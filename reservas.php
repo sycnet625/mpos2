@@ -274,6 +274,21 @@ if (isset($_GET['action'])) {
             GROUP BY p.codigo ORDER BY p.nombre LIMIT 10");
         $stmt->execute([$idAlmacen, $empID, "%$q%", "%$q%"]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } elseif ($_GET['action'] === 'month_data') {
+        $year  = intval($_GET['year']  ?? date('Y'));
+        $month = intval($_GET['month'] ?? date('n'));
+        $stmt  = $pdo->prepare("SELECT id, cliente_nombre, cliente_telefono,
+            fecha_reserva, total, abono,
+            (total - COALESCE(abono,0)) AS deuda,
+            COALESCE(estado_reserva,'PENDIENTE') AS estado_reserva,
+            COALESCE(estado_pago,'pendiente')    AS estado_pago,
+            metodo_pago, notas
+            FROM ventas_cabecera
+            WHERE tipo_servicio='reserva' AND id_sucursal=?
+              AND YEAR(fecha_reserva)=? AND MONTH(fecha_reserva)=?
+            ORDER BY fecha_reserva ASC");
+        $stmt->execute([$sucursalID, $year, $month]);
+        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     }
     exit;
 }
@@ -469,6 +484,45 @@ if (isset($_GET['ajax'])) {
         #linesTable td,#linesTable th { padding:6px 10px; vertical-align:middle; }
         .modal-xl { max-width:960px; }
         @media print { .no-print { display:none!important; } }
+
+        /* ── Almanaque ─────────────────────────────────────────────────────── */
+        .cal-wrapper { background:white; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.08); overflow:hidden; }
+        .cal-nav { background:#0f172a; color:white; padding:14px 20px; display:flex; align-items:center; justify-content:space-between; }
+        .cal-nav h5 { margin:0; font-size:1.15rem; font-weight:800; letter-spacing:.02em; }
+        .cal-nav .btn { border-radius:50%; width:36px; height:36px; padding:0; display:flex; align-items:center; justify-content:center; font-size:1.1rem; }
+        .cal-legend { display:flex; flex-wrap:wrap; gap:10px; padding:10px 16px; background:#f8fafc; border-bottom:1px solid #e2e8f0; font-size:.75rem; }
+        .cal-legend-item { display:flex; align-items:center; gap:5px; font-weight:600; color:#374151; }
+        .cal-legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+        .cal-day-names { display:grid; grid-template-columns:repeat(7,1fr); background:#f1f5f9; border-bottom:1px solid #e2e8f0; }
+        .cal-day-name { padding:8px 4px; text-align:center; font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:#64748b; }
+        .cal-day-name:last-child, .cal-day-name:nth-child(6) { color:#ef4444; } /* Sab/Dom rojo */
+        .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:#e2e8f0; }
+        .cal-day { background:white; min-height:90px; padding:6px 7px; display:flex; flex-direction:column; gap:3px; transition:background .15s; }
+        .cal-day:hover { background:#f8fafc; }
+        .cal-day.other-month { background:#f9fafb; }
+        .cal-day.other-month .cal-day-num { color:#cbd5e1; }
+        .cal-day.cal-today { background:#fffbeb; }
+        .cal-day.cal-today .cal-day-num { background:#f59e0b; color:white; border-radius:50%; width:24px; height:24px; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:.8rem; }
+        .cal-day-num { font-size:.8rem; font-weight:700; color:#374151; line-height:1; margin-bottom:2px; }
+        .cal-day.has-reservas { cursor:default; }
+        .cal-reservation {
+            font-size:.68rem; font-weight:700; padding:2px 6px; border-radius:5px;
+            cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+            max-width:100%; transition:opacity .15s;
+        }
+        .cal-reservation:hover { opacity:.8; }
+        .cal-res-pendiente { background:#dbeafe; color:#1d4ed8; border-left:3px solid #3b82f6; }
+        .cal-res-hoy       { background:#fef9c3; color:#854d0e; border-left:3px solid #f59e0b; }
+        .cal-res-vencida   { background:#fee2e2; color:#991b1b; border-left:3px solid #ef4444; }
+        .cal-res-entregado { background:#dcfce7; color:#166534; border-left:3px solid #22c55e; }
+        .cal-res-cancelado { background:#f1f5f9; color:#64748b; border-left:3px solid #94a3b8; text-decoration:line-through; }
+        .cal-more { background:#f1f5f9; color:#6366f1; border-left:3px solid #6366f1; cursor:pointer; }
+        /* Vista activa */
+        .view-btn.active { background:#0f172a !important; color:white !important; border-color:#0f172a !important; }
+        @media(max-width:640px) {
+            .cal-day { min-height:60px; padding:4px; }
+            .cal-reservation { font-size:.6rem; padding:1px 4px; }
+        }
     </style>
 </head>
 <body>
@@ -529,6 +583,14 @@ if (isset($_GET['ajax'])) {
     <!-- ── Barra de filtros ─────────────────────────────────────────────────── -->
     <div class="filter-bar mb-3 no-print">
         <div class="row g-2 align-items-center">
+            <!-- Toggle de vista -->
+            <div class="col-auto">
+                <div class="btn-group btn-group-sm" role="group">
+                    <button class="btn btn-outline-secondary view-btn active" id="btnVistaTbl" onclick="setVista('tabla')"><i class="fas fa-list me-1"></i>Lista</button>
+                    <button class="btn btn-outline-secondary view-btn" id="btnVistaCal" onclick="setVista('almanaque')"><i class="fas fa-calendar-alt me-1"></i>Almanaque</button>
+                </div>
+            </div>
+            <div class="col-auto"><div class="vr"></div></div>
             <div class="col-auto">
                 <div class="btn-group btn-group-sm" role="group">
                     <?php foreach (['PENDIENTE'=>'⏳ Pendientes','ENTREGADO'=>'✓ Entregados','CANCELADO'=>'✗ Cancelados','TODOS'=>'Todos'] as $val=>$lbl): ?>
@@ -562,6 +624,7 @@ if (isset($_GET['ajax'])) {
     </div>
 
     <!-- ── Tabla principal ─────────────────────────────────────────────────── -->
+    <div id="tableSection">
     <div class="card card-table shadow-sm">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
@@ -602,6 +665,38 @@ if (isset($_GET['ajax'])) {
             </ul></nav>
         </div>
         <?php endif; ?>
+    </div>
+    </div><!-- /#tableSection -->
+
+    <!-- ── Almanaque ──────────────────────────────────────────────────────── -->
+    <div id="calView" style="display:none;" class="mt-0">
+        <div class="cal-wrapper">
+            <div class="cal-nav">
+                <button class="btn btn-outline-light btn-sm" onclick="prevMonth()"><i class="fas fa-chevron-left"></i></button>
+                <h5 id="calTitle" class="mb-0">Cargando...</h5>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-warning btn-sm" onclick="goToday()">Hoy</button>
+                    <button class="btn btn-outline-light btn-sm" onclick="nextMonth()"><i class="fas fa-chevron-right"></i></button>
+                </div>
+            </div>
+            <div class="cal-legend">
+                <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#3b82f6;"></div>Pendiente</div>
+                <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#f59e0b;"></div>Para hoy</div>
+                <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#ef4444;"></div>Vencida</div>
+                <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#22c55e;"></div>Entregado</div>
+                <div class="cal-legend-item"><div class="cal-legend-dot" style="background:#94a3b8;"></div>Cancelado</div>
+            </div>
+            <div class="cal-day-names">
+                <div class="cal-day-name">Lun</div>
+                <div class="cal-day-name">Mar</div>
+                <div class="cal-day-name">Mié</div>
+                <div class="cal-day-name">Jue</div>
+                <div class="cal-day-name">Vie</div>
+                <div class="cal-day-name">Sáb</div>
+                <div class="cal-day-name">Dom</div>
+            </div>
+            <div class="cal-grid" id="calGrid"></div>
+        </div>
     </div>
 
 </div><!-- /container -->
@@ -1136,6 +1231,138 @@ function importICS() {
         else showToast('Error: ' + data.msg, 'danger');
     };
     fi.click();
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALMANAQUE — Vista de calendario mensual
+// ══════════════════════════════════════════════════════════════════════════════
+let calYear  = new Date().getFullYear();
+let calMonth = new Date().getMonth() + 1;
+let calData  = [];
+
+const CAL_MONTHS = ['Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+function setVista(vista) {
+    const isCal = (vista === 'almanaque');
+    document.getElementById('calView').style.display      = isCal ? 'block' : 'none';
+    document.getElementById('tableSection').style.display = isCal ? 'none'  : 'block';
+    document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(isCal ? 'btnVistaCal' : 'btnVistaTbl').classList.add('active');
+    if (isCal) loadCalendar(calYear, calMonth);
+}
+
+async function loadCalendar(year, month) {
+    calYear = year; calMonth = month;
+    document.getElementById('calTitle').textContent = 'Cargando...';
+    try {
+        const res = await fetch(`reservas.php?action=month_data&year=${year}&month=${month}`);
+        calData = await res.json();
+        renderCalendar();
+    } catch(e) {
+        document.getElementById('calGrid').innerHTML = '<div class="text-center text-danger py-5">Error al cargar datos del calendario.</div>';
+    }
+}
+
+function prevMonth() {
+    calMonth--;
+    if (calMonth < 1) { calMonth = 12; calYear--; }
+    loadCalendar(calYear, calMonth);
+}
+function nextMonth() {
+    calMonth++;
+    if (calMonth > 12) { calMonth = 1; calYear++; }
+    loadCalendar(calYear, calMonth);
+}
+function goToday() {
+    loadCalendar(new Date().getFullYear(), new Date().getMonth() + 1);
+}
+
+function getResClass(estadoReserva, dateStr) {
+    const er = (estadoReserva || 'PENDIENTE').toUpperCase();
+    if (er === 'ENTREGADO') return 'cal-res-entregado';
+    if (er === 'CANCELADO') return 'cal-res-cancelado';
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (dateStr < todayStr)  return 'cal-res-vencida';
+    if (dateStr === todayStr) return 'cal-res-hoy';
+    return 'cal-res-pendiente';
+}
+
+function renderCalendar() {
+    document.getElementById('calTitle').textContent = CAL_MONTHS[calMonth - 1] + ' ' + calYear;
+
+    const firstDow    = new Date(calYear, calMonth - 1, 1).getDay();    // 0=Dom
+    const daysInMonth = new Date(calYear, calMonth, 0).getDate();
+    const prevMDays   = new Date(calYear, calMonth - 1, 0).getDate();
+    const startOffset = (firstDow === 0) ? 6 : firstDow - 1;           // Lun=0
+    const todayStr    = new Date().toISOString().split('T')[0];
+
+    // Agrupar reservas por fecha YYYY-MM-DD
+    const byDate = {};
+    calData.forEach(r => {
+        if (!r.fecha_reserva) return;
+        const d = r.fecha_reserva.split(' ')[0];
+        (byDate[d] = byDate[d] || []).push(r);
+    });
+
+    let html = '';
+
+    // Celdas del mes anterior (relleno)
+    for (let i = startOffset - 1; i >= 0; i--) {
+        html += `<div class="cal-day other-month"><span class="cal-day-num">${prevMDays - i}</span></div>`;
+    }
+
+    // Días del mes actual
+    for (let day = 1; day <= daysInMonth; day++) {
+        const dd      = String(day).padStart(2, '0');
+        const mm      = String(calMonth).padStart(2, '0');
+        const dateStr = `${calYear}-${mm}-${dd}`;
+        const isToday = (dateStr === todayStr);
+        const dayRes  = byDate[dateStr] || [];
+
+        const numEl = `<span class="cal-day-num">${day}</span>`;
+
+        let chips = dayRes.slice(0, 3).map(r => {
+            const cls   = getResClass(r.estado_reserva, dateStr);
+            const fname = (r.cliente_nombre || '?').split(' ')[0];
+            const deuda = parseFloat(r.deuda || 0);
+            const title = `${r.cliente_nombre} — $${parseFloat(r.total||0).toFixed(2)} — ${r.estado_reserva||'PENDIENTE'}`;
+            return `<div class="cal-reservation ${cls}" onclick="verTicket(${r.id},${deuda})" title="${title.replace(/"/g,'&quot;')}">${fname}</div>`;
+        }).join('');
+
+        if (dayRes.length > 3) {
+            chips += `<div class="cal-reservation cal-more" onclick="mostrarDiaDlg('${dateStr}')">+${dayRes.length - 3} más</div>`;
+        }
+
+        html += `<div class="cal-day ${isToday ? 'cal-today' : ''} ${dayRes.length ? 'has-reservas' : ''}">${numEl}${chips}</div>`;
+    }
+
+    // Celdas del mes siguiente (relleno para completar la grilla)
+    const total     = startOffset + daysInMonth;
+    const remaining = (7 - (total % 7)) % 7;
+    for (let i = 1; i <= remaining; i++) {
+        html += `<div class="cal-day other-month"><span class="cal-day-num">${i}</span></div>`;
+    }
+
+    document.getElementById('calGrid').innerHTML = html;
+}
+
+function mostrarDiaDlg(dateStr) {
+    const dayRes = calData.filter(r => r.fecha_reserva && r.fecha_reserva.startsWith(dateStr));
+    if (!dayRes.length) return;
+    if (dayRes.length === 1) { verTicket(dayRes[0].id, parseFloat(dayRes[0].deuda || 0)); return; }
+
+    const lista = dayRes.map(r =>
+        `#${r.id} — ${r.cliente_nombre} — $${parseFloat(r.total||0).toFixed(2)} (${r.estado_reserva||'PENDIENTE'})`
+    ).join('\n');
+    const choice = prompt(
+        `${dayRes.length} reservas el ${dateStr}:\n\n${lista}\n\nEscribe el ID para ver detalles (o Cancelar):`,
+        ''
+    );
+    if (choice) {
+        const r = dayRes.find(x => String(x.id) === choice.trim());
+        if (r) verTicket(r.id, parseFloat(r.deuda || 0));
+    }
 }
 </script>
 </body>
