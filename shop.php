@@ -46,6 +46,11 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
 
+// Datos de tarjeta para pasarela de transferencia
+$CFG_TARJETA = $config['numero_tarjeta'] ?? '';
+$CFG_TITULAR = $config['titular_tarjeta'] ?? '';
+$CFG_BANCO   = $config['banco_tarjeta']   ?? 'Bandec / BPA';
+
 try {
     require_once 'db.php';
     date_default_timezone_set('America/Havana');
@@ -132,11 +137,11 @@ if (isset($_GET['ajax_search'])) {
     if (strlen($q) < 1) { echo json_encode([]); exit; }
 
     try {
-        $sql = "SELECT p.codigo, p.nombre, p.precio, p.descripcion, p.categoria, p.unidad_medida, p.color,
-                COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s 
+        $sql = "SELECT p.codigo, p.nombre, p.precio, p.descripcion, p.categoria, p.unidad_medida, p.color, p.es_reservable,
+                COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s
                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?), 0) as stock
-                FROM productos p 
-                WHERE p.es_web = 1 
+                FROM productos p
+                WHERE p.es_web = 1
                   AND p.activo = 1 
                   AND p.id_empresa = ?
                   AND (p.sucursales_web = '' OR p.sucursales_web IS NULL OR FIND_IN_SET(?, p.sucursales_web) > 0)
@@ -162,7 +167,8 @@ if (isset($_GET['ajax_search'])) {
         foreach ($results as &$r) {
             $r['precio'] = floatval($r['precio']);
             $r['stock'] = floatval($r['stock']);
-            $r['hasStock'] = $r['stock'] > 0;
+            $r['hasStock']     = $r['stock'] > 0;
+            $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
             $localPath = __DIR__ . '/../product_images/' . $r['codigo'] . '.jpg';
             $r['hasImg'] = file_exists($localPath);
             $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
@@ -933,6 +939,7 @@ ob_end_flush();
         .msg-client { align-self: flex-end; background: #0d6efd; color: white; border-bottom-right-radius: 2px; }
         .msg-admin { align-self: flex-start; background: #e9ecef; color: #333; border-bottom-left-radius: 2px; }
         .chat-badge-notify { position: absolute; top: 0; right: 0; background: red; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: none; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -950,6 +957,9 @@ ob_end_flush();
                 <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="toggleTrackingModal()">
                     <i class="fas fa-truck me-1"></i> <span class="d-none d-md-inline">Rastreo</span>
                 </button>
+                <a href="como_comprar.php" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold" title="¿Cómo comprar?">
+                    <i class="fas fa-question-circle me-1"></i> <span class="d-none d-md-inline">Ayuda</span>
+                </a>
                 
                 <div id="authButtons">
                     <?php if(isset($_SESSION['client_id'])): ?>
@@ -1089,30 +1099,32 @@ ob_end_flush();
             </div>
         <?php endif; ?>
         
-        <?php foreach($productos as $p): 
+        <?php foreach($productos as $p):
             $imgPath = $localImgPath . $p['codigo'] . '.jpg';
             $hasImg = file_exists($imgPath);
             $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) : null;
             $stock = floatval($p['stock_total'] ?? 0);
             $hasStock = $stock > 0;
+            $esReservable = intval($p['es_reservable'] ?? 0) === 1;
             $bg = "#" . substr(md5($p['nombre']), 0, 6);
             $initials = mb_strtoupper(mb_substr($p['nombre'], 0, 2));
         ?>
         <div class="product-card" onclick='openProductDetail(<?= json_encode([
-            "id" => $p['codigo'],
-            "name" => $p['nombre'],
-            "price" => floatval($p['precio']),
-            "desc" => $p['descripcion'] ?? '',
-            "img" => $imgUrl,
-            "bg" => $bg,
-            "initials" => $initials,
-            "hasImg" => $hasImg,
-            "hasStock" => $hasStock,
-            "stock" => $stock,
-            "code" => $p['codigo'],
-            "cat" => $p['categoria'],
-            "unit" => $p['unidad_medida'] ?? '',
-            "color" => $p['color'] ?? ''
+            "id"          => $p['codigo'],
+            "name"        => $p['nombre'],
+            "price"       => floatval($p['precio']),
+            "desc"        => $p['descripcion'] ?? '',
+            "img"         => $imgUrl,
+            "bg"          => $bg,
+            "initials"    => $initials,
+            "hasImg"      => $hasImg,
+            "hasStock"    => $hasStock,
+            "stock"       => $stock,
+            "code"        => $p['codigo'],
+            "cat"         => $p['categoria'],
+            "unit"        => $p['unidad_medida'] ?? '',
+            "color"       => $p['color'] ?? '',
+            "esReservable"=> $esReservable,
         ], JSON_UNESCAPED_UNICODE) ?>)'>
             <div class="product-image-wrapper">
                 <?php if(isset($_SESSION['client_id'])): 
@@ -1150,22 +1162,34 @@ ob_end_flush();
                     <div class="product-placeholder" style="background: <?= $bg ?>cc"><?= $initials ?></div>
                 <?php endif; ?>
                 
-                <div class="stock-badge <?= $hasStock ? 'in-stock' : 'out-of-stock' ?>">
-                    <?= $hasStock ? '✓ Disponible' : '✗ Agotado' ?>
-                </div>
+                <?php if ($hasStock): ?>
+                <div class="stock-badge in-stock">✓ Disponible</div>
+                <?php elseif ($esReservable): ?>
+                <div class="stock-badge" style="background:rgba(255,193,7,0.92);color:#1a1a1a;">📅 Reservable</div>
+                <?php else: ?>
+                <div class="stock-badge out-of-stock">✗ Agotado</div>
+                <?php endif; ?>
             </div>
-            
+
             <div class="product-body">
                 <div class="product-category"><?= htmlspecialchars($p['categoria'] ?? 'General') ?></div>
                 <h6 class="product-name"><?= htmlspecialchars($p['nombre']) ?></h6>
-                
+
                 <div class="product-footer">
                     <div class="product-price">$<?= number_format($p['precio'], 2) ?></div>
-                    <button class="btn-add-cart" 
-                            onclick="addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)"
-                            <?= !$hasStock ? 'disabled' : '' ?>>
-                        <?= $hasStock ? '+ Agregar' : 'Agotado' ?>
-                    </button>
+                    <?php if ($hasStock): ?>
+                        <button class="btn-add-cart"
+                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)">
+                            + Agregar
+                        </button>
+                    <?php elseif ($esReservable): ?>
+                        <button class="btn-add-cart" style="background:#f59e0b;border-color:#f59e0b;font-size:.78rem;"
+                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>, true)">
+                            📅 Reservar
+                        </button>
+                    <?php else: ?>
+                        <button class="btn-add-cart" disabled>Agotado</button>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -1280,13 +1304,23 @@ ob_end_flush();
                     </table>
                     <div class="text-end fs-3 fw-bold">Total: $<span id="cartTotal">0.00</span></div>
                 </div>
-                <div class="modal-footer border-0">
-                    <button class="btn btn-outline-danger" onclick="clearCart()">
-                        <i class="fas fa-trash me-1"></i> Vaciar Carrito
-                    </button>
-                    <button class="btn btn-primary btn-lg px-4" onclick="showCheckout()">
-                        Proceder al Pago <i class="fas fa-arrow-right ms-2"></i>
-                    </button>
+                <div class="modal-footer border-0 flex-column gap-2">
+                    <div id="reservaCartNotice" class="alert alert-warning py-2 px-3 w-100 mb-0 small" style="display:none;">
+                        📅 Tu carrito incluye productos <strong>de reserva</strong> (sin stock). Usa <strong>Reservar</strong> para procesarlos.
+                    </div>
+                    <div class="d-flex w-100 gap-2">
+                        <button class="btn btn-outline-danger" onclick="clearCart()">
+                            <i class="fas fa-trash me-1"></i> Vaciar
+                        </button>
+                        <button class="btn btn-outline-primary flex-fill" onclick="iniciarFlujo('reserva')">
+                            📅 Reservar
+                            <small class="d-block" style="font-size:.7rem;opacity:.8">Sin stock OK</small>
+                        </button>
+                        <button class="btn btn-success flex-fill" onclick="iniciarFlujo('compra')">
+                            💳 Pagar Ahora
+                            <small class="d-block" style="font-size:.7rem;opacity:.8">Solo con stock</small>
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -1362,12 +1396,43 @@ ob_end_flush();
                                 <span class="fw-bold" style="color: var(--primary);">$<span id="grandTotal">0.00</span></span>
                             </div>
                         </div>
+
+                        <!-- SECCIÓN DE PAGO (solo para flujo 'compra') -->
+                        <div id="paymentSection" style="display:none; margin-top:1rem;">
+                            <div class="p-3 border rounded-3">
+                                <h6 class="fw-bold mb-3"><i class="fas fa-credit-card me-2 text-primary"></i>Método de Pago</h6>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpEfectivoMensajero" value="EFECTIVO_MENSAJERO" onchange="onPayMethodChange()" checked>
+                                    <label class="form-check-label" for="mpEfectivoMensajero">💵 Efectivo al mensajero (a la entrega)</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpEfectivoLocal" value="EFECTIVO_LOCAL" onchange="onPayMethodChange()">
+                                    <label class="form-check-label" for="mpEfectivoLocal">🏪 Efectivo en el local (a la entrega)</label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpTransferencia" value="TRANSFERENCIA" onchange="onPayMethodChange()">
+                                    <label class="form-check-label" for="mpTransferencia">📲 Transferencia Enzona / Transfermovil</label>
+                                </div>
+
+                                <div id="transferenciaInfo" style="display:none; margin-top:1rem;">
+                                    <div class="p-3 mb-3" style="background:#e8f4f8; border-radius:10px; border-left:4px solid #0d6efd;">
+                                        <div class="small mb-1">Tarjeta: <strong id="tCardNum"></strong></div>
+                                        <div class="small mb-1">Titular: <strong id="tCardHolder"></strong></div>
+                                        <div class="small mb-1">Banco: <strong id="tCardBank"></strong></div>
+                                        <div class="small">Monto a transferir: <strong class="text-success" id="tMonto"></strong></div>
+                                    </div>
+                                    <label class="form-label fw-bold">Código de confirmación del pago *</label>
+                                    <input id="codigoPago" type="text" class="form-control" placeholder="Ej: TRF-20260220-001234">
+                                    <small class="text-muted">Escribe el número de confirmación de la transferencia realizada.</small>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-footer border-0">
                         <button type="button" class="btn btn-secondary" onclick="showCartView()">
                             <i class="fas fa-arrow-left me-1"></i> Volver
                         </button>
-                        <button type="submit" class="btn btn-success btn-lg px-4">
+                        <button type="submit" id="btnConfirmarPedido" class="btn btn-success btn-lg px-4">
                             <i class="fas fa-check-circle me-2"></i> Confirmar Pedido
                         </button>
                     </div>
@@ -1382,6 +1447,30 @@ ob_end_flush();
                 </div>
                 <div class="modal-footer border-0 justify-content-center">
                     <button class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
+                </div>
+            </div>
+
+            <!-- Vista: esperando confirmación de transferencia -->
+            <div id="waitingPaymentView" style="display:none;">
+                <div class="modal-body text-center py-5">
+                    <div style="font-size: 4rem; margin-bottom: 1rem; animation: spin 2s linear infinite; display:inline-block;">⏳</div>
+                    <h4 class="fw-bold mb-3">Verificando tu transferencia...</h4>
+                    <p class="text-muted">El operador confirmará tu pago en breve.<br>Esta pantalla se actualizará automáticamente.</p>
+                    <div class="mt-3 p-3 bg-light rounded">
+                        <small class="text-muted">Código enviado: <strong id="codigoPagoDisplay"></strong></small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vista: pago confirmado -->
+            <div id="pagoConfirmadoView" style="display:none;">
+                <div class="modal-body text-center py-5">
+                    <div style="font-size: 5rem; margin-bottom: 1rem;">🎉</div>
+                    <h3 class="fw-bold mb-3 text-success">¡Pago Confirmado!</h3>
+                    <p class="text-muted fs-5">Tu transferencia fue verificada exitosamente.<br>Tu pedido está en proceso.</p>
+                </div>
+                <div class="modal-footer border-0 justify-content-center">
+                    <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
                 </div>
             </div>
         </div>
@@ -1640,8 +1729,16 @@ ob_end_flush();
         } catch (e) { alert("Error al actualizar."); }
     }
     
+    // Config de tarjeta para pasarela (inyectada desde PHP)
+    const CFG_TARJETA = <?= json_encode($CFG_TARJETA) ?>;
+    const CFG_TITULAR = <?= json_encode($CFG_TITULAR) ?>;
+    const CFG_BANCO   = <?= json_encode($CFG_BANCO)   ?>;
+
     let cart = JSON.parse(localStorage.getItem('palweb_cart') || '[]');
     let cartSyncTimeout = null;
+    let flujoActual = 'reserva'; // 'reserva' | 'compra'
+    let ordenUUID = null; // para polling de estado de pago
+    let pollInterval = null;
     
     function toggleTrackingModal() { trackingModal.show(); }
     function toggleAuthModal() { authModal.show(); }
@@ -1697,20 +1794,21 @@ ob_end_flush();
                             searchInput.value = '';
                             searchResults.style.display = 'none';
                             openProductDetail({
-                                id: item.codigo,
-                                name: item.nombre,
-                                price: item.precio,
-                                desc: item.descripcion || '',
-                                img: item.imgUrl,
-                                bg: item.bg,
-                                initials: item.initials,
-                                hasImg: item.hasImg,
-                                hasStock: item.hasStock,
-                                stock: item.stock,
-                                code: item.codigo,
-                                cat: item.categoria,
-                                unit: item.unidad_medida,
-                                color: item.color
+                                id:          item.codigo,
+                                name:        item.nombre,
+                                price:       item.precio,
+                                desc:        item.descripcion || '',
+                                img:         item.imgUrl,
+                                bg:          item.bg,
+                                initials:    item.initials,
+                                hasImg:      item.hasImg,
+                                hasStock:    item.hasStock,
+                                stock:       item.stock,
+                                code:        item.codigo,
+                                cat:         item.categoria,
+                                unit:        item.unidad_medida,
+                                color:       item.color,
+                                esReservable: item.esReservable || false
                             });
                         };
                         
@@ -1744,16 +1842,19 @@ ob_end_flush();
         if (typeof syncCartWithServer === 'function') syncCartWithServer();
     }
     
-    function addToCart(id, name, price) {
-        event.stopPropagation();
-        const existing = cart.find(i => i.id === id);
+    function addToCart(id, name, price, isReserva = false) {
+        if (event) event.stopPropagation();
+        const existing = cart.find(i => i.id === id && i.isReserva === isReserva);
         if (existing) {
             existing.qty++;
         } else {
-            cart.push({ id, name, price, qty: 1 });
+            cart.push({ id, name, price, qty: 1, isReserva });
         }
         updateCounters();
-        alert('✓ Producto agregado al carrito');
+        const msg = isReserva
+            ? '📅 Reserva agregada al carrito'
+            : '✓ Producto agregado al carrito';
+        showToast(msg);
     }
     
     function renderCart() {
@@ -1767,9 +1868,14 @@ ob_end_flush();
             cart.forEach((item, index) => {
                 const subtotal = item.qty * item.price;
                 total += subtotal;
+                const reservaBadge = item.isReserva
+                    ? `<span class="badge ms-1" style="background:#f59e0b;color:#1a1a1a;font-size:.65rem;">📅 RESERVA</span>`
+                    : '';
                 tbody.innerHTML += `
                     <tr>
-                        <td><div class="fw-bold">${item.name}</div></td>
+                        <td>
+                            <div class="fw-bold">${item.name}${reservaBadge}</div>
+                        </td>
                         <td class="text-center">
                             <div class="btn-group">
                                 <button class="btn btn-sm btn-outline-secondary" onclick="modQty(${index}, -1)" aria-label="Disminuir cantidad de ${item.name}">-</button>
@@ -1787,6 +1893,11 @@ ob_end_flush();
                 `;
             });
         }
+
+        // Aviso si hay items de reserva en el carrito
+        const hasReservaItems = cart.some(i => i.isReserva);
+        const reservaNotice = document.getElementById('reservaCartNotice');
+        if (reservaNotice) reservaNotice.style.display = hasReservaItems ? 'block' : 'none';
         
         document.getElementById('cartTotal').innerText = total.toFixed(2);
         calcTotal();
@@ -1839,18 +1950,30 @@ ob_end_flush();
         const btn = document.getElementById('btnAddDetail');
         
         if (data.hasStock) {
-            stockBadge.innerText = `✓ Disponible`;
+            stockBadge.innerText = '✓ Disponible';
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-success';
             btn.disabled = false;
+            btn.style.background = '';
             btn.innerHTML = '<i class="fas fa-cart-plus me-2"></i> AGREGAR AL CARRITO';
-            btn.onclick = () => { 
-                addToCart(data.id, data.name, data.price); 
-                modalDetail.hide(); 
+            btn.onclick = () => {
+                addToCart(data.id, data.name, data.price, false);
+                modalDetail.hide();
+            };
+        } else if (data.esReservable) {
+            stockBadge.innerText = '📅 Disponible bajo reserva';
+            stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-warning text-dark';
+            btn.disabled = false;
+            btn.style.background = '#f59e0b';
+            btn.innerHTML = '📅 RESERVAR PRODUCTO';
+            btn.onclick = () => {
+                addToCart(data.id, data.name, data.price, true);
+                modalDetail.hide();
             };
         } else {
             stockBadge.innerText = '✗ Agotado';
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-danger';
             btn.disabled = true;
+            btn.style.background = '';
             btn.innerHTML = 'PRODUCTO AGOTADO';
         }
         
@@ -1882,16 +2005,136 @@ ob_end_flush();
         document.getElementById('cartItemsView').style.display = 'block';
         document.getElementById('checkoutView').style.display = 'none';
         document.getElementById('successView').style.display = 'none';
+        document.getElementById('waitingPaymentView').style.display = 'none';
+        document.getElementById('pagoConfirmadoView').style.display = 'none';
     }
-    
+
     function showCheckout() {
-        if (cart.length === 0) return;
+        // Alias para compatibilidad (flujo reserva por defecto)
+        iniciarFlujo('reserva');
+    }
+
+    function iniciarFlujo(flujo) {
+        if (cart.length === 0) { showToast('El carrito está vacío'); return; }
+        flujoActual = flujo;
+
+        if (flujo === 'compra') {
+            // Bloquear si hay items marcados como reserva en el carrito
+            const reservaItems = cart.filter(i => i.isReserva);
+            if (reservaItems.length > 0) {
+                const nombres = reservaItems.map(i => '• ' + i.name).join('\n');
+                alert('⚠️ Tu carrito contiene productos de RESERVA (sin stock):\n\n' + nombres +
+                      '\n\nEstos productos solo pueden procesarse con el botón "📅 Reservar".\nPor favor elimínalos del carrito o usa "Reservar" para todos.');
+                return;
+            }
+            // Verificar stock antes de abrir checkout
+            const items = cart.map(i => ({ id: i.id, qty: i.qty }));
+            fetch('pagos_api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'check_stock', items })
+            })
+            .then(r => r.json())
+            .then(res => {
+                if (!res.all_ok) {
+                    const lista = res.out.map(p =>
+                        `• ${p.nombre}: disponible ${p.stock}, necesario ${p.needed}`
+                    ).join('\n');
+                    alert("⚠️ Los siguientes productos no tienen stock suficiente para pago inmediato:\n\n" + lista +
+                          "\n\nPuedes usar 'Reservar' para pedirlos sin stock.");
+                    return;
+                }
+                abrirCheckoutInterno('compra');
+            })
+            .catch(() => {
+                // Si falla la verificación, abrir igual (la validación final la hace pos_save)
+                abrirCheckoutInterno('compra');
+            });
+        } else {
+            abrirCheckoutInterno('reserva');
+        }
+    }
+
+    function abrirCheckoutInterno(flujo) {
+        flujoActual = flujo;
         document.getElementById('cartItemsView').style.display = 'none';
         document.getElementById('checkoutView').style.display = 'block';
-        // Establecer fecha mínima como mañana
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        document.getElementById('cliDate').min = tomorrow.toISOString().split('T')[0];
+        document.getElementById('successView').style.display = 'none';
+        document.getElementById('waitingPaymentView').style.display = 'none';
+        document.getElementById('pagoConfirmadoView').style.display = 'none';
+
+        // Mostrar u ocultar sección de pago
+        const paySection = document.getElementById('paymentSection');
+        paySection.style.display = flujo === 'compra' ? 'block' : 'none';
+
+        // Siempre limpiar estado del campo código de pago (evitar validación HTML5 en campo oculto)
+        const codigoPagoInput = document.getElementById('codigoPago');
+        if (codigoPagoInput) { codigoPagoInput.removeAttribute('required'); codigoPagoInput.required = false; codigoPagoInput.value = ''; }
+
+        // Si es compra: marcar el primer radio como checked y ocultar info de transferencia
+        if (flujo === 'compra') {
+            const firstRadio = document.getElementById('mpEfectivoMensajero');
+            if (firstRadio) firstRadio.checked = true;
+            document.getElementById('transferenciaInfo').style.display = 'none';
+        }
+
+        // Fecha mínima
+        const today = new Date().toISOString().split('T')[0];
+        const tomorrow = new Date(Date.now() + 86400000).toISOString().split('T')[0];
+        const dateInput = document.getElementById('cliDate');
+        dateInput.min = today;
+        dateInput.max = flujo === 'compra' ? tomorrow : '';
+        if (!dateInput.value) dateInput.value = tomorrow;
+    }
+
+    function onPayMethodChange() {
+        const val = document.querySelector('input[name=metodoPago]:checked')?.value;
+        const infoDiv = document.getElementById('transferenciaInfo');
+        const codigoPagoInput = document.getElementById('codigoPago');
+        if (val === 'TRANSFERENCIA') {
+            document.getElementById('tCardNum').textContent    = CFG_TARJETA || '(sin configurar)';
+            document.getElementById('tCardHolder').textContent = CFG_TITULAR || '(sin configurar)';
+            document.getElementById('tCardBank').textContent   = CFG_BANCO   || 'Bandec / BPA';
+            const total = parseFloat(document.getElementById('grandTotal').innerText) || 0;
+            document.getElementById('tMonto').textContent =
+                new Intl.NumberFormat('es-CU', { style: 'currency', currency: 'CUP' }).format(total);
+            infoDiv.style.display = 'block';
+            if (codigoPagoInput) codigoPagoInput.required = true;
+        } else {
+            infoDiv.style.display = 'none';
+            if (codigoPagoInput) codigoPagoInput.required = false;
+        }
+    }
+
+    function mostrarEsperandoPago(uuid, codigo) {
+        ordenUUID = uuid;
+        document.getElementById('checkoutView').style.display = 'none';
+        document.getElementById('waitingPaymentView').style.display = 'block';
+        const displayEl = document.getElementById('codigoPagoDisplay');
+        if (displayEl) displayEl.textContent = codigo || '';
+        // Iniciar polling
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(pollPago, 5000);
+    }
+
+    function pollPago() {
+        if (!ordenUUID) return;
+        fetch(`pagos_api.php?action=check_status&uuid=${encodeURIComponent(ordenUUID)}`)
+            .then(r => r.json())
+            .then(res => {
+                if (res.estado_pago === 'confirmado') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    document.getElementById('waitingPaymentView').style.display = 'none';
+                    document.getElementById('pagoConfirmadoView').style.display = 'block';
+                }
+            })
+            .catch(() => { /* silencioso */ });
+    }
+
+    function showStockWarningToast(out) {
+        const lista = out.map(p => `${p.nombre} (${p.stock} disp.)`).join(', ');
+        showToast('Sin stock: ' + lista, 5000);
     }
 
     // ===== GEOLOCALIZACIÓN =====
@@ -1959,12 +2202,12 @@ ob_end_flush();
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Enviando...';
-        
+
         let address = document.getElementById('cliDir').value;
-        let shipCost = 0;
         const notes = document.getElementById('cliNotes').value;
-        
-        if (document.getElementById('delHome').checked) {
+        const delivery = document.getElementById('delHome').checked;
+
+        if (delivery) {
             const mun = document.getElementById('cMun').value;
             const bar = document.getElementById('cBar').value;
             if (!mun || !bar) {
@@ -1973,40 +2216,69 @@ ob_end_flush();
                 btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
                 return;
             }
-            shipCost = parseFloat(document.getElementById('shipCost').innerText);
             address = `[MENSAJERÍA: ${mun} - ${bar}] ${address}`;
         } else {
-            address = "[RECOGIDA] " + address;
+            address = flujoActual === 'reserva' ? "[RESERVA] " + address : "[RECOGIDA] " + address;
         }
 
-        // Datos para pos_save.php
+        // Determinar tipo_servicio y metodo_pago según flujo
+        let tipoServicio, metodoPago, codigoPago = null, estadoPago = 'pendiente';
+
+        if (flujoActual === 'reserva') {
+            tipoServicio = 'reserva';
+            metodoPago   = 'PENDIENTE_ENTREGA';
+        } else {
+            tipoServicio = delivery ? 'domicilio' : 'recogida';
+            const radioChecked = document.querySelector('input[name=metodoPago]:checked');
+            metodoPago = radioChecked ? radioChecked.value : 'EFECTIVO_MENSAJERO';
+            if (metodoPago === 'TRANSFERENCIA') {
+                codigoPago = (document.getElementById('codigoPago')?.value || '').trim();
+                if (!codigoPago) {
+                    alert('Por favor ingresa el código de confirmación de la transferencia.');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+                    return;
+                }
+                estadoPago = 'verificando';
+            }
+        }
+
+        const uuid = 'WEB-' + Date.now();
         const data = {
-            uuid: 'WEB-' + Date.now(), // UUID temporal para la app
-            total: parseFloat(document.getElementById('grandTotal').innerText),
-            metodo_pago: 'Efectivo',
-            tipo_servicio: document.getElementById('delHome').checked ? 'domicilio' : 'recogida',
-            cliente_nombre: document.getElementById('cliName').value,
-            cliente_telefono: document.getElementById('cliTel').value,
-            cliente_direccion: address,
-            fecha_reserva: document.getElementById('cliDate').value,
-            mensajero_nombre: notes, // Usamos campo mensajero para notas por ahora si no existe otro
-            items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, note: '' }))
+            uuid,
+            total:              parseFloat(document.getElementById('grandTotal').innerText),
+            metodo_pago:        metodoPago,
+            tipo_servicio:      tipoServicio,
+            cliente_nombre:     document.getElementById('cliName').value,
+            cliente_telefono:   document.getElementById('cliTel').value,
+            cliente_direccion:  address,
+            fecha_reserva:      document.getElementById('cliDate').value,
+            mensajero_nombre:   notes,
+            codigo_pago:        codigoPago,
+            estado_pago:        estadoPago,
+            items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, note: '', isReserva: i.isReserva || false }))
         };
 
         try {
-            // USAR POS_SAVE.PHP EN LA RAÍZ
             const res = await fetch('pos_save.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
             });
             const json = await res.json();
-            
+
             if (json.status === 'success') {
                 cart = [];
+                localStorage.removeItem('palweb_cart');
                 updateCounters();
                 document.getElementById('checkoutView').style.display = 'none';
-                document.getElementById('successView').style.display = 'block';
+
+                if (estadoPago === 'verificando') {
+                    // Mostrar pantalla de espera con polling
+                    mostrarEsperandoPago(uuid, codigoPago);
+                } else {
+                    document.getElementById('successView').style.display = 'block';
+                }
             } else {
                 alert('Error: ' + (json.msg || 'Error desconocido'));
             }
@@ -2026,6 +2298,8 @@ ob_end_flush();
     window.clearCart = clearCart;
     window.showCartView = showCartView;
     window.showCheckout = showCheckout;
+    window.iniciarFlujo = iniciarFlujo;
+    window.onPayMethodChange = onPayMethodChange;
     window.modQty = modQty;
     window.remItem = remItem;
     window.loadMunicipios = loadMunicipios;

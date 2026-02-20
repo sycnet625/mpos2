@@ -42,7 +42,13 @@ $defaultConfig = [
     "depreciacion_equipos_pct" => 0,
     "kiosco_solo_stock" => false,
     "customer_display_chime_type" => "mixkit_bell",
-    "customer_display_insect" => "mosca"
+    "customer_display_insect" => "mosca",
+    // Mensajería / Entrega a domicilio
+    "mensajeria_tarifa_km" => 150,
+    // Pasarela de pagos online (Transferencia)
+    "numero_tarjeta" => "",
+    "titular_tarjeta" => "",
+    "banco_tarjeta" => "Bandec / BPA"
 ];
 
 // 1. CARGAR CONFIGURACIÓN ACTUAL
@@ -90,7 +96,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "kiosco_solo_stock" => isset($_POST['kiosco_solo_stock']),
             "customer_display_chime_type" => $_POST['customer_display_chime_type'] ?? 'mixkit_bell',
             "customer_display_insect" => in_array($_POST['customer_display_insect'] ?? 'mosca', ['mosca', 'mariposa', 'mariquita'])
-                ? $_POST['customer_display_insect'] : 'mosca'
+                ? $_POST['customer_display_insect'] : 'mosca',
+            // Mensajería
+            "mensajeria_tarifa_km" => floatval($_POST['mensajeria_tarifa_km'] ?? 150),
+            // Pasarela de pagos (transferencia)
+            "numero_tarjeta"  => trim($_POST['numero_tarjeta']  ?? ''),
+            "titular_tarjeta" => trim($_POST['titular_tarjeta'] ?? ''),
+            "banco_tarjeta"   => trim($_POST['banco_tarjeta']   ?? 'Bandec / BPA'),
         ];
 
         // Procesar Cajeros Dinámicos
@@ -307,6 +319,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <label class="form-check-label fw-bold" for="chkKioscoStock">Mostrar solo productos con existencias</label>
                     <div class="form-text">Si se activa, el Kiosco (client_order.php) ocultará automáticamente los productos que no tengan stock.</div>
                 </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header" style="color:#0077b6;"><i class="fas fa-motorcycle"></i> Mensajería y Entrega a Domicilio</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Tarifa por kilómetro (CUP)</label>
+                        <div class="input-group">
+                            <span class="input-group-text">$</span>
+                            <input type="number" step="0.01" min="0" name="mensajeria_tarifa_km" class="form-control"
+                                   value="<?php echo htmlspecialchars($currentConfig['mensajeria_tarifa_km'] ?? 150); ?>">
+                            <span class="input-group-text">/km</span>
+                        </div>
+                        <div class="form-text">Precio por kilómetro de distancia al calcular el costo de envío en la tienda online.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header text-success"><i class="fas fa-credit-card"></i> Pasarela de Pagos Online (Transferencia)</div>
+            <div class="card-body">
+                <div class="alert alert-info border-0 small mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Estos datos se muestran al cliente cuando elige pagar por <strong>Transferencia Enzona / Transfermovil</strong> en la tienda online. Si los campos están vacíos, la opción de transferencia mostrará "(sin configurar)".
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label">Número de Tarjeta</label>
+                        <input type="text" name="numero_tarjeta" class="form-control font-monospace"
+                               placeholder="Ej: 9225 1234 5678 9012"
+                               value="<?php echo htmlspecialchars($currentConfig['numero_tarjeta'] ?? ''); ?>">
+                        <div class="form-text">Tarjeta bancaria donde el cliente realizará la transferencia.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Titular de la Cuenta</label>
+                        <input type="text" name="titular_tarjeta" class="form-control"
+                               placeholder="Ej: JUAN PEREZ GARCIA"
+                               value="<?php echo htmlspecialchars($currentConfig['titular_tarjeta'] ?? ''); ?>">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Banco</label>
+                        <select name="banco_tarjeta" class="form-select">
+                            <?php
+                            $bancos = ['Bandec / BPA', 'Bandec', 'BPA', 'Banco Metropolitano', 'Banco Popular de Ahorro'];
+                            $bancoActual = $currentConfig['banco_tarjeta'] ?? 'Bandec / BPA';
+                            foreach ($bancos as $b) {
+                                $sel = ($bancoActual === $b) ? 'selected' : '';
+                                echo "<option value=\"" . htmlspecialchars($b) . "\" $sel>" . htmlspecialchars($b) . "</option>";
+                            }
+                            // Si el valor actual no está en la lista, agregarlo
+                            if (!in_array($bancoActual, $bancos)) {
+                                echo "<option value=\"" . htmlspecialchars($bancoActual) . "\" selected>" . htmlspecialchars($bancoActual) . "</option>";
+                            }
+                            ?>
+                        </select>
+                    </div>
+                </div>
+                <?php if (!empty($currentConfig['numero_tarjeta'])): ?>
+                <div class="mt-3 p-3 border rounded-3" style="background:#f0f9f0;">
+                    <div class="small text-muted mb-1 fw-bold">Vista previa — lo que verá el cliente:</div>
+                    <div class="small">Tarjeta: <strong class="font-monospace"><?= htmlspecialchars($currentConfig['numero_tarjeta']) ?></strong></div>
+                    <div class="small">Titular: <strong><?= htmlspecialchars($currentConfig['titular_tarjeta']) ?></strong></div>
+                    <div class="small">Banco: <strong><?= htmlspecialchars($currentConfig['banco_tarjeta']) ?></strong></div>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
 

@@ -56,6 +56,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $val = intval($input['value']);
                 $pdo->prepare("UPDATE productos SET es_web = ? WHERE codigo = ? AND id_empresa = ?")->execute([$val, $code, $EMP_ID]);
             }
+            elseif ($input['action'] === 'update_reservable') {
+                $val = intval($input['value']);
+                $pdo->prepare("UPDATE productos SET es_reservable = ? WHERE codigo = ? AND id_empresa = ?")->execute([$val, $code, $EMP_ID]);
+            }
             elseif ($input['action'] === 'update_sucursales') {
                 $val = implode(',', $input['value']); 
                 $pdo->prepare("UPDATE productos SET sucursales_web = ? WHERE codigo = ? AND id_empresa = ?")->execute([$val, $code, $EMP_ID]);
@@ -116,13 +120,13 @@ $offset = ($page - 1) * $perPage;
 $total = $pdo->query("SELECT COUNT(*) FROM productos p $where")->fetchColumn();
 $totalPages = ceil($total / $perPage);
 
-// SELECCIONAMOS LAS NUEVAS COLUMNAS (color, unidad_medida, peso)
+// SELECCIONAMOS LAS NUEVAS COLUMNAS (color, unidad_medida, peso, es_reservable)
 $sql = "SELECT p.codigo, p.nombre, p.precio, p.categoria, p.es_web, p.sucursales_web, p.descripcion,
                p.es_servicio, p.es_materia_prima, p.es_elaborado,
-               p.color, p.unidad_medida, p.peso 
-        FROM productos p 
-        $where 
-        ORDER BY p.nombre ASC 
+               p.color, p.unidad_medida, p.peso, p.es_reservable
+        FROM productos p
+        $where
+        ORDER BY p.nombre ASC
         LIMIT $perPage OFFSET $offset";
 $products = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 
@@ -232,10 +236,16 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                         </td>
                         
                         <td class="text-center">
-                            <div class="form-check form-switch d-inline-block">
-                                <input class="form-check-input" type="checkbox" style="cursor:pointer; transform: scale(1.4);" 
+                            <div class="form-check form-switch d-inline-block" title="Visible en tienda web">
+                                <input class="form-check-input" type="checkbox" style="cursor:pointer; transform: scale(1.4);"
                                        onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)"
                                        <?php echo $p['es_web'] ? 'checked' : ''; ?>>
+                            </div>
+                            <div class="mt-2 d-flex align-items-center justify-content-center gap-1" title="Aceptar reservas sin stock">
+                                <input class="form-check-input" type="checkbox" style="cursor:pointer; <?php echo ($p['es_reservable'] ?? 0) ? 'background-color:#f59e0b;border-color:#d97706;' : ''; ?>"
+                                       onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)"
+                                       <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
+                                <span style="font-size:0.75rem;" title="Reservable">📅</span>
                             </div>
                         </td>
 
@@ -393,9 +403,31 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ action: 'update_web_status', id: id, value: val })
             });
-        } catch(e) { 
-            checkbox.checked = !val; 
-            alert('Error conexión'); 
+        } catch(e) {
+            checkbox.checked = !val;
+            alert('Error conexión');
+        }
+    }
+
+    // --- 1b. TOGGLE RESERVABLE ---
+    async function toggleReservable(id, checkbox) {
+        const val = checkbox.checked ? 1 : 0;
+        try {
+            const res = await fetch('web_manager.php', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ action: 'update_reservable', id: id, value: val })
+            });
+            const json = await res.json();
+            if (json.status === 'success') {
+                checkbox.style.backgroundColor = val ? '#f59e0b' : '';
+                checkbox.style.borderColor     = val ? '#d97706' : '';
+            } else {
+                checkbox.checked = !checkbox.checked;
+                alert('Error: ' + (json.msg || 'Desconocido'));
+            }
+        } catch(e) {
+            checkbox.checked = !checkbox.checked;
+            alert('Error conexión');
         }
     }
 

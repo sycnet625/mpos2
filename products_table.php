@@ -39,12 +39,19 @@ function renderProductRows($rows, $localPath) {
                 <?php if($p['es_materia_prima']): ?><span class="emoji-span" title="Materia Prima">🧱</span><?php endif; ?>
                 <?php if($p['es_servicio']): ?><span class="emoji-span" title="Servicio">🛠️</span><?php endif; ?>
                 <?php if($p['es_cocina']): ?><span class="emoji-span" title="Cocina">👨‍🍳</span><?php endif; ?>
+                <?php if($p['es_reservable'] ?? false): ?><span class="emoji-span" title="Reservable (sin stock)">📅</span><?php endif; ?>
                 <?php if(!$isActive): ?><span class="badge bg-danger text-white border ms-1" style="font-size:0.6rem;">INACTIVO</span><?php endif; ?>
             </div>
         </td>
         <td class="text-center">
-            <div class="form-check form-switch d-flex justify-content-center">
+            <div class="form-check form-switch d-flex justify-content-center" title="Visible en tienda web">
                 <input class="form-check-input" type="checkbox" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
+            </div>
+            <div class="form-check form-switch d-flex justify-content-center align-items-center mt-1" title="Aceptar reservas sin stock">
+                <input class="form-check-input" type="checkbox" style="<?php echo ($p['es_reservable'] ?? 0) ? 'background-color:#f59e0b;border-color:#d97706;' : ''; ?>"
+                       onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)"
+                       <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
+                <span class="ms-1" style="font-size:0.6rem; line-height:1; color:#9ca3af;">📅</span>
             </div>
         </td>
         <td class="small text-muted"><?php echo $p['categoria']; ?></td>
@@ -146,7 +153,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $val = intval($_POST['val']);
             $stmt = $pdo->prepare("UPDATE productos SET es_web = ? WHERE codigo = ? AND id_empresa = ?");
             $stmt->execute([$val, $sku, $EMP_ID]);
-            echo json_encode(['status'=>'success']); 
+            echo json_encode(['status'=>'success']);
+        } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        exit;
+    }
+
+    // TOGGLE RESERVABLE
+    if (isset($_POST['action']) && $_POST['action'] === 'toggle_reservable') {
+        try {
+            $sku = $_POST['sku'];
+            $val = intval($_POST['val']);
+            $stmt = $pdo->prepare("UPDATE productos SET es_reservable = ? WHERE codigo = ? AND id_empresa = ?");
+            $stmt->execute([$val, $sku, $EMP_ID]);
+            echo json_encode(['status'=>'success']);
         } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
         exit;
     }
@@ -418,7 +437,7 @@ if ($isAjax) {
                         <th onclick="sortBy('codigo')" style="cursor:pointer">SKU <i id="icon_codigo" class="fas fa-sort text-muted small"></i></th>
                         <th onclick="sortBy('nombre')" style="cursor:pointer">Producto <i id="icon_nombre" class="fas fa-sort-up text-primary small"></i></th>
                         
-                        <th class="text-center" style="width: 80px;">Web</th>
+                        <th class="text-center" style="width: 80px;" title="Web visible / 📅 Reservable sin stock">Web / 📅</th>
                         
                         <th onclick="sortBy('categoria')" style="cursor:pointer">Categoría <i id="icon_categoria" class="fas fa-sort text-muted small"></i></th>
                         <th onclick="sortBy('stock_total')" style="cursor:pointer" class="text-center">Stock <i id="icon_stock_total" class="fas fa-sort text-muted small"></i></th>
@@ -768,6 +787,25 @@ async function toggleWeb(sku, checkbox) {
         const res = await fetch('products_table.php', { method: 'POST', body: formData });
         const data = await res.json();
         if(data.status !== 'success') { checkbox.checked = !checkbox.checked; alert("Error: " + data.msg); }
+    } catch(e) { checkbox.checked = !checkbox.checked; }
+}
+
+async function toggleReservable(sku, checkbox) {
+    const val = checkbox.checked ? 1 : 0;
+    const formData = new FormData();
+    formData.append('action', 'toggle_reservable');
+    formData.append('sku', sku);
+    formData.append('val', val);
+    try {
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            checkbox.style.backgroundColor = val ? '#f59e0b' : '';
+            checkbox.style.borderColor     = val ? '#d97706' : '';
+        } else {
+            checkbox.checked = !checkbox.checked;
+            alert("Error: " + data.msg);
+        }
     } catch(e) { checkbox.checked = !checkbox.checked; }
 }
 

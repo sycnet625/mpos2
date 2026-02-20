@@ -75,6 +75,12 @@ try {
     $uuid = $input['uuid'] ?? uniqid('pos_', true);
     $tipoServicio = $input['tipo_servicio'] ?? 'mostrador';
 
+    // Campos nuevos: pago online y reserva sin stock
+    $codigoPago    = isset($input['codigo_pago']) ? substr((string)$input['codigo_pago'], 0, 100) : null;
+    $estadoPago    = isset($input['estado_pago'])  ? substr((string)$input['estado_pago'],  0, 20)  : 'pendiente';
+    $esReserva     = ($tipoServicio === 'reserva');
+    $sinExistencia = 0; // se calcula en el loop de items
+
     // 4. TRANSACCIÓN GLOBAL
     $pdo->beginTransaction();
 
@@ -107,10 +113,10 @@ try {
     // B. Insertar Cabecera
     $sqlCab = "INSERT INTO ventas_cabecera (
         uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, id_caja,
-        tipo_servicio, cliente_nombre, cliente_telefono, cliente_direccion, 
+        tipo_servicio, cliente_nombre, cliente_telefono, cliente_direccion,
         id_empresa, mensajero_nombre, fecha_reserva, sincronizado, id_sesion_caja,
-        abono
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)";
+        abono, codigo_pago, estado_pago
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)";
 
     $stmtCab = $pdo->prepare($sqlCab);
     $stmtCab->execute([
@@ -129,7 +135,9 @@ try {
         safe_str($input['mensajero_nombre'] ?? '', 100),
         !empty($input['fecha_reserva']) ? $input['fecha_reserva'] : null,
         $idSesion,
-        floatval($input['abono'] ?? 0)
+        floatval($input['abono'] ?? 0),
+        $codigoPago,
+        $estadoPago
     ]);
 
     $idVenta = $pdo->lastInsertId();
@@ -174,19 +182,25 @@ try {
         $esElaborado = $prodData ? intval($prodData['es_elaborado']) : 0;
 
         // Mover Inventario (Solo productos físicos)
-        if ($kardexAvailable && $esServicio === 0) {
-            // ** VERIFICACIÓN DE STOCK ANTES DE VENDER **
-            $stmtStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+        if ($esServicio === 0) {
+            $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
             $stmtStock->execute([$sku, $idAlmacen]);
-            $stockActual = $stmtStock->fetchColumn();
-            $stockActual = ($stockActual !== false) ? floatval($stockActual) : 0.00;
+            $stockActual = floatval($stmtStock->fetchColumn());
 
-            if ($stockActual < $qty) {
-                throw new Exception("Stock insuficiente para '" . $name . "'. Disponible: " . $stockActual . ". Requerido: " . $qty);
+            if ($esReserva) {
+                // En reservas NO se deduce kardex; solo se marca si hay déficit
+                if ($stockActual < $qty) {
+                    $sinExistencia = 1;
+                }
+            } else {
+                // Venta normal: verificar stock y registrar movimiento
+                if ($stockActual < $qty) {
+                    throw new Exception("Stock insuficiente para '" . $name . "'. Disponible: " . $stockActual . ". Requerido: " . $qty);
+                }
+                if ($kardexAvailable) {
+                    $kardex->registrarVenta($sku, $qty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
+                }
             }
-            // FIN VERIFICACIÓN DE STOCK
-
-            $kardex->registrarVenta($sku, $qty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
         }
 
         // Comanda (Elaborados)
@@ -201,8 +215,38 @@ try {
         $stmtCom->execute([$idVenta, json_encode($itemsCocina), $fechaVenta]);
     }
 
+    // F. Actualizar sin_existencia si aplica
+    if ($sinExistencia) {
+        $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia = 1 WHERE id = ?")
+            ->execute([$idVenta]);
+    }
+
     $pdo->commit();
-    echo json_encode(['status' => 'success', 'id' => $idVenta]);
+
+    // G. Notificaciones de chat (fuera de transacción para no bloquear)
+    $clienteNombre = safe_str($input['cliente_nombre'] ?? 'Cliente', 100);
+    try {
+        $stmtChat = $pdo->prepare(
+            "INSERT INTO chat_messages (client_uuid, sender, message, is_read) VALUES (?, ?, ?, 0)"
+        );
+        if ($sinExistencia) {
+            $stmtChat->execute([
+                'SISTEMA_NOTIF', 'client',
+                "⚠️ RESERVA SIN STOCK: Pedido #{$idVenta} ({$clienteNombre}) tiene productos sin existencia suficiente. Revisar antes de confirmar."
+            ]);
+        }
+        if ($estadoPago === 'verificando') {
+            $stmtChat->execute([
+                'SISTEMA_NOTIF', 'client',
+                "💳 PAGO PENDIENTE: Pedido #{$idVenta} ({$clienteNombre}) — Código enviado: {$codigoPago}. Por favor verificar la transferencia."
+            ]);
+        }
+    } catch (Throwable $chatErr) {
+        // No bloquear la respuesta por fallo en notificación de chat
+        error_log("pos_save chat error: " . $chatErr->getMessage());
+    }
+
+    echo json_encode(['status' => 'success', 'id' => $idVenta, 'uuid' => $uuid]);
 
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();

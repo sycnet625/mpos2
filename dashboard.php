@@ -132,6 +132,22 @@ $tasaConversion = ($ipsUnicas > 0) ? ($ventasWebCount / $ipsUnicas) * 100 : 0;
 $urlMasVisitada = getScalar($pdo, "SELECT url_visitada FROM metricas_web GROUP BY url_visitada ORDER BY COUNT(*) DESC LIMIT 1");
 $urlMasVisitada = basename($urlMasVisitada) ?: '/';
 
+// Alertas: reservas sin stock y pagos pendientes de verificación
+$reservasSinStock = 0;
+$pagosVerificando = 0;
+try {
+    $reservasSinStock = (int)$pdo->query(
+        "SELECT COUNT(*) FROM ventas_cabecera
+         WHERE tipo_servicio='reserva' AND sin_existencia=1
+           AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
+    )->fetchColumn();
+    $pagosVerificando = (int)$pdo->query(
+        "SELECT COUNT(*) FROM ventas_cabecera
+         WHERE estado_pago='verificando'
+           AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
+    )->fetchColumn();
+} catch (Throwable $e) { /* columnas pueden no existir aún */ }
+
 // ============================================================================
 //   2.5 ANÁLISIS DE LOGS DE SERVIDOR (NGINX)
 // ============================================================================
@@ -458,6 +474,40 @@ function getStatusBadge($estado) {
                     </div>
                 </div>
             </div>
+
+            <?php if ($reservasSinStock > 0 || $pagosVerificando > 0): ?>
+            <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1"><i class="fas fa-bell me-2 text-warning"></i> Alertas Operativas</h6>
+            <div class="row g-4 mb-4">
+                <?php if ($reservasSinStock > 0): ?>
+                <div class="col-md-6">
+                    <div class="card h-100 shadow-sm border-0" style="background:#fff3cd; border-left:5px solid #fd7e14 !important; border-left-width:5px;">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div style="font-size:2.5rem;">📦</div>
+                            <div>
+                                <h6 class="text-uppercase fw-bold small text-muted mb-1">Reservas sin Existencias</h6>
+                                <h3 class="fw-bold mb-1 text-warning"><?= $reservasSinStock ?> reserva<?= $reservasSinStock > 1 ? 's' : '' ?></h3>
+                                <a href="reservas.php" class="btn btn-sm btn-outline-warning">Ver reservas →</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <?php if ($pagosVerificando > 0): ?>
+                <div class="col-md-6">
+                    <div class="card h-100 shadow-sm border-0" style="background:#fff3cd; border-left:5px solid #ffc107 !important; border-left-width:5px;">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div style="font-size:2.5rem;">💳</div>
+                            <div>
+                                <h6 class="text-uppercase fw-bold small text-muted mb-1">Pagos Pendientes</h6>
+                                <h3 class="fw-bold mb-1 text-dark"><?= $pagosVerificando ?> pago<?= $pagosVerificando > 1 ? 's' : '' ?></h3>
+                                <a href="reservas.php" class="btn btn-sm btn-outline-warning">Verificar →</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
 
             <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1"><i class="fas fa-chart-line me-2"></i> Rendimiento del Periodo</h6>
             <div class="row g-4 mb-4">

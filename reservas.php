@@ -1,11 +1,12 @@
 <?php
-// ARCHIVO: reservas.php v1.1
+// ARCHIVO: reservas.php v2.0
 ini_set('display_errors', 0);
 require_once 'db.php';
 
 // Configuración básica
 require_once 'config_loader.php';
 $sucursalID = intval($config['id_sucursal']);
+$idAlmacen  = intval($config['id_almacen']);
 
 // 1. PROCESAR ACCIONES (Entregar / Cancelar / Enviar a Cocina)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -15,12 +16,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($input['action']) && isset($input['id'])) {
         $idVenta = intval($input['id']);
         try {
-            // ACCIÓN: ENTRAGAR O CANCELAR
+            // ACCIÓN: ENTREGAR (con deducción de Kardex) O CANCELAR
             if ($input['action'] === 'complete' || $input['action'] === 'cancel') {
                 $newState = ($input['action'] === 'complete') ? 'ENTREGADO' : 'CANCELADO';
+
+                $alertas = [];
+
+                if ($input['action'] === 'complete') {
+                    // Deducir kardex al entregar la reserva
+                    require_once 'kardex_engine.php';
+                    if (class_exists('KardexEngine')) {
+                        $kardex = new KardexEngine($pdo);
+                        $stmtItems = $pdo->prepare(
+                            "SELECT vd.id_producto, vd.cantidad, vd.precio, vd.nombre_producto
+                             FROM ventas_detalle vd WHERE vd.id_venta_cabecera = ?"
+                        );
+                        $stmtItems->execute([$idVenta]);
+                        $items = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
+
+                        $pdo->beginTransaction();
+                        foreach ($items as $item) {
+                            $sku = $item['id_producto'];
+                            $qty = floatval($item['cantidad']);
+
+                            // Verificar tipo producto (servicios no tienen stock)
+                            $stmtEs = $pdo->prepare("SELECT es_servicio FROM productos WHERE codigo = ?");
+                            $stmtEs->execute([$sku]);
+                            $esServicio = (int)($stmtEs->fetchColumn() ?? 0);
+                            if ($esServicio) continue;
+
+                            // Verificar stock disponible
+                            $stmtSt = $pdo->prepare(
+                                "SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?"
+                            );
+                            $stmtSt->execute([$sku, $idAlmacen]);
+                            $stockActual = floatval($stmtSt->fetchColumn());
+                            if ($stockActual < $qty) {
+                                $alertas[] = "{$item['nombre_producto']}: stock actual={$stockActual}, necesario={$qty}";
+                            }
+
+                            // Registrar salida en kardex (nueva firma de 9 parámetros)
+                            $kardex->registrarMovimiento(
+                                $sku,
+                                $idAlmacen,
+                                $config['id_sucursal'],
+                                'VENTA',
+                                -$qty,
+                                "ENTREGA-RESERVA-{$idVenta}",
+                                floatval($item['precio']),
+                                'reservas',
+                                date('Y-m-d H:i:s')
+                            );
+                        }
+                        $pdo->commit();
+                    }
+                }
+
                 $stmtUpd = $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva = ? WHERE id = ?");
                 $stmtUpd->execute([$newState, $idVenta]);
-                echo json_encode(['status' => 'success']);
+
+                if (!empty($alertas)) {
+                    echo json_encode(['status' => 'warning', 'alertas' => $alertas,
+                        'msg' => 'Entregado con advertencias de stock insuficiente.']);
+                } else {
+                    echo json_encode(['status' => 'success']);
+                }
             } 
             // ACCIÓN NUEVA: ENVIAR A COCINA
             elseif ($input['action'] === 'send_to_kitchen') {
@@ -48,6 +108,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmtComanda = $pdo->prepare("INSERT INTO comandas (id_venta, items_json, estado, fecha_creacion) VALUES (?, ?, 'pendiente', NOW())");
                 $stmtComanda->execute([$idVenta, json_encode($itemsJson)]);
                 
+                echo json_encode(['status' => 'success']);
+            }
+            // ACCIÓN: CONFIRMAR PAGO (transferencia)
+            elseif ($input['action'] === 'confirm_payment') {
+                $pdo->prepare("UPDATE ventas_cabecera SET estado_pago = 'confirmado' WHERE id = ?")
+                    ->execute([$idVenta]);
+                // Notificar vía chat
+                $stmtV = $pdo->prepare("SELECT uuid_venta, cliente_nombre FROM ventas_cabecera WHERE id = ?");
+                $stmtV->execute([$idVenta]);
+                $venta = $stmtV->fetch(PDO::FETCH_ASSOC);
+                if ($venta) {
+                    $pdo->prepare("INSERT INTO chat_messages (client_uuid, sender, message, is_read) VALUES (?,?,?,0)")
+                        ->execute([
+                            'PAGO_CONFIRMADO_' . $venta['uuid_venta'],
+                            'admin',
+                            "✓ Pago confirmado para el pedido de {$venta['cliente_nombre']} (#{$idVenta}). ¡Gracias!"
+                        ]);
+                }
                 echo json_encode(['status' => 'success']);
             }
             // ACCIÓN: IMPORTAR .ICS
@@ -99,19 +177,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// 2. OBTENER RESERVAS ACTIVAS (SQL CORREGIDO PARA SKU)
+// Contar reservas sin stock para alerta de encabezado
+$cntSinStock = 0;
+try {
+    $stmtCnt = $pdo->query(
+        "SELECT COUNT(*) FROM ventas_cabecera
+         WHERE tipo_servicio='reserva' AND sin_existencia=1
+           AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
+    );
+    $cntSinStock = (int)$stmtCnt->fetchColumn();
+} catch (Exception $e) { $cntSinStock = 0; }
+
+// 2. OBTENER RESERVAS ACTIVAS
 try {
     $sql = "SELECT c.id, c.cliente_nombre, c.cliente_telefono, c.fecha_reserva, c.total, c.abono,
                    (c.total - COALESCE(c.abono, 0)) as deuda,
+                   COALESCE(c.sin_existencia, 0) as sin_existencia,
+                   COALESCE(c.estado_pago, 'pendiente') as estado_pago,
+                   c.codigo_pago,
                    GROUP_CONCAT(
-                        CONCAT(d.cantidad, 'x ', COALESCE(p.nombre, 'Producto Eliminado')) 
+                        CONCAT(d.cantidad, 'x ', COALESCE(p.nombre, 'Producto Eliminado'))
                         SEPARATOR ', '
                    ) as resumen_items,
                    (SELECT COUNT(*) FROM comandas com WHERE com.id_venta = c.id) as enviado_cocina
             FROM ventas_cabecera c
             LEFT JOIN ventas_detalle d ON c.id = d.id_venta_cabecera
-            LEFT JOIN productos p ON d.id_producto = p.codigo 
-            WHERE c.tipo_servicio = 'reserva' 
+            LEFT JOIN productos p ON d.id_producto = p.codigo
+            WHERE c.tipo_servicio = 'reserva'
               AND c.id_sucursal = ?
               AND (c.estado_reserva = 'PENDIENTE' OR c.estado_reserva IS NULL)
             GROUP BY c.id
@@ -155,10 +247,21 @@ try {
 <body class="p-3">
 
 <div class="container-fluid">
+
+    <?php if ($cntSinStock > 0): ?>
+    <div class="alert alert-warning d-flex align-items-center mb-3 shadow-sm" role="alert">
+        <i class="fas fa-exclamation-triangle fa-lg me-3 text-warning"></i>
+        <div>
+            <strong>⚠️ <?= $cntSinStock ?> reserva<?= $cntSinStock > 1 ? 's' : '' ?> con productos sin existencias actuales.</strong>
+            Revisa las marcadas en rojo antes de confirmar la entrega.
+        </div>
+    </div>
+    <?php endif; ?>
+
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h3 class="fw-bold mb-0"><i class="far fa-calendar-alt text-primary me-2"></i> GESTIÓN DE RESERVAS v1.1</h3>
-            <p class="text-muted mb-0">Control de entregas y pedidos a cocina</p>
+            <h3 class="fw-bold mb-0"><i class="far fa-calendar-alt text-primary me-2"></i> GESTIÓN DE RESERVAS v2.0</h3>
+            <p class="text-muted mb-0">Control de entregas, pagos y pedidos a cocina</p>
         </div>
         <div>
             <a href="pos.php" class="btn btn-outline-secondary me-2"><i class="fas fa-cash-register"></i> POS</a>
@@ -180,24 +283,52 @@ try {
                         <div class="text-center py-5 text-muted"><i class="fas fa-check-circle fa-3x mb-3 opacity-25"></i><p>Sin reservas pendientes.</p></div>
                     <?php else: ?>
                         <div class="list-group list-group-flush">
-                            <?php foreach ($reservas as $r): 
+                            <?php foreach ($reservas as $r):
                                 $fecha = new DateTime($r['fecha_reserva']);
                                 $hoy = new DateTime();
                                 $diff = $hoy->diff($fecha);
                                 $dias = $diff->invert ? -$diff->days : $diff->days;
-                                
+
                                 $badgeCls = 'bg-primary';
                                 $textoTiempo = ($dias === 0) ? 'HOY' : ($dias == 1 ? 'Mañana' : "En $dias días");
                                 if ($dias < 0) { $badgeCls = 'bg-danger'; $textoTiempo = 'VENCIDO'; }
                                 elseif ($dias === 0) { $badgeCls = 'bg-warning text-dark'; }
+
+                                // Badge de estado de pago
+                                $ep = $r['estado_pago'] ?? 'pendiente';
+                                if ($ep === 'confirmado') { $epBadge = 'bg-success'; $epTexto = '✓ Pago confirmado'; }
+                                elseif ($ep === 'verificando') { $epBadge = 'bg-warning text-dark'; $epTexto = '💳 Verificando pago'; }
+                                else { $epBadge = 'bg-secondary'; $epTexto = 'Pago al recibir'; }
+
+                                $sinStock = intval($r['sin_existencia'] ?? 0);
                             ?>
-                            <div class="list-group-item reserva-item p-3" onclick="verTicket(<?php echo $r['id']; ?>, <?php echo $r['deuda']; ?>)">
+                            <div class="list-group-item reserva-item p-3<?= $sinStock ? ' border-start border-3 border-danger' : '' ?>" onclick="verTicket(<?php echo $r['id']; ?>, <?php echo $r['deuda']; ?>)">
                                 <div class="d-flex w-100 justify-content-between align-items-center mb-1">
                                     <h6 class="mb-0 fw-bold"><?php echo htmlspecialchars($r['cliente_nombre']); ?></h6>
-                                    <span class="badge <?php echo $badgeCls; ?>"><?php echo $textoTiempo; ?></span>
+                                    <div class="d-flex gap-1">
+                                        <?php if ($sinStock): ?>
+                                            <span class="badge bg-danger" title="Productos sin stock al reservar">📦 Sin stock</span>
+                                        <?php endif; ?>
+                                        <span class="badge <?php echo $badgeCls; ?>"><?php echo $textoTiempo; ?></span>
+                                    </div>
                                 </div>
-                                <div class="small text-muted mb-2"><i class="far fa-clock"></i> <?php echo $fecha->format('d/m/Y h:i A'); ?></div>
-                                
+                                <div class="small text-muted mb-1"><i class="far fa-clock"></i> <?php echo $fecha->format('d/m/Y h:i A'); ?></div>
+
+                                <!-- Badge de estado de pago -->
+                                <div class="mb-2">
+                                    <span class="badge <?= $epBadge ?> small"><?= $epTexto ?></span>
+                                    <?php if ($ep === 'verificando' && !empty($r['codigo_pago'])): ?>
+                                        <small class="text-muted ms-1">Cód: <?= htmlspecialchars($r['codigo_pago']) ?></small>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php if ($ep === 'verificando'): ?>
+                                    <button class="btn btn-sm btn-success fw-bold mb-2 w-100"
+                                            onclick="event.stopPropagation(); confirmarPago(<?= $r['id'] ?>)">
+                                        <i class="fas fa-check-circle"></i> CONFIRMAR PAGO
+                                    </button>
+                                <?php endif; ?>
+
                                 <?php if ($dias === 0 && $r['enviado_cocina'] == 0): ?>
                                     <button class="btn btn-sm btn-info text-white fw-bold mb-2 w-100" onclick="event.stopPropagation(); enviarACocina(<?php echo $r['id']; ?>)">
                                         <i class="fas fa-fire"></i> MANDAR A COCINA HOY
@@ -206,7 +337,7 @@ try {
                                     <div class="alert alert-success py-1 px-2 mb-2 small text-center fw-bold"><i class="fas fa-check"></i> YA EN COCINA</div>
                                 <?php endif; ?>
 
-                                <p class="mb-2 small text-dark border-start border-3 border-info ps-2 bg-light py-1">
+                                <p class="mb-0 small text-dark border-start border-3 border-info ps-2 bg-light py-1">
                                     <?php echo htmlspecialchars(mb_strimwidth($r['resumen_items'] ?? '', 0, 60, "...")); ?>
                                 </p>
                             </div>
@@ -277,9 +408,38 @@ try {
 
     async function procesarReserva(a) {
         if (!confirm("¿Confirmar acción?")) return;
-        const res = await fetch('reservas.php', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ id: currentTicketId, action: a }) });
+        const res = await fetch('reservas.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ id: currentTicketId, action: a })
+        });
         const data = await res.json();
-        if (data.status === 'success') location.reload(); else alert("Error: " + data.msg);
+        if (data.status === 'success') {
+            location.reload();
+        } else if (data.status === 'warning') {
+            alert("⚠️ Entregado con advertencias de stock:\n\n" + (data.alertas || []).join('\n'));
+            location.reload();
+        } else {
+            alert("Error: " + data.msg);
+        }
+    }
+
+    async function confirmarPago(id) {
+        if (!confirm("¿Confirmar el pago de transferencia para el pedido #" + id + "?")) return;
+        try {
+            const res = await fetch('reservas.php', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ id: id, action: 'confirm_payment' })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                alert("✓ Pago confirmado. El cliente será notificado.");
+                location.reload();
+            } else {
+                alert("Error: " + data.msg);
+            }
+        } catch (e) { alert("Error de conexión"); }
     }
 
     function imprimirTicket() { window.open('ticket_view.php?id=' + currentTicketId, 'Ticket', 'width=380,height=600'); }
@@ -321,6 +481,7 @@ try {
 
 
 <?php include_once 'menu_master.php'; ?>
+<footer class="text-center text-muted py-2" style="font-size:.72rem;">Sistema PALWEB POS v3.0</footer>
 </body>
 </html>
 

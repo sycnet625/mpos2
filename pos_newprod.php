@@ -78,17 +78,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
 
             // Preparar Query con TODAS las columnas
             $sql = "INSERT INTO productos (
-                codigo, id_empresa, nombre, descripcion, categoria, 
-                precio, costo, precio_mayorista, impuesto, activo, stock_minimo, 
+                codigo, id_empresa, nombre, descripcion, categoria,
+                precio, costo, precio_mayorista, impuesto, activo, stock_minimo,
                 es_materia_prima, es_servicio, unidad_medida, peso, color,
-                es_web, sucursales_web, es_pos, 
+                es_web, es_reservable, sucursales_web, es_pos,
                 es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6,
                 id_sucursal_origen
             ) VALUES (
-                ?, ?, ?, ?, ?, 
-                ?, ?, ?, 1, ?, 
                 ?, ?, ?, ?, ?,
-                ?, ?, ?,
+                ?, ?, ?, 1, ?,
+                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?
             )";
 
@@ -110,6 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 floatval($_POST['peso'] ?? 0),
                 $_POST['color'] ?? '#cccccc',
                 isset($_POST['es_web']) ? 1 : 0,
+                isset($_POST['es_reservable']) ? 1 : 0,
                 $_POST['sucursales_web'] ?? '1',
                 isset($_POST['es_pos']) ? 1 : 0,
                 isset($_POST['es_suc1']) ? 1 : 0,
@@ -118,7 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 isset($_POST['es_suc4']) ? 1 : 0,
                 isset($_POST['es_suc5']) ? 1 : 0,
                 isset($_POST['es_suc6']) ? 1 : 0,
-                $SUC_ID // Guardar origen
+                $SUC_ID
             ]);
 
             // Guardar Imagen si viene
@@ -278,6 +279,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                                     <div class="form-check form-switch mb-2">
                                         <input class="form-check-input" type="checkbox" name="es_web" id="qp_es_web">
                                         <label class="form-check-label fw-bold" for="qp_es_web">Visible en Web</label>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <div class="form-check form-switch mb-2 p-2 rounded" style="background:#fff8e1;border:1px solid #ffe082;">
+                                        <input class="form-check-input ms-0 me-2" type="checkbox" name="es_reservable" id="qp_es_reservable">
+                                        <label class="form-check-label fw-bold" for="qp_es_reservable">
+                                            📅 Reservable (sin existencia)
+                                        </label>
+                                        <div class="form-text text-muted mt-0">Si se activa, los clientes podrán <strong>reservar</strong> este producto aunque no tenga stock disponible.</div>
                                     </div>
                                 </div>
                                 <div class="col-12">

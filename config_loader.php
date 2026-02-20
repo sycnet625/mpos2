@@ -17,7 +17,10 @@ if (!isset($config)) {
         "mostrar_servicios" => true,
         "categorias_ocultas" => [],
         "mensajeria_tarifa_km" => 150,
-        "cajeros" => []
+        "cajeros" => [],
+        "numero_tarjeta" => "",
+        "titular_tarjeta" => "",
+        "banco_tarjeta" => "Bandec / BPA"
     ];
 
     if (file_exists($configFile)) {
