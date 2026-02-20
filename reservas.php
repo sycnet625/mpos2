@@ -534,8 +534,9 @@ if (isset($_GET['ajax'])) {
         <span class="badge bg-indigo-600" style="background:#6366f1;">Suc. <?= $sucursalID ?></span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a href="crm_clients.php" class="btn btn-outline-light btn-sm"><i class="fas fa-users me-1"></i>CRM Clientes</a>
-        <a href="dashboard.php"   class="btn btn-outline-light btn-sm"><i class="fas fa-home me-1"></i>Dashboard</a>
+        <a href="crm_clients.php"  class="btn btn-outline-light btn-sm"><i class="fas fa-users me-1"></i>CRM Clientes</a>
+        <a href="dashboard.php"    class="btn btn-outline-light btn-sm"><i class="fas fa-home me-1"></i>Dashboard</a>
+        <a href="guia_reservas.php" class="btn btn-outline-light btn-sm" target="_blank"><i class="fas fa-book-open me-1"></i>Guía</a>
         <button class="btn btn-outline-warning btn-sm" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
         <button class="btn btn-primary btn-sm fw-bold px-3" onclick="openForm(null)"><i class="fas fa-plus me-1"></i>Nueva Reserva</button>
     </div>
