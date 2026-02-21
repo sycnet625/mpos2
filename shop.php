@@ -25,7 +25,7 @@ ob_start();
 // ── Cabeceras de Seguridad HTTP ──────────────────────────────────────────────
 // Content-Security-Policy: los scripts e inline-styles son necesarios por la
 // arquitectura monolítica; migrar a nonces/hashes en refactorización futura.
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://www.googletagmanager.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 // HTTP/2: informa al cliente que el servidor soporta h2 en el puerto 443.
 // La habilitación real del protocolo requiere configuración en Nginx/Apache.
 header("Alt-Svc: h2=\":443\"; ma=86400");
@@ -263,18 +263,35 @@ if (isset($_GET['action_track'])) {
         $cleanPhone = preg_replace('/^53/', '', $q);
         $phonePattern = "%" . $cleanPhone . "%";
         
-        // Buscamos por ID exacto o por teléfono parcial
-        $stmt = $pdo->prepare("SELECT id, estado, total, fecha, fecha_actualizacion, cliente_nombre, items_json 
-                                FROM pedidos_cabecera 
-                                WHERE id = ? OR cliente_telefono LIKE ? 
-                                ORDER BY fecha DESC LIMIT 5");
+        // Buscamos reservas por ID exacto o por teléfono parcial en ventas_cabecera
+        $stmt = $pdo->prepare("SELECT id, estado_reserva, total, fecha_reserva, cliente_nombre
+                                FROM ventas_cabecera
+                                WHERE tipo_servicio='reserva'
+                                  AND (id = ? OR cliente_telefono LIKE ?)
+                                ORDER BY fecha_reserva DESC LIMIT 5");
         $stmt->execute([$q, $phonePattern]);
         $pedidos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        // Mapear estado_reserva a formato legible para el frontend
+        $estadoMap = [
+            'PENDIENTE'    => 'Pendiente',
+            'ENTREGADO'    => 'Entregado',
+            'CANCELADO'    => 'Cancelado',
+            'EN_CAMINO'    => 'En Camino',
+            'EN_PREPARACION' => 'En Preparación',
+        ];
+
+        // Cargar ítems desde ventas_detalle
+        $stmtItems = $pdo->prepare("SELECT nombre_producto AS name, cantidad AS qty, precio AS price
+                                     FROM ventas_detalle WHERE id_venta_cabecera = ?");
         foreach ($pedidos as &$pedido) {
-            $pedido['items'] = json_decode($pedido['items_json'] ?? '[]', true);
-            unset($pedido['items_json']); 
+            $pedido['estado'] = $estadoMap[$pedido['estado_reserva']] ?? ucfirst(strtolower($pedido['estado_reserva'] ?? 'Pendiente'));
+            $pedido['fecha']  = $pedido['fecha_reserva'];
+            unset($pedido['estado_reserva'], $pedido['fecha_reserva']);
+            $stmtItems->execute([$pedido['id']]);
+            $pedido['items'] = $stmtItems->fetchAll(PDO::FETCH_ASSOC);
         }
+        unset($pedido);
 
         echo json_encode($pedidos);
     } catch (Exception $e) { 
@@ -1618,6 +1635,11 @@ ob_end_flush();
 </div>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
+
+<!-- Toast de notificación -->
+<div id="shopToastContainer" aria-live="polite" aria-atomic="true"
+     style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;min-width:240px;"></div>
+
 <script>
     // INICIALIZACIÓN
     window.addEventListener('load', () => {
@@ -1638,6 +1660,24 @@ ob_end_flush();
     const trackingModal = new bootstrap.Modal(document.getElementById('trackingModal'));
     const authModal = new bootstrap.Modal(document.getElementById('authModal'));
     const profileModal = new bootstrap.Modal(document.getElementById('profileModal'));
+
+    // ========================================================
+    // TOAST DE NOTIFICACIÓN
+    // ========================================================
+    function showToast(msg, duration = 3000) {
+        const container = document.getElementById('shopToastContainer');
+        const id = 'toast_' + Date.now();
+        const el = document.createElement('div');
+        el.id = id;
+        el.className = 'toast align-items-center text-white bg-dark border-0 show mb-2';
+        el.setAttribute('role', 'status');
+        el.innerHTML = `<div class="d-flex"><div class="toast-body">${msg}</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                onclick="document.getElementById('${id}').remove()" aria-label="Cerrar"></button></div>`;
+        container.appendChild(el);
+        setTimeout(() => { if (el.parentNode) el.remove(); }, duration);
+    }
+    window.showToast = showToast;
 
     // ========================================================
     // GESTIÓN DE WISHLIST

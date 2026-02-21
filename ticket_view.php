@@ -29,6 +29,19 @@ try {
 
 $tiposServicio = [ 'consumir_aqui' => 'COMER AQUÍ', 'llevar' => 'PARA LLEVAR', 'mensajeria' => 'DOMICILIO', 'reserva' => 'RESERVA' ];
 $tipoServicioDisplay = $tiposServicio[$venta['tipo_servicio']] ?? strtoupper($venta['tipo_servicio']);
+
+$canalOrigen = $venta['canal_origen'] ?? 'POS';
+$canalMap = [
+    'Web'        => ['#0ea5e9', '🌐', 'Web'],
+    'POS'        => ['#6366f1', '🖥️', 'POS'],
+    'WhatsApp'   => ['#22c55e', '💬', 'WhatsApp'],
+    'Teléfono'   => ['#f59e0b', '📞', 'Teléfono'],
+    'Kiosko'     => ['#8b5cf6', '📱', 'Kiosko'],
+    'Presencial' => ['#475569', '🙋', 'Presencial'],
+    'ICS'        => ['#94a3b8', '📥', 'Importado'],
+    'Otro'       => ['#94a3b8', '❓', 'Otro'],
+];
+[$canalColor, $canalEmoji, $canalLabel] = $canalMap[$canalOrigen] ?? $canalMap['Otro'];
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -70,10 +83,21 @@ $tipoServicioDisplay = $tiposServicio[$venta['tipo_servicio']] ?? strtoupper($ve
             margin-top: 5px;
             border: 2px solid #000;
         }
-        @media print { 
-            .no-print { display: none; } 
-            body { padding: 0; width: 100%; } 
+        .canal-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            color: white !important;
+            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact;
+        }
+        @media print {
+            .no-print { display: none; }
+            body { padding: 0; width: 100%; }
             .total-section { background: white; }
+            .canal-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
         }
     </style>
 </head>
@@ -95,6 +119,11 @@ $tipoServicioDisplay = $tiposServicio[$venta['tipo_servicio']] ?? strtoupper($ve
             <tr><td>UUID:</td><td class="text-right" style="font-size:9px;"><?php echo htmlspecialchars($venta['uuid_venta']); ?></td></tr>
             <tr><td>Fecha:</td><td class="text-right"><?php echo date('d/m/Y H:i', strtotime($venta['fecha'])); ?></td></tr>
             <tr><td>Cajero:</td><td class="text-right fw-bold"><?php echo htmlspecialchars($cajero); ?></td></tr>
+            <tr><td>Origen:</td><td class="text-right">
+                <span class="canal-badge" style="background-color:<?php echo $canalColor; ?>!important;">
+                    <?php echo $canalEmoji; ?> <?php echo htmlspecialchars($canalLabel); ?>
+                </span>
+            </td></tr>
             <tr><td>Método Pago:</td><td class="text-right fw-bold"><?php echo htmlspecialchars($venta['metodo_pago']); ?></td></tr>
             
             <?php if (!empty($venta['tipo_servicio'])): ?>
@@ -195,7 +224,7 @@ $tipoServicioDisplay = $tiposServicio[$venta['tipo_servicio']] ?? strtoupper($ve
 
     <div class="text-center mt-3 border-top pt-2">
         <p class="fw-bold" style="margin:0;"><?php echo htmlspecialchars($config['mensaje_final']); ?></p>
-        <small>Sistema PALWEB POS v2.0</small>
+        <small>Sistema PALWEB POS v3.0</small>
     </div>
 <?php include_once 'menu_master.php'; ?>
 </body>

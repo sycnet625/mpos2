@@ -48,7 +48,11 @@ $defaultConfig = [
     // Pasarela de pagos online (Transferencia)
     "numero_tarjeta" => "",
     "titular_tarjeta" => "",
-    "banco_tarjeta" => "Bandec / BPA"
+    "banco_tarjeta" => "Bandec / BPA",
+    "facebook_url" => "",
+    "twitter_url" => "",
+    "instagram_url" => "",
+    "youtube_url" => ""
 ];
 
 // 1. CARGAR CONFIGURACIÓN ACTUAL
@@ -103,6 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "numero_tarjeta"  => trim($_POST['numero_tarjeta']  ?? ''),
             "titular_tarjeta" => trim($_POST['titular_tarjeta'] ?? ''),
             "banco_tarjeta"   => trim($_POST['banco_tarjeta']   ?? 'Bandec / BPA'),
+            "facebook_url"    => trim($_POST['facebook_url']    ?? ''),
+            "twitter_url"     => trim($_POST['twitter_url']     ?? ''),
+            "instagram_url"   => trim($_POST['instagram_url']   ?? ''),
+            "youtube_url"     => trim($_POST['youtube_url']     ?? ''),
         ];
 
         // Procesar Cajeros Dinámicos
@@ -195,9 +203,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label class="form-label">Dirección</label>
                         <input type="text" name="direccion" class="form-control" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
                     </div>
-                    <div class="col-12">
-                        <label class="form-label">Mensaje Final (Pie de Ticket)</label>
-                        <input type="text" name="mensaje_final" class="form-control" value="<?php echo htmlspecialchars($currentConfig['mensaje_final']); ?>">
+                    <div class="col-md-6">
+                        <label class="form-label">URL de Facebook</label>
+                        <input type="url" name="facebook_url" class="form-control" placeholder="https://facebook.com/tu_pagina" value="<?php echo htmlspecialchars($currentConfig['facebook_url']); ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">URL de Instagram</label>
+                        <input type="url" name="instagram_url" class="form-control" placeholder="https://instagram.com/tu_perfil" value="<?php echo htmlspecialchars($currentConfig['instagram_url']); ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">URL de Twitter (X)</label>
+                        <input type="url" name="twitter_url" class="form-control" placeholder="https://twitter.com/tu_cuenta" value="<?php echo htmlspecialchars($currentConfig['twitter_url']); ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">URL de YouTube</label>
+                        <input type="url" name="youtube_url" class="form-control" placeholder="https://youtube.com/tu_canal" value="<?php echo htmlspecialchars($currentConfig['youtube_url']); ?>">
                     </div>
                 </div>
             </div>

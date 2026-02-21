@@ -40,12 +40,14 @@ try {
 
     // Cálculos Materia Prima
     $costoTotal = 0;
+    $totalCantidadFormula = 0; // Este es el $totalCantidadConsolidado solicitado
     $maxLotesPosibles = 999999;
 
+    // Loop pre-cálculo para obtener el total consolidado de la fórmula
     foreach ($detalles as $d) {
-        $costoLine = $d['cantidad'] * $d['costo_actual'];
-        $costoTotal += $costoLine;
-        
+        $costoTotal           += $d['cantidad'] * $d['costo_actual'];
+        $totalCantidadFormula += floatval($d['cantidad']);
+
         // Calcular para cuántos lotes alcanza este ingrediente
         $lotesPosibles = ($d['cantidad'] > 0) ? ($d['stock_real'] / $d['cantidad']) : 0;
         if ($lotesPosibles < $maxLotesPosibles) $maxLotesPosibles = $lotesPosibles;
@@ -70,7 +72,39 @@ try {
     $utilidadNeta = $utilidadBruta - $totalIndirectos;
     $margenNeto = ($precioVenta > 0) ? ($utilidadNeta / $precioVenta) * 100 : 0;
 
+    // 3. Reservas pendientes que necesitan el producto final de esta receta
+    $stmtRes = $pdo->prepare("
+        SELECT vc.id, vc.cliente_nombre, vc.cliente_telefono, vc.fecha_reserva,
+               vd.cantidad AS cant_reservada,
+               COALESCE(vc.canal_origen, 'POS') AS canal_origen,
+               COALESCE(vc.estado_reserva, 'PENDIENTE') AS estado_reserva
+        FROM ventas_cabecera vc
+        JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
+        WHERE vd.id_producto = ?
+          AND vc.tipo_servicio = 'reserva'
+          AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
+        ORDER BY vc.fecha_reserva ASC
+        LIMIT 50");
+    $stmtRes->execute([$receta['id_producto_final']]);
+    $reservasPendientes = $stmtRes->fetchAll(PDO::FETCH_ASSOC);
+    $totalReservado = array_sum(array_column($reservasPendientes, 'cant_reservada'));
+
 } catch (Exception $e) { die("Error: " . $e->getMessage()); }
+
+$canalMap = [
+    'Web'        => ['#0ea5e9', '🌐', 'Web'],
+    'POS'        => ['#6366f1', '🖥️', 'POS'],
+    'WhatsApp'   => ['#22c55e', '💬', 'WhatsApp'],
+    'Teléfono'   => ['#f59e0b', '📞', 'Teléfono'],
+    'Kiosko'     => ['#8b5cf6', '📱', 'Kiosko'],
+    'Presencial' => ['#475569', '🙋', 'Presencial'],
+    'ICS'        => ['#94a3b8', '📥', 'Importado'],
+    'Otro'       => ['#94a3b8', '❓', 'Otro'],
+];
+function getCanalBadgePR($canal, $map) {
+    [$bg, $emoji, $label] = $map[$canal] ?? $map['Otro'];
+    return "<span style=\"display:inline-flex;align-items:center;gap:4px;background-color:{$bg}!important;color:white!important;padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700;white-space:nowrap;print-color-adjust:exact;-webkit-print-color-adjust:exact;\">{$emoji} {$label}</span>";
+}
 ?>
 <!DOCTYPE html>
 <html>
@@ -103,7 +137,17 @@ try {
         .rent-val-neg { color: #d9534f; }
         .final-profit { font-size: 16px; font-weight: bold; border-top: 2px solid #333; padding-top: 8px; margin-top: 8px; }
         
-        @media print { .no-print { display: none; } body { margin: 0; } }
+        .reservas-section { margin-top: 30px; }
+        .reservas-section h3 { color: #2F75B5; border-bottom: 1px solid #ccc; padding-bottom: 5px; margin-bottom: 12px; }
+        .reservas-section table th { background-color: #374151; }
+        .canal-cell { white-space: nowrap; }
+        .sin-reservas { color: #888; font-style: italic; padding: 12px; background: #f9f9f9; border: 1px dashed #ddd; border-radius: 4px; text-align: center; }
+        .total-reservado { background: #fff3cd; font-weight: bold; }
+        @media print {
+            .no-print { display: none; }
+            body { margin: 0; }
+            * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+        }
     </style>
 </head>
 <body>
@@ -151,6 +195,7 @@ try {
                 <th class="center">Stock Actual</th>
                 <th class="right">Costo Unit.</th>
                 <th class="right">Subtotal</th>
+                <th class="center">% Fórmula</th>
                 <th class="center">Cobertura</th>
                 <th class="center">Estado</th>
             </tr>
@@ -170,6 +215,14 @@ try {
                 <td class="center"><?php echo $stock; ?></td>
                 <td class="right">$<?php echo number_format($d['costo_actual'], 2); ?></td>
                 <td class="right">$<?php echo number_format($req * $d['costo_actual'], 2); ?></td>
+                <td class="center"><?php
+                    // Cálculo basado en el peso del insumo sobre el total consolidado
+                    $pctFormula = ($totalCantidadFormula > 0) ? ($req / $totalCantidadFormula) * 100 : 0;
+                    $barPct = min($pctFormula, 100);
+                    echo '<strong style="color:#1a5fa8;">' . number_format($pctFormula, 1) . '%</strong>';
+                    echo '<div style="background:#e9ecef;border-radius:3px;height:5px;width:50px;display:inline-block;margin-left:5px;vertical-align:middle;">';
+                    echo '<div style="height:100%;border-radius:3px;width:' . $barPct . '%;background:#2F75B5;"></div></div>';
+                ?></td>
                 <td class="center">
                     <div class="bar-container"><div class="bar-fill" style="width:<?php echo $percent; ?>%; background-color:<?php echo $colorBar; ?>;"></div></div>
                 </td>
@@ -179,6 +232,7 @@ try {
             <tr class="total-row">
                 <td colspan="4" class="right">COSTO TOTAL MATERIA PRIMA (LOTE):</td>
                 <td class="right">$<?php echo number_format($costoTotal, 2); ?></td>
+                <td class="center"><strong>100.0%</strong></td>
                 <td colspan="2"></td>
             </tr>
         </tbody>
@@ -234,6 +288,88 @@ try {
                 <?php echo nl2br(htmlspecialchars($receta['descripcion'])); ?>
             </div>
         </div>
+    </div>
+
+    <!-- ── Reservas pendientes que esperan este producto ───────────────────── -->
+    <div class="reservas-section">
+        <h3>
+            📋 Reservas Pendientes que Requieren «<?php echo htmlspecialchars($receta['nombre_prod']); ?>»
+            <?php if ($totalReservado > 0): ?>
+                <span style="font-size:13px;color:#dc2626;margin-left:10px;">
+                    — Total comprometido: <strong><?php echo number_format($totalReservado, 2); ?> u.</strong>
+                </span>
+            <?php endif; ?>
+        </h3>
+
+        <?php if (empty($reservasPendientes)): ?>
+            <div class="sin-reservas">✓ No hay reservas pendientes que requieran este producto.</div>
+        <?php else: ?>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#Reserva</th>
+                        <th>Cliente</th>
+                        <th>Teléfono</th>
+                        <th class="center">Fecha Entrega</th>
+                        <th class="center">Cant. Reservada</th>
+                        <th class="center">Canal Origen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php
+                    $now = new DateTime();
+                    foreach ($reservasPendientes as $res):
+                        $fechaRes = $res['fecha_reserva'] ? new DateTime($res['fecha_reserva']) : null;
+                        $esHoy    = $fechaRes && $fechaRes->format('Y-m-d') === $now->format('Y-m-d');
+                        $vencida  = $fechaRes && $now > $fechaRes && !$esHoy;
+                        $rowStyle = $vencida ? 'background:#fff1f0;' : ($esHoy ? 'background:#fffbeb;' : '');
+                    ?>
+                    <tr style="<?php echo $rowStyle; ?>">
+                        <td class="center fw-bold">#<?php echo $res['id']; ?></td>
+                        <td><?php echo htmlspecialchars($res['cliente_nombre']); ?></td>
+                        <td style="color:#64748b;"><?php echo htmlspecialchars($res['cliente_telefono'] ?: '—'); ?></td>
+                        <td class="center">
+                            <?php if ($fechaRes): ?>
+                                <?php echo $fechaRes->format('d/m/Y H:i'); ?>
+                                <?php if ($esHoy): ?>
+                                    <span style="background:#f59e0b;color:white;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:bold;margin-left:4px;">HOY</span>
+                                <?php elseif ($vencida): ?>
+                                    <span style="background:#dc2626;color:white;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:bold;margin-left:4px;">VENCIDA</span>
+                                <?php endif; ?>
+                            <?php else: ?>—<?php endif; ?>
+                        </td>
+                        <td class="center"><strong><?php echo number_format(floatval($res['cant_reservada']), 2); ?></strong></td>
+                        <td class="center canal-cell"><?php echo getCanalBadgePR($res['canal_origen'], $canalMap); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+                <tfoot>
+                    <tr class="total-reservado">
+                        <td colspan="4" class="right">TOTAL COMPROMETIDO EN RESERVAS:</td>
+                        <td class="center"><?php echo number_format($totalReservado, 2); ?> u.</td>
+                        <td></td>
+                    </tr>
+                    <?php
+                    $stockDisponible = 0;
+                    foreach ($detalles as $d) { /* ya tenemos maxLotesPosibles */ }
+                    $unidadesProducibles = $maxLotesPosibles * floatval($receta['unidades_resultantes']);
+                    $deficit = max(0, $totalReservado - $unidadesProducibles);
+                    ?>
+                    <?php if ($deficit > 0): ?>
+                    <tr style="background:#fef2f2;">
+                        <td colspan="4" class="right" style="color:#dc2626;font-weight:bold;">⚠ DÉFICIT (reservado - producible con stock actual):</td>
+                        <td class="center" style="color:#dc2626;font-weight:bold;"><?php echo number_format($deficit, 2); ?> u.</td>
+                        <td></td>
+                    </tr>
+                    <?php else: ?>
+                    <tr style="background:#f0fdf4;">
+                        <td colspan="4" class="right" style="color:#166534;font-weight:bold;">✓ Stock suficiente para cubrir todas las reservas pendientes</td>
+                        <td colspan="2"></td>
+                    </tr>
+                    <?php endif; ?>
+                </tfoot>
+            </table>
+        <?php endif; ?>
     </div>
 
 <?php include_once 'menu_master.php'; ?>

@@ -274,8 +274,45 @@ $sqlInvByCategory = "SELECT p.categoria, SUM(s.cantidad) as total_cantidad, SUM(
 $invByCategoryData = getRows($pdo, $sqlInvByCategory);
 
 
-// E. Lista de Pedidos
-$sqlOrders = "SELECT * FROM pedidos_cabecera ORDER BY CASE WHEN estado = 'pendiente' THEN 1 ELSE 2 END, fecha DESC LIMIT 50";
+// E. Lista Unificada de Pedidos Web y Reservas
+$sqlOrders = "
+    (SELECT
+        id,
+        cliente_nombre,
+        cliente_telefono,
+        cliente_direccion,
+        fecha,
+        fecha_programada,
+        total,
+        estado,
+        notas,
+        'WEB' as origen,
+        'Web' as canal_origen
+    FROM pedidos_cabecera)
+    UNION ALL
+    (SELECT
+        id,
+        cliente_nombre,
+        cliente_telefono,
+        cliente_direccion,
+        fecha,
+        fecha_reserva as fecha_programada,
+        total,
+        CASE COALESCE(estado_reserva, 'PENDIENTE')
+            WHEN 'PENDIENTE'  THEN 'pendiente'
+            WHEN 'ENTREGADO'  THEN 'completado'
+            WHEN 'CANCELADO'  THEN 'cancelado'
+            WHEN 'EN_CAMINO'  THEN 'camino'
+            WHEN 'EN_PREPARACION' THEN 'proceso'
+            ELSE 'pendiente'
+        END as estado,
+        notas,
+        'POS' as origen,
+        COALESCE(canal_origen, 'POS') as canal_origen
+    FROM ventas_cabecera
+    WHERE tipo_servicio = 'reserva')
+    ORDER BY CASE WHEN estado = 'pendiente' THEN 1 ELSE 2 END, fecha DESC 
+    LIMIT 100";
 $pedidos = getRows($pdo, $sqlOrders, []);
 
 // F. Sistema
@@ -291,11 +328,38 @@ function getStatusBadge($estado) {
         default:          return '<span class="badge bg-secondary">'.$estado.'</span>';
     }
 }
+
+function getCanalBadge($canal) {
+    $map = [
+        'Web'        => ['#0ea5e9', 'white', 'fa-globe',         'Web'],
+        'POS'        => ['#6366f1', 'white', 'fa-cash-register', 'POS'],
+        'WhatsApp'   => ['#22c55e', 'white', 'fa-whatsapp fab',  'WhatsApp'],
+        'Teléfono'   => ['#f59e0b', 'white', 'fa-phone-alt',     'Tel.'],
+        'Kiosko'     => ['#8b5cf6', 'white', 'fa-tablet-alt',    'Kiosko'],
+        'Presencial' => ['#475569', 'white', 'fa-user',          'Presencial'],
+        'ICS'        => ['#94a3b8', 'white', 'fa-file-import',   'ICS'],
+        'Otro'       => ['#94a3b8', 'white', 'fa-question',      'Otro'],
+    ];
+    [$bg, $fg, $icon, $label] = $map[$canal] ?? $map['Otro'];
+    // Separar fab/fas si viene junto
+    $iconClass = str_contains($icon, ' ') ? $icon : "fas $icon";
+    return "<span style=\"display:inline-flex;align-items:center;gap:4px;background-color:{$bg}!important;color:{$fg}!important;padding:3px 9px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;\"><i class=\"{$iconClass}\"></i>{$label}</span>";
+}
 ?>
 
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-ZM015S9N6M');
+</script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard Admin | PalWeb POS</title>
@@ -500,7 +564,7 @@ function getStatusBadge($estado) {
                             <div>
                                 <h6 class="text-uppercase fw-bold small text-muted mb-1">Pagos Pendientes</h6>
                                 <h3 class="fw-bold mb-1 text-dark"><?= $pagosVerificando ?> pago<?= $pagosVerificando > 1 ? 's' : '' ?></h3>
-                                <a href="reservas.php" class="btn btn-sm btn-outline-warning">Verificar →</a>
+                                <a href="reservas.php?estado=VERIFICANDO" class="btn btn-sm btn-outline-warning">Verificar →</a>
                             </div>
                         </div>
                     </div>
@@ -722,12 +786,13 @@ function getStatusBadge($estado) {
                                     <th>Fechas / Reserva</th>
                                     <th>Total</th>
                                     <th>Estado</th>
+                                    <th class="text-center">Origen</th>
                                     <th class="text-end pe-3">Acción</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php if(empty($pedidos)): ?>
-                                    <tr><td colspan="7" class="text-center py-5 text-muted">No hay pedidos registrados.</td></tr>
+                                    <tr><td colspan="8" class="text-center py-5 text-muted">No hay pedidos registrados.</td></tr>
                                 <?php else: ?>
                                     <?php foreach($pedidos as $row): 
                                         $stmtDet = $pdo->prepare("SELECT d.cantidad, p.nombre FROM pedidos_detalle d JOIN productos p ON d.id_producto = p.codigo WHERE d.id_pedido = ?");
@@ -761,12 +826,14 @@ function getStatusBadge($estado) {
                                         </td>
                                         <td class="fw-bold text-success">$<?php echo number_format($row['total'], 2); ?></td>
                                         <td><?php echo getStatusBadge($row['estado']); ?></td>
+                                        <td class="text-center"><?php echo getCanalBadge($row['canal_origen'] ?? 'POS'); ?></td>
                                         <td class="text-end pe-3">
-                                            <button class="btn btn-sm btn-primary shadow-sm" 
+                                            <button class="btn btn-sm btn-primary shadow-sm"
                                                     onclick="openManageModal(
-                                                        <?php echo $row['id']; ?>, 
-                                                        '<?php echo $row['estado']; ?>', 
-                                                        `<?php echo addslashes($row['notas_admin'] ?? ''); ?>`
+                                                        <?php echo $row['id']; ?>,
+                                                        '<?php echo $row['estado']; ?>',
+                                                        `<?php echo addslashes($row['notas'] ?? ''); ?>`,
+                                                        '<?php echo $row['origen']; ?>'
                                                     )">
                                                 <i class="fas fa-edit"></i> Gestionar
                                             </button>
@@ -973,6 +1040,7 @@ function getStatusBadge($estado) {
             </div>
             <div class="modal-body">
                 <input type="hidden" id="inputOrderId">
+                <input type="hidden" id="inputOrderOrigen">
                 <div class="mb-4">
                     <label class="form-label fw-bold">Estado del Pedido</label>
                     <select class="form-select form-select-lg" id="inputOrderState">
@@ -1027,8 +1095,9 @@ function getStatusBadge($estado) {
 
     const manageModal = new bootstrap.Modal(document.getElementById('manageModal'));
 
-    function openManageModal(id, estado, nota) {
+    function openManageModal(id, estado, nota, origen) {
         document.getElementById('inputOrderId').value = id;
+        document.getElementById('inputOrderOrigen').value = origen || 'POS';
         document.getElementById('modalOrderId').innerText = id;
         document.getElementById('inputOrderState').value = estado;
         document.getElementById('inputOrderNote').value = nota;
@@ -1039,6 +1108,7 @@ function getStatusBadge($estado) {
         const id = document.getElementById('inputOrderId').value;
         const estado = document.getElementById('inputOrderState').value;
         const nota = document.getElementById('inputOrderNote').value;
+        const origen = document.getElementById('inputOrderOrigen').value;
         
         const btn = event.currentTarget;
         const oldHtml = btn.innerHTML;
@@ -1048,7 +1118,7 @@ function getStatusBadge($estado) {
             const resp = await fetch('update_order.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, estado, nota })
+                body: JSON.stringify({ id, estado, nota, origen })
             });
             const result = await resp.json();
             

@@ -41,6 +41,25 @@ if (!$sesion) {
 if (!$sesion) die("<h1>No hay registros de caja disponibles.</h1>");
 $idSesion = $sesion['id'];
 
+$canalMap = [
+    'Web'        => ['#0ea5e9', '🌐', 'Web'],
+    'POS'        => ['#6366f1', '🖥️', 'POS'],
+    'WhatsApp'   => ['#22c55e', '💬', 'WhatsApp'],
+    'Teléfono'   => ['#f59e0b', '📞', 'Tel.'],
+    'Kiosko'     => ['#8b5cf6', '📱', 'Kiosko'],
+    'Presencial' => ['#475569', '🙋', 'Presencial'],
+    'ICS'        => ['#94a3b8', '📥', 'ICS'],
+    'Otro'       => ['#94a3b8', '❓', 'Otro'],
+];
+function getCanalBadgeRC($canal, $map) {
+    [$bg, $emoji, $label] = $map[$canal] ?? $map['Otro'];
+    return "<span style=\"display:inline-flex;align-items:center;gap:4px;"
+         . "background-color:{$bg}!important;color:white!important;"
+         . "padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;"
+         . "white-space:nowrap;print-color-adjust:exact;-webkit-print-color-adjust:exact;\">"
+         . "{$emoji} {$label}</span>";
+}
+
 // 3. OBTENER DATOS
 $sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja = ? AND id_sucursal = ? ORDER BY id DESC";
 $stmtT = $pdo->prepare($sqlTickets);
@@ -127,6 +146,17 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
         .bg-gasto { background-color: #ffe5d0; color: #994d07; }
         .bg-refund-badge { background-color: #f8d7da; color: #842029; }
         .detail-row { background-color: #fafafa; border-left: 5px solid #ccc; font-size: 0.9rem; }
+        .accounting-date-badge {
+            background-color: #ffc107;
+            color: #000;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-weight: bold;
+            box-shadow: 0 0 15px rgba(255, 193, 7, 0.8);
+            display: inline-block;
+            margin-top: 10px;
+        }
+        @media print { * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
     </style>
 </head>
 <body class="p-3">
@@ -142,6 +172,9 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
                     <span class="badge bg-secondary ms-2">CERRADA</span>
                 <?php endif; ?>
             </h4>
+            <div class="mt-2 mb-3">
+                <span class="accounting-date-badge">FECHA CONTABLE: <?php echo date('d/m/Y', strtotime($sesion['fecha_contable'])); ?></span>
+            </div>
             <div class="text-muted small mt-1">
                 <i class="fas fa-user"></i> <?php echo htmlspecialchars($sesion['nombre_cajero']); ?> | 
                 <i class="far fa-clock"></i> <?php echo date('d/m/Y h:i A', strtotime($sesion['fecha_apertura'])); ?>
@@ -203,7 +236,7 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
         <div class="card-header bg-white py-3"><h5 class="mb-0 fw-bold">Movimientos de Caja</h5></div>
         <div class="table-responsive">
             <table class="table table-hover mb-0 align-middle">
-                <thead class="table-light"><tr><th width="50"></th><th>Ticket</th><th>Hora</th><th>Cliente / Concepto</th><th>Tipo Servicio</th><th>Forma Pago</th><th>Total</th></tr></thead>
+                <thead class="table-light"><tr><th width="50"></th><th>Ticket</th><th>Hora</th><th>Cliente / Concepto</th><th>Tipo Servicio</th><th class="text-center">Origen</th><th>Forma Pago</th><th>Total</th></tr></thead>
                 <tbody>
                     <?php foreach($tickets as $t): 
                         $tid = $t['id']; 
@@ -233,11 +266,12 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
                             <?php if($isRefund) echo " <span class='badge bg-danger'>DEVOLUCIÓN</span>"; ?>
                         </td>
                         <td><?php echo strtoupper($t['tipo_servicio']); ?></td>
+                        <td class="text-center"><?php echo getCanalBadgeRC($t['canal_origen'] ?? 'POS', $canalMap); ?></td>
                         <td><span class="badge badge-pago <?php echo $badgePagoClass; ?>"><?php echo $t['metodo_pago']; ?></span></td>
                         <td class="text-end fw-bold fs-5">$<?php echo number_format($t['total'], 2); ?></td>
                     </tr>
                     <tr class="collapse" id="detail-<?php echo $tid; ?>">
-                        <td colspan="7" class="p-0">
+                        <td colspan="8" class="p-0">
                             <div class="detail-row p-3">
                                 <table class="table table-sm mb-0 bg-white border">
                                     <thead class="text-muted small">

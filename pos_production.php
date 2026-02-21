@@ -239,6 +239,65 @@ try {
                     </div>
                 </div>
             </div>
+
+            <!-- RESERVAS PENDIENTES -->
+            <div class="row mt-4" v-if="pendingReservations.length > 0">
+                <div class="col-12">
+                    <div class="card card-custom border-top border-4 border-warning">
+                        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center py-3">
+                            <span><i class="fas fa-calendar-check text-warning me-2"></i> Reservas Pendientes — {{ selectedRecipe.nombre_producto_final }}</span>
+                            <span class="badge bg-warning text-dark fs-6">{{ pendingReservations.length }} reserva{{ pendingReservations.length !== 1 ? 's' : '' }}</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="bg-light text-muted small text-uppercase">
+                                    <tr>
+                                        <th class="ps-3">#Ticket</th>
+                                        <th>Cliente</th>
+                                        <th>Teléfono</th>
+                                        <th>Fecha Entrega</th>
+                                        <th class="text-center">Cant.</th>
+                                        <th class="text-center">Origen</th>
+                                        <th class="text-center">Estado</th>
+                                        <th class="text-end pe-3">Total</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="r in pendingReservations" :key="r.id">
+                                        <td class="ps-3">
+                                            <a :href="'ticket_view.php?id='+r.id" target="_blank" class="fw-bold text-primary text-decoration-none">
+                                                #{{ String(r.id).padStart(5,'0') }}
+                                            </a>
+                                        </td>
+                                        <td class="fw-bold">{{ r.cliente_nombre || 'Sin nombre' }}</td>
+                                        <td class="text-muted small">{{ r.cliente_telefono || '-' }}</td>
+                                        <td v-html="formatFechaRes(r.fecha_reserva)"></td>
+                                        <td class="text-center fw-bold text-warning fs-5">{{ parseFloat(r.cantidad_reservada) }}</td>
+                                        <td class="text-center" v-html="canalBadge(r.canal_origen || 'POS')"></td>
+                                        <td class="text-center" v-html="estadoBadge(r.estado_reserva)"></td>
+                                        <td class="text-end fw-bold pe-3">${{ parseFloat(r.total).toFixed(2) }}</td>
+                                    </tr>
+                                </tbody>
+                                <tfoot class="bg-warning bg-opacity-10">
+                                    <tr>
+                                        <td colspan="4" class="text-end fw-bold text-muted ps-3 py-2">Total unidades reservadas:</td>
+                                        <td class="text-center fw-bold text-warning fs-5 py-2">{{ totalReservado() }}</td>
+                                        <td colspan="3"></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row mt-3" v-else-if="selectedRecipe && pendingReservations !== null">
+                <div class="col-12">
+                    <div class="alert alert-light border d-flex align-items-center gap-2 py-2 mb-0">
+                        <i class="fas fa-calendar-check text-muted"></i>
+                        <span class="text-muted small">Sin reservas pendientes para <strong>{{ selectedRecipe.nombre_producto_final }}</strong></span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div v-if="isEditing">
@@ -304,16 +363,46 @@ try {
                         <div class="col-lg-8">
                             <div class="d-flex justify-content-between align-items-center mb-3">
                                 <h6 class="text-uppercase text-muted fw-bold small mb-0">Composición del Lote</h6>
-                                <div class="bg-light px-3 py-2 rounded border">
-                                    Costo Total Lote: <strong class="text-primary fs-5 ms-2">${{ formCostoLote.toFixed(2) }}</strong>
+                                <div class="d-flex align-items-center gap-3">
+                                    <!-- Toggle Modo -->
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn fw-bold" :class="modoCreacion==='clasico' ? 'btn-dark' : 'btn-outline-dark'" @click="switchMode('clasico')">
+                                            <i class="fas fa-list-ol me-1"></i> Clásico
+                                        </button>
+                                        <button type="button" class="btn fw-bold" :class="modoCreacion==='porcentual' ? 'btn-info text-white' : 'btn-outline-info'" @click="switchMode('porcentual')">
+                                            <i class="fas fa-percent me-1"></i> Por %
+                                        </button>
+                                    </div>
+                                    <div class="bg-light px-3 py-2 rounded border">
+                                        Costo Total Lote: <strong class="text-primary fs-5 ms-2">${{ formCostoLote.toFixed(2) }}</strong>
+                                    </div>
                                 </div>
                             </div>
 
+                            <!-- Panel modo porcentual -->
+                            <div v-if="modoCreacion==='porcentual'" class="alert alert-info border-info py-2 mb-3 d-flex align-items-center gap-4 flex-wrap">
+                                <div class="d-flex align-items-center gap-2">
+                                    <i class="fas fa-flask text-info"></i>
+                                    <strong class="small text-uppercase">Cantidad Total del Lote:</strong>
+                                    <input type="number" class="form-control form-control-sm text-center fw-bold" style="width:100px" v-model.number="totalFormula" min="0.001" step="0.001" @change="recalcCantidades">
+                                    <span class="text-muted small">(unidad base)</span>
+                                </div>
+                                <div class="ms-auto d-flex align-items-center gap-2">
+                                    <span class="small fw-bold text-muted">% acumulado:</span>
+                                    <span class="badge fs-6 px-3 py-2" :class="Math.abs(pctTotal-100)<0.1 ? 'bg-success' : (pctTotal>100 ? 'bg-danger' : 'bg-warning text-dark')">
+                                        {{ pctTotal.toFixed(1) }}%
+                                    </span>
+                                    <span v-if="Math.abs(pctTotal-100)<0.1" class="text-success small"><i class="fas fa-check-circle"></i> Correcto</span>
+                                    <span v-else-if="pctTotal>100" class="text-danger small"><i class="fas fa-exclamation-circle"></i> Supera 100%</span>
+                                    <span v-else class="text-warning small">Faltan {{ (100-pctTotal).toFixed(1) }}%</span>
+                                </div>
+                            </div>
+
+                            <!-- Buscador de ingredientes -->
                             <div class="card bg-primary bg-opacity-10 border-0 p-3 mb-4">
                                 <div class="d-flex gap-3 position-relative">
                                     <div class="flex-grow-1">
-                                        <input type="text" class="form-control form-control-lg border-0 shadow-sm" v-model="searchIng" @input="filterIngs" placeholder="🔍 Buscar y agregar ingrediente..." id="ingSearch" autocomplete="off">
-                                        
+                                        <input type="text" class="form-control form-control-lg border-0 shadow-sm" v-model="searchIng" @input="filterIngs" :placeholder="modoCreacion==='porcentual' ? '🔍 Buscar ingrediente (luego indica su %)...' : '🔍 Buscar y agregar ingrediente...'" id="ingSearch" autocomplete="off">
                                         <ul class="search-list w-100 shadow-lg" v-if="filteredIngs.length > 0" style="top: 100%;">
                                             <li class="search-item py-2" v-for="i in filteredIngs" @click="selectIng(i)">
                                                 <div class="d-flex justify-content-between align-items-center">
@@ -323,8 +412,19 @@ try {
                                             </li>
                                         </ul>
                                     </div>
-                                    <div style="width: 120px;">
+                                    <!-- Modo clásico: campo cantidad -->
+                                    <div v-if="modoCreacion==='clasico'" style="width: 130px;">
                                         <input type="number" class="form-control form-control-lg border-0 shadow-sm text-center" v-model.number="ingCant" placeholder="Cant" step="0.001">
+                                    </div>
+                                    <!-- Modo porcentual: campo % -->
+                                    <div v-else style="width: 130px;">
+                                        <div class="input-group">
+                                            <input type="number" class="form-control form-control-lg border-0 shadow-sm text-center fw-bold" v-model.number="ingPct" placeholder="%" step="0.1" min="0" max="100">
+                                            <span class="input-group-text bg-white border-0 fw-bold text-info">%</span>
+                                        </div>
+                                        <div class="text-center" style="font-size:0.7rem; color:#666;" v-if="ingPct>0 && totalFormula>0">
+                                            = {{ (totalFormula * ingPct / 100).toFixed(3) }} u
+                                        </div>
                                     </div>
                                     <button class="btn btn-primary btn-lg shadow-sm px-4" @click="addIngrediente" :disabled="!tempIng">
                                         <i class="fas fa-plus"></i>
@@ -332,15 +432,17 @@ try {
                                 </div>
                             </div>
 
+                            <!-- Tabla de ingredientes -->
                             <div class="table-responsive border rounded bg-white shadow-sm" style="min-height: 300px;">
                                 <table class="table table-striped table-hover align-middle mb-0">
                                     <thead class="bg-dark text-white small text-uppercase">
                                         <tr>
-                                            <th style="width: 45%;" class="ps-3">Ingrediente</th>
-                                            <th style="width: 20%; text-align: center;">Cantidad</th>
-                                            <th style="width: 15%; text-align: right;">Costo U.</th>
-                                            <th style="width: 15%; text-align: right;">Subtotal</th>
-                                            <th style="width: 5%;"></th>
+                                            <th style="width: 38%;" class="ps-3">Ingrediente</th>
+                                            <th style="width: 18%; text-align: center;">Cantidad</th>
+                                            <th style="width: 12%; text-align: center;">% Fórmula</th>
+                                            <th style="width: 14%; text-align: right;">Costo U.</th>
+                                            <th style="width: 14%; text-align: right;">Subtotal</th>
+                                            <th style="width: 4%;"></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -349,9 +451,23 @@ try {
                                                 <div class="fw-bold text-dark">{{ ing.nombre }}</div>
                                                 <small class="text-muted font-monospace" style="font-size: 0.75rem;">{{ ing.id }}</small>
                                             </td>
+                                            <!-- Cantidad: editable en clásico, calculada en porcentual -->
                                             <td class="text-center p-1">
-                                                <input type="number" class="input-qty fs-6" v-model.number="ing.cant" step="0.001">
+                                                <div v-if="modoCreacion==='clasico'">
+                                                    <input type="number" class="input-qty fs-6" v-model.number="ing.cant" step="0.001">
+                                                </div>
+                                                <div v-else class="fw-bold text-dark">{{ parseFloat(ing.cant).toFixed(3) }}</div>
                                                 <small class="text-muted" style="font-size:0.7rem">{{ing.unidad}}</small>
+                                            </td>
+                                            <!-- % Fórmula: editable en porcentual, calculado en clásico -->
+                                            <td class="text-center p-1">
+                                                <div v-if="modoCreacion==='porcentual'">
+                                                    <input type="number" class="input-qty fs-6 text-info fw-bold" v-model.number="ing.pct" step="0.1" min="0" @input="ing.cant = totalFormula * (parseFloat(ing.pct)||0) / 100">
+                                                    <small class="text-info" style="font-size:0.7rem">%</small>
+                                                </div>
+                                                <div v-else class="text-muted small">
+                                                    {{ totalCantFormula > 0 ? (ing.cant / totalCantFormula * 100).toFixed(1) : '0.0' }}%
+                                                </div>
                                             </td>
                                             <td class="text-end small text-muted">${{ parseFloat(ing.costo_base).toFixed(2) }}</td>
                                             <td class="text-end fw-bold text-primary">${{ (ing.cant * ing.costo_base).toFixed(2) }}</td>
@@ -360,11 +476,12 @@ try {
                                             </td>
                                         </tr>
                                         <tr v-if="form.ingredientes.length === 0">
-                                            <td colspan="5" class="text-center py-5 text-muted">
+                                            <td colspan="6" class="text-center py-5 text-muted">
                                                 <div class="py-4">
                                                     <i class="fas fa-basket-shopping fa-3x mb-3 opacity-25"></i>
                                                     <h5>Lista de Ingredientes Vacía</h5>
-                                                    <p class="mb-0">Usa el buscador azul de arriba para agregar materias primas.</p>
+                                                    <p class="mb-0" v-if="modoCreacion==='clasico'">Usa el buscador azul para agregar materias primas con su cantidad.</p>
+                                                    <p class="mb-0" v-else>Establece la cantidad total del lote y agrega ingredientes con su % en la fórmula.</p>
                                                 </div>
                                             </td>
                                         </tr>
@@ -458,11 +575,15 @@ try {
         el: '#app',
         data: {
             currentTab: 'master', isEditing: false,
-            recetas: recetasInit, selectedRecipe: null, details: [], history: [], reports: null,
+            recetas: recetasInit, selectedRecipe: null, details: [], pendingReservations: [], history: [], reports: null,
             historyFilter: { start: '<?php echo date('Y-m-d', strtotime('-7 days')); ?>', end: '<?php echo date('Y-m-d'); ?>' },
             form: { id: null, nombre_receta: '', id_producto_final: '', unidades: 1, descripcion: '', ingredientes: [] },
             searchFinal: '', filteredFinales: [], selectedFinalName: '',
             searchIng: '', filteredIngs: [], tempIng: null, ingCant: 1,
+            // Modo de creación de receta
+            modoCreacion: 'clasico',   // 'clasico' | 'porcentual'
+            totalFormula: 1000,        // cantidad total del lote base (modo porcentual)
+            ingPct: 0,                 // % del ingrediente que se va a agregar
             modalAnalyze: null, analyzeLots: 1, analysisResult: null,
             // Selección múltiple
             selectedRecipes: [],
@@ -472,10 +593,21 @@ try {
                 if (!this.form.ingredientes) return 0;
                 return this.form.ingredientes.reduce((a, i) => a + (i.cant * i.costo_base), 0); 
             },
-            formCostoUnit() { return this.form.unidades > 0 ? this.formCostoLote / this.form.unidades : 0; }
+            formCostoUnit() { return this.form.unidades > 0 ? this.formCostoLote / this.form.unidades : 0; },
+            totalCantFormula() { return this.form.ingredientes.reduce((a, i) => a + (parseFloat(i.cant) || 0), 0); },
+            pctTotal() { return this.form.ingredientes.reduce((a, i) => a + (parseFloat(i.pct) || 0), 0); }
         },
         mounted() {
             this.modalAnalyze = new bootstrap.Modal(document.getElementById('analyzeModal'));
+        },
+        watch: {
+            totalFormula(val) {
+                if (this.modoCreacion === 'porcentual') {
+                    this.form.ingredientes.forEach(ing => {
+                        ing.cant = parseFloat(val) * (parseFloat(ing.pct) || 0) / 100;
+                    });
+                }
+            }
         },
         methods: {
             async api(action, body = {}) {
@@ -503,7 +635,12 @@ try {
 
             selectRecipe(r) {
                 this.selectedRecipe = r;
+                this.pendingReservations = [];
                 this.api('get_details', {id: r.id}).then(d => this.details = d);
+                if (r.id_producto_final) {
+                    this.api('get_pending_reservations', {id_producto: r.id_producto_final})
+                        .then(d => this.pendingReservations = Array.isArray(d) ? d : []);
+                }
             },
 
             // --- GESTOR DE EDICIÓN ---
@@ -528,12 +665,23 @@ try {
                 this.form.id = r.id; 
 
                 this.api('get_details', {id: r.id}).then(d => {
+                    // Detectar si fue creada en modo porcentual
+                    const hasPct = d.some(x => parseFloat(x.pct_formula) > 0);
+                    this.modoCreacion = hasPct ? 'porcentual' : 'clasico';
+                    if (hasPct) {
+                        // Reconstruir totalFormula desde el primer ingrediente con pct > 0
+                        const anchor = d.find(x => parseFloat(x.pct_formula) > 0 && parseFloat(x.cantidad) > 0);
+                        if (anchor) {
+                            this.totalFormula = parseFloat((parseFloat(anchor.cantidad) / (parseFloat(anchor.pct_formula) / 100)).toFixed(3));
+                        }
+                    }
                     this.form.ingredientes = d.map(x => ({
                         id: x.id_ingrediente,
                         nombre: x.nombre,
-                        cant: parseFloat(x.cantidad), 
+                        cant: parseFloat(x.cantidad),
                         costo_base: parseFloat(x.costo_actual || 0),
-                        unidad: x.unidad_medida
+                        unidad: x.unidad_medida,
+                        pct: parseFloat(x.pct_formula || 0)
                     }));
                 });
             },
@@ -542,41 +690,75 @@ try {
                 this.resetForm();
             },
             saveRecipe() {
+                const costoTotal = this.formCostoLote;
                 const payload = {
                     ...this.form,
-                    costo_lote: this.formCostoLote,
+                    costo_lote: costoTotal,
                     costo_unitario: this.formCostoUnit,
-                    ingredientes: this.form.ingredientes.map(i => ({
-                        id: i.id,
-                        cant: i.cant,
-                        costo_total: i.cant * i.costo_base
-                    }))
+                    ingredientes: this.form.ingredientes.map(i => {
+                        const totalCant   = this.totalCantFormula;
+                        const pctFormula = this.modoCreacion === 'porcentual'
+                            ? (parseFloat(i.pct) || 0)
+                            : (totalCant > 0 ? parseFloat(((i.cant / totalCant) * 100).toFixed(2)) : 0);
+                        return { id: i.id, cant: i.cant, costo_total: i.cant * i.costo_base, pct_formula: pctFormula };
+                    })
                 };
-                
                 this.api('save_recipe', payload).then(d => {
                     if(d.status === 'success') location.reload(); else alert('Error al guardar: ' + d.msg);
                 });
             },
 
-            resetForm() { this.form = { id: null, nombre_receta: '', id_producto_final: '', unidades: 1, descripcion: '', ingredientes: [] }; this.searchFinal = ''; this.selectedFinalName = ''; },
+            resetForm() {
+                this.form = { id: null, nombre_receta: '', id_producto_final: '', unidades: 1, descripcion: '', ingredientes: [] };
+                this.searchFinal = ''; this.selectedFinalName = '';
+                this.modoCreacion = 'clasico'; this.totalFormula = 1000; this.ingPct = 0;
+            },
             
+            switchMode(mode) {
+                if (mode === this.modoCreacion) return;
+                if (mode === 'porcentual' && this.form.ingredientes.length > 0) {
+                    // Distribuir % iguales como punto de partida
+                    const n = this.form.ingredientes.length;
+                    const pctCada = parseFloat((100 / n).toFixed(2));
+                    this.form.ingredientes.forEach(ing => { ing.pct = pctCada; });
+                }
+                if (mode === 'clasico') {
+                    this.form.ingredientes.forEach(ing => { ing.pct = 0; });
+                }
+                this.modoCreacion = mode;
+            },
+            recalcCantidades() {
+                if (this.modoCreacion === 'porcentual') {
+                    this.form.ingredientes.forEach(ing => {
+                        ing.cant = parseFloat(this.totalFormula) * (parseFloat(ing.pct) || 0) / 100;
+                    });
+                }
+            },
             filterFinales() { const q=this.searchFinal.toLowerCase(); this.filteredFinales=allFinales.filter(p=>p.nombre.toLowerCase().includes(q)).slice(0,10); },
             selectFinal(p) { this.form.id_producto_final=p.codigo; this.selectedFinalName=p.nombre; this.filteredFinales=[]; this.searchFinal=''; },
             clearFinal() { this.form.id_producto_final=''; this.selectedFinalName=''; },
             
             filterIngs() { const q=this.searchIng.toLowerCase(); this.filteredIngs=allInsumos.filter(p=>p.nombre.toLowerCase().includes(q)).slice(0,10); },
             selectIng(p) { this.tempIng=p; this.searchIng=p.nombre; this.filteredIngs=[]; document.getElementById('ingSearch').focus(); },
-            addIngrediente() { 
-                if(this.tempIng) { 
-                    this.form.ingredientes.push({
-                        id: this.tempIng.codigo, 
-                        nombre: this.tempIng.nombre, 
-                        cant: this.ingCant, 
-                        costo_base: parseFloat(this.tempIng.costo),
-                        unidad: this.tempIng.unidad_medida
-                    }); 
-                    this.searchIng=''; this.tempIng=null; 
-                } 
+            addIngrediente() {
+                if (!this.tempIng) return;
+                let cant, pct;
+                if (this.modoCreacion === 'porcentual') {
+                    pct  = parseFloat(this.ingPct) || 0;
+                    cant = parseFloat(this.totalFormula) * pct / 100;
+                } else {
+                    pct  = 0;
+                    cant = this.ingCant;
+                }
+                this.form.ingredientes.push({
+                    id: this.tempIng.codigo,
+                    nombre: this.tempIng.nombre,
+                    cant: cant,
+                    costo_base: parseFloat(this.tempIng.costo),
+                    unidad: this.tempIng.unidad_medida,
+                    pct: pct
+                });
+                this.searchIng = ''; this.tempIng = null; this.ingPct = 0;
             },
 
             cloneRecipe(r) { if(confirm("¿Clonar esta receta?")) this.api('clone_recipe', {id: r.id}).then(() => location.reload()); },
@@ -594,6 +776,41 @@ try {
             printReport(id) { window.open(`pos_production_report.php?id=${id}`, '_blank', 'width=900,height=800'); },
             loadHistory() { this.currentTab = 'history'; this.isEditing=false; this.api('get_history', this.historyFilter).then(d => this.history = d); },
             loadReports() { this.currentTab = 'reports'; this.isEditing=false; this.api('get_reports').then(d => this.reports = d); },
+            canalBadge(canal) {
+                const map = {
+                    'Web':       ['#0ea5e9','🌐','Web'],
+                    'POS':       ['#6366f1','🖥️','POS'],
+                    'WhatsApp':  ['#22c55e','💬','WhatsApp'],
+                    'Teléfono':  ['#f59e0b','📞','Teléfono'],
+                    'Kiosko':    ['#8b5cf6','📱','Kiosko'],
+                    'Presencial':['#475569','🙋','Presencial'],
+                    'ICS':       ['#94a3b8','📥','ICS'],
+                    'Otro':      ['#94a3b8','❓','Otro'],
+                };
+                const [bg, emoji, label] = map[canal] || map['Otro'];
+                return `<span style="background-color:${bg}!important;color:white!important;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:bold;display:inline-block;">${emoji} ${label}</span>`;
+            },
+            estadoBadge(estado) {
+                const map = {
+                    'PENDIENTE':      ['#f59e0b','Pendiente'],
+                    'EN_PREPARACION': ['#3b82f6','En Prep.'],
+                    'EN_CAMINO':      ['#8b5cf6','En Camino'],
+                };
+                const [bg, label] = map[estado] || ['#94a3b8', estado];
+                return `<span style="background-color:${bg}!important;color:white!important;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:bold;display:inline-block;">${label}</span>`;
+            },
+            formatFechaRes(fecha) {
+                if (!fecha) return '-';
+                const d = new Date(fecha);
+                const today = new Date(); today.setHours(0,0,0,0);
+                const dDate = new Date(d); dDate.setHours(0,0,0,0);
+                const dateStr = d.toLocaleDateString('es-ES');
+                const timeStr = d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'});
+                if (dDate < today) return `<span style="background:#dc3545;color:white;padding:1px 5px;border-radius:3px;font-size:10px;">VENCIDA</span> ${dateStr}`;
+                if (dDate.getTime()===today.getTime()) return `<span style="background:#f59e0b;color:white;padding:1px 5px;border-radius:3px;font-size:10px;">HOY</span> ${timeStr}`;
+                return `${dateStr} ${timeStr}`;
+            },
+            totalReservado() { return this.pendingReservations.reduce((a,r)=>a+parseFloat(r.cantidad_reservada||0),0).toFixed(1); },
             calculateMargin(r) { const p = parseFloat(r.precio_venta), c = parseFloat(r.costo_unitario); return (p>0) ? (((p-c)/p)*100).toFixed(1) : 0; }
         }
     });

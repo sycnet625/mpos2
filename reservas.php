@@ -9,6 +9,9 @@ $sucursalID = intval($config['id_sucursal']);
 $idAlmacen  = intval($config['id_almacen']);
 $empID      = intval($config['id_empresa']);
 
+// Migración automática: columna de canal de origen
+$pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN IF NOT EXISTS canal_origen VARCHAR(30) DEFAULT 'POS'");
+
 function safeStr(string $s, int $max = 255): string {
     return mb_substr(trim($s), 0, $max);
 }
@@ -34,6 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $abono         = floatval($input['abono'] ?? 0);
             $estadoPago    = safeStr($input['estado_pago'] ?? 'pendiente', 20);
             $items         = $input['items'] ?? [];
+            $canalesValidos = ['POS','Web','WhatsApp','Teléfono','Kiosko','Presencial','Otro'];
+            $canalOrigen   = in_array($input['canal_origen'] ?? '', $canalesValidos)
+                             ? $input['canal_origen'] : 'POS';
 
             if (empty($items)) throw new Exception('Debe agregar al menos un producto.');
 
@@ -44,11 +50,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("INSERT INTO ventas_cabecera
                 (uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, tipo_servicio,
                  fecha_reserva, notas, cliente_nombre, cliente_telefono, cliente_direccion,
-                 abono, estado_pago, id_empresa, estado_reserva, sincronizado, id_caja, id_cliente)
-                VALUES (?,NOW(),?,?,?,?,'reserva',?,?,?,?,?,?,?,?,'PENDIENTE',0,1,?)")
+                 abono, estado_pago, id_empresa, estado_reserva, sincronizado, id_caja, id_cliente, canal_origen)
+                VALUES (?,NOW(),?,?,?,?,'reserva',?,?,?,?,?,?,?,?,'PENDIENTE',0,1,?,?)")
                 ->execute([$uuid, $total, $metodo, $sucursalID, $idAlmacen,
                     $fechaReserva, $notas, $clienteNombre, $clienteTel, $clienteDir,
-                    $abono, $estadoPago, $empID, $idCliente]);
+                    $abono, $estadoPago, $empID, $idCliente, $canalOrigen]);
             $idVenta = $pdo->lastInsertId();
 
             foreach ($items as $it) {
@@ -75,6 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $metodo        = safeStr($input['metodo_pago'] ?? 'Efectivo', 50);
             $abono         = floatval($input['abono'] ?? 0);
             $items         = $input['items'] ?? [];
+            $canalesValidos = ['POS','Web','WhatsApp','Teléfono','Kiosko','Presencial','Otro'];
+            $canalOrigen   = in_array($input['canal_origen'] ?? '', $canalesValidos)
+                             ? $input['canal_origen'] : 'POS';
 
             if (!$idVenta) throw new Exception('ID inválido.');
             if (empty($items)) throw new Exception('Debe agregar al menos un producto.');
@@ -84,10 +93,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             $pdo->prepare("UPDATE ventas_cabecera SET
                 cliente_nombre=?, cliente_telefono=?, cliente_direccion=?, id_cliente=?,
-                fecha_reserva=?, notas=?, metodo_pago=?, total=?, abono=?
+                fecha_reserva=?, notas=?, metodo_pago=?, total=?, abono=?, canal_origen=?
                 WHERE id=? AND id_sucursal=? AND tipo_servicio='reserva'")
                 ->execute([$clienteNombre, $clienteTel, $clienteDir, $idCliente,
-                    $fechaReserva, $notas, $metodo, $total, $abono, $idVenta, $sucursalID]);
+                    $fechaReserva, $notas, $metodo, $total, $abono, $canalOrigen, $idVenta, $sucursalID]);
 
             $pdo->prepare("DELETE FROM ventas_detalle WHERE id_venta_cabecera=?")->execute([$idVenta]);
             foreach ($items as $it) {
@@ -196,6 +205,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['status' => 'success']);
         }
 
+        // ── ACTUALIZAR ESTADO ─────────────────────────────────────────────────
+        elseif ($action === 'update_estado') {
+            $idVenta = intval($input['id']);
+            $estado  = safeStr($input['estado'] ?? '', 30);
+            $nota    = safeStr($input['nota'] ?? '', 1000);
+            $validos = ['PENDIENTE','EN_PREPARACION','EN_CAMINO','ENTREGADO','CANCELADO'];
+            if (!in_array($estado, $validos)) throw new Exception('Estado inválido.');
+            $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva=?, notas=?
+                           WHERE id=? AND tipo_servicio='reserva' AND id_sucursal=?")
+                ->execute([$estado, $nota, $idVenta, $sucursalID]);
+            echo json_encode(['status' => 'success']);
+        }
+
         // ── CREAR CLIENTE RÁPIDO ──────────────────────────────────────────────
         elseif ($action === 'create_client') {
             $nombre    = safeStr($input['nombre'] ?? '', 100);
@@ -235,7 +257,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $stmtC = $pdo->prepare("SELECT id FROM ventas_cabecera WHERE uuid_venta=?");
                     $stmtC->execute([$uuid]);
                     if ($stmtC->fetch()) continue;
-                    $pdo->prepare("INSERT INTO ventas_cabecera (uuid_venta,fecha,total,metodo_pago,id_sucursal,id_almacen,tipo_servicio,cliente_nombre,fecha_reserva,id_empresa,estado_reserva,sincronizado,id_caja) VALUES (?,NOW(),0,'Pendiente',?,?,'reserva',?,?,?,'PENDIENTE',0,1)")
+                    $pdo->prepare("INSERT INTO ventas_cabecera (uuid_venta,fecha,total,metodo_pago,id_sucursal,id_almacen,tipo_servicio,cliente_nombre,fecha_reserva,id_empresa,estado_reserva,sincronizado,id_caja,canal_origen) VALUES (?,NOW(),0,'Pendiente',?,?,'reserva',?,?,?,'PENDIENTE',0,1,'ICS')")
                         ->execute([$uuid, $sucursalID, $idAlmacen, $title, $date, $empID]);
                     $count++;
                 }
@@ -289,6 +311,78 @@ if (isset($_GET['action'])) {
             ORDER BY fecha_reserva ASC");
         $stmt->execute([$sucursalID, $year, $month]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    } elseif ($_GET['action'] === 'check_client_phone') {
+        $tel = preg_replace('/\D/', '', trim($_GET['tel'] ?? ''));
+        if (strlen($tel) < 5) { echo json_encode(['exists' => false, 'cliente' => null]); exit; }
+        $stmt = $pdo->prepare("SELECT id, nombre, telefono, categoria FROM clientes
+            WHERE REPLACE(REPLACE(REPLACE(telefono,' ',''),'+',''),'-','') LIKE ? AND activo=1 LIMIT 1");
+        $stmt->execute(["%$tel%"]);
+        $cl = $stmt->fetch(PDO::FETCH_ASSOC);
+        echo json_encode(['exists' => (bool)$cl, 'cliente' => $cl ?: null]);
+
+    } elseif ($_GET['action'] === 'report_data') {
+        $year  = intval($_GET['year']  ?? date('Y'));
+        $month = intval($_GET['month'] ?? date('n'));
+        $MONTHS_ES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
+                      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+        // Sección 1: Todos los productos de reservas pendientes con déficit de stock
+        $stmt = $pdo->prepare("
+            SELECT vd.id_producto AS codigo, vd.nombre_producto AS nombre,
+                   SUM(vd.cantidad) AS total_reservado,
+                   COALESCE(MAX(sa.cantidad), 0) AS stock_actual,
+                   GREATEST(0, SUM(vd.cantidad) - COALESCE(MAX(sa.cantidad), 0)) AS deficit,
+                   COUNT(DISTINCT vc.id) AS num_reservas
+            FROM ventas_cabecera vc
+            JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
+            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
+            LEFT JOIN productos p ON p.codigo = vd.id_producto
+            WHERE vc.tipo_servicio = 'reserva' AND vc.id_sucursal = ?
+              AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
+              AND COALESCE(p.es_servicio, 0) = 0
+            GROUP BY vd.id_producto, vd.nombre_producto
+            ORDER BY deficit DESC, nombre ASC");
+        $stmt->execute([$idAlmacen, $sucursalID]);
+        $allProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $sinStock = array_values(array_filter($allProducts, fn($p) => floatval($p['deficit']) > 0));
+
+        // Sección 2: Por semana del mes indicado
+        $stmt2 = $pdo->prepare("
+            SELECT vd.id_producto AS codigo, vd.nombre_producto AS nombre,
+                   SUM(vd.cantidad) AS total_reservado,
+                   COALESCE(MAX(sa.cantidad), 0) AS stock_actual,
+                   GREATEST(0, SUM(vd.cantidad) - COALESCE(MAX(sa.cantidad), 0)) AS deficit,
+                   CASE
+                     WHEN DAY(vc.fecha_reserva) BETWEEN 1  AND 7  THEN 1
+                     WHEN DAY(vc.fecha_reserva) BETWEEN 8  AND 14 THEN 2
+                     WHEN DAY(vc.fecha_reserva) BETWEEN 15 AND 21 THEN 3
+                     ELSE 4
+                   END AS semana
+            FROM ventas_cabecera vc
+            JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
+            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
+            LEFT JOIN productos p ON p.codigo = vd.id_producto
+            WHERE vc.tipo_servicio = 'reserva' AND vc.id_sucursal = ?
+              AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
+              AND YEAR(vc.fecha_reserva) = ? AND MONTH(vc.fecha_reserva) = ?
+              AND COALESCE(p.es_servicio, 0) = 0
+            GROUP BY vd.id_producto, vd.nombre_producto, semana
+            ORDER BY semana ASC, deficit DESC, nombre ASC");
+        $stmt2->execute([$idAlmacen, $sucursalID, $year, $month]);
+        $byWeekRaw = $stmt2->fetchAll(PDO::FETCH_ASSOC);
+        $byWeek = [1 => [], 2 => [], 3 => [], 4 => []];
+        foreach ($byWeekRaw as $row) { $byWeek[intval($row['semana'])][] = $row; }
+
+        echo json_encode([
+            'status'      => 'success',
+            'sin_stock'   => $sinStock,
+            'all_products'=> $allProducts,
+            'by_week'     => $byWeek,
+            'month'       => $month,
+            'year'        => $year,
+            'month_name'  => $MONTHS_ES[$month] ?? '',
+        ]);
     }
     exit;
 }
@@ -309,6 +403,7 @@ $params = [];
 if ($filterEstado === 'PENDIENTE')   $where[] = "(c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL)";
 elseif ($filterEstado === 'ENTREGADO') $where[] = "c.estado_reserva='ENTREGADO'";
 elseif ($filterEstado === 'CANCELADO') $where[] = "c.estado_reserva='CANCELADO'";
+elseif ($filterEstado === 'VERIFICANDO') $where[] = "c.estado_pago='verificando'";
 if ($filterQ)     { $where[] = "c.cliente_nombre LIKE ?"; $params[] = "%$filterQ%"; }
 if ($filterFecha === 'hoy')     $where[] = "DATE(c.fecha_reserva)=CURDATE()";
 elseif ($filterFecha === 'semana')  $where[] = "c.fecha_reserva BETWEEN NOW() AND DATE_ADD(NOW(),INTERVAL 7 DAY)";
@@ -340,6 +435,7 @@ $sqlMain = "SELECT c.id, c.cliente_nombre, c.cliente_telefono, c.cliente_direcci
     c.notas, c.metodo_pago, c.estado_reserva,
     COALESCE(c.estado_pago,'pendiente') AS estado_pago,
     c.codigo_pago, COALESCE(c.sin_existencia,0) AS sin_existencia, c.id_cliente,
+    COALESCE(c.canal_origen,'POS') AS canal_origen,
     COUNT(d.id) AS num_items,
     GROUP_CONCAT(CONCAT(FORMAT(d.cantidad,0),'× ',d.nombre_producto) SEPARATOR ', ') AS resumen_items,
     (SELECT COUNT(*) FROM comandas com WHERE com.id_venta=c.id) AS en_cocina
@@ -370,9 +466,11 @@ $renderRows = function() use ($reservas) {
 
         // Badge estado reserva
         $er = $r['estado_reserva'] ?? 'PENDIENTE';
-        if ($er === 'ENTREGADO')      { $erCls = 'bg-success';        $erTxt = '✓ Entregado'; }
-        elseif ($er === 'CANCELADO')  { $erCls = 'bg-secondary';      $erTxt = '✗ Cancelado'; }
-        else                          { $erCls = 'bg-primary';        $erTxt = '⏳ Pendiente'; }
+        if ($er === 'ENTREGADO')         { $erCls = 'bg-success';           $erTxt = '✓ Entregado'; }
+        elseif ($er === 'CANCELADO')     { $erCls = 'bg-secondary';         $erTxt = '✗ Cancelado'; }
+        elseif ($er === 'EN_CAMINO')     { $erCls = 'bg-primary';           $erTxt = '🛵 En Camino'; }
+        elseif ($er === 'EN_PREPARACION'){ $erCls = 'bg-info text-dark';    $erTxt = '🔥 En Preparación'; }
+        else                             { $erCls = 'bg-warning text-dark'; $erTxt = '⏳ Pendiente'; }
 
         // Badge pago
         $ep = $r['estado_pago'];
@@ -383,6 +481,20 @@ $renderRows = function() use ($reservas) {
         $rowCls = $vencida ? 'table-danger' : ($esHoy ? 'table-warning' : '');
         $deuda  = floatval($r['deuda']);
         $isPending = ($er === 'PENDIENTE' || !$er);
+
+        // Badge canal de origen
+        $canal = $r['canal_origen'] ?? 'POS';
+        $canalMap = [
+            'POS'        => ['bg:#6366f1;color:white',  'fas fa-cash-register', 'POS'],
+            'Web'        => ['bg:#0ea5e9;color:white',  'fas fa-globe',         'Web'],
+            'WhatsApp'   => ['bg:#22c55e;color:white',  'fab fa-whatsapp',      'WhatsApp'],
+            'Teléfono'   => ['bg:#f59e0b;color:white',  'fas fa-phone-alt',     'Tel.'],
+            'Kiosko'     => ['bg:#8b5cf6;color:white',  'fas fa-tablet-alt',    'Kiosko'],
+            'Presencial' => ['bg:#64748b;color:white',  'fas fa-user',          'Presencial'],
+            'ICS'        => ['bg:#94a3b8;color:white',  'fas fa-file-import',   'ICS'],
+            'Otro'       => ['bg:#94a3b8;color:white',  'fas fa-question',      'Otro'],
+        ];
+        [$cBg, $cIcon, $cLabel] = $canalMap[$canal] ?? $canalMap['Otro'];
 ?>
 <tr class="<?= $rowCls ?>">
     <td class="ps-3 small fw-bold text-muted">#<?= $r['id'] ?></td>
@@ -425,8 +537,16 @@ $renderRows = function() use ($reservas) {
         <?php endif; ?>
     </td>
     <td class="text-center"><span class="badge <?= $erCls ?>"><?= $erTxt ?></span></td>
+    <td class="text-center">
+        <span style="display:inline-flex;align-items:center;gap:4px;<?= $cBg ?>;padding:3px 8px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;">
+            <i class="<?= $cIcon ?>"></i><?= $cLabel ?>
+        </span>
+    </td>
     <td class="text-end pe-3 no-print">
         <div class="btn-group btn-group-sm">
+            <button class="btn btn-outline-primary" title="Gestionar estado"
+                onclick="openGestionarEstado(<?= $r['id'] ?>,'<?= $er ?>',`<?= addslashes($r['notas'] ?? '') ?>`)">
+                <i class="fas fa-tasks"></i></button>
             <button class="btn btn-outline-secondary" onclick="verTicket(<?= $r['id'] ?>,<?= $deuda ?>)" title="Ver ticket"><i class="fas fa-eye"></i></button>
             <?php if ($isPending): ?>
             <button class="btn btn-outline-primary" onclick="openForm(<?= $r['id'] ?>)" title="Editar"><i class="fas fa-edit"></i></button>
@@ -483,7 +603,13 @@ if (isset($_GET['ajax'])) {
         /* Lines table */
         #linesTable td,#linesTable th { padding:6px 10px; vertical-align:middle; }
         .modal-xl { max-width:960px; }
-        @media print { .no-print { display:none!important; } }
+        @media print { .no-print { display:none!important; } body { background:white; } }
+        .crm-badge-ok  { background:#dcfce7; color:#166534; border:1px solid #86efac; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
+        .crm-badge-no  { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
+        .crm-badge-no .btn-guardar-cliente { background:none; border:none; padding:0; font-size:.7rem; font-weight:700; color:#0d6efd; cursor:pointer; text-decoration:underline; }
+        /* Reporte imprimible */
+        .print-section { display:none; }
+        @media print { .print-section { display:block; } }
 
         /* ── Almanaque ─────────────────────────────────────────────────────── */
         .cal-wrapper { background:white; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.08); overflow:hidden; }
@@ -537,6 +663,7 @@ if (isset($_GET['ajax'])) {
         <a href="crm_clients.php"  class="btn btn-outline-light btn-sm"><i class="fas fa-users me-1"></i>CRM Clientes</a>
         <a href="dashboard.php"    class="btn btn-outline-light btn-sm"><i class="fas fa-home me-1"></i>Dashboard</a>
         <a href="guia_reservas.php" class="btn btn-outline-light btn-sm" target="_blank"><i class="fas fa-book-open me-1"></i>Guía</a>
+        <button class="btn btn-outline-info btn-sm" onclick="printReport()"><i class="fas fa-print me-1"></i>Reporte Stock</button>
         <button class="btn btn-outline-warning btn-sm" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
         <button class="btn btn-primary btn-sm fw-bold px-3" onclick="openForm(null)"><i class="fas fa-plus me-1"></i>Nueva Reserva</button>
     </div>
@@ -594,7 +721,7 @@ if (isset($_GET['ajax'])) {
             <div class="col-auto"><div class="vr"></div></div>
             <div class="col-auto">
                 <div class="btn-group btn-group-sm" role="group">
-                    <?php foreach (['PENDIENTE'=>'⏳ Pendientes','ENTREGADO'=>'✓ Entregados','CANCELADO'=>'✗ Cancelados','TODOS'=>'Todos'] as $val=>$lbl): ?>
+                    <?php foreach (['PENDIENTE'=>'⏳ Pendientes','VERIFICANDO'=>'💳 Por Verificar','ENTREGADO'=>'✓ Entregados','CANCELADO'=>'✗ Cancelados','TODOS'=>'Todos'] as $val=>$lbl): ?>
                     <button type="button" class="btn <?= $filterEstado===$val?'btn-dark':'btn-outline-secondary' ?>"
                             onclick="setFiltro('estado','<?= $val ?>')"><?= $lbl ?></button>
                     <?php endforeach; ?>
@@ -638,13 +765,14 @@ if (isset($_GET['ajax'])) {
                         <th class="text-end">Total / Deuda</th>
                         <th class="text-center">Pago</th>
                         <th class="text-center">Estado</th>
+                        <th class="text-center">Origen</th>
                         <th class="text-end pe-3 no-print">Acciones</th>
                     </tr>
                 </thead>
                 <tbody id="tableBody">
                     <?php $renderRows(); ?>
                     <?php if (empty($reservas)): ?>
-                    <tr><td colspan="8" class="text-center py-5 text-muted">
+                    <tr><td colspan="9" class="text-center py-5 text-muted">
                         <i class="far fa-calendar-times fa-3x mb-3 d-block opacity-25"></i>
                         No hay reservas con estos filtros.
                     </td></tr>
@@ -738,7 +866,9 @@ if (isset($_GET['ajax'])) {
                                 </div>
                                 <div class="mb-2">
                                     <label class="form-label small fw-bold mb-1">Teléfono</label>
-                                    <input type="text" id="fClienteTel" class="form-control form-control-sm" placeholder="+53 5 000 0000">
+                                    <input type="text" id="fClienteTel" class="form-control form-control-sm" placeholder="+53 5 000 0000"
+                                           oninput="debounceCheckCliente(this.value)">
+                                    <div id="clienteCrmBadge" class="mt-1" style="min-height:22px;"></div>
                                 </div>
                                 <div>
                                     <label class="form-label small fw-bold mb-1">Dirección de entrega</label>
@@ -756,6 +886,18 @@ if (isset($_GET['ajax'])) {
                                 <div class="mb-2">
                                     <label class="form-label small fw-bold mb-1">Fecha y hora de entrega *</label>
                                     <input type="datetime-local" id="fFechaReserva" class="form-control form-control-sm">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-bold mb-1">Canal de origen</label>
+                                    <select id="fCanalOrigen" class="form-select form-select-sm">
+                                        <option value="POS">🖥️ POS</option>
+                                        <option value="Web">🌐 Web</option>
+                                        <option value="WhatsApp">💬 WhatsApp</option>
+                                        <option value="Teléfono">📞 Teléfono</option>
+                                        <option value="Kiosko">📱 Kiosko</option>
+                                        <option value="Presencial">🙋 Presencial</option>
+                                        <option value="Otro">❓ Otro</option>
+                                    </select>
                                 </div>
                                 <div class="mb-2">
                                     <label class="form-label small fw-bold mb-1">Método de pago</label>
@@ -858,6 +1000,41 @@ if (isset($_GET['ajax'])) {
 </div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
+     MODAL: GESTIONAR ESTADO
+══════════════════════════════════════════════════════════════════════════════ -->
+<div class="modal fade" id="gestionarEstadoModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold"><i class="fas fa-tasks me-2"></i>Gestionar Reserva <span id="gModalId"></span></h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <input type="hidden" id="gId">
+                <div class="mb-3">
+                    <label class="form-label fw-bold small">Estado del pedido</label>
+                    <select class="form-select" id="gEstado">
+                        <option value="PENDIENTE">⏳ Pendiente</option>
+                        <option value="EN_PREPARACION">🔥 En Preparación</option>
+                        <option value="EN_CAMINO">🛵 En Camino</option>
+                        <option value="ENTREGADO">✅ Entregado</option>
+                        <option value="CANCELADO">❌ Cancelado</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label fw-bold small">Nota interna</label>
+                    <textarea class="form-control form-control-sm" id="gNota" rows="2" placeholder="Ej: Motorista Juan en camino…"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer p-2">
+                <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                <button class="btn btn-primary fw-bold flex-fill" onclick="saveEstado()"><i class="fas fa-save me-1"></i>Guardar Estado</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
      MODAL: NUEVO CLIENTE RÁPIDO
 ══════════════════════════════════════════════════════════════════════════════ -->
 <div class="modal fade" id="newClientModal" tabindex="-1">
@@ -919,10 +1096,11 @@ let currentQ      = '<?= addslashes($filterQ) ?>';
 let currentPage   = <?= $page ?>;
 let tCurrentId    = 0;
 
-const formModal      = new bootstrap.Modal('#formModal');
-const ticketModal    = new bootstrap.Modal('#ticketModal');
-const newClientModal = new bootstrap.Modal('#newClientModal');
-const toastEl        = new bootstrap.Toast(document.getElementById('toastEl'), {delay:3000});
+const formModal           = new bootstrap.Modal('#formModal');
+const ticketModal         = new bootstrap.Modal('#ticketModal');
+const newClientModal      = new bootstrap.Modal('#newClientModal');
+const gestionarEstadoModal = new bootstrap.Modal('#gestionarEstadoModal');
+const toastEl             = new bootstrap.Toast(document.getElementById('toastEl'), {delay:3000});
 
 function showToast(msg, type='success') {
     const el = document.getElementById('toastEl');
@@ -966,9 +1144,12 @@ async function openForm(id) {
         document.getElementById('fClienteNombre').value = d.cliente_nombre || '';
         document.getElementById('fClienteTel').value  = d.cliente_telefono || '';
         document.getElementById('fClienteDir').value  = d.cliente_direccion || '';
-        document.getElementById('fAbono').value       = d.abono || '';
-        document.getElementById('fNotas').value       = d.notas || '';
-        document.getElementById('fMetodoPago').value  = d.metodo_pago || 'Efectivo';
+        document.getElementById('fAbono').value        = d.abono || '';
+        document.getElementById('fNotas').value        = d.notas || '';
+        document.getElementById('fMetodoPago').value   = d.metodo_pago || 'Efectivo';
+        document.getElementById('fCanalOrigen').value  = d.canal_origen || 'POS';
+        // Verificar si cliente existe en CRM
+        if (d.cliente_telefono) checkClienteByTel(d.cliente_telefono);
         if (d.fecha_reserva) {
             const dt = new Date(d.fecha_reserva.replace(' ','T'));
             document.getElementById('fFechaReserva').value =
@@ -995,9 +1176,11 @@ function resetForm() {
     document.getElementById('fAbono').value         = '';
     document.getElementById('fNotas').value         = '';
     document.getElementById('fMetodoPago').value    = 'Efectivo';
+    document.getElementById('fCanalOrigen').value   = 'POS';
     document.getElementById('fFechaReserva').value  = '';
     document.getElementById('clientSearch').value   = '';
     document.getElementById('prodSearch').value     = '';
+    document.getElementById('clienteCrmBadge').innerHTML = '';
     renderLines();
 }
 
@@ -1020,6 +1203,7 @@ async function saveReserva() {
         fecha_reserva:    fecha.replace('T',' ') + ':00',
         notas:            document.getElementById('fNotas').value.trim(),
         metodo_pago:      document.getElementById('fMetodoPago').value,
+        canal_origen:     document.getElementById('fCanalOrigen').value,
         abono:            parseFloat(document.getElementById('fAbono').value) || 0,
         items:            lineItems.map(({codigo,nombre,categoria,cantidad,precio}) => ({codigo,nombre,categoria,cantidad,precio}))
     };
@@ -1363,6 +1547,221 @@ function mostrarDiaDlg(dateStr) {
     if (choice) {
         const r = dayRes.find(x => String(x.id) === choice.trim());
         if (r) verTicket(r.id, parseFloat(r.deuda || 0));
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GESTIONAR ESTADO
+// ══════════════════════════════════════════════════════════════════════════════
+function openGestionarEstado(id, estadoActual, notaActual) {
+    document.getElementById('gId').value    = id;
+    document.getElementById('gModalId').innerText = '#' + id;
+    document.getElementById('gEstado').value = estadoActual || 'PENDIENTE';
+    document.getElementById('gNota').value   = notaActual || '';
+    gestionarEstadoModal.show();
+}
+
+async function saveEstado() {
+    const id     = document.getElementById('gId').value;
+    const estado = document.getElementById('gEstado').value;
+    const nota   = document.getElementById('gNota').value;
+    const btn    = event.currentTarget;
+    const old    = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Guardando...';
+    try {
+        const res  = await fetch('reservas.php', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: 'update_estado', id: parseInt(id), estado, nota})
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            gestionarEstadoModal.hide();
+            showToast('✓ Estado actualizado correctamente.');
+            reloadTable();
+        } else {
+            showToast('Error: ' + (data.msg || 'Desconocido'), 'danger');
+            btn.disabled = false; btn.innerHTML = old;
+        }
+    } catch(e) {
+        showToast('Error de conexión', 'danger');
+        btn.disabled = false; btn.innerHTML = old;
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CHECK CLIENTE POR TELÉFONO
+// ══════════════════════════════════════════════════════════════════════════════
+let checkClienteTimer = null;
+function debounceCheckCliente(tel) {
+    clearTimeout(checkClienteTimer);
+    document.getElementById('clienteCrmBadge').innerHTML = '';
+    if (tel.replace(/\D/g,'').length < 5) return;
+    checkClienteTimer = setTimeout(() => checkClienteByTel(tel), 500);
+}
+
+async function checkClienteByTel(tel) {
+    if (!tel || tel.replace(/\D/g,'').length < 5) return;
+    const badge = document.getElementById('clienteCrmBadge');
+    badge.innerHTML = '<span class="text-muted" style="font-size:.68rem;">Buscando…</span>';
+    try {
+        const res  = await fetch(`reservas.php?action=check_client_phone&tel=${encodeURIComponent(tel)}`);
+        const data = await res.json();
+        if (data.exists) {
+            const catMap = {VIP:'⭐', Corporativo:'🏢', Regular:'', Empleado:'👤', Moroso:'⚠️'};
+            const cat = data.cliente.categoria || 'Regular';
+            badge.innerHTML = `<span class="crm-badge-ok">
+                <i class="fas fa-user-check"></i> Cliente registrado: <strong>${data.cliente.nombre}</strong>
+                ${catMap[cat]||''} ${cat !== 'Regular' ? cat : ''}
+            </span>`;
+        } else {
+            badge.innerHTML = `<span class="crm-badge-no">
+                <i class="fas fa-user-times"></i> Sin registro en CRM
+                <button class="btn-guardar-cliente" onclick="abrirGuardarCliente()">→ Guardar como Cliente</button>
+            </span>`;
+        }
+    } catch(e) {
+        badge.innerHTML = '';
+    }
+}
+
+function abrirGuardarCliente() {
+    // Pre-rellenar modal de nuevo cliente con los datos del formulario de reserva
+    document.getElementById('ncNombre').value = document.getElementById('fClienteNombre').value.trim();
+    document.getElementById('ncTel').value    = document.getElementById('fClienteTel').value.trim();
+    document.getElementById('ncDir').value    = document.getElementById('fClienteDir').value.trim();
+    document.getElementById('ncCat').value    = 'Regular';
+    newClientModal.show();
+}
+
+// Sobrescribir el guardar cliente para actualizar badge y vincular a la reserva
+const _origGuardarNuevoCliente = guardarNuevoCliente;
+guardarNuevoCliente = async function() {
+    const nombre = document.getElementById('ncNombre').value.trim();
+    if (!nombre) { showToast('Nombre requerido', 'warning'); return; }
+    const res  = await fetch('reservas.php', {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({action:'create_client', nombre,
+            telefono:  document.getElementById('ncTel').value.trim(),
+            direccion: document.getElementById('ncDir').value.trim(),
+            categoria: document.getElementById('ncCat').value })});
+    const data = await res.json();
+    if (data.status === 'success') {
+        seleccionarCliente(data.id, data.nombre, data.telefono, data.direccion);
+        newClientModal.hide();
+        document.getElementById('ncNombre').value = '';
+        document.getElementById('ncTel').value    = '';
+        document.getElementById('ncDir').value    = '';
+        showToast(`✓ Cliente "${data.nombre}" creado y vinculado.`);
+        // Actualizar badge a "registrado"
+        document.getElementById('clienteCrmBadge').innerHTML =
+            `<span class="crm-badge-ok"><i class="fas fa-user-check"></i> Cliente registrado: <strong>${data.nombre}</strong></span>`;
+    } else {
+        showToast('Error: ' + data.msg, 'danger');
+    }
+};
+
+// ══════════════════════════════════════════════════════════════════════════════
+// REPORTE A4 — Productos reservados sin stock / por semana
+// ══════════════════════════════════════════════════════════════════════════════
+async function printReport() {
+    const now   = new Date();
+    const year  = now.getFullYear();
+    const month = now.getMonth() + 1;
+    showToast('Generando reporte…', 'info');
+    try {
+        const res  = await fetch(`reservas.php?action=report_data&year=${year}&month=${month}`);
+        const data = await res.json();
+        if (data.status !== 'success') { showToast('Error al generar reporte', 'danger'); return; }
+
+        const fmtNum = n => parseFloat(n || 0).toFixed(2);
+        const rowStyle = deficit => deficit > 0 ? 'background:#fff1f0;font-weight:700;' : '';
+
+        const buildTable = (rows, showWeek) => {
+            if (!rows.length) return '<p style="color:#888;font-style:italic;">Sin productos en esta categoría.</p>';
+            return `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:6px;">
+                <thead><tr style="background:#1e293b;color:white;">
+                    <th style="padding:6px 8px;text-align:left;">Producto</th>
+                    <th style="padding:6px 8px;text-align:left;">Código</th>
+                    <th style="padding:6px 8px;text-align:right;">Reservado</th>
+                    <th style="padding:6px 8px;text-align:right;">Stock</th>
+                    <th style="padding:6px 8px;text-align:right;background:#dc2626;">Déficit</th>
+                    ${showWeek ? '' : '<th style="padding:6px 8px;text-align:center;"># Reservas</th>'}
+                </tr></thead>
+                <tbody>${rows.map(r => `
+                    <tr style="border-bottom:1px solid #e2e8f0;${rowStyle(r.deficit)}">
+                        <td style="padding:5px 8px;">${r.nombre}</td>
+                        <td style="padding:5px 8px;color:#64748b;font-size:10px;">${r.codigo}</td>
+                        <td style="padding:5px 8px;text-align:right;">${fmtNum(r.total_reservado)}</td>
+                        <td style="padding:5px 8px;text-align:right;color:${parseFloat(r.stock_actual)>0?'#166534':'#dc2626'};">${fmtNum(r.stock_actual)}</td>
+                        <td style="padding:5px 8px;text-align:right;color:#dc2626;">${parseFloat(r.deficit||0)>0?fmtNum(r.deficit):'—'}</td>
+                        ${showWeek ? '' : `<td style="padding:5px 8px;text-align:center;">${r.num_reservas||0}</td>`}
+                    </tr>`).join('')}
+                </tbody></table>`;
+        };
+
+        const weekRanges = {1:'1 – 7', 2:'8 – 14', 3:'15 – 21', 4:'22 – fin de mes'};
+        let weekSections = '';
+        for (let w = 1; w <= 4; w++) {
+            const wRows = data.by_week[w] || [];
+            const sinSt = wRows.filter(r => parseFloat(r.deficit||0) > 0);
+            weekSections += `
+            <div style="margin-bottom:18px;">
+                <h3 style="font-size:13px;font-weight:700;color:#1e293b;margin:0 0 6px;
+                    border-bottom:2px solid #6366f1;padding-bottom:4px;">
+                    Semana ${w} — Días ${weekRanges[w]}
+                    ${sinSt.length ? `<span style="font-size:10px;color:#dc2626;font-weight:700;margin-left:8px;">⚠ ${sinSt.length} producto(s) con déficit</span>` : ''}
+                </h3>
+                ${buildTable(wRows, true)}
+            </div>`;
+        }
+
+        const printDate = now.toLocaleDateString('es-CU', {day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
+        const html = `<!DOCTYPE html><html lang="es"><head>
+            <meta charset="UTF-8">
+            <title>Reporte Stock Reservas — ${data.month_name} ${data.year}</title>
+            <style>
+                @page { size: A4; margin: 1.8cm 1.5cm; }
+                body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1e293b; margin:0; }
+                h1 { font-size:18px; font-weight:900; color:#0f172a; margin:0 0 2px; }
+                h2 { font-size:14px; font-weight:800; color:#1e293b; margin:18px 0 8px;
+                     border-left:4px solid #6366f1; padding-left:10px; }
+                .header { border-bottom:3px solid #0f172a; padding-bottom:10px; margin-bottom:14px; }
+                .sub { font-size:10px; color:#64748b; }
+                .kpi-row { display:flex; gap:12px; margin-bottom:14px; }
+                .kpi { flex:1; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; }
+                .kpi .num { font-size:20px; font-weight:900; color:#6366f1; }
+                .kpi .lbl { font-size:9px; color:#64748b; text-transform:uppercase; letter-spacing:.05em; }
+                .alert-box { background:#fff1f0; border:1px solid #fca5a5; border-radius:6px;
+                    padding:8px 12px; font-size:11px; color:#991b1b; margin-bottom:12px; }
+                .footer { margin-top:20px; border-top:1px solid #e2e8f0; padding-top:6px;
+                    font-size:9px; color:#94a3b8; text-align:center; }
+                @media print { body { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
+            </style></head><body>
+            <div class="header">
+                <h1>📦 Reporte de Reservas — Productos sin Stock</h1>
+                <div class="sub">Generado: ${printDate} · Sistema PALWEB POS v3.0</div>
+            </div>
+            <div class="kpi-row">
+                <div class="kpi"><div class="num">${data.all_products.length}</div><div class="lbl">Productos reservados</div></div>
+                <div class="kpi"><div class="num" style="color:#dc2626">${data.sin_stock.length}</div><div class="lbl">Con déficit de stock</div></div>
+            </div>
+            ${data.sin_stock.length ? `<div class="alert-box">⚠️ Existen <strong>${data.sin_stock.length}</strong> producto(s) con stock insuficiente para cubrir todas las reservas pendientes.</div>` : ''}
+
+            <h2>Sección 1 — Todos los productos reservados (pendientes)</h2>
+            ${buildTable(data.all_products, false)}
+
+            <h2>Sección 2 — A fabricar por semana del mes: ${data.month_name} ${data.year}</h2>
+            ${weekSections}
+
+            <div class="footer">Sistema PALWEB POS v3.0 · Reporte generado automáticamente</div>
+            <script>window.onload=()=>{window.print();}<\/script>
+        </body></html>`;
+
+        const win = window.open('', '_blank', 'width=820,height=900');
+        win.document.write(html);
+        win.document.close();
+    } catch(e) {
+        showToast('Error al generar reporte: ' + e.message, 'danger');
     }
 }
 </script>

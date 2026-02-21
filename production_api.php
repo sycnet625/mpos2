@@ -25,6 +25,9 @@ $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 
+// Agregar columna pct_formula si aún no existe
+try { $pdo->exec("ALTER TABLE recetas_detalle ADD COLUMN IF NOT EXISTS pct_formula DECIMAL(5,2) DEFAULT 0"); } catch(Exception $e) {}
+
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
@@ -51,9 +54,9 @@ try {
             }
 
             // Insertar Detalles
-            $stmtDet = $pdo->prepare("INSERT INTO recetas_detalle (id_receta, id_ingrediente, cantidad, costo_calculado) VALUES (?, ?, ?, ?)");
+            $stmtDet = $pdo->prepare("INSERT INTO recetas_detalle (id_receta, id_ingrediente, cantidad, costo_calculado, pct_formula) VALUES (?, ?, ?, ?, ?)");
             foreach ($input['ingredientes'] as $ing) {
-                $stmtDet->execute([$id, $ing['id'], $ing['cant'], $ing['costo_total']]);
+                $stmtDet->execute([$id, $ing['id'], $ing['cant'], $ing['costo_total'], $ing['pct_formula'] ?? 0]);
             }
             $pdo->commit();
             echo json_encode(['status' => 'success']); exit;
@@ -61,7 +64,7 @@ try {
 
         // 2. OBTENER DETALLES (CRÍTICO PARA EDITAR)
         if ($action === 'get_details') {
-            $sql = "SELECT d.id_ingrediente, d.cantidad, d.costo_calculado,
+            $sql = "SELECT d.id_ingrediente, d.cantidad, d.costo_calculado, d.pct_formula,
                            COALESCE(p.nombre, 'ITEM BORRADO') as nombre, 
                            COALESCE(p.unidad_medida, 'U') as unidad_medida, 
                            COALESCE(p.costo, 0) as costo_actual, 
@@ -254,6 +257,26 @@ try {
         if ($action === 'get_history') {
             $stmt = $pdo->prepare("SELECT * FROM producciones_historial WHERE DATE(fecha) BETWEEN ? AND ? ORDER BY fecha DESC");
             $stmt->execute([$input['start'], $input['end']]);
+            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC)); exit;
+        }
+
+        // 10. RESERVAS PENDIENTES POR PRODUCTO FINAL
+        if ($action === 'get_pending_reservations') {
+            $idProducto = $input['id_producto'] ?? '';
+            if (empty($idProducto)) { echo json_encode([]); exit; }
+            try { $pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN IF NOT EXISTS canal_origen VARCHAR(30) DEFAULT 'POS'"); } catch(Exception $e) {}
+            $stmt = $pdo->prepare("SELECT vc.id, vc.cliente_nombre, vc.cliente_telefono,
+                                          vc.fecha_reserva, vc.estado_reserva, vc.total,
+                                          COALESCE(vc.canal_origen, 'POS') as canal_origen,
+                                          SUM(vd.cantidad) as cantidad_reservada
+                                   FROM ventas_cabecera vc
+                                   JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
+                                   WHERE vc.tipo_servicio = 'reserva'
+                                     AND vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO')
+                                     AND vd.id_producto = ?
+                                   GROUP BY vc.id
+                                   ORDER BY vc.fecha_reserva ASC");
+            $stmt->execute([$idProducto]);
             echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC)); exit;
         }
     }
