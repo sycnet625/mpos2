@@ -78,7 +78,7 @@ if ($action === 'check_status') {
     if (!$uuid) { echo json_encode(['error' => 'uuid requerido']); exit; }
 
     $stmt = $pdo->prepare(
-        "SELECT estado_pago, estado_reserva FROM ventas_cabecera WHERE uuid_venta = ? LIMIT 1"
+        "SELECT estado_pago, estado_reserva, motivo_rechazo FROM ventas_cabecera WHERE uuid_venta = ? LIMIT 1"
     );
     $stmt->execute([$uuid]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -86,8 +86,9 @@ if ($action === 'check_status') {
     if (!$row) { echo json_encode(['error' => 'no encontrado']); exit; }
 
     echo json_encode([
-        'estado_pago'    => $row['estado_pago']    ?? 'pendiente',
-        'estado_reserva' => $row['estado_reserva'] ?? 'PENDIENTE',
+        'estado_pago'     => $row['estado_pago']      ?? 'pendiente',
+        'estado_reserva'  => $row['estado_reserva']   ?? 'PENDIENTE',
+        'motivo_rechazo'  => $row['motivo_rechazo']   ?? null,
     ]);
     exit;
 }
@@ -137,6 +138,38 @@ if ($action === 'confirm_payment') {
 
         $pdo->commit();
         echo json_encode(['status' => 'success', 'msg' => 'Pago confirmado correctamente.']);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// ──────────────────────────────────────────────────────────────────
+// Acción: reject_payment
+// POST { action:'reject_payment', id:N, motivo:'...' }  — requiere sesión admin
+// ──────────────────────────────────────────────────────────────────
+if ($action === 'reject_payment') {
+    session_start();
+    if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+        http_response_code(403);
+        echo json_encode(['error' => 'No autorizado']);
+        exit;
+    }
+
+    $id     = intval($input['id'] ?? 0);
+    $motivo = trim($input['motivo'] ?? 'Transferencia no verificada.');
+    if ($id <= 0) { echo json_encode(['error' => 'id inválido']); exit; }
+
+    try {
+        // Auto-migrar columna si no existe
+        try { $pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN IF NOT EXISTS motivo_rechazo VARCHAR(500) DEFAULT NULL"); } catch(Exception $e) {}
+
+        $pdo->beginTransaction();
+        $pdo->prepare("UPDATE ventas_cabecera SET estado_pago='rechazado', estado_reserva='CANCELADO', motivo_rechazo=? WHERE id=?")
+            ->execute([$motivo, $id]);
+        $pdo->commit();
+        echo json_encode(['status' => 'success', 'msg' => 'Pago rechazado.']);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);

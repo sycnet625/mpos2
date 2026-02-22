@@ -397,13 +397,18 @@ $page         = max(1, intval($_GET['page'] ?? 1));
 $perPage      = 25;
 $offset       = ($page - 1) * $perPage;
 
-$where  = ["c.tipo_servicio='reserva'", "c.id_sucursal=$sucursalID"];
 $params = [];
 
-if ($filterEstado === 'PENDIENTE')   $where[] = "(c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL)";
-elseif ($filterEstado === 'ENTREGADO') $where[] = "c.estado_reserva='ENTREGADO'";
-elseif ($filterEstado === 'CANCELADO') $where[] = "c.estado_reserva='CANCELADO'";
-elseif ($filterEstado === 'VERIFICANDO') $where[] = "c.estado_pago='verificando'";
+// Para VERIFICANDO los pedidos vienen de shop.php con tipo_servicio='domicilio'/'recogida',
+// nunca con 'reserva', así que no restringimos por tipo_servicio en ese caso.
+if ($filterEstado === 'VERIFICANDO') {
+    $where = ["c.id_sucursal=$sucursalID", "c.estado_pago='verificando'"];
+} else {
+    $where = ["c.tipo_servicio='reserva'", "c.id_sucursal=$sucursalID"];
+    if ($filterEstado === 'PENDIENTE')     $where[] = "(c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL)";
+    elseif ($filterEstado === 'ENTREGADO') $where[] = "c.estado_reserva='ENTREGADO'";
+    elseif ($filterEstado === 'CANCELADO') $where[] = "c.estado_reserva='CANCELADO'";
+}
 if ($filterQ)     { $where[] = "c.cliente_nombre LIKE ?"; $params[] = "%$filterQ%"; }
 if ($filterFecha === 'hoy')     $where[] = "DATE(c.fecha_reserva)=CURDATE()";
 elseif ($filterFecha === 'semana')  $where[] = "c.fecha_reserva BETWEEN NOW() AND DATE_ADD(NOW(),INTERVAL 7 DAY)";
@@ -485,14 +490,14 @@ $renderRows = function() use ($reservas) {
         // Badge canal de origen
         $canal = $r['canal_origen'] ?? 'POS';
         $canalMap = [
-            'POS'        => ['bg:#6366f1;color:white',  'fas fa-cash-register', 'POS'],
-            'Web'        => ['bg:#0ea5e9;color:white',  'fas fa-globe',         'Web'],
-            'WhatsApp'   => ['bg:#22c55e;color:white',  'fab fa-whatsapp',      'WhatsApp'],
-            'Teléfono'   => ['bg:#f59e0b;color:white',  'fas fa-phone-alt',     'Tel.'],
-            'Kiosko'     => ['bg:#8b5cf6;color:white',  'fas fa-tablet-alt',    'Kiosko'],
-            'Presencial' => ['bg:#64748b;color:white',  'fas fa-user',          'Presencial'],
-            'ICS'        => ['bg:#94a3b8;color:white',  'fas fa-file-import',   'ICS'],
-            'Otro'       => ['bg:#94a3b8;color:white',  'fas fa-question',      'Otro'],
+            'POS'        => ['background-color:#f97316!important;color:#000!important', 'fas fa-cash-register', 'POS'],
+            'Web'        => ['background-color:#fde047!important;color:#000!important', 'fas fa-globe',         'Web'],
+            'WhatsApp'   => ['background-color:#1d4ed8!important;color:#fff!important', 'fab fa-whatsapp',      'WhatsApp'],
+            'Teléfono'   => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-phone-alt',     'Tel.'],
+            'Kiosko'     => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-tablet-alt',    'Kiosko'],
+            'Presencial' => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-user',          'Presencial'],
+            'ICS'        => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-file-import',   'ICS'],
+            'Otro'       => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-question',      'Otro'],
         ];
         [$cBg, $cIcon, $cLabel] = $canalMap[$canal] ?? $canalMap['Otro'];
 ?>
@@ -538,7 +543,7 @@ $renderRows = function() use ($reservas) {
     </td>
     <td class="text-center"><span class="badge <?= $erCls ?>"><?= $erTxt ?></span></td>
     <td class="text-center">
-        <span style="display:inline-flex;align-items:center;gap:4px;<?= $cBg ?>;padding:3px 8px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;">
+        <span style="display:inline-flex;align-items:center;gap:4px;<?= $cBg ?>;padding:4px 10px;border-radius:20px;font-size:.68rem;font-weight:800;white-space:nowrap;print-color-adjust:exact;-webkit-print-color-adjust:exact;">
             <i class="<?= $cIcon ?>"></i><?= $cLabel ?>
         </span>
     </td>
@@ -551,7 +556,8 @@ $renderRows = function() use ($reservas) {
             <?php if ($isPending): ?>
             <button class="btn btn-outline-primary" onclick="openForm(<?= $r['id'] ?>)" title="Editar"><i class="fas fa-edit"></i></button>
             <?php if ($ep === 'verificando'): ?>
-            <button class="btn btn-outline-success fw-bold" onclick="confirmarPago(<?= $r['id'] ?>)" title="Confirmar pago"><i class="fas fa-check-double"></i></button>
+            <button class="btn btn-outline-success fw-bold" onclick="confirmarPago(<?= $r['id'] ?>)" title="Confirmar transferencia"><i class="fas fa-check-double"></i></button>
+            <button class="btn btn-outline-danger fw-bold" onclick="rechazarPago(<?= $r['id'] ?>)" title="Rechazar transferencia"><i class="fas fa-ban"></i></button>
             <?php endif; ?>
             <?php if ($esHoy && !$r['en_cocina']): ?>
             <button class="btn btn-outline-info" onclick="enviarACocina(<?= $r['id'] ?>)" title="Enviar a cocina"><i class="fas fa-fire-alt"></i></button>
@@ -890,9 +896,9 @@ if (isset($_GET['ajax'])) {
                                 <div class="mb-2">
                                     <label class="form-label small fw-bold mb-1">Canal de origen</label>
                                     <select id="fCanalOrigen" class="form-select form-select-sm">
+                                        <option value="WhatsApp">💬 WhatsApp</option>
                                         <option value="POS">🖥️ POS</option>
                                         <option value="Web">🌐 Web</option>
-                                        <option value="WhatsApp">💬 WhatsApp</option>
                                         <option value="Teléfono">📞 Teléfono</option>
                                         <option value="Kiosko">📱 Kiosko</option>
                                         <option value="Presencial">🙋 Presencial</option>
@@ -1147,7 +1153,7 @@ async function openForm(id) {
         document.getElementById('fAbono').value        = d.abono || '';
         document.getElementById('fNotas').value        = d.notas || '';
         document.getElementById('fMetodoPago').value   = d.metodo_pago || 'Efectivo';
-        document.getElementById('fCanalOrigen').value  = d.canal_origen || 'POS';
+        document.getElementById('fCanalOrigen').value  = d.canal_origen || 'WhatsApp';
         // Verificar si cliente existe en CRM
         if (d.cliente_telefono) checkClienteByTel(d.cliente_telefono);
         if (d.fecha_reserva) {
@@ -1176,7 +1182,7 @@ function resetForm() {
     document.getElementById('fAbono').value         = '';
     document.getElementById('fNotas').value         = '';
     document.getElementById('fMetodoPago').value    = 'Efectivo';
-    document.getElementById('fCanalOrigen').value   = 'POS';
+    document.getElementById('fCanalOrigen').value   = 'WhatsApp';
     document.getElementById('fFechaReserva').value  = '';
     document.getElementById('clientSearch').value   = '';
     document.getElementById('prodSearch').value     = '';
@@ -1389,9 +1395,18 @@ async function procesarAccion(id, action) {
 }
 async function confirmarPago(id) {
     if (!confirm(`¿Confirmar el pago de transferencia del pedido #${id}?`)) return;
-    const res  = await fetch('reservas.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action:'confirm_payment'})});
+    const res  = await fetch('pagos_api.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action:'confirm_payment'})});
     const data = await res.json();
     if (data.status === 'success') { showToast('✓ Pago confirmado. Cliente notificado.'); reloadTable(); }
+    else showToast('Error: ' + (data.msg || data.error), 'danger');
+}
+async function rechazarPago(id) {
+    const motivo = prompt(`Motivo del rechazo para el pedido #${id} (opcional):`);
+    if (motivo === null) return; // canceló el prompt
+    if (!confirm(`¿RECHAZAR la transferencia del pedido #${id}? El pedido quedará cancelado.`)) return;
+    const res  = await fetch('pagos_api.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id, action:'reject_payment', motivo: motivo || 'Transferencia no verificada.'})});
+    const data = await res.json();
+    if (data.status === 'success') { showToast('Transferencia rechazada. Pedido cancelado.', 'warning'); reloadTable(); }
     else showToast('Error: ' + data.msg, 'danger');
 }
 async function enviarACocina(id) {

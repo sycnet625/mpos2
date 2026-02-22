@@ -77,7 +77,10 @@ try {
 
     // Campos nuevos: pago online y reserva sin stock
     $codigoPago    = isset($input['codigo_pago']) ? substr((string)$input['codigo_pago'], 0, 100) : null;
-    $estadoPago    = isset($input['estado_pago'])  ? substr((string)$input['estado_pago'],  0, 20)  : 'pendiente';
+    // Las ventas del POS físico ya están cobradas en persona → 'confirmado'.
+    // Solo las ventas web envían estado_pago explícitamente ('verificando' o 'pendiente').
+    $estadoPago    = isset($input['estado_pago'])  ? substr((string)$input['estado_pago'],  0, 20)  : 'confirmado';
+    $canalOrigen   = isset($input['canal_origen']) ? substr((string)$input['canal_origen'], 0, 30)  : 'POS';
     $esReserva     = ($tipoServicio === 'reserva');
     $sinExistencia = 0; // se calcula en el loop de items
 
@@ -115,8 +118,8 @@ try {
         uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, id_caja,
         tipo_servicio, cliente_nombre, cliente_telefono, cliente_direccion,
         id_empresa, mensajero_nombre, fecha_reserva, sincronizado, id_sesion_caja,
-        abono, codigo_pago, estado_pago
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)";
+        abono, codigo_pago, estado_pago, canal_origen
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)";
 
     $stmtCab = $pdo->prepare($sqlCab);
     $stmtCab->execute([
@@ -137,7 +140,8 @@ try {
         $idSesion,
         floatval($input['abono'] ?? 0),
         $codigoPago,
-        $estadoPago
+        $estadoPago,
+        $canalOrigen
     ]);
 
     $idVenta = $pdo->lastInsertId();

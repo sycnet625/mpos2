@@ -1490,6 +1490,22 @@ ob_end_flush();
                     <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
                 </div>
             </div>
+
+            <!-- Vista: pago rechazado -->
+            <div id="pagoRechazadoView" style="display:none;">
+                <div class="modal-body text-center py-5">
+                    <div style="font-size: 5rem; margin-bottom: 1rem;">❌</div>
+                    <h3 class="fw-bold mb-3 text-danger">Transferencia Rechazada</h3>
+                    <p class="text-muted fs-5">El operador no pudo verificar tu transferencia.<br>Por favor contáctanos para más información.</p>
+                    <div id="motivoRechazoDiv" class="alert alert-warning mt-3" style="display:none;">
+                        <strong>Motivo:</strong> <span id="motivoRechazoTxt"></span>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 justify-content-center gap-2">
+                    <button class="btn btn-outline-secondary btn-lg px-4" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
+                    <button class="btn btn-primary btn-lg px-4" onclick="showCheckout()">Intentar de nuevo</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -2047,6 +2063,7 @@ ob_end_flush();
         document.getElementById('successView').style.display = 'none';
         document.getElementById('waitingPaymentView').style.display = 'none';
         document.getElementById('pagoConfirmadoView').style.display = 'none';
+        document.getElementById('pagoRechazadoView').style.display = 'none';
     }
 
     function showCheckout() {
@@ -2102,6 +2119,7 @@ ob_end_flush();
         document.getElementById('successView').style.display = 'none';
         document.getElementById('waitingPaymentView').style.display = 'none';
         document.getElementById('pagoConfirmadoView').style.display = 'none';
+        document.getElementById('pagoRechazadoView').style.display = 'none';
 
         // Mostrar u ocultar sección de pago
         const paySection = document.getElementById('paymentSection');
@@ -2167,6 +2185,17 @@ ob_end_flush();
                     pollInterval = null;
                     document.getElementById('waitingPaymentView').style.display = 'none';
                     document.getElementById('pagoConfirmadoView').style.display = 'block';
+                } else if (res.estado_pago === 'rechazado') {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    document.getElementById('waitingPaymentView').style.display = 'none';
+                    const motivoDiv = document.getElementById('motivoRechazoDiv');
+                    const motivoTxt = document.getElementById('motivoRechazoTxt');
+                    if (res.motivo_rechazo) {
+                        motivoTxt.textContent = res.motivo_rechazo;
+                        motivoDiv.style.display = 'block';
+                    }
+                    document.getElementById('pagoRechazadoView').style.display = 'block';
                 }
             })
             .catch(() => { /* silencioso */ });
@@ -2296,6 +2325,7 @@ ob_end_flush();
             mensajero_nombre:   notes,
             codigo_pago:        codigoPago,
             estado_pago:        estadoPago,
+            canal_origen:       'Web',
             items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, note: '', isReserva: i.isReserva || false }))
         };
 
