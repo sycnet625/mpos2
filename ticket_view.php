@@ -322,6 +322,17 @@ $canalMap = [
                         💳 Pagado con: <strong><?php echo htmlspecialchars($venta['metodo_pago']); ?></strong>
                     </td></tr>
                 <?php endif; ?>
+                <?php
+                $monedaTk = $venta['moneda'] ?? 'CUP';
+                $tcTk     = floatval($venta['tipo_cambio'] ?? 1.0);
+                $montoOTk = floatval($venta['monto_moneda_original'] ?? 0);
+                if ($monedaTk !== 'CUP' && $tcTk > 1.0 && $montoOTk > 0):
+                ?>
+                <tr><td colspan="2" class="text-center" style="font-size:10px; color:#666; border-top:1px dashed #000; padding-top:3px;">
+                    Pagado en <?= htmlspecialchars($monedaTk) ?>: <b><?= htmlspecialchars($monedaTk) ?> <?= number_format($montoOTk, 2) ?></b>
+                    (TC: 1 <?= htmlspecialchars($monedaTk) ?> = <?= number_format($tcTk, 2) ?> CUP)
+                </td></tr>
+                <?php endif; ?>
             <?php endif; ?>
         </table>
     </div>

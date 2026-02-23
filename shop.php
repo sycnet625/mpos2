@@ -51,6 +51,14 @@ $CFG_TARJETA = $config['numero_tarjeta'] ?? '';
 $CFG_TITULAR = $config['titular_tarjeta'] ?? '';
 $CFG_BANCO   = $config['banco_tarjeta']   ?? 'Bandec / BPA';
 
+// Multi-divisa y métodos de pago para la shop
+$metodosShop   = array_values(array_filter(
+    $config['metodos_pago'] ?? [],
+    fn($m) => ($m['activo'] ?? false) && ($m['aplica_shop'] ?? false)
+));
+$tipoCambioUSD = floatval($config['tipo_cambio_usd'] ?? 385);
+$tipoCambioMLC = floatval($config['tipo_cambio_mlc'] ?? 310);
+
 try {
     require_once 'db.php';
     date_default_timezone_set('America/Havana');
@@ -1260,7 +1268,14 @@ ob_end_flush();
                 <a href="quienes_somos.php" class="btn btn-outline-info btn-sm rounded-pill px-3 fw-bold" title="Quiénes Somos">
                     <i class="fas fa-building me-1"></i> <span class="d-none d-md-inline">Nosotros</span>
                 </a>
-                
+
+                <!-- Toggle de moneda -->
+                <div class="btn-group btn-group-sm" id="shopCurrencyToggle" title="Cambiar moneda de visualización">
+                    <button class="btn btn-outline-light btn-sm fw-bold" onclick="setShopCurrency('CUP')">CUP</button>
+                    <button class="btn btn-outline-light btn-sm fw-bold" onclick="setShopCurrency('USD')">USD</button>
+                    <button class="btn btn-outline-light btn-sm fw-bold" onclick="setShopCurrency('MLC')">MLC</button>
+                </div>
+
                 <div id="authButtons">
                     <?php if(isset($_SESSION['client_id'])): ?>
                         <div class="dropdown">
@@ -1511,7 +1526,7 @@ ob_end_flush();
                 <?php endif; ?>
 
                 <div class="product-footer">
-                    <div class="product-price">
+                    <div class="product-price" data-cup="<?= floatval($p['precio']) ?>" data-cup-oferta="<?= floatval($p['precio_oferta'] ?? 0) ?>">
                         <?php $precioOferta = floatval($p['precio_oferta'] ?? 0); ?>
                         <?php if ($precioOferta > 0 && $precioOferta < floatval($p['precio'])): ?>
                             <span class="price-original">$<?= number_format($p['precio'], 2) ?></span>
@@ -1825,29 +1840,8 @@ ob_end_flush();
                         <div id="paymentSection" style="display:none; margin-top:1rem;">
                             <div class="p-3 border rounded-3">
                                 <h6 class="fw-bold mb-3"><i class="fas fa-credit-card me-2 text-primary"></i>Método de Pago</h6>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpEfectivoMensajero" value="EFECTIVO_MENSAJERO" onchange="onPayMethodChange()" checked>
-                                    <label class="form-check-label" for="mpEfectivoMensajero">💵 Efectivo al mensajero (a la entrega)</label>
-                                </div>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpEfectivoLocal" value="EFECTIVO_LOCAL" onchange="onPayMethodChange()">
-                                    <label class="form-check-label" for="mpEfectivoLocal">🏪 Efectivo en el local (a la entrega)</label>
-                                </div>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="radio" name="metodoPago" id="mpTransferencia" value="TRANSFERENCIA" onchange="onPayMethodChange()">
-                                    <label class="form-check-label" for="mpTransferencia">📲 Transferencia Enzona / Transfermovil</label>
-                                </div>
-
-                                <div id="transferenciaInfo" style="display:none; margin-top:1rem;">
-                                    <div class="p-3 mb-3" style="background:#e8f4f8; border-radius:10px; border-left:4px solid #0d6efd;">
-                                        <div class="small mb-1">Tarjeta: <strong id="tCardNum"></strong></div>
-                                        <div class="small mb-1">Titular: <strong id="tCardHolder"></strong></div>
-                                        <div class="small mb-1">Banco: <strong id="tCardBank"></strong></div>
-                                        <div class="small">Monto a transferir: <strong class="text-success" id="tMonto"></strong></div>
-                                    </div>
-                                    <label class="form-label fw-bold">Código de confirmación del pago *</label>
-                                    <input id="codigoPago" type="text" class="form-control" placeholder="Ej: TRF-20260220-001234">
-                                    <small class="text-muted">Escribe el número de confirmación de la transferencia realizada.</small>
+                                <div id="shopPaymentMethodsContainer">
+                                    <!-- Renderizado dinámico por renderShopPaymentMethods() -->
                                 </div>
                             </div>
                         </div>
@@ -2412,6 +2406,11 @@ ob_end_flush();
     const CFG_TITULAR = <?= json_encode($CFG_TITULAR) ?>;
     const CFG_BANCO   = <?= json_encode($CFG_BANCO)   ?>;
 
+    // Multi-divisa
+    window.SHOP_METODOS = <?= json_encode($metodosShop, JSON_UNESCAPED_UNICODE) ?>;
+    window.SHOP_TC_USD  = <?= $tipoCambioUSD ?>;
+    window.SHOP_TC_MLC  = <?= $tipoCambioMLC ?>;
+
     // Perfil del cliente logueado (null si no hay sesión)
     const CLIENT_PROFILE = <?= json_encode($clienteProfile) ?>;
 
@@ -2893,15 +2892,17 @@ ob_end_flush();
         const paySection = document.getElementById('paymentSection');
         paySection.style.display = flujo === 'compra' ? 'block' : 'none';
 
-        // Siempre limpiar estado del campo código de pago (evitar validación HTML5 en campo oculto)
-        const codigoPagoInput = document.getElementById('codigoPago');
-        if (codigoPagoInput) { codigoPagoInput.removeAttribute('required'); codigoPagoInput.required = false; codigoPagoInput.value = ''; }
+        // Siempre limpiar estado de campos código de pago (evitar validación HTML5 en campo oculto)
+        document.querySelectorAll('[id^="codigoPago_"]').forEach(inp => {
+            inp.removeAttribute('required'); inp.required = false; inp.value = '';
+        });
 
         // Si es compra: marcar el primer radio como checked y ocultar info de transferencia
         if (flujo === 'compra') {
-            const firstRadio = document.getElementById('mpEfectivoMensajero');
+            const firstRadio = document.querySelector('input[name=metodoPago]');
             if (firstRadio) firstRadio.checked = true;
-            document.getElementById('transferenciaInfo').style.display = 'none';
+            document.querySelectorAll('[id^="transInfo_"]').forEach(d => d.style.display = 'none');
+            onPayMethodChange();
         }
 
         // Fecha mínima
@@ -2927,22 +2928,81 @@ ob_end_flush();
         }
     }
 
+    // ───── Multi-divisa shop ─────
+    let shopCurrency = localStorage.getItem('shop_currency') || 'CUP';
+    let shopTC = 1.0;
+
+    function formatPrice(precioCUP) {
+        const p = precioCUP / shopTC;
+        const sym = shopCurrency === 'CUP' ? '$' : shopCurrency + ' ';
+        return sym + p.toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    window.setShopCurrency = function(m) {
+        shopCurrency = m;
+        localStorage.setItem('shop_currency', m);
+        shopTC = { CUP: 1.0, USD: window.SHOP_TC_USD, MLC: window.SHOP_TC_MLC }[m] || 1.0;
+        document.querySelectorAll('#shopCurrencyToggle button').forEach(b =>
+            b.classList.toggle('active', b.textContent.trim() === m));
+        renderProducts();
+    };
+
+    function renderProducts() {
+        // Actualiza los precios en las tarjetas del catálogo (PHP-rendered con data-cup)
+        document.querySelectorAll('.product-price[data-cup]').forEach(el => {
+            const cup      = parseFloat(el.dataset.cup) || 0;
+            const cupOferta= parseFloat(el.dataset.cupOferta) || 0;
+            if (cupOferta > 0 && cupOferta < cup) {
+                el.innerHTML = `<span class="price-original">${formatPrice(cup)}</span> <span class="price-oferta">${formatPrice(cupOferta)}</span>`;
+            } else {
+                el.textContent = formatPrice(cup);
+            }
+        });
+    }
+
+    // ───── Métodos de pago dinámicos (shop) ─────
+    function renderShopPaymentMethods() {
+        const container = document.getElementById('shopPaymentMethodsContainer');
+        if (!container) return;
+        container.innerHTML = '';
+        const metodos = window.SHOP_METODOS || [];
+        metodos.forEach((m, i) => {
+            const radioId = 'mp_' + m.id.replace(/\W/g, '_');
+            container.innerHTML += `
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="radio" name="metodoPago"
+                           id="${radioId}" value="${m.id}" onchange="onPayMethodChange()" ${i === 0 ? 'checked' : ''}>
+                    <label class="form-check-label" for="${radioId}">
+                        <i class="fas ${m.icono} me-2"></i>${m.nombre}
+                    </label>
+                </div>`;
+            if (m.es_transferencia) {
+                container.innerHTML += `
+                    <div id="transInfo_${m.id.replace(/\W/g,'_')}" style="display:none;" class="mb-2">
+                        <div class="p-3 mb-2 rounded" style="background:#e8f4f8; border-left:4px solid #0d6efd;">
+                            <div class="small">Tarjeta: <strong>${CFG_TARJETA || '(sin configurar)'}</strong></div>
+                            <div class="small">Titular: <strong>${CFG_TITULAR || '(sin configurar)'}</strong></div>
+                            <div class="small">Banco: <strong>${CFG_BANCO || 'Bandec / BPA'}</strong></div>
+                        </div>
+                        <label class="form-label fw-bold">Código de confirmación *</label>
+                        <input id="codigoPago_${m.id.replace(/\W/g,'_')}" type="text" class="form-control mb-1"
+                               placeholder="Ej: TRF-20260220-001234">
+                        <small class="text-muted">Código de confirmación de la transferencia.</small>
+                    </div>`;
+            }
+        });
+    }
+
     function onPayMethodChange() {
         const val = document.querySelector('input[name=metodoPago]:checked')?.value;
-        const infoDiv = document.getElementById('transferenciaInfo');
-        const codigoPagoInput = document.getElementById('codigoPago');
-        if (val === 'TRANSFERENCIA') {
-            document.getElementById('tCardNum').textContent    = CFG_TARJETA || '(sin configurar)';
-            document.getElementById('tCardHolder').textContent = CFG_TITULAR || '(sin configurar)';
-            document.getElementById('tCardBank').textContent   = CFG_BANCO   || 'Bandec / BPA';
-            const total = parseFloat(document.getElementById('grandTotal').innerText) || 0;
-            document.getElementById('tMonto').textContent =
-                new Intl.NumberFormat('es-CU', { style: 'currency', currency: 'CUP' }).format(total);
-            infoDiv.style.display = 'block';
-            if (codigoPagoInput) codigoPagoInput.required = true;
-        } else {
-            infoDiv.style.display = 'none';
-            if (codigoPagoInput) codigoPagoInput.required = false;
+        // Ocultar todos los paneles de transferencia
+        document.querySelectorAll('[id^="transInfo_"]').forEach(d => d.style.display = 'none');
+        if (val) {
+            const metodo = (window.SHOP_METODOS || []).find(x => x.id === val);
+            if (metodo?.es_transferencia) {
+                const transDiv = document.getElementById('transInfo_' + val.replace(/\W/g, '_'));
+                if (transDiv) transDiv.style.display = 'block';
+            }
         }
     }
 
@@ -3085,9 +3145,11 @@ ob_end_flush();
         } else {
             tipoServicio = delivery ? 'domicilio' : 'recogida';
             const radioChecked = document.querySelector('input[name=metodoPago]:checked');
-            metodoPago = radioChecked ? radioChecked.value : 'EFECTIVO_MENSAJERO';
-            if (metodoPago === 'TRANSFERENCIA') {
-                codigoPago = (document.getElementById('codigoPago')?.value || '').trim();
+            metodoPago = radioChecked ? radioChecked.value : ((window.SHOP_METODOS?.[0]?.id) || 'Efectivo');
+            const metodoObj = (window.SHOP_METODOS || []).find(m => m.id === metodoPago);
+            if (metodoObj?.es_transferencia) {
+                const codigoInput = document.getElementById('codigoPago_' + metodoPago.replace(/\W/g, '_'));
+                codigoPago = (codigoInput?.value || '').trim();
                 if (!codigoPago) {
                     alert('Por favor ingresa el código de confirmación de la transferencia.');
                     btn.disabled = false;
@@ -3097,6 +3159,9 @@ ob_end_flush();
                 estadoPago = 'verificando';
             }
         }
+
+        // Totales en CUP (siempre en CUP para el backend)
+        const grandTotalCUP = parseFloat(document.getElementById('grandTotal').innerText) || 0;
 
         // Validar time slot
         if (!selectedSlot) {
@@ -3111,17 +3176,20 @@ ob_end_flush();
         const slotPrefix = `[⏰ ${selectedSlot.label}] `;
         const data = {
             uuid,
-            total:              parseFloat(document.getElementById('grandTotal').innerText),
-            metodo_pago:        metodoPago,
-            tipo_servicio:      tipoServicio,
-            cliente_nombre:     document.getElementById('cliName').value,
-            cliente_telefono:   document.getElementById('cliTel').value,
-            cliente_direccion:  address,
-            fecha_reserva:      document.getElementById('cliDate').value,
-            mensajero_nombre:   slotPrefix + notes,
-            codigo_pago:        codigoPago,
-            estado_pago:        estadoPago,
-            canal_origen:       'Web',
+            total:                   grandTotalCUP,
+            metodo_pago:             metodoPago,
+            tipo_servicio:           tipoServicio,
+            cliente_nombre:          document.getElementById('cliName').value,
+            cliente_telefono:        document.getElementById('cliTel').value,
+            cliente_direccion:       address,
+            fecha_reserva:           document.getElementById('cliDate').value,
+            mensajero_nombre:        slotPrefix + notes,
+            codigo_pago:             codigoPago,
+            estado_pago:             estadoPago,
+            canal_origen:            'Web',
+            moneda:                  shopCurrency,
+            tipo_cambio:             shopTC,
+            monto_moneda_original:   parseFloat((grandTotalCUP / shopTC).toFixed(2)),
             items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, note: '', isReserva: i.isReserva || false }))
         };
 
@@ -3657,6 +3725,12 @@ async function initShopPush() {
 }
 
 document.addEventListener('DOMContentLoaded', () => { setTimeout(initShopPush, 1200); });
+
+// ── Inicializar moneda y métodos de pago dinámicos ──
+document.addEventListener('DOMContentLoaded', () => {
+    renderShopPaymentMethods();
+    setShopCurrency(shopCurrency);
+});
 
 // =========================================================
 // Feature 13: FLY-TO-CART ANIMATION

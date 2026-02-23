@@ -53,6 +53,19 @@ try {
     $esReserva     = ($tipoServicio === 'reserva');
     $fechaVenta    = date('Y-m-d H:i:s');
 
+    // Campos de moneda (multi-divisa)
+    $moneda              = in_array($input['moneda'] ?? 'CUP', ['CUP','USD','MLC']) ? $input['moneda'] : 'CUP';
+    $tipoCambio          = floatval($input['tipo_cambio'] ?? 1.0);
+    $montoMonedaOriginal = floatval($input['monto_moneda_original'] ?? 0);
+
+    // Agregar columnas de moneda si no existen (idempotente)
+    try {
+        $pdo->exec("ALTER TABLE ventas_cabecera
+            ADD COLUMN IF NOT EXISTS moneda CHAR(3) NOT NULL DEFAULT 'CUP',
+            ADD COLUMN IF NOT EXISTS tipo_cambio DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
+            ADD COLUMN IF NOT EXISTS monto_moneda_original DECIMAL(12,2) NOT NULL DEFAULT 0.00");
+    } catch (Throwable $_e) {}
+
     // Pagos desglosados
     $payments = $input['payments'] ?? [];
     if (empty($payments) && !empty($input['metodo_pago'])) {
@@ -82,14 +95,16 @@ try {
             uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, id_caja,
             tipo_servicio, cliente_nombre, cliente_telefono, cliente_direccion,
             id_empresa, mensajero_nombre, fecha_reserva, sincronizado, id_sesion_caja,
-            abono, codigo_pago, estado_pago, canal_origen
-        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?)
+            abono, codigo_pago, estado_pago, canal_origen,
+            moneda, tipo_cambio, monto_moneda_original
+        ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?, ?, ?, ?, ?, ?)
     ");
     $stmtCab->execute([
         $uuid, $fechaVenta, $total, $metodoPago, $idSucursal, $idAlmacen,
         $tipoServicio, $clienteNombre, $clienteTel, $clienteDir,
         $idEmpresa, $mensajero, $fechaReserva,
-        $abono, $codigoPago, $estadoPago, $canalOrigen
+        $abono, $codigoPago, $estadoPago, $canalOrigen,
+        $moneda, $tipoCambio, $montoMonedaOriginal > 0 ? $montoMonedaOriginal : $total
     ]);
     $idVenta = $pdo->lastInsertId();
 

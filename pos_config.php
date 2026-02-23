@@ -61,6 +61,15 @@ $defaultConfig = [
     "ticket_mostrar_cajero" => true,
     "ticket_mostrar_qr" => true,
     "ticket_mostrar_items_count" => true,
+    // Multi-divisa y métodos de pago
+    "tipo_cambio_usd"    => 385.00,
+    "tipo_cambio_mlc"    => 310.00,
+    "moneda_default_pos" => "CUP",
+    "metodos_pago" => [
+        ["id"=>"Efectivo",      "nombre"=>"Efectivo",      "icono"=>"fa-money-bill-wave","color_bootstrap"=>"success","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>false],
+        ["id"=>"Transferencia", "nombre"=>"Transferencia", "icono"=>"fa-university",     "color_bootstrap"=>"primary","activo"=>true,"requiere_codigo"=>true, "aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>true],
+        ["id"=>"Tarjeta",       "nombre"=>"Tarjeta/Gasto", "icono"=>"fa-credit-card",    "color_bootstrap"=>"warning","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>false,"es_transferencia"=>false],
+    ],
 ];
 
 // 1. CARGAR CONFIGURACIÓN ACTUAL
@@ -119,7 +128,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "twitter_url"     => trim($_POST['twitter_url']     ?? ''),
             "instagram_url"   => trim($_POST['instagram_url']   ?? ''),
             "youtube_url"     => trim($_POST['youtube_url']     ?? ''),
+            // Multi-divisa
+            "tipo_cambio_usd"    => floatval($_POST['tipo_cambio_usd']    ?? 385),
+            "tipo_cambio_mlc"    => floatval($_POST['tipo_cambio_mlc']    ?? 310),
+            "moneda_default_pos" => in_array($_POST['moneda_default_pos'] ?? 'CUP', ['CUP','USD','MLC']) ? $_POST['moneda_default_pos'] : 'CUP',
+            "metodos_pago"       => [],
         ];
+
+        // Procesar Métodos de Pago
+        if (isset($_POST['mp_id']) && is_array($_POST['mp_id'])) {
+            $coloresValidos = ['success','primary','secondary','warning','danger','info','dark'];
+            for ($i = 0; $i < count($_POST['mp_id']); $i++) {
+                $mpId = trim($_POST['mp_id'][$i] ?? '');
+                if (empty($mpId)) continue;
+                $mpColor = $_POST['mp_color'][$i] ?? 'secondary';
+                $newConfig['metodos_pago'][] = [
+                    "id"               => $mpId,
+                    "nombre"           => trim($_POST['mp_nombre'][$i]  ?? $mpId),
+                    "icono"            => trim($_POST['mp_icono'][$i]   ?? 'fa-money-bill-wave'),
+                    "color_bootstrap"  => in_array($mpColor, $coloresValidos) ? $mpColor : 'secondary',
+                    "activo"           => isset($_POST['mp_activo'][$i]),
+                    "requiere_codigo"  => isset($_POST['mp_requiere_codigo'][$i]),
+                    "aplica_pos"       => isset($_POST['mp_aplica_pos'][$i]),
+                    "aplica_shop"      => isset($_POST['mp_aplica_shop'][$i]),
+                    "es_transferencia" => isset($_POST['mp_es_transferencia'][$i]),
+                ];
+            }
+        }
+        if (empty($newConfig['metodos_pago'])) {
+            $newConfig['metodos_pago'] = $defaultConfig['metodos_pago'] ?? [];
+        }
 
         // Procesar Cajeros Dinámicos
         if (isset($_POST['cajero_nombre']) && is_array($_POST['cajero_nombre'])) {
@@ -713,6 +751,123 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div><!-- /card-body -->
         </div><!-- /card Diseño del Ticket -->
 
+        <!-- ===== TASAS DE CAMBIO ===== -->
+        <div class="card">
+            <div class="card-header text-success"><i class="fas fa-exchange-alt"></i> Tasas de Cambio</div>
+            <div class="card-body">
+                <div class="alert alert-info border-0 small mb-3">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Define cuántos <strong>CUP</strong> equivalen a 1 USD o 1 MLC. El POS y la tienda online usarán estas tasas para mostrar precios en divisas.
+                </div>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Tasa USD → CUP</label>
+                        <div class="input-group">
+                            <span class="input-group-text">1 USD =</span>
+                            <input type="number" step="0.01" min="1" name="tipo_cambio_usd" class="form-control"
+                                   value="<?= htmlspecialchars($currentConfig['tipo_cambio_usd'] ?? 385) ?>">
+                            <span class="input-group-text">CUP</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Tasa MLC → CUP</label>
+                        <div class="input-group">
+                            <span class="input-group-text">1 MLC =</span>
+                            <input type="number" step="0.01" min="1" name="tipo_cambio_mlc" class="form-control"
+                                   value="<?= htmlspecialchars($currentConfig['tipo_cambio_mlc'] ?? 310) ?>">
+                            <span class="input-group-text">CUP</span>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Moneda por defecto (POS)</label>
+                        <select name="moneda_default_pos" class="form-select">
+                            <?php foreach (['CUP','USD','MLC'] as $mon): ?>
+                            <option value="<?= $mon ?>" <?= ($currentConfig['moneda_default_pos'] ?? 'CUP') === $mon ? 'selected' : '' ?>><?= $mon ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text">Moneda que aparece seleccionada por defecto al abrir el cobro.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== MÉTODOS DE PAGO ===== -->
+        <div class="card">
+            <div class="card-header text-primary"><i class="fas fa-credit-card"></i> Métodos de Pago</div>
+            <div class="card-body">
+                <div class="alert alert-warning border-0 small mb-3">
+                    <i class="fas fa-exclamation-triangle me-1"></i>
+                    El campo <strong>ID</strong> se guarda en la base de datos — no lo cambies en métodos existentes. Solo un método puede ser <strong>Transferencia</strong>.
+                </div>
+                <div id="metodosContainer">
+                    <?php
+                    $metodosConfig = $currentConfig['metodos_pago'] ?? [];
+                    $coloresOpts = ['success'=>'Verde','primary'=>'Azul','secondary'=>'Gris','warning'=>'Amarillo','danger'=>'Rojo','info'=>'Celeste','dark'=>'Negro'];
+                    foreach ($metodosConfig as $mi => $mp):
+                    ?>
+                    <div class="metodo-row border rounded p-2 mb-2 bg-light">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-md-2">
+                                <label class="small text-muted d-block">ID (inmutable)</label>
+                                <input type="text" name="mp_id[]" class="form-control form-control-sm font-monospace fw-bold"
+                                       value="<?= htmlspecialchars($mp['id']) ?>" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="small text-muted d-block">Nombre visible</label>
+                                <input type="text" name="mp_nombre[]" class="form-control form-control-sm"
+                                       value="<?= htmlspecialchars($mp['nombre']) ?>" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="small text-muted d-block">Icono FontAwesome</label>
+                                <input type="text" name="mp_icono[]" class="form-control form-control-sm"
+                                       value="<?= htmlspecialchars($mp['icono']) ?>" placeholder="fa-money-bill-wave">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="small text-muted d-block">Color</label>
+                                <select name="mp_color[]" class="form-select form-select-sm">
+                                    <?php foreach ($coloresOpts as $cv => $cl): ?>
+                                    <option value="<?= $cv ?>" <?= ($mp['color_bootstrap'] ?? '') === $cv ? 'selected' : '' ?>><?= $cl ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="small text-muted d-block">Opciones</label>
+                                <div class="d-flex flex-wrap gap-2 align-items-center">
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="checkbox" name="mp_activo[<?= $mi ?>]" value="1"
+                                               id="mpActivo<?= $mi ?>" <?= ($mp['activo'] ?? false) ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="mpActivo<?= $mi ?>">Activo</label>
+                                    </div>
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="checkbox" name="mp_aplica_pos[<?= $mi ?>]" value="1"
+                                               id="mpPos<?= $mi ?>" <?= ($mp['aplica_pos'] ?? false) ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="mpPos<?= $mi ?>">POS</label>
+                                    </div>
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="checkbox" name="mp_aplica_shop[<?= $mi ?>]" value="1"
+                                               id="mpShop<?= $mi ?>" <?= ($mp['aplica_shop'] ?? false) ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="mpShop<?= $mi ?>">Shop</label>
+                                    </div>
+                                    <div class="form-check form-check-inline mb-0">
+                                        <input class="form-check-input" type="checkbox" name="mp_es_transferencia[<?= $mi ?>]" value="1"
+                                               id="mpTrans<?= $mi ?>" <?= ($mp['es_transferencia'] ?? false) ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="mpTrans<?= $mi ?>">Transf.</label>
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger btn-sm ms-auto" onclick="removeMetodo(this)">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addMetodoPago()">
+                    <i class="fas fa-plus-circle"></i> Agregar Método de Pago
+                </button>
+            </div>
+        </div>
+
         <div class="d-grid gap-2 mb-5">
             <button type="submit" class="btn btn-primary btn-lg fw-bold shadow">
                 <i class="fas fa-save me-2"></i> GUARDAR CAMBIOS
@@ -760,6 +915,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             btn.closest('.cajero-row').remove();
         } else {
             alert("Debe existir al menos un cajero.");
+        }
+    }
+
+    let _mpIndex = <?= count($currentConfig['metodos_pago'] ?? []) ?>;
+    const COLORES = ['success','primary','secondary','warning','danger','info','dark'];
+    const COLORES_LABELS = {'success':'Verde','primary':'Azul','secondary':'Gris','warning':'Amarillo','danger':'Rojo','info':'Celeste','dark':'Negro'};
+
+    function addMetodoPago() {
+        const container = document.getElementById('metodosContainer');
+        const i = _mpIndex++;
+        const colorOpts = COLORES.map(c => `<option value="${c}">${COLORES_LABELS[c]}</option>`).join('');
+        const div = document.createElement('div');
+        div.className = 'metodo-row border rounded p-2 mb-2 bg-light';
+        div.innerHTML = `
+            <div class="row g-2 align-items-center">
+                <div class="col-md-2">
+                    <label class="small text-muted d-block">ID (inmutable)</label>
+                    <input type="text" name="mp_id[]" class="form-control form-control-sm font-monospace fw-bold" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="small text-muted d-block">Nombre visible</label>
+                    <input type="text" name="mp_nombre[]" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="small text-muted d-block">Icono FontAwesome</label>
+                    <input type="text" name="mp_icono[]" class="form-control form-control-sm" placeholder="fa-money-bill-wave">
+                </div>
+                <div class="col-md-2">
+                    <label class="small text-muted d-block">Color</label>
+                    <select name="mp_color[]" class="form-select form-select-sm">${colorOpts}</select>
+                </div>
+                <div class="col-md-4">
+                    <label class="small text-muted d-block">Opciones</label>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input" type="checkbox" name="mp_activo[${i}]" value="1" id="mpActivo${i}" checked>
+                            <label class="form-check-label small" for="mpActivo${i}">Activo</label>
+                        </div>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input" type="checkbox" name="mp_aplica_pos[${i}]" value="1" id="mpPos${i}" checked>
+                            <label class="form-check-label small" for="mpPos${i}">POS</label>
+                        </div>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input" type="checkbox" name="mp_aplica_shop[${i}]" value="1" id="mpShop${i}">
+                            <label class="form-check-label small" for="mpShop${i}">Shop</label>
+                        </div>
+                        <div class="form-check form-check-inline mb-0">
+                            <input class="form-check-input" type="checkbox" name="mp_es_transferencia[${i}]" value="1" id="mpTrans${i}">
+                            <label class="form-check-label small" for="mpTrans${i}">Transf.</label>
+                        </div>
+                        <button type="button" class="btn btn-outline-danger btn-sm ms-auto" onclick="removeMetodo(this)">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+        container.appendChild(div);
+    }
+
+    function removeMetodo(btn) {
+        const container = document.getElementById('metodosContainer');
+        if (container.children.length > 1) {
+            btn.closest('.metodo-row').remove();
+        } else {
+            alert("Debe existir al menos un método de pago.");
         }
     }
 </script>

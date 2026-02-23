@@ -29,6 +29,15 @@ if (!isset($config)) {
         "ticket_mostrar_cajero" => true,
         "ticket_mostrar_qr" => true,
         "ticket_mostrar_items_count" => true,
+        // Multi-divisa y métodos de pago
+        "tipo_cambio_usd"    => 385.00,
+        "tipo_cambio_mlc"    => 310.00,
+        "moneda_default_pos" => "CUP",
+        "metodos_pago" => [
+            ["id"=>"Efectivo",      "nombre"=>"Efectivo",      "icono"=>"fa-money-bill-wave","color_bootstrap"=>"success","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>false],
+            ["id"=>"Transferencia", "nombre"=>"Transferencia", "icono"=>"fa-university",     "color_bootstrap"=>"primary","activo"=>true,"requiere_codigo"=>true, "aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>true],
+            ["id"=>"Tarjeta",       "nombre"=>"Tarjeta/Gasto", "icono"=>"fa-credit-card",    "color_bootstrap"=>"warning","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>false,"es_transferencia"=>false],
+        ],
     ];
 
     if (file_exists($configFile)) {

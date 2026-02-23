@@ -1,3 +1,17 @@
+<?php
+// Variables de config inyectadas desde pos.php (que ya cargó config_loader.php)
+$metodosPosActivos = array_values(array_filter(
+    $config['metodos_pago'] ?? [],
+    fn($m) => ($m['activo'] ?? false) && ($m['aplica_pos'] ?? true)
+));
+?>
+<script>
+window.METODOS_PAGO_POS  = <?= json_encode($metodosPosActivos, JSON_UNESCAPED_UNICODE) ?>;
+window.POS_TC_USD        = <?= floatval($config['tipo_cambio_usd'] ?? 385) ?>;
+window.POS_TC_MLC        = <?= floatval($config['tipo_cambio_mlc'] ?? 310) ?>;
+window.POS_MONEDA_DEFAULT = <?= json_encode($config['moneda_default_pos'] ?? 'CUP') ?>;
+</script>
+
 <div class="modal fade" id="paymentModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
@@ -7,17 +21,23 @@
             </div>
             <div class="modal-body pt-4 px-4">
                 <div class="text-center mb-4"><div class="total-display-large" id="payment-total-due">$0.00</div></div>
-                <div class="btn-group w-100 mb-4 shadow-sm" role="group">
-                    <input type="radio" class="btn-check" name="paymentMode" id="modeCash" autocomplete="off" checked onclick="setPaymentMode('cash')">
-                    <label class="btn btn-outline-success fw-bold" for="modeCash"><i class="fas fa-money-bill-wave me-1"></i> Efectivo</label>
-                    <input type="radio" class="btn-check" name="paymentMode" id="modeTransfer" autocomplete="off" onclick="setPaymentMode('transfer')">
-                    <label class="btn btn-outline-primary fw-bold" for="modeTransfer"><i class="fas fa-university me-1"></i> Transf.</label>
-                    <input type="radio" class="btn-check" name="paymentMode" id="modeCard" autocomplete="off" onclick="setPaymentMode('card')">
-                    <label class="btn btn-outline-warning fw-bold text-dark" for="modeCard"><i class="fas fa-credit-card me-1"></i> Gasto</label>
-                    <input type="radio" class="btn-check" name="paymentMode" id="modeMixed" autocomplete="off" onclick="setPaymentMode('mixed')">
-                    <label class="btn btn-outline-secondary fw-bold" for="modeMixed"><i class="fas fa-calculator me-1"></i> Mixto</label>
+
+                <!-- Botones de método de pago (dinámicos desde config) -->
+                <div id="paymentMethodsGroup" class="btn-group w-100 mb-2 shadow-sm" role="group">
+                    <!-- Renderizado por renderPaymentMethodsPOS() -->
                 </div>
-                
+
+                <!-- Selector de moneda -->
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <label class="small fw-bold text-muted">Moneda:</label>
+                    <div class="btn-group btn-group-sm" id="posCurrencyGroup">
+                        <button class="btn btn-outline-secondary" onclick="setCurrencyPOS('CUP')">CUP</button>
+                        <button class="btn btn-outline-secondary" onclick="setCurrencyPOS('USD')">USD</button>
+                        <button class="btn btn-outline-secondary" onclick="setCurrencyPOS('MLC')">MLC</button>
+                    </div>
+                    <span class="small text-muted" id="posExchangeDisplay"></span>
+                </div>
+
                 <div id="cashPaymentSection">
                     <div class="mb-3">
                         <label class="form-label small fw-bold text-muted text-uppercase">Monto Entregado</label>
@@ -39,17 +59,15 @@
                 </div>
 
                 <div id="simplePaymentSection" class="d-none"><div class="alert alert-info text-center"><i class="fas fa-check-circle me-1"></i> Pago por el monto exacto.</div></div>
-                
+
                 <div id="mixedPaymentSection" class="d-none">
                     <div class="progress mb-3" style="height: 10px;"><div class="progress-bar bg-success" id="mixProgressBar" role="progressbar" style="width: 0%"></div></div>
-                    <div class="input-group mb-2"><span class="input-group-text bg-success text-white" style="width: 120px;">Efectivo</span><input type="number" class="form-control split-payment-input text-end" id="payCash" placeholder="0.00" min="0" step="0.01" oninput="autoCompleteMixed('cash')"></div>
-                    <div class="input-group mb-2"><span class="input-group-text bg-primary text-white" style="width: 120px;">Transferencia</span><input type="number" class="form-control split-payment-input text-end" id="payTransfer" placeholder="0.00" min="0" step="0.01" oninput="autoCompleteMixed('transfer')"></div>
-                    <div class="input-group mb-2"><span class="input-group-text bg-warning text-dark" style="width: 120px;">Gasto/Tarj.</span><input type="number" class="form-control split-payment-input text-end" id="payCard" placeholder="0.00" min="0" step="0.01" oninput="calculateMixedTotals()"></div>
+                    <div id="mixedInputsContainer"></div>
                     <div class="text-end mt-2"><small class="text-muted fw-bold me-2">RESTANTE:</small><span class="fw-bold text-danger fs-5" id="mixRemaining">$0.00</span></div>
                 </div>
-                
+
                 <hr class="my-4">
-                
+
                 <div class="row g-2 mb-3">
                     <div class="col-7">
                         <label class="small text-muted fw-bold">Cliente</label>
@@ -101,173 +119,274 @@
 </div>
 
 <script>
+// ───── Estado del modal de pago ─────
+let posCurrentCurrency = 'CUP';
+let posCurrentTC       = 1.0;
+
 window.setQuickAmount = function(amount) {
     const si = document.getElementById('singleAmountInput');
-    if(si) {
-        si.value = amount;
-        calcChange();
-    }
+    if(si) { si.value = amount; calcChange(); }
 };
 
-window.openPaymentModal = function() {
-    if(cart.length === 0) return showToast('Carrito vacío', 'warning');
-    if(!cashOpen) return showToast('CAJA CERRADA', 'error');
-    
-    let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct/100)) * i.qty), 0);
-    currentSaleTotal = sub * (1 - globalDiscountPct/100);
-    document.getElementById('payment-total-due').innerText = '$' + currentSaleTotal.toFixed(2);
-    
-    ['payCash','payTransfer','payCard'].forEach(id => { const el=document.getElementById(id); if(el) el.value=''; });
-    
-    const si = document.getElementById('singleAmountInput'); 
-    if(si) {
-        si.value = currentSaleTotal.toFixed(2);
+// ───── Render dinámico de botones de método ─────
+function renderPaymentMethodsPOS() {
+    const container = document.getElementById('paymentMethodsGroup');
+    const metodos   = window.METODOS_PAGO_POS || [];
+    container.innerHTML = '';
+    metodos.forEach((m, i) => {
+        const safeId = 'mode_' + m.id.replace(/\W/g, '_');
+        const isWarning = m.color_bootstrap === 'warning';
+        container.innerHTML += `
+            <input type="radio" class="btn-check" name="paymentMode" id="${safeId}" autocomplete="off"
+                   ${i === 0 ? 'checked' : ''} onclick="setPaymentMode('${m.id.replace(/'/g,"\\'")}')">
+            <label class="btn btn-outline-${m.color_bootstrap} fw-bold${isWarning ? ' text-dark' : ''}" for="${safeId}">
+                <i class="fas ${m.icono} me-1"></i>${m.nombre}
+            </label>`;
+    });
+    if (metodos.length > 1) {
+        container.innerHTML += `
+            <input type="radio" class="btn-check" name="paymentMode" id="modeMixed" autocomplete="off"
+                   onclick="setPaymentMode('mixed')">
+            <label class="btn btn-outline-secondary fw-bold" for="modeMixed">
+                <i class="fas fa-calculator me-1"></i>Mixto
+            </label>`;
     }
-    
-    calcChange();
-    
-    document.getElementById('modeCash').checked = true;
-    setPaymentMode('cash');
-    toggleServiceOptions();
-    
-    new bootstrap.Modal(document.getElementById('paymentModal')).show();
-    setTimeout(() => { if(si) si.select(); }, 500);
+}
+
+// ───── Render dinámico de inputs mixtos ─────
+function renderMixedInputsPOS() {
+    const container = document.getElementById('mixedInputsContainer');
+    const metodos   = window.METODOS_PAGO_POS || [];
+    container.innerHTML = '';
+    metodos.forEach(m => {
+        const color  = m.color_bootstrap || 'secondary';
+        const dark   = color === 'warning' ? 'text-dark' : 'text-white';
+        container.innerHTML += `
+            <div class="input-group mb-2">
+                <span class="input-group-text bg-${color} ${dark}" style="width:130px;">${m.nombre}</span>
+                <input type="number" class="form-control split-payment-input text-end"
+                       id="payMixed_${m.id.replace(/\W/g,'_')}" data-method-id="${m.id}"
+                       placeholder="0.00" min="0" step="0.01"
+                       oninput="autoCompleteMixedDynamic('${m.id.replace(/'/g,"\\'")}')">
+            </div>`;
+    });
+}
+
+// ───── Selector de moneda ─────
+window.setCurrencyPOS = function(moneda) {
+    posCurrentCurrency = moneda;
+    const rates = { CUP: 1.0, USD: window.POS_TC_USD, MLC: window.POS_TC_MLC };
+    posCurrentTC = rates[moneda] || 1.0;
+    document.getElementById('posExchangeDisplay').textContent =
+        moneda === 'CUP' ? '' : `1 ${moneda} = ${posCurrentTC.toFixed(2)} CUP`;
+    document.querySelectorAll('#posCurrencyGroup button').forEach(b =>
+        b.classList.toggle('active', b.textContent.trim() === moneda));
+
+    // Actualizar display del total
+    const montoDisplay = currentSaleTotal / posCurrentTC;
+    const sym = moneda === 'CUP' ? '$' : moneda + ' ';
+    document.getElementById('payment-total-due').innerText = sym + montoDisplay.toFixed(2);
+
+    // Actualizar botones de cantidad rápida según moneda
+    const quickAmounts = moneda === 'CUP' ? [200, 500, 1000, 2000] : [1, 5, 10, 20];
+    document.querySelectorAll('[onclick^="setQuickAmount"]').forEach((btn, i) => {
+        const amt = quickAmounts[i] ?? quickAmounts[0];
+        btn.textContent = amt;
+        btn.setAttribute('onclick', `setQuickAmount(${amt})`);
+    });
+    if (currentPaymentMode !== 'mixed') calcChange();
 };
 
+// ───── Modo de pago ─────
 window.setPaymentMode = function(mode) {
     currentPaymentMode = mode;
-    ['cashPaymentSection','simplePaymentSection','mixedPaymentSection'].forEach(id => document.getElementById(id).classList.add('d-none'));
-    
-    if(mode === 'cash') { 
-        document.getElementById('cashPaymentSection').classList.remove('d-none'); 
+    ['cashPaymentSection', 'simplePaymentSection', 'mixedPaymentSection'].forEach(id =>
+        document.getElementById(id).classList.add('d-none'));
+
+    const metodoEfectivo = (window.METODOS_PAGO_POS || [])[0]?.id || 'Efectivo';
+    if (mode === metodoEfectivo) {
+        document.getElementById('cashPaymentSection').classList.remove('d-none');
         const si = document.getElementById('singleAmountInput');
-        if(si && (!si.value || parseFloat(si.value) === 0)) {
-            si.value = currentSaleTotal.toFixed(2);
-        }
+        if (si && (!si.value || parseFloat(si.value) === 0)) si.value = (currentSaleTotal / posCurrentTC).toFixed(2);
         calcChange();
-        setTimeout(() => si.focus(), 100); 
-    } 
-    else if(mode === 'mixed') { 
-        document.getElementById('mixedPaymentSection').classList.remove('d-none'); 
-        document.getElementById('payCash').value = currentSaleTotal.toFixed(2); 
-        calculateMixedTotals(); 
-        setTimeout(() => document.getElementById('payCash').select(), 100); 
-    } 
-    else { 
-        document.getElementById('simplePaymentSection').classList.remove('d-none'); 
+        setTimeout(() => si?.focus(), 100);
+    } else if (mode === 'mixed') {
+        document.getElementById('mixedPaymentSection').classList.remove('d-none');
+        const first = document.querySelector('.split-payment-input');
+        if (first) { first.value = currentSaleTotal.toFixed(2); }
+        calculateMixedTotals();
+        setTimeout(() => first?.select(), 100);
+    } else {
+        document.getElementById('simplePaymentSection').classList.remove('d-none');
     }
 };
 
+// ───── Cálculo de cambio ─────
 window.calcChange = function() {
-    const r = parseFloat(document.getElementById('singleAmountInput').value) || 0;
-    const c = r - currentSaleTotal;
-    const d = document.getElementById('singleChangeDisplay');
-    if(c >= -0.01) { 
-        d.innerText = '$' + Math.max(0, c).toFixed(2); 
-        d.className = 'h2 fw-bold text-primary mb-0'; 
-    } else { 
-        d.innerText = 'Falta: $' + Math.abs(c).toFixed(2); 
-        d.className = 'h4 fw-bold text-danger mb-0'; 
+    const r   = parseFloat(document.getElementById('singleAmountInput').value) || 0;
+    const totalEnMoneda = currentSaleTotal / posCurrentTC;
+    const c   = r - totalEnMoneda;
+    const d   = document.getElementById('singleChangeDisplay');
+    const sym = posCurrentCurrency === 'CUP' ? '$' : posCurrentCurrency + ' ';
+    if (c >= -0.01) {
+        d.innerText = sym + Math.max(0, c).toFixed(2);
+        d.className = 'h2 fw-bold text-primary mb-0';
+    } else {
+        d.innerText = 'Falta: ' + sym + Math.abs(c).toFixed(2);
+        d.className = 'h4 fw-bold text-danger mb-0';
     }
 };
 
+// ───── Totales modo mixto ─────
 window.calculateMixedTotals = function() {
-    const c = parseFloat(document.getElementById('payCash').value)||0;
-    const t = parseFloat(document.getElementById('payTransfer').value)||0;
-    const cd = parseFloat(document.getElementById('payCard').value)||0;
-    const paid = c + t + cd;
+    const inputs = document.querySelectorAll('.split-payment-input');
+    let paid = 0;
+    inputs.forEach(inp => paid += parseFloat(inp.value) || 0);
     const rem = currentSaleTotal - paid;
-    const pct = Math.min(100, (paid/currentSaleTotal)*100);
-    const bar = document.getElementById('mixProgressBar'); 
-    if(bar) { 
-        bar.style.width = pct + '%'; 
-        bar.className = 'progress-bar ' + (rem <= 0.01 ? 'bg-success' : 'bg-warning'); 
-    }
-    const rd = document.getElementById('mixRemaining'); 
-    if(rd) { 
-        if(rem > 0.01) { 
-            rd.innerText = '$' + rem.toFixed(2); 
-            rd.className = 'fw-bold text-danger fs-5'; 
-            document.getElementById('btn-confirm-payment').disabled = true; 
+    const pct = Math.min(100, (paid / currentSaleTotal) * 100);
+    const bar = document.getElementById('mixProgressBar');
+    if (bar) { bar.style.width = pct + '%'; bar.className = 'progress-bar ' + (rem <= 0.01 ? 'bg-success' : 'bg-warning'); }
+    const rd  = document.getElementById('mixRemaining');
+    if (rd) {
+        if (rem > 0.01) {
+            rd.innerText = '$' + rem.toFixed(2); rd.className = 'fw-bold text-danger fs-5';
+            document.getElementById('btn-confirm-payment').disabled = true;
         } else if (rem < -0.01) {
-            rd.innerText = 'Exceso: $' + Math.abs(rem).toFixed(2); 
-            rd.className = 'fw-bold text-info fs-5'; 
+            rd.innerText = 'Exceso: $' + Math.abs(rem).toFixed(2); rd.className = 'fw-bold text-info fs-5';
             document.getElementById('btn-confirm-payment').disabled = false;
-        } else { 
-            rd.innerText = 'PAGO COMPLETO'; 
-            rd.className = 'fw-bold text-success fs-5'; 
-            document.getElementById('btn-confirm-payment').disabled = false; 
-        } 
+        } else {
+            rd.innerText = 'PAGO COMPLETO'; rd.className = 'fw-bold text-success fs-5';
+            document.getElementById('btn-confirm-payment').disabled = false;
+        }
     }
 };
 
-window.autoCompleteMixed = function(source) {
-    const cashEl = document.getElementById('payCash');
-    const transferEl = document.getElementById('payTransfer');
-    const cardEl = document.getElementById('payCard');
-    
-    const cashVal = parseFloat(cashEl.value) || 0;
-    const transferVal = parseFloat(transferEl.value) || 0;
-    const cardVal = parseFloat(cardEl.value) || 0;
-
-    if (source === 'cash') {
-        const remaining = currentSaleTotal - cashVal - cardVal;
-        transferEl.value = remaining > 0 ? remaining.toFixed(2) : "0.00";
-    } else if (source === 'transfer') {
-        const remaining = currentSaleTotal - transferVal - cardVal;
-        cashEl.value = remaining > 0 ? remaining.toFixed(2) : "0.00";
+function autoCompleteMixedDynamic(sourceId) {
+    const inputs = Array.from(document.querySelectorAll('.split-payment-input'));
+    if (inputs.length === 2) {
+        const safeSourceId = sourceId.replace(/\W/g, '_');
+        const src   = document.getElementById('payMixed_' + safeSourceId);
+        const other = inputs.find(i => i.dataset.methodId !== sourceId);
+        if (src && other) {
+            const rem = currentSaleTotal - (parseFloat(src.value) || 0);
+            other.value = rem > 0 ? rem.toFixed(2) : '0.00';
+        }
     }
-    
-    calculateMixedTotals();
-};
-
-function autoCompletePayment(sourceId, targetIds) {
-    const val = parseFloat(document.getElementById(sourceId).value)||0;
-    const otherVal = parseFloat(document.getElementById(targetIds[1]).value)||0; 
-    const rem = currentSaleTotal - val - otherVal;
-    if(rem >= 0) document.getElementById(targetIds[0]).value = rem.toFixed(2);
     calculateMixedTotals();
 }
+
+// ───── Abrir modal ─────
+window.openPaymentModal = function() {
+    if (cart.length === 0) return showToast('Carrito vacío', 'warning');
+    if (!cashOpen) return showToast('CAJA CERRADA', 'error');
+
+    let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct / 100)) * i.qty), 0);
+    currentSaleTotal = sub * (1 - globalDiscountPct / 100);
+
+    // Limpiar inputs mixtos
+    document.querySelectorAll('.split-payment-input').forEach(el => el.value = '');
+
+    const si = document.getElementById('singleAmountInput');
+    if (si) si.value = '';
+
+    // Renderizar métodos dinámicos
+    renderPaymentMethodsPOS();
+    renderMixedInputsPOS();
+
+    // Seleccionar moneda default
+    setCurrencyPOS(window.POS_MONEDA_DEFAULT || 'CUP');
+
+    // Seleccionar primer método
+    const firstRadio = document.querySelector('input[name="paymentMode"]');
+    if (firstRadio) {
+        firstRadio.checked = true;
+        setPaymentMode(firstRadio.id.replace('mode_', '').replace(/_/g, ' '));
+        // Usar el id real del método
+        const firstMethod = (window.METODOS_PAGO_POS || [])[0];
+        if (firstMethod) setPaymentMode(firstMethod.id);
+    }
+
+    toggleServiceOptions();
+    new bootstrap.Modal(document.getElementById('paymentModal')).show();
+    setTimeout(() => { if (si) si.select(); }, 500);
+};
 
 window.toggleServiceOptions = function() {
     const t = document.getElementById('serviceType').value;
     document.getElementById('deliveryDiv').classList.add('d-none');
     document.getElementById('reservationDiv').classList.add('d-none');
-    if(t === 'mensajeria' || t === 'delivery') document.getElementById('deliveryDiv').classList.remove('d-none');
-    if(t === 'reserva') document.getElementById('reservationDiv').classList.remove('d-none');
+    if (t === 'mensajeria' || t === 'delivery') document.getElementById('deliveryDiv').classList.remove('d-none');
+    if (t === 'reserva') document.getElementById('reservationDiv').classList.remove('d-none');
 };
 
+// ───── Confirmar pago ─────
 window.confirmPayment = async function() {
-    let payments = []; let mainMethod = 'Efectivo';
+    let payments   = [];
+    let mainMethod = 'Efectivo';
+    const metodoEfectivo = (window.METODOS_PAGO_POS || [])[0]?.id || 'Efectivo';
+
     if (currentPaymentMode === 'mixed') {
         mainMethod = 'Mixto';
-        const c = parseFloat(document.getElementById('payCash').value)||0;
-        const t = parseFloat(document.getElementById('payTransfer').value)||0;
-        const cd = parseFloat(document.getElementById('payCard').value)||0;
-        if(c>0) payments.push({method:'Efectivo', amount:c});
-        if(t>0) payments.push({method:'Transferencia', amount:t});
-        if(cd>0) payments.push({method:'Tarjeta', amount:cd});
-        if((c+t+cd) < (currentSaleTotal - 0.05)) return alert("Pago incompleto");
-    } else if (currentPaymentMode === 'cash') {
-        mainMethod = 'Efectivo';
-        payments.push({method:'Efectivo', amount: currentSaleTotal});
-        const del = parseFloat(document.getElementById('singleAmountInput').value)||0;
-        if(del < (currentSaleTotal - 0.01)) return alert("Monto insuficiente");
+        let total = 0;
+        document.querySelectorAll('.split-payment-input').forEach(inp => {
+            const amt = parseFloat(inp.value) || 0;
+            if (amt > 0) { payments.push({ method: inp.dataset.methodId, amount: amt }); total += amt; }
+        });
+        if (total < (currentSaleTotal - 0.05)) return alert("Pago incompleto");
     } else {
-        mainMethod = currentPaymentMode === 'transfer' ? 'Transferencia' : 'Tarjeta';
-        payments.push({method: mainMethod, amount: currentSaleTotal});
+        mainMethod = currentPaymentMode;
+        if (currentPaymentMode === metodoEfectivo) {
+            const del = parseFloat(document.getElementById('singleAmountInput').value) || 0;
+            const totalEnMoneda = currentSaleTotal / posCurrentTC;
+            if (del < (totalEnMoneda - 0.01)) return alert("Monto insuficiente");
+        }
+        payments.push({ method: mainMethod, amount: currentSaleTotal });
     }
+
     const cliName = document.getElementById('cliName').value || 'Mostrador';
-    const serv = document.getElementById('serviceType').value;
-    let msj = ''; if(serv === 'mensajeria' || serv === 'delivery') { msj = document.getElementById('deliveryDriver').value; if(!msj) return alert("Seleccione mensajero"); }
-    let rDate='', rAbono=0; if(serv === 'reserva') { rDate = document.getElementById('reservationDate').value; rAbono = document.getElementById('reservationAbono').value; if(!rDate||!rAbono) return alert("Datos reserva incompletos"); }
-    const payload = { uuid: crypto.randomUUID(), items: cart.map(i=>({id:i.id, name:i.name, qty:i.qty, price:i.price, note:i.note})), total: currentSaleTotal, payments: payments, metodo_pago: mainMethod, tipo_servicio: serv, cliente_nombre: cliName, mensajero_nombre: msj, fecha_reserva: rDate, abono: rAbono, id_caja: cashId, timestamp: Date.now() };
+    const serv    = document.getElementById('serviceType').value;
+    let msj = '';
+    if (serv === 'mensajeria' || serv === 'delivery') {
+        msj = document.getElementById('deliveryDriver').value;
+        if (!msj) return alert("Seleccione mensajero");
+    }
+    let rDate = '', rAbono = 0;
+    if (serv === 'reserva') {
+        rDate  = document.getElementById('reservationDate').value;
+        rAbono = document.getElementById('reservationAbono').value;
+        if (!rDate || !rAbono) return alert("Datos reserva incompletos");
+    }
+
+    const payload = {
+        uuid:                 crypto.randomUUID(),
+        items:                cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, note: i.note })),
+        total:                currentSaleTotal,
+        payments:             payments,
+        metodo_pago:          mainMethod,
+        tipo_servicio:        serv,
+        cliente_nombre:       cliName,
+        mensajero_nombre:     msj,
+        fecha_reserva:        rDate,
+        abono:                rAbono,
+        id_caja:              cashId,
+        timestamp:            Date.now(),
+        moneda:               posCurrentCurrency,
+        tipo_cambio:          posCurrentTC,
+        monto_moneda_original: parseFloat((currentSaleTotal / posCurrentTC).toFixed(2)),
+    };
+
     bootstrap.Modal.getInstance(document.getElementById('paymentModal')).hide();
     try {
-        const r = await fetch('pos_save.php', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+        const r   = await fetch('pos_save.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
         const res = await r.json();
-        if(res.status === 'success') { Synth.cash(); if(document.getElementById('printTicket').checked) window.open('ticket_view.php?id='+res.id, 'Ticket', 'width=380,height=600'); else showToast('Venta #' + res.id + ' Registrada'); finishSale(); } else { alert('Error: ' + res.msg); }
-    } catch(e) { saveOffline(payload); }
+        if (res.status === 'success') {
+            Synth.cash();
+            if (document.getElementById('printTicket').checked) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
+            else showToast('Venta #' + res.id + ' Registrada');
+            finishSale();
+        } else {
+            alert('Error: ' + res.msg);
+        }
+    } catch (e) { saveOffline(payload); }
 };
 </script>
-
