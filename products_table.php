@@ -22,8 +22,12 @@ function renderProductRows($rows, $localPath) {
     if(empty($rows)): ?>
         <tr><td colspan="11" class="text-center py-5 text-muted">No se encontraron productos.</td></tr>
     <?php else: 
-        foreach($rows as $p): 
-            $hasImg = file_exists($localPath . $p['codigo'] . '.jpg'); 
+        foreach($rows as $p):
+            $imgBase  = $localPath . $p['codigo'];
+            $hasImg   = false; $imgV = '';
+            foreach (['.avif','.webp','.jpg'] as $_e) {
+                if (file_exists($imgBase.$_e)) { $hasImg = true; $imgV = '&v='.filemtime($imgBase.$_e); break; }
+            }
             $stock = floatval($p['stock_total']);
             $isActive = intval($p['activo'] ?? 1);
             $rowClass = $isActive ? '' : 'row-inactive';
@@ -31,7 +35,7 @@ function renderProductRows($rows, $localPath) {
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.$p['codigo'] : 'https://via.placeholder.com/50?text=IMG'; ?>" class="prod-img-table" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
+        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'https://via.placeholder.com/50?text=IMG'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
         <td class="small font-monospace"><?php echo $p['codigo']; ?></td>
         <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;">
             <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
@@ -123,7 +127,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         exit;
     }
 
-    // SUBIDA DE IMAGEN
+    // SUBIDA DE IMAGEN — guarda en .jpg, .webp y .avif
     if (isset($_FILES['new_photo'])) {
         try {
             $code = $_POST['prod_code'] ?? '';
@@ -132,17 +136,57 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($file['error'] !== UPLOAD_ERR_OK) throw new Exception("Error subida.");
             $imgData = file_get_contents($file['tmp_name']);
             $src = @imagecreatefromstring($imgData);
-            if (!$src) throw new Exception("Imagen corrupta.");
-            $width = imagesx($src); $height = imagesy($src);
-            $size = min($width, $height);
-            $x = ($width - $size) / 2; $y = ($height - $size) / 2;
-            $dest = imagecreatetruecolor(200, 200);
-            imagecopyresampled($dest, $src, 0, 0, $x, $y, 200, 200, $size, $size);
+            if (!$src) throw new Exception("Imagen inválida o formato no soportado.");
+
+            // Recorte cuadrado centrado → 800×800 (master) y 200×200 (thumb)
+            $width  = imagesx($src);
+            $height = imagesy($src);
+            $size   = min($width, $height);
+            $x      = (int)(($width  - $size) / 2);
+            $y      = (int)(($height - $size) / 2);
+
+            // ── Master 800 px ─────────────────────────────────────────────────
+            $master = imagecreatetruecolor(800, 800);
+            imagecopyresampled($master, $src, 0, 0, $x, $y, 800, 800, $size, $size);
+
+            // ── Thumb 200 px ──────────────────────────────────────────────────
+            $thumb = imagecreatetruecolor(200, 200);
+            imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
+            imagedestroy($src);
+
             if (!is_dir($localPath)) @mkdir($localPath, 0777, true);
-            imagejpeg($dest, $localPath . $code . '.jpg', 85);
-            imagedestroy($src); imagedestroy($dest);
+
+            $base = $localPath . $code;
+
+            // Eliminar archivos anteriores para evitar que formatos de mayor
+            // prioridad (avif > webp > jpg) en image.php sirvan versiones viejas.
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
+                if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+
+            // JPEG — compatibilidad universal (baseline)
+            if (!imagejpeg($master, $base . '.jpg', 85))
+                throw new Exception("No se pudo guardar el .jpg.");
+
+            // WebP — soporte amplio, ~30 % más ligero que JPEG
+            if (function_exists('imagewebp'))
+                imagewebp($master, $base . '.webp', 82);
+
+            // AVIF — soporte moderno, ~50 % más ligero que JPEG
+            if (function_exists('imageavif'))
+                imageavif($master, $base . '.avif', 60, 6);
+
+            // Thumbs (para cards pequeñas si se necesitan en el futuro)
+            imagejpeg($thumb,  $base . '_thumb.jpg',  80);
+            if (function_exists('imagewebp')) imagewebp($thumb, $base . '_thumb.webp', 78);
+
+            imagedestroy($master);
+            imagedestroy($thumb);
+
             echo json_encode(['status' => 'success']);
-        } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
         exit;
     }
 
@@ -167,6 +211,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$val, $sku, $EMP_ID]);
             echo json_encode(['status'=>'success']);
         } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        exit;
+    }
+
+    // ELIMINAR IMAGEN EXTRA
+    if (isset($_POST['action']) && $_POST['action'] === 'delete_extra_img') {
+        try {
+            $sku  = $_POST['sku']  ?? '';
+            $slot = $_POST['slot'] ?? '';
+            if (!$sku) throw new Exception("SKU ausente.");
+            if (!in_array($slot, ['extra1', 'extra2'])) throw new Exception("Slot inválido.");
+            $base = $localPath . $sku . '_' . $slot;
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
+                if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+            echo json_encode(['status' => 'success']);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
         exit;
     }
 
@@ -470,7 +532,8 @@ if ($isAjax) {
     </nav>
 </div>
 
-<input type="file" id="fileInput" accept="image/jpeg, image/webp" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="fileInput"       accept="image/jpeg, image/webp" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="editorFileInput" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
 
 <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -765,6 +828,93 @@ async function applyBulkAction() {
     } catch(e) { alert("Error conexión"); }
 }
 
+// --- IMÁGENES DEL EDITOR ---
+let _editorSlot = '', _editorSku = '';
+
+function triggerEditorImg(sku, slot) {
+    _editorSku  = sku;
+    _editorSlot = slot;
+    document.getElementById('editorFileInput').click();
+}
+
+async function handleEditorUpload() {
+    const input = document.getElementById('editorFileInput');
+    const file  = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    const prodCode = (_editorSlot === 'main') ? _editorSku : _editorSku + '_' + _editorSlot;
+    const formData = new FormData();
+    formData.append('new_photo', file);
+    formData.append('prod_code', prodCode);
+
+    const imgEl = document.getElementById('img_' + _editorSlot);
+    if (imgEl) imgEl.style.opacity = '0.4';
+
+    try {
+        const res  = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            if (imgEl) {
+                imgEl.src = `image.php?code=${encodeURIComponent(prodCode)}&t=${Date.now()}`;
+                imgEl.style.opacity = '1';
+            }
+            const btnWrap = document.getElementById('btnWrap_' + _editorSlot);
+            if (btnWrap) {
+                const firstBtn = btnWrap.querySelector('button');
+                if (firstBtn) firstBtn.innerHTML = '<i class="fas fa-camera me-1"></i> Cambiar';
+                if (_editorSlot !== 'main' && !btnWrap.querySelector('.btn-outline-danger')) {
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'btn btn-sm btn-outline-danger';
+                    delBtn.title = 'Eliminar imagen';
+                    delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                    const slot = _editorSlot, sku = _editorSku;
+                    delBtn.onclick = () => deleteEditorImg(sku, slot);
+                    btnWrap.appendChild(delBtn);
+                }
+            }
+            // Refrescar miniatura de la tabla si es imagen principal
+            if (_editorSlot === 'main') {
+                const tableImg = document.querySelector(`.prod-img-table[data-code="${_editorSku}"]`);
+                if (tableImg) tableImg.src = `image.php?code=${encodeURIComponent(_editorSku)}&t=${Date.now()}`;
+            }
+        } else {
+            if (imgEl) imgEl.style.opacity = '1';
+            alert('Error al guardar imagen: ' + (data.msg || 'desconocido'));
+        }
+    } catch (e) {
+        if (imgEl) imgEl.style.opacity = '1';
+        alert('Error de conexión al subir imagen.');
+    }
+}
+
+async function deleteEditorImg(sku, slot) {
+    const label = slot === 'extra1' ? 'Extra 1' : 'Extra 2';
+    if (!confirm(`¿Eliminar imagen ${label} del producto?`)) return;
+
+    const formData = new FormData();
+    formData.append('action', 'delete_extra_img');
+    formData.append('sku',    sku);
+    formData.append('slot',   slot);
+
+    try {
+        const res  = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const imgEl = document.getElementById('img_' + slot);
+            if (imgEl) imgEl.src = `image.php?code=${encodeURIComponent(sku + '_' + slot)}&t=${Date.now()}`;
+            const btnWrap = document.getElementById('btnWrap_' + slot);
+            if (btnWrap) btnWrap.innerHTML =
+                `<button type="button" class="btn btn-sm btn-outline-primary" onclick="triggerEditorImg('${sku}','${slot}')"><i class="fas fa-upload me-1"></i> Subir</button>`;
+        } else {
+            alert('Error al eliminar imagen: ' + (data.msg || 'desconocido'));
+        }
+    } catch (e) {
+        alert('Error de conexión al eliminar imagen.');
+    }
+}
+
 // --- VARIOS ---
 function triggerUpload(code) { currentCode = code; document.getElementById('fileInput').click(); }
 function uploadPhoto() {
@@ -773,9 +923,20 @@ function uploadPhoto() {
     const formData = new FormData();
     formData.append('new_photo', file);
     formData.append('prod_code', currentCode);
-    fetch('products_table.php', { method: 'POST', body: formData }).then(r => r.json()).then(res => {
-        if(res.status==='success') location.reload(); else alert('Error: ' + res.msg);
-    });
+    // Resetear el input para que el mismo archivo se pueda subir de nuevo
+    document.getElementById('fileInput').value = '';
+    fetch('products_table.php', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                // Actualizar la imagen en la tabla con cache-buster (sin recargar página)
+                const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
+                if(img) img.src = `image.php?code=${encodeURIComponent(currentCode)}&t=${Date.now()}`;
+            } else {
+                alert('Error al guardar imagen: ' + res.msg);
+            }
+        })
+        .catch(e => alert('Error de conexión: ' + e.message));
 }
 async function toggleWeb(sku, checkbox) {
     const val = checkbox.checked ? 1 : 0;

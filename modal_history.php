@@ -191,9 +191,21 @@ if (isset($_GET['render_mode'])) {
                         <td><span class="badge <?php echo $badgeClass; ?> badge-pago" style="font-size:0.7rem"><?php echo $metodosDisplay; ?></span></td>
                         <td class="text-end" onclick="event.stopPropagation()">
                             <?php if (!$isRef): ?>
-                                <button class="btn btn-sm btn-danger py-0 px-2 shadow-sm me-1" onclick="refundTicketComplete(<?php echo $t['id']; ?>)" title="Devolver Todo"><i class="fas fa-undo"></i></button>
+                                <button class="btn btn-sm btn-warning py-0 px-2 shadow-sm me-1"
+                                        onclick="voidTicket(<?php echo $t['id']; ?>)"
+                                        title="Anular con motivo (sesión activa)">
+                                    <i class="fas fa-ban"></i>
+                                </button>
+                                <button class="btn btn-sm btn-danger py-0 px-2 shadow-sm me-1"
+                                        onclick="refundTicketComplete(<?php echo $t['id']; ?>)"
+                                        title="Devolución (admin)">
+                                    <i class="fas fa-undo"></i>
+                                </button>
                             <?php endif; ?>
-                            <button class="btn btn-sm btn-dark py-0 px-2 shadow-sm" onclick="window.open('ticket_view.php?id=<?php echo $t['id']; ?>','T','width=380,height=600')"><i class="fas fa-print"></i></button>
+                            <button class="btn btn-sm btn-dark py-0 px-2 shadow-sm"
+                                    onclick="window.open('ticket_view.php?id=<?php echo $t['id']; ?>','T','width=380,height=600')">
+                                <i class="fas fa-print"></i>
+                            </button>
                         </td>
                     </tr>
                     <tr class="collapse bg-white" id="det-row-<?php echo $t['id']; ?>">
@@ -261,8 +273,11 @@ if (isset($_GET['render_mode'])) {
                     <p class="text-muted">Iniciando historial...</p>
                 </div>
             </div>
-            <div class="modal-footer py-1 bg-light">
-                <small class="text-muted ms-auto">Datos en tiempo real</small>
+            <div class="modal-footer py-1 bg-light d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                    <i class="fas fa-ban text-warning me-1"></i>Anular (sesión activa, con motivo)&nbsp;&nbsp;
+                    <i class="fas fa-undo text-danger me-1"></i>Devolver (admin)
+                </small>
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>

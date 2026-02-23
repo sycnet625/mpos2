@@ -52,7 +52,15 @@ $defaultConfig = [
     "facebook_url" => "",
     "twitter_url" => "",
     "instagram_url" => "",
-    "youtube_url" => ""
+    "youtube_url" => "",
+    // Diseño del ticket
+    "ticket_logo" => "",
+    "ticket_slogan" => "",
+    "ticket_mostrar_uuid" => false,
+    "ticket_mostrar_canal" => true,
+    "ticket_mostrar_cajero" => true,
+    "ticket_mostrar_qr" => true,
+    "ticket_mostrar_items_count" => true,
 ];
 
 // 1. CARGAR CONFIGURACIÓN ACTUAL
@@ -115,11 +123,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Procesar Cajeros Dinámicos
         if (isset($_POST['cajero_nombre']) && is_array($_POST['cajero_nombre'])) {
+            $rolesValidos = ['cajero', 'supervisor', 'admin'];
             for ($i = 0; $i < count($_POST['cajero_nombre']); $i++) {
                 $nombre = trim($_POST['cajero_nombre'][$i]);
                 $pin = trim($_POST['cajero_pin'][$i]);
+                $rol = in_array($_POST['cajero_rol'][$i] ?? '', $rolesValidos) ? $_POST['cajero_rol'][$i] : 'cajero';
                 if (!empty($nombre) && !empty($pin)) {
-                    $newConfig['cajeros'][] = ["nombre" => $nombre, "pin" => $pin];
+                    $newConfig['cajeros'][] = ["nombre" => $nombre, "pin" => $pin, "rol" => $rol];
                 }
             }
         }
@@ -129,11 +139,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['cajeros'][] = ["nombre" => "Admin", "pin" => "0000"];
         }
 
-        // Guardar JSON
-        if (file_put_contents($configFile, json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE))) {
+        // ---- Logo del ticket ----
+        $newConfig['ticket_logo'] = $currentConfig['ticket_logo'] ?? '';
+        if (!empty($_POST['ticket_logo_remove'])) {
+            foreach (['jpg', 'png', 'gif', 'webp'] as $ext) {
+                // Limpiar rutas antiguas (assets/) y nueva (assets/img/)
+                foreach (['/assets/ticket_logo.', '/assets/img/ticket_logo.'] as $prefix) {
+                    $f = __DIR__ . $prefix . $ext;
+                    if (file_exists($f)) unlink($f);
+                }
+            }
+            $newConfig['ticket_logo'] = '';
+        } elseif (isset($_FILES['ticket_logo']) && $_FILES['ticket_logo']['error'] === UPLOAD_ERR_OK) {
+            $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+            $mime = mime_content_type($_FILES['ticket_logo']['tmp_name']);
+            if (isset($allowed[$mime]) && $_FILES['ticket_logo']['size'] <= 2 * 1024 * 1024) {
+                $ext = $allowed[$mime];
+                // Eliminar logos anteriores en ambas ubicaciones posibles
+                foreach (array_values($allowed) as $e) {
+                    foreach (['/assets/ticket_logo.', '/assets/img/ticket_logo.'] as $prefix) {
+                        $f = __DIR__ . $prefix . $e;
+                        if (file_exists($f)) unlink($f);
+                    }
+                }
+                $dest = __DIR__ . '/assets/img/ticket_logo.' . $ext;
+                if (move_uploaded_file($_FILES['ticket_logo']['tmp_name'], $dest)) {
+                    $newConfig['ticket_logo'] = 'assets/img/ticket_logo.' . $ext;
+                } else {
+                    throw new Exception("No se pudo guardar el logo. Verifique permisos en assets/img/.");
+                }
+            } else {
+                throw new Exception("El logo debe ser JPG, PNG o WebP y no superar 2MB.");
+            }
+        }
+
+        // ---- Otros campos del diseño ----
+        $newConfig['ticket_slogan']             = substr(trim($_POST['ticket_slogan'] ?? ''), 0, 100);
+        $newConfig['ticket_mostrar_uuid']        = isset($_POST['ticket_mostrar_uuid']);
+        $newConfig['ticket_mostrar_canal']       = isset($_POST['ticket_mostrar_canal']);
+        $newConfig['ticket_mostrar_cajero']      = isset($_POST['ticket_mostrar_cajero']);
+        $newConfig['ticket_mostrar_qr']          = isset($_POST['ticket_mostrar_qr']);
+        $newConfig['ticket_mostrar_items_count'] = isset($_POST['ticket_mostrar_items_count']);
+
+        // Guardar JSON — preservar campos del cfg que no están en el form (ej: vapid_*, sync_api_key)
+        $saveConfig = array_merge($currentConfig, $newConfig);
+        if (file_put_contents($configFile, json_encode($saveConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) !== false) {
             $msg = "Configuración guardada exitosamente.";
             $msgType = "success";
-            $currentConfig = $newConfig; // Refrescar vista
+            $currentConfig = $saveConfig; // Refrescar vista
         } else {
             throw new Exception("No se pudo escribir en el archivo pos.cfg. Verifique permisos.");
         }
@@ -185,7 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     <?php endif; ?>
 
-    <form method="POST">
+    <form method="POST" enctype="multipart/form-data">
         
         <div class="card">
             <div class="card-header text-primary"><i class="fas fa-store"></i> Datos del Negocio (Ticket)</div>
@@ -510,19 +563,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="card-header text-info"><i class="fas fa-users"></i> Gestión de Cajeros</div>
             <div class="card-body">
                 <div id="cajerosContainer">
-                    <?php foreach($currentConfig['cajeros'] as $cajero): ?>
-                    <div class="row g-2 align-items-center cajero-row">
-                        <div class="col-5">
+                    <?php foreach($currentConfig['cajeros'] as $cajero):
+                        $rolCajero = $cajero['rol'] ?? 'cajero';
+                        $rolColors = ['cajero'=>'primary','supervisor'=>'warning','admin'=>'danger'];
+                        $rolIcons  = ['cajero'=>'fa-user','supervisor'=>'fa-user-shield','admin'=>'fa-user-crown'];
+                        $rolColor  = $rolColors[$rolCajero] ?? 'primary';
+                        $rolIcon   = $rolIcons[$rolCajero]  ?? 'fa-user';
+                    ?>
+                    <div class="row g-2 align-items-center cajero-row mb-1">
+                        <div class="col-4">
                             <div class="input-group">
                                 <span class="input-group-text bg-white"><i class="fas fa-user"></i></span>
                                 <input type="text" name="cajero_nombre[]" class="form-control" placeholder="Nombre" value="<?php echo htmlspecialchars($cajero['nombre']); ?>" required>
                             </div>
                         </div>
-                        <div class="col-5">
+                        <div class="col-3">
                             <div class="input-group">
                                 <span class="input-group-text bg-white"><i class="fas fa-key"></i></span>
-                                <input type="text" name="cajero_pin[]" class="form-control" placeholder="PIN (4 dígitos)" value="<?php echo htmlspecialchars($cajero['pin']); ?>" required pattern="\d{4,}" title="Mínimo 4 dígitos">
+                                <input type="text" name="cajero_pin[]" class="form-control" placeholder="PIN" value="<?php echo htmlspecialchars($cajero['pin']); ?>" required pattern="\d{4,}" title="Mínimo 4 dígitos">
                             </div>
+                        </div>
+                        <div class="col-3">
+                            <select name="cajero_rol[]" class="form-select form-select-sm">
+                                <option value="cajero" <?= $rolCajero==='cajero' ? 'selected' : '' ?>>🔵 Cajero</option>
+                                <option value="supervisor" <?= $rolCajero==='supervisor' ? 'selected' : '' ?>>🟠 Supervisor</option>
+                                <option value="admin" <?= $rolCajero==='admin' ? 'selected' : '' ?>>🔴 Admin</option>
+                            </select>
                         </div>
                         <div class="col-2 text-end">
                             <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCajero(this)"><i class="fas fa-trash"></i></button>
@@ -535,6 +601,117 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 </button>
             </div>
         </div>
+
+        <!-- ===== DISEÑO DEL TICKET ===== -->
+        <?php
+        $logoPath   = $currentConfig['ticket_logo'] ?? '';
+        $logoExists = !empty($logoPath) && file_exists(__DIR__ . '/' . $logoPath);
+        $togglesDef = [
+            ['ticket_mostrar_cajero',      'chkMostrarCajero',      'fas fa-user-tie',    'Cajero',           $currentConfig['ticket_mostrar_cajero']      ?? true],
+            ['ticket_mostrar_canal',       'chkMostrarCanal',       'fas fa-tag',         'Canal de Origen',  $currentConfig['ticket_mostrar_canal']       ?? true],
+            ['ticket_mostrar_uuid',        'chkMostrarUuid',        'fas fa-fingerprint', 'UUID de venta',    $currentConfig['ticket_mostrar_uuid']        ?? false],
+            ['ticket_mostrar_items_count', 'chkMostrarItemsCount',  'fas fa-list-ol',     'Total de Ítems',   $currentConfig['ticket_mostrar_items_count'] ?? true],
+            ['ticket_mostrar_qr',          'chkMostrarQr',          'fas fa-qrcode',      'Código QR',        $currentConfig['ticket_mostrar_qr']          ?? true],
+        ];
+        ?>
+        <div class="card">
+            <div class="card-header" style="color:#7c3aed;"><i class="fas fa-receipt me-2"></i> Diseño del Ticket</div>
+            <div class="card-body">
+                <div class="row g-4">
+
+                    <!-- Columna controles -->
+                    <div class="col-xl-7">
+
+                        <!-- Logo -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-image me-1"></i> Logo</h6>
+                            <?php if ($logoExists): ?>
+                            <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
+                                <img src="<?= htmlspecialchars($logoPath) ?>?v=<?= filemtime(__DIR__ . '/' . $logoPath) ?>"
+                                     style="max-height:70px; max-width:180px; border-radius:4px;" alt="Logo actual">
+                                <div>
+                                    <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i>Logo activo</span>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="ticket_logo_remove" id="chkLogoRemove" value="1">
+                                        <label class="form-check-label small text-danger fw-semibold" for="chkLogoRemove">
+                                            <i class="fas fa-trash me-1"></i>Eliminar logo actual
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php else: ?>
+                            <div class="mb-2 p-2 border rounded bg-light text-muted small">
+                                <i class="fas fa-ban me-1"></i> Sin logo — se mostrará solo el nombre del negocio
+                            </div>
+                            <?php endif; ?>
+                            <input type="file" name="ticket_logo" class="form-control" accept="image/jpeg,image/png,image/webp"
+                                   onchange="onLogoFileChange(this)">
+                            <div class="form-text">JPG, PNG o WebP · Máx 2 MB · Recomendado: 280 × 80 px</div>
+                        </div>
+
+                        <!-- Textos -->
+                        <div class="mb-4 pb-3 border-bottom">
+                            <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-font me-1"></i> Textos del Ticket</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Slogan / Tagline <small class="text-muted">(debajo del nombre)</small></label>
+                                <input type="text" name="ticket_slogan" class="form-control" maxlength="100"
+                                       value="<?= htmlspecialchars($currentConfig['ticket_slogan'] ?? '') ?>"
+                                       placeholder="Ej: La mejor calidad de la ciudad"
+                                       oninput="updateTicketPreview()">
+                            </div>
+                            <div>
+                                <label class="form-label">Mensaje Final <small class="text-muted">(pie del ticket)</small></label>
+                                <input type="text" name="mensaje_final" class="form-control" maxlength="150"
+                                       value="<?= htmlspecialchars($currentConfig['mensaje_final']) ?>"
+                                       placeholder="Ej: ¡Gracias por su compra!"
+                                       oninput="updateTicketPreview()">
+                            </div>
+                        </div>
+
+                        <!-- Toggles -->
+                        <div>
+                            <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-sliders-h me-1"></i> Elementos a Mostrar</h6>
+                            <div class="row g-2">
+                                <?php foreach ($togglesDef as [$name, $id, $icon, $label, $checked]): ?>
+                                <div class="col-sm-6">
+                                    <div class="form-check form-switch p-2 rounded border bg-light">
+                                        <input class="form-check-input" type="checkbox" role="switch"
+                                               name="<?= $name ?>" id="<?= $id ?>"
+                                               <?= $checked ? 'checked' : '' ?>
+                                               onchange="updateTicketPreview()">
+                                        <label class="form-check-label small fw-semibold" for="<?= $id ?>">
+                                            <i class="<?= $icon ?> me-1 text-secondary"></i><?= $label ?>
+                                        </label>
+                                    </div>
+                                </div>
+                                <?php endforeach; ?>
+                            </div>
+                        </div>
+                    </div><!-- /col controles -->
+
+                    <!-- Columna preview -->
+                    <div class="col-xl-5">
+                        <div class="sticky-top" style="top:20px;">
+                            <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-eye me-1"></i> Vista Previa</h6>
+                            <div style="background:#d1d5db; padding:16px; border-radius:10px;">
+                                <div id="ticketPreview"
+                                     style="font-family:'Courier New',monospace; font-size:11px; background:#fff;
+                                            border:1px solid #999; padding:12px; width:220px; margin:0 auto;
+                                            box-shadow:2px 2px 0 #bbb;">
+                                </div>
+                            </div>
+                            <div class="form-text mt-2 text-center">
+                                Vista aproximada ·
+                                <a href="ticket_view.php?id=216" target="_blank" class="text-decoration-none">
+                                    Ver ticket real <i class="fas fa-external-link-alt"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div><!-- /col preview -->
+
+                </div><!-- /row -->
+            </div><!-- /card-body -->
+        </div><!-- /card Diseño del Ticket -->
 
         <div class="d-grid gap-2 mb-5">
             <button type="submit" class="btn btn-primary btn-lg fw-bold shadow">
@@ -549,19 +726,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     function addCajero() {
         const container = document.getElementById('cajerosContainer');
         const div = document.createElement('div');
-        div.className = 'row g-2 align-items-center cajero-row';
+        div.className = 'row g-2 align-items-center cajero-row mb-1';
         div.innerHTML = `
-            <div class="col-5">
+            <div class="col-4">
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="fas fa-user"></i></span>
                     <input type="text" name="cajero_nombre[]" class="form-control" placeholder="Nombre" required>
                 </div>
             </div>
-            <div class="col-5">
+            <div class="col-3">
                 <div class="input-group">
                     <span class="input-group-text bg-white"><i class="fas fa-key"></i></span>
-                    <input type="text" name="cajero_pin[]" class="form-control" placeholder="PIN (4 dígitos)" required pattern="\\d{4,}">
+                    <input type="text" name="cajero_pin[]" class="form-control" placeholder="PIN" required pattern="\\d{4,}">
                 </div>
+            </div>
+            <div class="col-3">
+                <select name="cajero_rol[]" class="form-select form-select-sm">
+                    <option value="cajero">🔵 Cajero</option>
+                    <option value="supervisor">🟠 Supervisor</option>
+                    <option value="admin">🔴 Admin</option>
+                </select>
             </div>
             <div class="col-2 text-end">
                 <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCajero(this)"><i class="fas fa-trash"></i></button>
@@ -578,6 +762,132 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             alert("Debe existir al menos un cajero.");
         }
     }
+</script>
+
+<script>
+// ===== VISTA PREVIA DEL TICKET =====
+const _tplCfg = {
+    nombre:      <?= json_encode($currentConfig['tienda_nombre']) ?>,
+    dir:         <?= json_encode($currentConfig['direccion']) ?>,
+    tel:         <?= json_encode($currentConfig['telefono']) ?>,
+    slogan:      <?= json_encode($currentConfig['ticket_slogan'] ?? '') ?>,
+    msgFinal:    <?= json_encode($currentConfig['mensaje_final']) ?>,
+    logoSrc:     <?= json_encode($logoExists ? $logoPath . '?v=' . filemtime(__DIR__ . '/' . $logoPath) : '') ?>,
+};
+
+function _esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function _sep() {
+    return '<div style="border-top:1px dashed #999;margin:5px 0;"></div>';
+}
+
+function updateTicketPreview() {
+    const nombre     = document.querySelector('[name=tienda_nombre]')?.value || _tplCfg.nombre;
+    const dir        = document.querySelector('[name=direccion]')?.value     || _tplCfg.dir;
+    const tel        = document.querySelector('[name=telefono]')?.value      || _tplCfg.tel;
+    const slogan     = document.querySelector('[name=ticket_slogan]')?.value  ?? _tplCfg.slogan;
+    const msgFinal   = document.querySelector('[name=mensaje_final]')?.value  ?? _tplCfg.msgFinal;
+    const showCajero = document.getElementById('chkMostrarCajero')?.checked;
+    const showCanal  = document.getElementById('chkMostrarCanal')?.checked;
+    const showUuid   = document.getElementById('chkMostrarUuid')?.checked;
+    const showItems  = document.getElementById('chkMostrarItemsCount')?.checked;
+    const showQr     = document.getElementById('chkMostrarQr')?.checked;
+    const logoSrc    = window._ticketLogoSrc ?? _tplCfg.logoSrc;
+
+    let h = '';
+
+    // Cabecera
+    h += '<div style="text-align:center;margin-bottom:6px;">';
+    if (logoSrc) {
+        h += `<img src="${logoSrc}" style="display:block;max-width:160px;max-height:52px;margin:0 auto 4px;" alt="">`;
+    }
+    h += `<strong style="font-size:13px;">${_esc(nombre)}</strong>`;
+    if (slogan) h += `<div style="font-size:9px;margin-top:1px;">${_esc(slogan)}</div>`;
+    h += `<div style="font-size:9px;color:#666;">${_esc(dir)}</div>`;
+    if (tel) h += `<div style="font-size:9px;color:#666;">Tel: ${_esc(tel)}</div>`;
+    h += '</div>';
+
+    h += _sep();
+
+    // Meta
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><td>Ticket:</td><td style="text-align:right"><b>#000216</b></td></tr>';
+    if (showUuid) h += '<tr><td>UUID:</td><td style="text-align:right;font-size:8px;color:#666;">WEB-1234567890</td></tr>';
+    h += '<tr><td>Fecha:</td><td style="text-align:right">23/02/2026 09:02</td></tr>';
+    if (showCajero) h += '<tr><td>Cajero:</td><td style="text-align:right"><b>Admin</b></td></tr>';
+    if (showCanal)  h += '<tr><td>Origen:</td><td style="text-align:right"><span style="background:#0ea5e9;color:#fff;padding:1px 5px;border-radius:10px;font-size:8px;">🌐 Web</span></td></tr>';
+    h += '<tr><td>Método Pago:</td><td style="text-align:right"><b>Efectivo</b></td></tr>';
+    h += '</table>';
+
+    h += _sep();
+
+    // Ítems
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><th style="text-align:left;border-bottom:1px solid #000;padding:2px 0;">Cant</th>'
+       + '<th style="text-align:left;border-bottom:1px solid #000;padding:2px 0;">Descripción</th>'
+       + '<th style="text-align:right;border-bottom:1px solid #000;padding:2px 0;">Total</th></tr>';
+    h += '<tr><td>1.00</td><td>Cafe en sobre</td><td style="text-align:right">$40.00</td></tr>';
+    h += '</table>';
+    if (showItems) {
+        h += '<div style="text-align:right;font-size:9px;font-weight:bold;border-top:1px solid #000;margin-top:3px;padding-top:2px;">Total Ítems: 1</div>';
+    }
+
+    // Totales
+    h += '<div style="border:2px solid #000;padding:5px;margin-top:5px;">';
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><td>Subtotal productos:</td><td style="text-align:right">$40.00</td></tr>';
+    h += '<tr><td><b>Costo mensajería:</b></td><td style="text-align:right"><b>$250.00</b></td></tr>';
+    h += '<tr style="border-top:1px dashed #000;"><td colspan="2"></td></tr>';
+    h += '<tr><td><b style="font-size:11px;">TOTAL A PAGAR:</b></td><td style="text-align:right"><b style="font-size:14px;">$290.00</b></td></tr>';
+    h += '<tr><td colspan="2" style="text-align:center;font-size:8px;border-top:1px dashed #000;padding-top:3px;">💳 Pagado con: <b>Efectivo</b></td></tr>';
+    h += '</table></div>';
+
+    // Pie
+    h += _sep();
+    if (msgFinal) {
+        h += `<div style="text-align:center;font-weight:bold;font-size:10px;">${_esc(msgFinal)}</div>`;
+    }
+    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema PALWEB POS v3.0</div>';
+
+    // QR placeholder
+    if (showQr) {
+        h += _sep();
+        h += '<div style="text-align:center;">';
+        h += '<div style="font-size:8px;margin-bottom:3px;">Escanea para ver este ticket</div>';
+        h += '<svg width="52" height="52" viewBox="0 0 52 52" style="display:inline-block;">';
+        // QR simulado con rectángulos
+        h += '<rect x="0" y="0" width="52" height="52" fill="white"/>';
+        h += '<rect x="2" y="2" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="6" y="6" width="12" height="12" fill="#000"/>';
+        h += '<rect x="30" y="2" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="34" y="6" width="12" height="12" fill="#000"/>';
+        h += '<rect x="2" y="30" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="6" y="34" width="12" height="12" fill="#000"/>';
+        h += '<rect x="30" y="30" width="6" height="6" fill="#000"/><rect x="38" y="30" width="6" height="6" fill="#000"/>';
+        h += '<rect x="30" y="38" width="6" height="6" fill="#000"/><rect x="46" y="46" width="6" height="6" fill="#000"/>';
+        h += '</svg>';
+        h += '</div>';
+    }
+
+    document.getElementById('ticketPreview').innerHTML = h;
+}
+
+function onLogoFileChange(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => { window._ticketLogoSrc = e.target.result; updateTicketPreview(); };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    updateTicketPreview();
+    // Sincronizar nombre/dirección/tel con la preview en tiempo real
+    ['tienda_nombre','direccion','telefono'].forEach(n => {
+        document.querySelector(`[name="${n}"]`)?.addEventListener('input', updateTicketPreview);
+    });
+});
 </script>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>

@@ -16,6 +16,13 @@ $accept    = $_SERVER['HTTP_ACCEPT'] ?? '';
 $supAvif   = str_contains($accept, 'image/avif');
 $supWebp   = str_contains($accept, 'image/webp');
 
+// fmt=avif|webp|jpg permite que <picture><source type="..."> solicite el formato
+// exacto sin depender del header Accept (útil también para CDNs y tests).
+$fmt = $_GET['fmt'] ?? '';
+if     ($fmt === 'avif')              { $supAvif = true;  $supWebp = false; }
+elseif ($fmt === 'webp')              { $supAvif = false; $supWebp = true;  }
+elseif ($fmt === 'jpg' || $fmt === 'jpeg') { $supAvif = false; $supWebp = false; }
+
 // ── Selección de formato óptimo ───────────────────────────────────────────────
 if ($supAvif && file_exists($base . '.avif')) {
     $path      = $base . '.avif';

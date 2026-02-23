@@ -8,6 +8,8 @@ error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
 require_once 'db.php';
+require_once 'push_notify.php';
+require_once 'pos_audit.php';
 
 // Verificar motor de inventario
 $kardexAvailable = false;
@@ -227,7 +229,39 @@ try {
 
     $pdo->commit();
 
-    // G. Notificaciones de chat (fuera de transacción para no bloquear)
+    // F-2. Audit de descuentos (fuera de transacción — silencioso)
+    // El frontend envía descuentos_items[] y descuento_global con cada venta
+    try {
+        $descuentosItems  = $input['descuentos_items']  ?? [];
+        $descuentoGlobal  = floatval($input['descuento_global'] ?? 0);
+
+        foreach ($descuentosItems as $d) {
+            log_audit($pdo, AUDIT_DESCUENTO_ITEM, $usuarioNombre, [
+                'id_venta'        => $idVenta,
+                'codigo'          => safe_str($d['codigo']  ?? '', 50),
+                'producto'        => safe_str($d['nombre']  ?? '', 150),
+                'precio_original' => floatval($d['precio_original'] ?? 0),
+                'descuento_pct'   => floatval($d['descuento_pct']   ?? 0),
+                'precio_final'    => floatval($d['precio_final']     ?? 0),
+            ]);
+        }
+
+        if ($descuentoGlobal > 0) {
+            $subtotalBruto = $descuentoGlobal < 100
+                ? round(floatval($input['total']) / (1 - $descuentoGlobal / 100), 2)
+                : 0;
+            log_audit($pdo, AUDIT_DESCUENTO_GLOBAL, $usuarioNombre, [
+                'id_venta'       => $idVenta,
+                'descuento_pct'  => $descuentoGlobal,
+                'subtotal_bruto' => $subtotalBruto,
+                'total_neto'     => floatval($input['total']),
+            ]);
+        }
+    } catch (Throwable $auditErr) {
+        error_log("pos_save audit error: " . $auditErr->getMessage());
+    }
+
+    // G. Notificaciones de chat + Push (fuera de transacción para no bloquear)
     $clienteNombre = safe_str($input['cliente_nombre'] ?? 'Cliente', 100);
     try {
         $stmtChat = $pdo->prepare(
@@ -238,16 +272,43 @@ try {
                 'SISTEMA_NOTIF', 'client',
                 "⚠️ RESERVA SIN STOCK: Pedido #{$idVenta} ({$clienteNombre}) tiene productos sin existencia suficiente. Revisar antes de confirmar."
             ]);
+            push_notify($pdo, 'operador',
+                '📦 Reserva sin stock',
+                "Pedido #{$idVenta} — {$clienteNombre} tiene productos sin existencia.",
+                '/marinero/reservas.php'
+            );
         }
         if ($estadoPago === 'verificando') {
             $stmtChat->execute([
                 'SISTEMA_NOTIF', 'client',
                 "💳 PAGO PENDIENTE: Pedido #{$idVenta} ({$clienteNombre}) — Código enviado: {$codigoPago}. Por favor verificar la transferencia."
             ]);
+            push_notify($pdo, 'operador',
+                '💳 Transferencia pendiente de verificar',
+                "Pedido #{$idVenta} — {$clienteNombre}. Código: {$codigoPago}",
+                '/marinero/reservas.php'
+            );
+        }
+        // Nuevo pedido web
+        if ($canalOrigen === 'Web' && $estadoPago !== 'verificando') {
+            push_notify($pdo, 'operador',
+                '🛒 Nuevo pedido web',
+                "#{$idVenta} — {$clienteNombre} — " . number_format(floatval($input['total']), 2) . ' CUP',
+                '/marinero/reservas.php'
+            );
+        }
+        // Nueva comanda a cocina
+        if (!empty($itemsCocina) && $tipoServicio !== 'reserva') {
+            $resumenCocina = implode(', ', array_map(fn($i) => $i['qty'] . '× ' . $i['name'], array_slice($itemsCocina, 0, 3)));
+            push_notify($pdo, 'cocina',
+                '🍳 Nueva comanda #' . $idVenta,
+                $resumenCocina,
+                '/marinero/cocina.php'
+            );
         }
     } catch (Throwable $chatErr) {
-        // No bloquear la respuesta por fallo en notificación de chat
-        error_log("pos_save chat error: " . $chatErr->getMessage());
+        // No bloquear la respuesta por fallo en notificación
+        error_log("pos_save notifications error: " . $chatErr->getMessage());
     }
 
     echo json_encode(['status' => 'success', 'id' => $idVenta, 'uuid' => $uuid]);

@@ -4,6 +4,7 @@ ini_set('display_errors', 0);
 session_start();
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'push_notify.php';
 
 $sucursalID = intval($config['id_sucursal']);
 $idAlmacen  = intval($config['id_almacen']);
@@ -43,7 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (empty($items)) throw new Exception('Debe agregar al menos un producto.');
 
+            $costoMensajeria = floatval($input['costo_mensajeria'] ?? 0);
             $total = array_reduce($items, fn($c, $i) => $c + floatval($i['precio']) * floatval($i['cantidad']), 0.0);
+            $total += $costoMensajeria;
             $uuid  = uniqid('R-', true);
 
             $pdo->beginTransaction();
@@ -57,16 +60,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $abono, $estadoPago, $empID, $idCliente, $canalOrigen]);
             $idVenta = $pdo->lastInsertId();
 
+            $sinExistencia = 0;
             foreach ($items as $it) {
+                $sku = safeStr($it['codigo'], 100);
                 $pdo->prepare("INSERT INTO ventas_detalle
                     (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
                     VALUES (?,?,?,?,?,?,?)")
-                    ->execute([$idVenta, safeStr($it['codigo'], 100), floatval($it['cantidad']),
+                    ->execute([$idVenta, $sku, floatval($it['cantidad']),
                         floatval($it['precio']), safeStr($it['nombre'], 255),
-                        safeStr($it['codigo'], 100), safeStr($it['categoria'] ?? 'General', 100)]);
+                        $sku, safeStr($it['categoria'] ?? 'General', 100)]);
+                // Verificar stock (solo productos físicos)
+                $stmtEs = $pdo->prepare("SELECT COALESCE(es_servicio,0) FROM productos WHERE codigo=?");
+                $stmtEs->execute([$sku]);
+                $esServ = intval($stmtEs->fetchColumn());
+                if (!$esServ) {
+                    $stmtSt = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+                    $stmtSt->execute([$sku, $idAlmacen]);
+                    if (floatval($stmtSt->fetchColumn()) < floatval($it['cantidad'])) {
+                        $sinExistencia = 1;
+                    }
+                }
+            }
+            if ($sinExistencia) {
+                $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=1 WHERE id=?")->execute([$idVenta]);
             }
             $pdo->commit();
-            echo json_encode(['status' => 'success', 'id' => $idVenta]);
+
+            // Push: nueva reserva manual creada
+            $resumenItems = implode(', ', array_slice(array_map(fn($i) => floatval($i['cantidad']) . '× ' . $i['nombre'], $items), 0, 3));
+            push_notify($pdo, 'operador',
+                '📅 Nueva reserva #' . $idVenta,
+                "{$clienteNombre}" . ($resumenItems ? " — {$resumenItems}" : ''),
+                '/marinero/reservas.php'
+            );
+            if ($sinExistencia) {
+                push_notify($pdo, 'operador',
+                    '📦 Reserva sin stock',
+                    "Reserva #{$idVenta} — {$clienteNombre} tiene productos sin existencia.",
+                    '/marinero/reservas.php'
+                );
+            }
+
+            echo json_encode(['status' => 'success', 'id' => $idVenta, 'sin_existencia' => $sinExistencia]);
         }
 
         // ── EDITAR ────────────────────────────────────────────────────────────
@@ -88,7 +123,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$idVenta) throw new Exception('ID inválido.');
             if (empty($items)) throw new Exception('Debe agregar al menos un producto.');
 
+            $costoMensajeria = floatval($input['costo_mensajeria'] ?? 0);
             $total = array_reduce($items, fn($c, $i) => $c + floatval($i['precio']) * floatval($i['cantidad']), 0.0);
+            $total += $costoMensajeria;
 
             $pdo->beginTransaction();
             $pdo->prepare("UPDATE ventas_cabecera SET
@@ -99,16 +136,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fechaReserva, $notas, $metodo, $total, $abono, $canalOrigen, $idVenta, $sucursalID]);
 
             $pdo->prepare("DELETE FROM ventas_detalle WHERE id_venta_cabecera=?")->execute([$idVenta]);
+            $sinExistencia = 0;
             foreach ($items as $it) {
+                $sku = safeStr($it['codigo'], 100);
                 $pdo->prepare("INSERT INTO ventas_detalle
                     (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
                     VALUES (?,?,?,?,?,?,?)")
-                    ->execute([$idVenta, safeStr($it['codigo'], 100), floatval($it['cantidad']),
+                    ->execute([$idVenta, $sku, floatval($it['cantidad']),
                         floatval($it['precio']), safeStr($it['nombre'], 255),
-                        safeStr($it['codigo'], 100), safeStr($it['categoria'] ?? 'General', 100)]);
+                        $sku, safeStr($it['categoria'] ?? 'General', 100)]);
+                $stmtEs = $pdo->prepare("SELECT COALESCE(es_servicio,0) FROM productos WHERE codigo=?");
+                $stmtEs->execute([$sku]);
+                if (!intval($stmtEs->fetchColumn())) {
+                    $stmtSt = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+                    $stmtSt->execute([$sku, $idAlmacen]);
+                    if (floatval($stmtSt->fetchColumn()) < floatval($it['cantidad'])) {
+                        $sinExistencia = 1;
+                    }
+                }
             }
+            $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=? WHERE id=?")->execute([$sinExistencia, $idVenta]);
             $pdo->commit();
-            echo json_encode(['status' => 'success']);
+            echo json_encode(['status' => 'success', 'sin_existencia' => $sinExistencia]);
         }
 
         // ── VER DETALLE (para modal editar) ───────────────────────────────────
@@ -286,14 +335,29 @@ if (isset($_GET['action'])) {
         $stmt->execute(["%$q%", "%$q%"]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } elseif ($_GET['action'] === 'search_products') {
-        $stmt = $pdo->prepare("SELECT p.codigo, p.nombre, p.precio, p.categoria,
-            p.es_servicio, p.es_reservable,
-            COALESCE(SUM(s.cantidad),0) as stock
-            FROM productos p
-            LEFT JOIN stock_almacen s ON s.id_producto=p.codigo AND s.id_almacen=?
-            WHERE p.activo=1 AND p.id_empresa=? AND p.es_materia_prima=0
-              AND (p.nombre LIKE ? OR p.codigo LIKE ?)
-            GROUP BY p.codigo ORDER BY p.nombre LIMIT 10");
+        // Filtro por sucursal: columna es_suc1..es_suc6 (validado como entero 1-6)
+        $sucFilter = ($sucursalID >= 1 && $sucursalID <= 6)
+            ? "AND p.es_suc{$sucursalID} = 1"
+            : '';
+        $sql = "SELECT p.codigo, p.nombre, p.precio, p.categoria,
+                    p.es_servicio, p.es_reservable,
+                    COALESCE(SUM(s.cantidad),0) AS stock
+                FROM productos p
+                LEFT JOIN stock_almacen s ON s.id_producto = p.codigo AND s.id_almacen = ?
+                WHERE p.activo = 1
+                  AND p.id_empresa = ?
+                  AND p.es_materia_prima = 0
+                  {$sucFilter}
+                  AND (p.nombre LIKE ? OR p.codigo LIKE ?)
+                GROUP BY p.codigo, p.nombre, p.precio, p.categoria, p.es_servicio, p.es_reservable
+                HAVING COALESCE(SUM(s.cantidad),0) > 0
+                    OR p.es_reservable = 1
+                    OR p.es_servicio   = 1
+                ORDER BY
+                    COALESCE(SUM(s.cantidad),0) > 0 DESC,
+                    p.nombre ASC
+                LIMIT 15";
+        $stmt = $pdo->prepare($sql);
         $stmt->execute([$idAlmacen, $empID, "%$q%", "%$q%"]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } elseif ($_GET['action'] === 'month_data') {
@@ -327,7 +391,7 @@ if (isset($_GET['action'])) {
         $MONTHS_ES = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio',
                       'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-        // Sección 1: Todos los productos de reservas pendientes con déficit de stock
+        // Sección 1: Todos los productos de reservas activas (no entregadas/canceladas) con déficit de stock
         $stmt = $pdo->prepare("
             SELECT vd.id_producto AS codigo, vd.nombre_producto AS nombre,
                    SUM(vd.cantidad) AS total_reservado,
@@ -338,12 +402,12 @@ if (isset($_GET['action'])) {
             JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
             LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
-            WHERE vc.tipo_servicio = 'reserva' AND vc.id_sucursal = ?
-              AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
+            WHERE vc.tipo_servicio IN ('reserva','Reserva')
+              AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
               AND COALESCE(p.es_servicio, 0) = 0
             GROUP BY vd.id_producto, vd.nombre_producto
             ORDER BY deficit DESC, nombre ASC");
-        $stmt->execute([$idAlmacen, $sucursalID]);
+        $stmt->execute([$idAlmacen]);
         $allProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $sinStock = array_values(array_filter($allProducts, fn($p) => floatval($p['deficit']) > 0));
 
@@ -363,13 +427,13 @@ if (isset($_GET['action'])) {
             JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
             LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
-            WHERE vc.tipo_servicio = 'reserva' AND vc.id_sucursal = ?
-              AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
+            WHERE vc.tipo_servicio IN ('reserva','Reserva')
+              AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
               AND YEAR(vc.fecha_reserva) = ? AND MONTH(vc.fecha_reserva) = ?
               AND COALESCE(p.es_servicio, 0) = 0
             GROUP BY vd.id_producto, vd.nombre_producto, semana
             ORDER BY semana ASC, deficit DESC, nombre ASC");
-        $stmt2->execute([$idAlmacen, $sucursalID, $year, $month]);
+        $stmt2->execute([$idAlmacen, $year, $month]);
         $byWeekRaw = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         $byWeek = [1 => [], 2 => [], 3 => [], 4 => []];
         foreach ($byWeekRaw as $row) { $byWeek[intval($row['semana'])][] = $row; }
@@ -880,6 +944,45 @@ if (isset($_GET['ajax'])) {
                                     <label class="form-label small fw-bold mb-1">Dirección de entrega</label>
                                     <input type="text" id="fClienteDir" class="form-control form-control-sm" placeholder="Calle, número, municipio">
                                 </div>
+
+                                <!-- ── Mensajería ──────────────────────────── -->
+                                <div class="mt-2 pt-2 border-top">
+                                    <div class="form-check mb-1">
+                                        <input type="checkbox" class="form-check-input" id="fMensajeria" onchange="toggleMensajeria()">
+                                        <label class="form-check-label small fw-bold" for="fMensajeria">
+                                            <i class="fas fa-motorcycle me-1 text-primary"></i>Envío a domicilio (Mensajería)
+                                        </label>
+                                    </div>
+                                    <div id="mensajeriaBox" style="display:none;" class="mt-2">
+                                        <div class="row g-2 mb-2">
+                                            <div class="col-6">
+                                                <label class="form-label small mb-1">Municipio</label>
+                                                <select id="fMunicipio" class="form-select form-select-sm" onchange="loadBarriosRes()">
+                                                    <option value="">Municipio...</option>
+                                                </select>
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small mb-1">Barrio</label>
+                                                <select id="fBarrio" class="form-select form-select-sm" onchange="calcMensajeriaAuto()">
+                                                    <option value="">Barrio...</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <label class="form-label small fw-bold mb-1">Tarifa mensajería ($)</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text"><i class="fas fa-motorcycle text-primary"></i></span>
+                                            <input type="number" id="fCostoMensajeria" class="form-control fw-bold"
+                                                   value="100" min="0" step="0.01"
+                                                   onchange="updateResTotal()" oninput="updateResTotal()">
+                                            <span class="input-group-text text-muted" id="fMensajeriaBadge" style="font-size:.7rem;max-width:90px;overflow:hidden;white-space:nowrap;">manual</span>
+                                        </div>
+                                        <small class="text-muted d-block mt-1">
+                                            <i class="fas fa-info-circle me-1"></i>El barrio calcula la tarifa automáticamente, o ingrésala manualmente.
+                                        </small>
+                                    </div>
+                                </div>
+                                <!-- ────────────────────────────────────────── -->
+
                                 <div class="mt-2 text-end">
                                     <a href="crm_clients.php" target="_blank" class="small text-primary"><i class="fas fa-external-link-alt me-1"></i>Ver todos en CRM</a>
                                 </div>
@@ -956,6 +1059,16 @@ if (isset($_GET['ajax'])) {
                                             </td></tr>
                                         </tbody>
                                         <tfoot>
+                                            <tr class="table-light text-muted small">
+                                                <td colspan="3" class="text-end">Subtotal productos:</td>
+                                                <td id="subtotalDisplay">$0.00</td>
+                                                <td></td>
+                                            </tr>
+                                            <tr id="rowMensajeriaTotal" class="table-light small" style="display:none;">
+                                                <td colspan="3" class="text-end"><i class="fas fa-motorcycle me-1 text-primary"></i>Mensajería:</td>
+                                                <td id="mensajeriaLineDisplay" class="text-primary fw-bold">$0.00</td>
+                                                <td></td>
+                                            </tr>
                                             <tr class="table-primary fw-bold">
                                                 <td colspan="3" class="text-end">TOTAL:</td>
                                                 <td id="totalDisplay" class="fw-bold" style="font-size:1.05rem;">$0.00</td>
@@ -963,6 +1076,15 @@ if (isset($_GET['ajax'])) {
                                             </tr>
                                         </tfoot>
                                     </table>
+                                </div>
+                                <!-- Alerta visual de productos sin stock -->
+                                <div id="stockWarningAlert" class="mt-2" style="display:none;">
+                                    <div class="alert alert-warning alert-dismissible border-warning py-2 px-3 mb-0" role="alert" style="font-size:.82rem;">
+                                        <i class="fas fa-exclamation-triangle me-1"></i>
+                                        <strong>Sin stock suficiente:</strong>
+                                        <span id="stockWarningList"></span>
+                                        <div class="small text-muted mt-1">Esta reserva se guardará marcada como <strong>📦 Sin existencia</strong> para seguimiento.</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1149,7 +1271,27 @@ async function openForm(id) {
         document.getElementById('fIdCliente').value   = d.id_cliente || '';
         document.getElementById('fClienteNombre').value = d.cliente_nombre || '';
         document.getElementById('fClienteTel').value  = d.cliente_telefono || '';
-        document.getElementById('fClienteDir').value  = d.cliente_direccion || '';
+        // Detectar mensajería embebida en la dirección
+        const rawDir = d.cliente_direccion || '';
+        const mensPatt = /^\[MENSAJERÍA:\s*([^\-\]]+?)\s*-\s*([^\]]+?)\]\s*/;
+        const mensMatch = rawDir.match(mensPatt);
+        if (mensMatch) {
+            document.getElementById('fClienteDir').value = rawDir.replace(mensPatt, '').trim();
+            document.getElementById('fMensajeria').checked = true;
+            document.getElementById('mensajeriaBox').style.display = 'block';
+            // Calcular costo mensajería como diferencia total – subtotal items
+            const itemsSubtotal = (d.items || []).reduce((s, it) => s + parseFloat(it.precio) * parseFloat(it.cantidad), 0);
+            const mensajeriaCost = Math.max(0, parseFloat(d.total || 0) - itemsSubtotal);
+            document.getElementById('fCostoMensajeria').value = mensajeriaCost.toFixed(2);
+            document.getElementById('fMensajeriaBadge').textContent = 'guardado';
+            // Cargar listas y preseleccionar municipio/barrio
+            await loadMunicipiosRes();
+            document.getElementById('fMunicipio').value = mensMatch[1].trim();
+            await loadBarriosRes();
+            document.getElementById('fBarrio').value = mensMatch[2].trim();
+        } else {
+            document.getElementById('fClienteDir').value = rawDir;
+        }
         document.getElementById('fAbono').value        = d.abono || '';
         document.getElementById('fNotas').value        = d.notas || '';
         document.getElementById('fMetodoPago').value   = d.metodo_pago || 'Efectivo';
@@ -1187,6 +1329,14 @@ function resetForm() {
     document.getElementById('clientSearch').value   = '';
     document.getElementById('prodSearch').value     = '';
     document.getElementById('clienteCrmBadge').innerHTML = '';
+    // Mensajería
+    document.getElementById('fMensajeria').checked  = false;
+    document.getElementById('mensajeriaBox').style.display = 'none';
+    document.getElementById('fMunicipio').innerHTML = '<option value="">Municipio...</option>';
+    document.getElementById('fBarrio').innerHTML    = '<option value="">Barrio...</option>';
+    document.getElementById('fCostoMensajeria').value = '100';
+    document.getElementById('fMensajeriaBadge').textContent = 'manual';
+    document.getElementById('rowMensajeriaTotal').style.display = 'none';
     renderLines();
 }
 
@@ -1199,18 +1349,33 @@ async function saveReserva() {
     if (!lineItems.length) { showToast('Agrega al menos un producto.', 'warning'); return; }
 
     const id = document.getElementById('fId').value;
+
+    // Construir dirección con prefijo de mensajería si aplica
+    let clienteDir = document.getElementById('fClienteDir').value.trim();
+    const conMensajeria = document.getElementById('fMensajeria').checked;
+    const costoMensajeria = conMensajeria ? (parseFloat(document.getElementById('fCostoMensajeria').value) || 0) : 0;
+    if (conMensajeria) {
+        const mun = document.getElementById('fMunicipio').value;
+        const bar = document.getElementById('fBarrio').value;
+        if (!mun || !bar) { showToast('Selecciona municipio y barrio para el envío.', 'warning'); return; }
+        // Limpiar prefijo anterior si se está editando, luego agregar el nuevo
+        clienteDir = clienteDir.replace(/^\[MENSAJERÍA:[^\]]+\]\s*/, '');
+        clienteDir = `[MENSAJERÍA: ${mun} - ${bar}] ${clienteDir}`.trim();
+    }
+
     const payload = {
         action:           id ? 'update' : 'create',
         id:               id ? parseInt(id) : undefined,
         cliente_nombre:   nombre,
         cliente_telefono: document.getElementById('fClienteTel').value.trim(),
-        cliente_direccion:document.getElementById('fClienteDir').value.trim(),
+        cliente_direccion: clienteDir,
         id_cliente:       parseInt(document.getElementById('fIdCliente').value) || 0,
         fecha_reserva:    fecha.replace('T',' ') + ':00',
         notas:            document.getElementById('fNotas').value.trim(),
         metodo_pago:      document.getElementById('fMetodoPago').value,
         canal_origen:     document.getElementById('fCanalOrigen').value,
         abono:            parseFloat(document.getElementById('fAbono').value) || 0,
+        costo_mensajeria: costoMensajeria,
         items:            lineItems.map(({codigo,nombre,categoria,cantidad,precio}) => ({codigo,nombre,categoria,cantidad,precio}))
     };
 
@@ -1228,8 +1393,19 @@ async function saveReserva() {
 // ── Líneas de producto ──────────────────────────────────────────────────────
 function addLine(prod) {
     const existing = lineItems.findIndex(i => i.codigo === prod.codigo);
-    if (existing >= 0) { lineItems[existing].cantidad += 1; }
-    else lineItems.push({ codigo: prod.codigo, nombre: prod.nombre, categoria: prod.categoria || 'General', cantidad: 1, precio: parseFloat(prod.precio) });
+    if (existing >= 0) {
+        lineItems[existing].cantidad += 1;
+    } else {
+        lineItems.push({
+            codigo:      prod.codigo,
+            nombre:      prod.nombre,
+            categoria:   prod.categoria || 'General',
+            cantidad:    1,
+            precio:      parseFloat(prod.precio),
+            stock:       parseFloat(prod.stock ?? 99),
+            es_servicio: parseInt(prod.es_servicio ?? 0)
+        });
+    }
     renderLines();
     document.getElementById('prodSearch').value = '';
     document.getElementById('prodResults').style.display = 'none';
@@ -1241,26 +1417,36 @@ function updateLine(idx, field, val) {
 }
 function renderLines() {
     const tbody = document.getElementById('linesTbody');
-    const empty = document.getElementById('emptyLinesRow');
     if (!lineItems.length) {
         tbody.innerHTML = '';
         const tr = document.createElement('tr');
         tr.id = 'emptyLinesRow';
         tr.innerHTML = '<td colspan="5" class="text-center text-muted small py-4"><i class="fas fa-shopping-basket fa-2x mb-2 d-block opacity-25"></i>Busca productos para agregarlos</td>';
         tbody.appendChild(tr);
-        document.getElementById('totalDisplay').innerText = '$0.00';
+        document.getElementById('subtotalDisplay').innerText = '$0.00';
+        document.getElementById('stockWarningAlert').style.display = 'none';
+        updateResTotal();
         return;
     }
     let total = 0;
+    const sinStock = [];
     tbody.innerHTML = lineItems.map((it, idx) => {
         const sub = it.cantidad * it.precio;
         total += sub;
-        return `<tr>
+        const sinExistencia = !it.es_servicio && parseFloat(it.stock) < it.cantidad;
+        if (sinExistencia) sinStock.push(`${it.nombre} (stock: ${parseFloat(it.stock).toFixed(0)}, necesario: ${it.cantidad})`);
+        const rowStyle = sinExistencia ? 'background-color:#fff3cd;' : '';
+        const stockInfo = it.es_servicio
+            ? ''
+            : (sinExistencia
+                ? `<span class="badge bg-danger ms-1" style="font-size:.6rem;">⚠ Sin stock</span>`
+                : `<span class="badge bg-success ms-1" style="font-size:.6rem;">Stock: ${parseFloat(it.stock).toFixed(0)}</span>`);
+        return `<tr style="${rowStyle}">
             <td>
-                <div class="fw-bold small">${it.nombre}</div>
+                <div class="fw-bold small">${it.nombre}${stockInfo}</div>
                 <div class="text-muted" style="font-size:.68rem;">${it.codigo}</div>
             </td>
-            <td><input type="number" class="form-control form-control-sm" value="${it.cantidad}" min="0.01" step="0.01"
+            <td><input type="number" class="form-control form-control-sm${sinExistencia?' border-warning':''}" value="${it.cantidad}" min="0.01" step="0.01"
                 onchange="updateLine(${idx},'cantidad',this.value)" style="width:65px;"></td>
             <td><input type="number" class="form-control form-control-sm" value="${it.precio}" min="0" step="0.01"
                 onchange="updateLine(${idx},'precio',this.value)" style="width:80px;"></td>
@@ -1268,8 +1454,83 @@ function renderLines() {
             <td><button class="btn btn-outline-danger btn-sm p-0 px-1" onclick="removeLine(${idx})"><i class="fas fa-trash-alt" style="font-size:.7rem;"></i></button></td>
         </tr>`;
     }).join('');
-    document.getElementById('totalDisplay').innerText = '$' + total.toFixed(2);
+    document.getElementById('subtotalDisplay').innerText = '$' + total.toFixed(2);
+    updateResTotal();
+
+    // Actualizar alerta de stock
+    const alertDiv = document.getElementById('stockWarningAlert');
+    if (sinStock.length) {
+        document.getElementById('stockWarningList').textContent = ' ' + sinStock.join('; ');
+        alertDiv.style.display = 'block';
+    } else {
+        alertDiv.style.display = 'none';
+    }
 }
+
+// ── Mensajería ───────────────────────────────────────────────────────────────
+function updateResTotal() {
+    const subtotalEl = document.getElementById('subtotalDisplay');
+    const subtotal = subtotalEl ? parseFloat(subtotalEl.innerText.replace('$','')) || 0 : 0;
+    const conMensajeria = document.getElementById('fMensajeria').checked;
+    const mensajeria = conMensajeria ? (parseFloat(document.getElementById('fCostoMensajeria').value) || 0) : 0;
+    document.getElementById('totalDisplay').innerText = '$' + (subtotal + mensajeria).toFixed(2);
+    const rowMens = document.getElementById('rowMensajeriaTotal');
+    if (rowMens) {
+        rowMens.style.display = conMensajeria ? '' : 'none';
+        document.getElementById('mensajeriaLineDisplay').innerText = '$' + mensajeria.toFixed(2);
+    }
+}
+
+function toggleMensajeria() {
+    const checked = document.getElementById('fMensajeria').checked;
+    document.getElementById('mensajeriaBox').style.display = checked ? 'block' : 'none';
+    if (checked && document.getElementById('fMunicipio').options.length === 1) loadMunicipiosRes();
+    if (!checked) {
+        document.getElementById('fCostoMensajeria').value = '100';
+        document.getElementById('fMensajeriaBadge').textContent = 'manual';
+    }
+    updateResTotal();
+}
+
+async function loadMunicipiosRes() {
+    try {
+        const res = await fetch('shop.php?action_geo=list_mun');
+        const muns = await res.json();
+        const sel = document.getElementById('fMunicipio');
+        sel.innerHTML = '<option value="">Municipio...</option>';
+        muns.forEach(m => sel.innerHTML += `<option value="${m}">${m}</option>`);
+    } catch(e) { console.error('Error cargando municipios:', e); }
+}
+
+async function loadBarriosRes() {
+    const mun = document.getElementById('fMunicipio').value;
+    const sel = document.getElementById('fBarrio');
+    sel.innerHTML = '<option value="">Barrio...</option>';
+    if (!mun) return;
+    try {
+        const res = await fetch(`shop.php?action_geo=list_bar&m=${encodeURIComponent(mun)}`);
+        const bars = await res.json();
+        bars.forEach(b => sel.innerHTML += `<option value="${b}">${b}</option>`);
+        // Resetear a manual al cambiar municipio
+        document.getElementById('fCostoMensajeria').value = '100';
+        document.getElementById('fMensajeriaBadge').textContent = 'manual';
+        updateResTotal();
+    } catch(e) { console.error('Error cargando barrios:', e); }
+}
+
+async function calcMensajeriaAuto() {
+    const mun = document.getElementById('fMunicipio').value;
+    const bar = document.getElementById('fBarrio').value;
+    if (!mun || !bar) return;
+    try {
+        const res  = await fetch(`shop.php?action_geo=calc&m=${encodeURIComponent(mun)}&b=${encodeURIComponent(bar)}`);
+        const data = await res.json();
+        document.getElementById('fCostoMensajeria').value = data.costo.toFixed(2);
+        document.getElementById('fMensajeriaBadge').textContent = `${mun} · ${bar}`;
+        updateResTotal();
+    } catch(e) { console.error('Error calculando mensajería:', e); }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ── Buscar productos (debounce) ─────────────────────────────────────────────
 let prodTimer = null;
@@ -1282,13 +1543,27 @@ async function buscarProductos(q) {
     const res  = await fetch(`reservas.php?action=search_products&q=${encodeURIComponent(q)}`);
     const list = await res.json();
     const div  = document.getElementById('prodResults');
-    if (!list.length) { div.innerHTML = '<div class="item text-muted">Sin resultados</div>'; div.style.display='block'; return; }
+    if (!list.length) {
+        div.innerHTML = '<div class="item text-muted small py-2 px-3"><i class="fas fa-search me-1"></i>Sin resultados para esta sucursal</div>';
+        div.style.display = 'block';
+        return;
+    }
     div.innerHTML = list.map(p => {
-        const stockBadge = p.es_servicio ? '<span class="badge bg-info text-dark ms-1" style="font-size:.6rem;">SERV</span>'
-            : (parseFloat(p.stock) > 0 ? `<span class="badge bg-success ms-1" style="font-size:.6rem;">Stock: ${parseFloat(p.stock).toFixed(0)}</span>`
-            : (p.es_reservable ? '<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem;">📅 Res.</span>'
-            : '<span class="badge bg-danger ms-1" style="font-size:.6rem;">Sin stock</span>'));
-        return `<div class="item" onclick='seleccionarProducto(${JSON.stringify(p)})'>
+        const stock       = parseFloat(p.stock);
+        const esServicio  = parseInt(p.es_servicio);
+        const esReservable= parseInt(p.es_reservable);
+        // Todos los resultados son seleccionables (el servidor ya filtró los no permitidos).
+        // Distinguir visualmente: con stock, sin stock pero reservable, servicio.
+        let stockBadge, itemStyle = '', cursor = 'pointer';
+        if (esServicio) {
+            stockBadge = '<span class="badge bg-info text-dark ms-1" style="font-size:.6rem;">SERV</span>';
+        } else if (stock > 0) {
+            stockBadge = `<span class="badge bg-success ms-1" style="font-size:.6rem;">Stock: ${stock.toFixed(0)}</span>`;
+        } else if (esReservable) {
+            stockBadge = '<span class="badge bg-warning text-dark ms-1" style="font-size:.6rem;"><i class="fas fa-calendar-check me-1"></i>Reservable</span>';
+            itemStyle  = 'background:#fffbeb;';
+        }
+        return `<div class="item" style="${itemStyle}cursor:${cursor};" onclick='seleccionarProducto(${JSON.stringify(p)})'>
             <strong>${p.nombre}</strong> ${stockBadge}
             <span class="float-end fw-bold text-primary">$${parseFloat(p.precio).toFixed(2)}</span>
             <div class="text-muted" style="font-size:.72rem;">${p.codigo} · ${p.categoria}</div>
@@ -1733,13 +2008,16 @@ async function printReport() {
         const printDate = now.toLocaleDateString('es-CU', {day:'2-digit',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'});
         const html = `<!DOCTYPE html><html lang="es"><head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
             <title>Reporte Stock Reservas — ${data.month_name} ${data.year}</title>
             <style>
                 @page { size: A4; margin: 1.8cm 1.5cm; }
-                body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1e293b; margin:0; }
+                * { box-sizing: border-box; }
+                body { font-family:'Segoe UI',Arial,sans-serif; font-size:12px; color:#1e293b; margin:0; padding-top:60px; }
                 h1 { font-size:18px; font-weight:900; color:#0f172a; margin:0 0 2px; }
                 h2 { font-size:14px; font-weight:800; color:#1e293b; margin:18px 0 8px;
                      border-left:4px solid #6366f1; padding-left:10px; }
+                .report-body { max-width: 820px; margin: 0 auto; padding: 20px 24px; }
                 .header { border-bottom:3px solid #0f172a; padding-bottom:10px; margin-bottom:14px; }
                 .sub { font-size:10px; color:#64748b; }
                 .kpi-row { display:flex; gap:12px; margin-bottom:14px; }
@@ -1750,29 +2028,61 @@ async function printReport() {
                     padding:8px 12px; font-size:11px; color:#991b1b; margin-bottom:12px; }
                 .footer { margin-top:20px; border-top:1px solid #e2e8f0; padding-top:6px;
                     font-size:9px; color:#94a3b8; text-align:center; }
-                @media print { body { print-color-adjust:exact; -webkit-print-color-adjust:exact; } }
+                /* ── Barra de acciones ── */
+                .action-bar {
+                    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+                    background: #0f172a; color: #fff;
+                    display: flex; align-items: center; gap: 12px;
+                    padding: 10px 20px; box-shadow: 0 2px 8px rgba(0,0,0,.35);
+                }
+                .action-bar .title {
+                    flex: 1; font-size: 13px; font-weight: 700; white-space: nowrap;
+                    overflow: hidden; text-overflow: ellipsis;
+                }
+                .action-bar button {
+                    border: none; border-radius: 6px; padding: 7px 18px;
+                    font-size: 13px; font-weight: 600; cursor: pointer;
+                    display: flex; align-items: center; gap: 6px;
+                }
+                .btn-print  { background: #6366f1; color: #fff; }
+                .btn-print:hover { background: #4f46e5; }
+                .btn-close-r { background: #334155; color: #e2e8f0; }
+                .btn-close-r:hover { background: #475569; }
+                @media print {
+                    .action-bar { display: none !important; }
+                    body { padding-top: 0; }
+                    body { print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+                }
             </style></head><body>
-            <div class="header">
-                <h1>📦 Reporte de Reservas — Productos sin Stock</h1>
-                <div class="sub">Generado: ${printDate} · Sistema PALWEB POS v3.0</div>
+
+            <div class="action-bar">
+                <span class="title">📦 Reporte Stock Reservas — ${data.month_name} ${data.year}</span>
+                <button class="btn-print"   onclick="window.print()">🖨️ Imprimir</button>
+                <button class="btn-close-r" onclick="window.close()">✕ Cerrar</button>
             </div>
-            <div class="kpi-row">
-                <div class="kpi"><div class="num">${data.all_products.length}</div><div class="lbl">Productos reservados</div></div>
-                <div class="kpi"><div class="num" style="color:#dc2626">${data.sin_stock.length}</div><div class="lbl">Con déficit de stock</div></div>
+
+            <div class="report-body">
+                <div class="header">
+                    <h1>📦 Reporte de Reservas — Productos sin Stock</h1>
+                    <div class="sub">Generado: ${printDate} · Sistema PALWEB POS v3.0</div>
+                </div>
+                <div class="kpi-row">
+                    <div class="kpi"><div class="num">${data.all_products.length}</div><div class="lbl">Productos reservados</div></div>
+                    <div class="kpi"><div class="num" style="color:#dc2626">${data.sin_stock.length}</div><div class="lbl">Con déficit de stock</div></div>
+                </div>
+                ${data.sin_stock.length ? `<div class="alert-box">⚠️ Existen <strong>${data.sin_stock.length}</strong> producto(s) con stock insuficiente para cubrir todas las reservas pendientes.</div>` : ''}
+
+                <h2>Sección 1 — Todos los productos reservados (pendientes)</h2>
+                ${buildTable(data.all_products, false)}
+
+                <h2>Sección 2 — A fabricar por semana del mes: ${data.month_name} ${data.year}</h2>
+                ${weekSections}
+
+                <div class="footer">Sistema PALWEB POS v3.0 · Reporte generado automáticamente</div>
             </div>
-            ${data.sin_stock.length ? `<div class="alert-box">⚠️ Existen <strong>${data.sin_stock.length}</strong> producto(s) con stock insuficiente para cubrir todas las reservas pendientes.</div>` : ''}
-
-            <h2>Sección 1 — Todos los productos reservados (pendientes)</h2>
-            ${buildTable(data.all_products, false)}
-
-            <h2>Sección 2 — A fabricar por semana del mes: ${data.month_name} ${data.year}</h2>
-            ${weekSections}
-
-            <div class="footer">Sistema PALWEB POS v3.0 · Reporte generado automáticamente</div>
-            <script>window.onload=()=>{window.print();}<\/script>
         </body></html>`;
 
-        const win = window.open('', '_blank', 'width=820,height=900');
+        const win = window.open('', '_blank');
         win.document.write(html);
         win.document.close();
     } catch(e) {

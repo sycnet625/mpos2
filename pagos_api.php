@@ -8,6 +8,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'push_notify.php';
 
 $idAlmacen = intval($config['id_almacen']);
 
@@ -78,7 +79,7 @@ if ($action === 'check_status') {
     if (!$uuid) { echo json_encode(['error' => 'uuid requerido']); exit; }
 
     $stmt = $pdo->prepare(
-        "SELECT estado_pago, estado_reserva, motivo_rechazo FROM ventas_cabecera WHERE uuid_venta = ? LIMIT 1"
+        "SELECT id, cliente_nombre, estado_pago, estado_reserva, motivo_rechazo FROM ventas_cabecera WHERE uuid_venta = ? LIMIT 1"
     );
     $stmt->execute([$uuid]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -86,6 +87,8 @@ if ($action === 'check_status') {
     if (!$row) { echo json_encode(['error' => 'no encontrado']); exit; }
 
     echo json_encode([
+        'id'              => $row['id'],
+        'cliente_nombre'  => $row['cliente_nombre']   ?? '',
         'estado_pago'     => $row['estado_pago']      ?? 'pendiente',
         'estado_reserva'  => $row['estado_reserva']   ?? 'PENDIENTE',
         'motivo_rechazo'  => $row['motivo_rechazo']   ?? null,
@@ -137,6 +140,20 @@ if ($action === 'confirm_payment') {
         // para que el cliente que hace polling de check_status lo vea actualizado.
 
         $pdo->commit();
+
+        // Push a cocina: preparar pedido confirmado
+        push_notify($pdo, 'cocina',
+            '✅ Pago confirmado — Preparar pedido',
+            "Pedido #{$id} de {$nombre} listo para preparar.",
+            '/marinero/cocina.php'
+        );
+        // Push a operador: confirmación de pago procesada
+        push_notify($pdo, 'operador',
+            '✅ Pago confirmado',
+            "Pedido #{$id} — {$nombre}",
+            '/marinero/reservas.php'
+        );
+
         echo json_encode(['status' => 'success', 'msg' => 'Pago confirmado correctamente.']);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -169,6 +186,13 @@ if ($action === 'reject_payment') {
         $pdo->prepare("UPDATE ventas_cabecera SET estado_pago='rechazado', estado_reserva='CANCELADO', motivo_rechazo=? WHERE id=?")
             ->execute([$motivo, $id]);
         $pdo->commit();
+
+        push_notify($pdo, 'operador',
+            '❌ Transferencia rechazada',
+            "Pedido #{$id} cancelado. Motivo: {$motivo}",
+            '/marinero/reservas.php'
+        );
+
         echo json_encode(['status' => 'success', 'msg' => 'Pago rechazado.']);
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();

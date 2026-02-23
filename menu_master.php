@@ -522,3 +522,206 @@ window.sendAdminMsg = async function() {
 })();
 </script>
 
+<!-- ═══════════════════════════════════════════════════════════════════════
+     PUSH NOTIFICATIONS — Botón campana + lógica de subscripción
+     PUSH_TIPO se define en la página que incluye este archivo:
+       define('PUSH_TIPO', 'operador');  ← en páginas de admin (default)
+       define('PUSH_TIPO', 'cocina');    ← en cocina.php
+     ═══════════════════════════════════════════════════════════════════════ -->
+<div id="pushBellWrap" style="position:fixed;bottom:68px;right:20px;z-index:9998;display:none;">
+    <button id="pushBellBtn"
+        onclick="handlePushBellClick()"
+        title="Activar notificaciones push"
+        style="width:36px;height:36px;border-radius:50%;border:none;
+               background:#f59e0b;color:#fff;font-size:15px;
+               box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:pointer;
+               display:flex;align-items:center;justify-content:center;">
+        <i id="pushBellIcon" class="fas fa-bell-slash"></i>
+    </button>
+</div>
+
+<script>
+(function () {
+    // Tipo de este dispositivo (se puede sobreescribir con define('PUSH_TIPO','cocina'))
+    const PUSH_TIPO = <?= json_encode(defined('PUSH_TIPO') ? constant('PUSH_TIPO') : 'operador') ?>;
+    const PUSH_CACHE_NAME = 'push-config-v1';
+
+    // ── Utilidad: convertir VAPID public key a Uint8Array ─────────────────
+    function urlB64ToUint8Array(b64) {
+        const pad  = '='.repeat((4 - b64.length % 4) % 4);
+        const raw  = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+        const arr  = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        return arr;
+    }
+
+    // ── Guardar tipo en Cache API (el SW lo lee al recibir un push) ───────
+    async function saveTipoToCache(tipo) {
+        try {
+            const cache = await caches.open(PUSH_CACHE_NAME);
+            await cache.put('push-tipo', new Response(tipo));
+        } catch (e) {}
+    }
+
+    // ── Suscribirse al push ───────────────────────────────────────────────
+    async function subscribePush() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+        try { await navigator.serviceWorker.register('service-worker.js', { scope: './' }); } catch (e) {}
+        const reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 6000)),
+        ]);
+
+        // Obtener o reutilizar subscripción existente
+        let sub = await reg.pushManager.getSubscription();
+
+        if (!sub) {
+            const res = await fetch('push_api.php?action=vapid_key');
+            const { publicKey } = await res.json();
+            if (!publicKey) return;
+
+            sub = await reg.pushManager.subscribe({
+                userVisibleOnly:      true,
+                applicationServerKey: urlB64ToUint8Array(publicKey),
+            });
+        }
+
+        // Registrar en servidor
+        await fetch('push_api.php', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({
+                action:       'subscribe',
+                subscription: sub.toJSON(),
+                tipo:         PUSH_TIPO,
+                device:       navigator.userAgent.slice(0, 150),
+            }),
+        });
+
+        // Guardar tipo para el SW
+        await saveTipoToCache(PUSH_TIPO);
+
+        updateBellUI('active');
+        if (typeof showToast === 'function')
+            showToast('🔔 Notificaciones push activadas para este dispositivo.', 'success');
+    }
+
+    // ── Desuscribirse ─────────────────────────────────────────────────────
+    async function unsubscribePush() {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+            await fetch('push_api.php', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ action: 'unsubscribe', endpoint: sub.endpoint }),
+            });
+            await sub.unsubscribe();
+        }
+        updateBellUI('off');
+        if (typeof showToast === 'function')
+            showToast('🔕 Notificaciones desactivadas.', 'warning');
+    }
+
+    // ── Actualizar ícono de campana ───────────────────────────────────────
+    function updateBellUI(state) {
+        const btn  = document.getElementById('pushBellBtn');
+        const icon = document.getElementById('pushBellIcon');
+        if (!btn || !icon) return;
+        if (state === 'active') {
+            btn.style.background  = '#22c55e';
+            btn.title             = 'Notificaciones activas — Click para desactivar';
+            icon.className        = 'fas fa-bell';
+        } else if (state === 'denied') {
+            btn.style.background  = '#ef4444';
+            btn.title             = 'Notificaciones bloqueadas en el navegador';
+            icon.className        = 'fas fa-bell-slash';
+        } else {
+            btn.style.background  = '#f59e0b';
+            btn.title             = 'Activar notificaciones push';
+            icon.className        = 'fas fa-bell-slash';
+        }
+    }
+
+    // ── Click en la campana ───────────────────────────────────────────────
+    window.handlePushBellClick = async function () {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+            alert('Este navegador no soporta notificaciones push.');
+            return;
+        }
+        const perm = Notification.permission;
+        if (perm === 'denied') {
+            alert('Las notificaciones están bloqueadas. Actívalas en la configuración del navegador (ícono de candado en la barra de dirección).');
+            return;
+        }
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+            if (confirm('¿Desactivar las notificaciones push en este dispositivo?')) {
+                await unsubscribePush();
+            }
+        } else {
+            const granted = perm === 'granted'
+                ? 'granted'
+                : await Notification.requestPermission();
+            if (granted === 'granted') {
+                await subscribePush();
+            } else {
+                updateBellUI('denied');
+            }
+        }
+    };
+
+    // ── Inicializar al cargar ─────────────────────────────────────────────
+    async function initPush() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+        const wrap = document.getElementById('pushBellWrap');
+        if (wrap) wrap.style.display = 'block';
+
+        const perm = Notification.permission;
+        if (perm === 'denied') { updateBellUI('denied'); return; }
+
+        // Registrar el SW si aún no está registrado en esta página
+        try {
+            await navigator.serviceWorker.register('service-worker.js', { scope: './' });
+        } catch (e) { /* ya registrado o error de scope */ }
+
+        // Esperar a que el SW esté activo (con timeout de 6 s para no bloquear)
+        let reg;
+        try {
+            reg = await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 6000)),
+            ]);
+        } catch (e) {
+            console.warn('[Push] SW no disponible:', e.message);
+            return;
+        }
+
+        const sub = await reg.pushManager.getSubscription();
+
+        if (sub) {
+            // Ya suscrito: refrescar tipo en servidor por si cambió
+            await saveTipoToCache(PUSH_TIPO);
+            await fetch('push_api.php', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({
+                    action:       'subscribe',
+                    subscription: sub.toJSON(),
+                    tipo:         PUSH_TIPO,
+                    device:       navigator.userAgent.slice(0, 150),
+                }),
+            }).catch(() => {});
+            updateBellUI('active');
+        } else {
+            updateBellUI('off');
+        }
+    }
+
+    window.addEventListener('load', () => { initPush().catch(console.error); });
+})();
+</script>
+

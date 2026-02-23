@@ -2,6 +2,7 @@
 // ARCHIVO: /var/www/palweb/api/chat_api.php
 header('Content-Type: application/json');
 require_once 'db.php';
+require_once 'push_notify.php';
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
@@ -19,8 +20,14 @@ try {
         $stmt->execute([$uuid, $sender, $msg]);
         
         // Si el admin responde, marcar los del cliente como leídos
-        if($sender === 'admin'){
+        if ($sender === 'admin') {
             $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE client_uuid = ? AND sender = 'client'")->execute([$uuid]);
+        }
+
+        // Push al operador cuando escribe el cliente
+        if ($sender === 'client') {
+            $preview = mb_substr($msg, 0, 80) . (mb_strlen($msg) > 80 ? '…' : '');
+            push_notify($pdo, 'operador', '💬 Nuevo mensaje de cliente', $preview, '/marinero/reservas.php');
         }
 
         echo json_encode(['status' => 'success']);

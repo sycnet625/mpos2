@@ -13,12 +13,12 @@ $sucursalID = intval($config['id_sucursal']);
 try {
     if ($action === 'login') {
         $pin = $input['pin'] ?? '';
-        $cajeros = $config['cajeros'] ?? []; 
-        $found = null;
+        $cajeros = $config['cajeros'] ?? [];
+        $foundCajero = null;
         foreach ($cajeros as $c) {
-            if ((string)$c['pin'] === (string)$pin) { $found = $c['nombre']; break; }
+            if ((string)$c['pin'] === (string)$pin) { $foundCajero = $c; break; }
         }
-        if ($found) echo json_encode(['status' => 'success', 'cajero' => $found]);
+        if ($foundCajero) echo json_encode(['status' => 'success', 'cajero' => $foundCajero['nombre'], 'rol' => $foundCajero['rol'] ?? 'cajero']);
         else echo json_encode(['status' => 'error', 'msg' => 'PIN incorrecto']);
     }
 

@@ -20,7 +20,15 @@ if (!isset($config)) {
         "cajeros" => [],
         "numero_tarjeta" => "",
         "titular_tarjeta" => "",
-        "banco_tarjeta" => "Bandec / BPA"
+        "banco_tarjeta" => "Bandec / BPA",
+        // Diseño del ticket
+        "ticket_logo" => "",
+        "ticket_slogan" => "",
+        "ticket_mostrar_uuid" => false,
+        "ticket_mostrar_canal" => true,
+        "ticket_mostrar_cajero" => true,
+        "ticket_mostrar_qr" => true,
+        "ticket_mostrar_items_count" => true,
     ];
 
     if (file_exists($configFile)) {

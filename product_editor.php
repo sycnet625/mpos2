@@ -107,6 +107,8 @@ $stmt->execute([$sku, $EMP_ID]);
 $p = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$p) die('<div class="alert alert-warning">Producto no encontrado.</div>');
 
+$localPath = '/home/marinero/product_images/';
+
 // Colores predefinidos para etiqueta
 $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#22c55e'=>'Verde','#3b82f6'=>'Azul','#8b5cf6'=>'Morado','#ec4899'=>'Rosa'];
 ?>
@@ -133,6 +135,53 @@ $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#2
             <input type="text" name="categoria" class="form-control" value="<?php echo htmlspecialchars($p['categoria']); ?>" list="catListEdit">
             <datalist id="catListEdit"></datalist>
         </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════
+         SECCIÓN — IMÁGENES
+    ═══════════════════════════════════════════════════ -->
+    <h6 class="text-warning border-bottom pb-2 mb-3 mt-4"><i class="fas fa-images me-1"></i> Imágenes del Producto</h6>
+
+    <div class="row g-3 mb-2">
+    <?php
+    $imgSlots = [
+        'main'   => 'Imagen Principal',
+        'extra1' => 'Extra 1 (detalles web)',
+        'extra2' => 'Extra 2 (detalles web)',
+    ];
+    foreach ($imgSlots as $slot => $slotLabel):
+        $imgCode = ($slot === 'main') ? $sku : $sku . '_' . $slot;
+        $hasImg  = false; $imgV = '';
+        foreach (['.avif','.webp','.jpg'] as $_e) {
+            $f = $localPath . $imgCode . $_e;
+            if (file_exists($f)) { $hasImg = true; $imgV = '&v='.filemtime($f); break; }
+        }
+    ?>
+    <div class="col-md-4">
+        <div class="border rounded p-2 bg-light text-center h-100">
+            <div class="small fw-bold text-muted mb-2"><?php echo $slotLabel; ?></div>
+            <img id="img_<?php echo $slot; ?>"
+                 src="image.php?code=<?php echo urlencode($imgCode) . $imgV; ?>"
+                 class="img-thumbnail mb-2"
+                 style="width:130px;height:130px;object-fit:cover;cursor:pointer;border-radius:8px;"
+                 onclick="triggerEditorImg('<?php echo addslashes($sku); ?>','<?php echo $slot; ?>')"
+                 title="Clic para cambiar imagen">
+            <div id="btnWrap_<?php echo $slot; ?>" class="d-flex gap-1 justify-content-center flex-wrap">
+                <button type="button" class="btn btn-sm btn-outline-primary"
+                        onclick="triggerEditorImg('<?php echo addslashes($sku); ?>','<?php echo $slot; ?>')">
+                    <i class="fas fa-<?php echo $hasImg ? 'camera' : 'upload'; ?> me-1"></i>
+                    <?php echo $hasImg ? 'Cambiar' : 'Subir'; ?>
+                </button>
+                <?php if ($hasImg && $slot !== 'main'): ?>
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        onclick="deleteEditorImg('<?php echo addslashes($sku); ?>','<?php echo $slot; ?>')">
+                    <i class="fas fa-trash"></i>
+                </button>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
     </div>
 
     <!-- ═══════════════════════════════════════════════════
@@ -377,4 +426,7 @@ document.querySelectorAll('.etiq-radio').forEach(r => {
         if (dl) cats.forEach(c => { const o = document.createElement('option'); o.value = c.nombre; dl.appendChild(o); });
     } catch(e) {}
 })();
+
+// Nota: triggerEditorImg, handleEditorUpload y deleteEditorImg están definidos
+// en products_table.php (script de la página padre).
 </script>

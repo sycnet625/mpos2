@@ -558,6 +558,115 @@
         }
     }
 </script>
+
+<!-- Push Notifications para Cocina -->
+<div id="pushBellWrap" style="position:fixed;bottom:16px;right:16px;z-index:9999;">
+    <button id="pushBellBtn" onclick="handleCocinaNotif()"
+        title="Activar notificaciones de cocina"
+        style="width:42px;height:42px;border-radius:50%;border:none;
+               background:#f59e0b;color:#fff;font-size:18px;
+               box-shadow:0 2px 10px rgba(0,0,0,0.4);cursor:pointer;">
+        <i id="pushBellIcon" class="fas fa-bell-slash"></i>
+    </button>
+</div>
+<script>
+(function () {
+    const PUSH_TIPO = 'cocina';
+    const PUSH_CACHE_NAME = 'push-config-v1';
+
+    function urlB64ToUint8Array(b64) {
+        const pad = '='.repeat((4 - b64.length % 4) % 4);
+        const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+        const arr = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        return arr;
+    }
+
+    async function saveTipoToCache(tipo) {
+        try {
+            const cache = await caches.open(PUSH_CACHE_NAME);
+            await cache.put('push-tipo', new Response(tipo));
+        } catch (e) {}
+    }
+
+    function setBell(state) {
+        const btn  = document.getElementById('pushBellBtn');
+        const icon = document.getElementById('pushBellIcon');
+        if (!btn || !icon) return;
+        if (state === 'active') {
+            btn.style.background = '#22c55e';
+            btn.title = 'Notificaciones cocina activas — Click para desactivar';
+            icon.className = 'fas fa-bell';
+        } else if (state === 'denied') {
+            btn.style.background = '#ef4444';
+            icon.className = 'fas fa-bell-slash';
+        } else {
+            btn.style.background = '#f59e0b';
+            btn.title = 'Activar notificaciones de cocina';
+            icon.className = 'fas fa-bell-slash';
+        }
+    }
+
+    async function subscribe() {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        try { await navigator.serviceWorker.register('service-worker.js', { scope: './' }); } catch (e) {}
+        const reg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 6000)),
+        ]);
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+            const res = await fetch('push_api.php?action=vapid_key');
+            const { publicKey } = await res.json();
+            if (!publicKey) return;
+            sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(publicKey) });
+        }
+        await fetch('push_api.php', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'subscribe', subscription: sub.toJSON(), tipo: PUSH_TIPO, device: navigator.userAgent.slice(0, 150) })
+        });
+        await saveTipoToCache(PUSH_TIPO);
+        setBell('active');
+    }
+
+    async function unsubscribe() {
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+            await fetch('push_api.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'unsubscribe', endpoint: sub.endpoint }) });
+            await sub.unsubscribe();
+        }
+        setBell('off');
+    }
+
+    window.handleCocinaNotif = async function () {
+        if (!('PushManager' in window)) { alert('Navegador no soporta push.'); return; }
+        if (Notification.permission === 'denied') { alert('Notificaciones bloqueadas. Actívalas en ajustes del navegador.'); return; }
+        const reg = await navigator.serviceWorker.ready;
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) {
+            if (confirm('¿Desactivar notificaciones de cocina?')) await unsubscribe();
+        } else {
+            const perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
+            if (perm === 'granted') await subscribe(); else setBell('denied');
+        }
+    };
+
+    window.addEventListener('load', async () => {
+        if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+        try { await navigator.serviceWorker.register('service-worker.js', { scope: './' }); } catch (e) {}
+        let reg;
+        try {
+            reg = await Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((_, rej) => setTimeout(() => rej(new Error('SW timeout')), 6000)),
+            ]);
+        } catch (e) { return; }
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) { await saveTipoToCache(PUSH_TIPO); setBell('active'); } else setBell('off');
+    });
+})();
+</script>
 </body>
 </html>
 

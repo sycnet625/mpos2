@@ -132,6 +132,21 @@ $tasaConversion = ($ipsUnicas > 0) ? ($ventasWebCount / $ipsUnicas) * 100 : 0;
 $urlMasVisitada = getScalar($pdo, "SELECT url_visitada FROM metricas_web GROUP BY url_visitada ORDER BY COUNT(*) DESC LIMIT 1");
 $urlMasVisitada = basename($urlMasVisitada) ?: '/';
 
+// ── Datos para el tab de Promociones Push ──────────────────────────────────
+$pushClientesCount   = 0;
+$pushOperadorCount   = 0;
+$pushTotalEnviadas   = 0;
+$pushHistorialPromo  = [];
+try {
+    $pushClientesCount  = (int)$pdo->query("SELECT COUNT(*) FROM push_subscriptions WHERE tipo = 'cliente'")->fetchColumn();
+    $pushOperadorCount  = (int)$pdo->query("SELECT COUNT(*) FROM push_subscriptions WHERE tipo IN ('operador','cocina')")->fetchColumn();
+    $pushTotalEnviadas  = (int)$pdo->query("SELECT COUNT(*) FROM push_notifications WHERE tipo = 'cliente'")->fetchColumn();
+    $pushHistorialPromo = $pdo->query(
+        "SELECT titulo, cuerpo, url, created_at FROM push_notifications
+          WHERE tipo = 'cliente' ORDER BY created_at DESC LIMIT 15"
+    )->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) { /* tablas aún no creadas */ }
+
 // Alertas: reservas sin stock y pagos pendientes de verificación
 $reservasSinStock = 0;
 $pagosVerificando = 0;
@@ -345,6 +360,115 @@ function getCanalBadge($canal) {
     $iconClass = str_contains($icon, ' ') ? $icon : "fas $icon";
     return "<span style=\"display:inline-flex;align-items:center;gap:4px;background-color:{$bg}!important;color:{$fg}!important;padding:3px 9px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;\"><i class=\"{$iconClass}\"></i>{$label}</span>";
 }
+
+// ============================================================================
+//   DATOS DEL TAB AUDITORÍA
+// ============================================================================
+$auditRows       = [];
+$auditKpi        = ['total' => 0, 'anulaciones' => 0, 'descuentos' => 0, 'devoluciones' => 0, 'integridad_ok' => 0, 'integridad_err' => 0];
+$auditTabBadge   = 0;   // Para el badge rojo del tab
+
+try {
+    // Crear/migrar tabla si no existe (reutiliza lógica de pos_audit.php)
+    $pdo->exec("CREATE TABLE IF NOT EXISTS auditoria_pos (
+        id         BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        accion     VARCHAR(50)  NOT NULL,
+        usuario    VARCHAR(100) NOT NULL,
+        datos      TEXT,
+        ip         VARCHAR(45)  NULL,
+        checksum   CHAR(40)     NULL,
+        created_at TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_accion     (accion),
+        INDEX idx_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Últimas 500 filas dentro del rango de fechas del dashboard
+    $stmtAudit = $pdo->prepare(
+        "SELECT * FROM auditoria_pos
+         WHERE (created_at BETWEEN ? AND ? OR created_at IS NULL)
+         ORDER BY id DESC
+         LIMIT 500"
+    );
+    $stmtAudit->execute([$fechaInicio . ' 00:00:00', $fechaFin . ' 23:59:59']);
+    $auditRows = $stmtAudit->fetchAll(PDO::FETCH_ASSOC);
+
+    foreach ($auditRows as $r) {
+        $auditKpi['total']++;
+        $accion = $r['accion'];
+        if ($accion === 'VENTA_ANULADA')                            $auditKpi['anulaciones']++;
+        if ($accion === 'DESCUENTO_ITEM' || $accion === 'DESCUENTO_GLOBAL') $auditKpi['descuentos']++;
+        if ($accion === 'DEVOLUCION_ITEM' || $accion === 'DEVOLUCION_TICKET') $auditKpi['devoluciones']++;
+
+        // Verificar integridad del checksum
+        $datos = $r['datos'] ?? '';
+        $ip    = $r['ip']    ?? '';
+        $esperado = sha1($accion . '|' . $r['usuario'] . '|' . $datos . '|' . $ip);
+        if ($r['checksum'] && $r['checksum'] === $esperado) {
+            $auditKpi['integridad_ok']++;
+        } elseif ($r['checksum']) {
+            $auditKpi['integridad_err']++;
+        }
+    }
+
+    // Badge del tab = anulaciones + descuentos en las últimas 24h
+    $stmtBadge = $pdo->query(
+        "SELECT COUNT(*) FROM auditoria_pos
+         WHERE accion IN ('VENTA_ANULADA','DESCUENTO_ITEM','DESCUENTO_GLOBAL')
+           AND created_at >= NOW() - INTERVAL 24 HOUR"
+    );
+    $auditTabBadge = (int)$stmtBadge->fetchColumn();
+
+} catch (Throwable $auditEx) {
+    // La tabla puede no existir aún — sin datos es suficiente
+}
+
+// Helpers de presentación del audit
+function auditBadgeHtml(string $accion): string {
+    $map = [
+        'VENTA_GUARDADA'     => ['#198754', 'fa-receipt',       'VENTA'],
+        'DESCUENTO_ITEM'     => ['#f59e0b', 'fa-tag',           'DESC. ITEM'],
+        'DESCUENTO_GLOBAL'   => ['#e67e22', 'fa-percent',       'DESC. GLOBAL'],
+        'VENTA_ANULADA'      => ['#dc3545', 'fa-ban',           'ANULADA'],
+        'DEVOLUCION_ITEM'    => ['#6f42c1', 'fa-undo',          'DEV. ITEM'],
+        'DEVOLUCION_TICKET'  => ['#9d174d', 'fa-times-circle',  'DEV. TICKET'],
+        'SESION_ABIERTA'     => ['#0ea5e9', 'fa-door-open',     'APERTURA'],
+        'SESION_CERRADA'     => ['#64748b', 'fa-door-closed',   'CIERRE'],
+    ];
+    [$color, $icon, $label] = $map[$accion] ?? ['#6c757d', 'fa-circle', $accion];
+    return "<span style=\"background:{$color};color:#fff;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;display:inline-flex;align-items:center;gap:4px;\"><i class=\"fas {$icon}\"></i>{$label}</span>";
+}
+
+function auditResumen(string $accion, array $d): string {
+    switch ($accion) {
+        case 'VENTA_ANULADA':
+            $motivo = htmlspecialchars(substr($d['motivo'] ?? '—', 0, 60));
+            $total  = '$' . number_format(abs($d['total'] ?? 0), 2);
+            return "Ticket #" . ($d['id_venta'] ?? '?') . " — {$total} — <em class=\"text-muted\">\"{$motivo}\"</em>";
+        case 'DESCUENTO_ITEM':
+            $pct  = number_format($d['descuento_pct'] ?? 0, 0);
+            $prod = htmlspecialchars(substr($d['producto'] ?? '?', 0, 30));
+            $ori  = '$' . number_format($d['precio_original'] ?? 0, 2);
+            $fin  = '$' . number_format($d['precio_final']    ?? 0, 2);
+            return "#{$d['id_venta']} — {$prod} — <s>{$ori}</s> → {$fin} (-{$pct}%)";
+        case 'DESCUENTO_GLOBAL':
+            $pct  = number_format($d['descuento_pct'] ?? 0, 0);
+            $net  = '$' . number_format($d['total_neto'] ?? 0, 2);
+            return "Ticket #{$d['id_venta']} — -{$pct}% global → neto {$net}";
+        case 'DEVOLUCION_ITEM':
+            $prod = htmlspecialchars(substr($d['producto'] ?? '?', 0, 30));
+            $m    = '$' . number_format($d['monto'] ?? 0, 2);
+            return "Ticket #{$d['id_venta']} — {$prod} — {$m}";
+        case 'DEVOLUCION_TICKET':
+            $tot  = '$' . number_format(abs($d['total'] ?? 0), 2);
+            return "Ticket #{$d['id_venta']} — Total {$tot} — " . ($d['items_count'] ?? '?') . " items";
+        case 'SESION_ABIERTA':
+        case 'SESION_CERRADA':
+            return "Sesión #" . ($d['id_sesion'] ?? '?');
+        default:
+            $txt = json_encode($d, JSON_UNESCAPED_UNICODE);
+            return htmlspecialchars(substr($txt, 0, 80));
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -441,6 +565,24 @@ function getCanalBadge($canal) {
             color: white !important;
             box-shadow: 0 4px 15px rgba(13, 110, 253, 0.3);
         }
+
+        /* ── Auditoría Tab ──────────────────────────────────── */
+        .audit-table { font-size: 0.82rem; }
+        .audit-table td { vertical-align: middle; padding: 6px 10px; }
+        .audit-table tr.audit-anulada  { background: #fff5f5 !important; border-left: 4px solid #dc3545 !important; }
+        .audit-table tr.audit-descuento { background: #fffbeb !important; border-left: 4px solid #f59e0b !important; }
+        .audit-table tr.audit-devolucion { background: #f5f0ff !important; border-left: 4px solid #6f42c1 !important; }
+        .audit-table tr.audit-sesion   { background: #f0f9ff !important; border-left: 4px solid #0ea5e9 !important; }
+        .audit-table tr.audit-venta    { background: #f0fdf4 !important; border-left: 4px solid #198754 !important; }
+        .audit-table tr.audit-other    { border-left: 4px solid #dee2e6 !important; }
+        .audit-integrity-ok  { color: #198754; font-weight: 700; }
+        .audit-integrity-err { color: #dc3545; font-weight: 700; }
+        .audit-integrity-na  { color: #adb5bd; }
+        .audit-filter-bar input, .audit-filter-bar select { font-size: 0.82rem; }
+        .kpi-audit-anuladas  { background: #fef2f2 !important; border-left: 5px solid #dc3545 !important; }
+        .kpi-audit-descuentos{ background: #fffbeb !important; border-left: 5px solid #f59e0b !important; }
+        .kpi-audit-devol     { background: #f5f0ff !important; border-left: 5px solid #6f42c1 !important; }
+        .kpi-audit-integ     { background: #f0fdf4 !important; border-left: 5px solid #198754 !important; }
     </style>
 </head>
 <body>
@@ -473,6 +615,17 @@ function getCanalBadge($canal) {
             </li>
             <li class="nav-item">
                 <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-web" type="button"><i class="fas fa-shopping-cart me-1"></i> Web & Ecommerce</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-promo" type="button"><i class="fas fa-bullhorn me-1"></i> Promociones <?php if($pushClientesCount > 0): ?><span class="badge bg-primary ms-1"><?php echo $pushClientesCount; ?></span><?php endif; ?></button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-auditoria" type="button">
+                    <i class="fas fa-shield-alt me-1"></i> Auditoría
+                    <?php if($auditTabBadge > 0): ?>
+                        <span class="badge bg-danger ms-1"><?php echo $auditTabBadge; ?></span>
+                    <?php endif; ?>
+                </button>
             </li>
         </ul>
 
@@ -1028,8 +1181,364 @@ function getCanalBadge($canal) {
                 </div>
             </div>
         </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════════ -->
+        <!-- TAB: PROMOCIONES PUSH                                                  -->
+        <!-- ═══════════════════════════════════════════════════════════════════════ -->
+        <div class="tab-pane fade" id="tab-promo">
+        <div>
+
+    <!-- KPIs -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-4">
+            <div class="card card-stat h-100 shadow-sm" style="border-left:5px solid #0d6efd!important;background:#eef6ff!important;">
+                <div class="card-body">
+                    <h6 class="fw-bold small text-uppercase text-primary">Suscriptores Tienda</h6>
+                    <h2 class="fw-bold mb-0"><?php echo number_format($pushClientesCount); ?></h2>
+                    <p class="text-muted small mb-0">Clientes con push activado en shop.php</p>
+                    <i class="fas fa-mobile-alt" style="position:absolute;right:18px;top:18px;font-size:2rem;opacity:.15;color:#0d6efd;"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-stat h-100 shadow-sm" style="border-left:5px solid #6366f1!important;background:#f0f0ff!important;">
+                <div class="card-body">
+                    <h6 class="fw-bold small text-uppercase" style="color:#6366f1;">Suscriptores Internos</h6>
+                    <h2 class="fw-bold mb-0"><?php echo number_format($pushOperadorCount); ?></h2>
+                    <p class="text-muted small mb-0">Operadores y cocina suscritos</p>
+                    <i class="fas fa-users-cog" style="position:absolute;right:18px;top:18px;font-size:2rem;opacity:.15;color:#6366f1;"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card card-stat h-100 shadow-sm" style="border-left:5px solid #22c55e!important;background:#f0fdf4!important;">
+                <div class="card-body">
+                    <h6 class="fw-bold small text-uppercase text-success">Campañas Enviadas</h6>
+                    <h2 class="fw-bold mb-0"><?php echo number_format($pushTotalEnviadas); ?></h2>
+                    <p class="text-muted small mb-0">Notificaciones promocionales en total</p>
+                    <i class="fas fa-paper-plane" style="position:absolute;right:18px;top:18px;font-size:2rem;opacity:.15;color:#22c55e;"></i>
+                </div>
+            </div>
+        </div>
     </div>
-</div>
+
+    <div class="row g-4">
+
+        <!-- Formulario de composición -->
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-primary text-white fw-bold py-3">
+                    <i class="fas fa-bullhorn me-2"></i> Enviar Notificación a Clientes
+                </div>
+                <div class="card-body">
+                    <div id="promoFeedback" class="mb-3" style="display:none;"></div>
+
+                    <!-- Plantillas rápidas -->
+                    <div class="mb-3">
+                        <label class="form-label fw-bold small">⚡ Plantillas rápidas</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="cargarPlantilla('oferta')">🏷️ Oferta especial</button>
+                            <button type="button" class="btn btn-sm btn-outline-success" onclick="cargarPlantilla('nuevo')">🆕 Nuevo producto</button>
+                            <button type="button" class="btn btn-sm btn-outline-warning" onclick="cargarPlantilla('urgente')">⏰ Urgente / última hora</button>
+                            <button type="button" class="btn btn-sm btn-outline-info" onclick="cargarPlantilla('descuento')">💰 Descuento</button>
+                        </div>
+                    </div>
+
+                    <hr>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Título <span class="text-danger">*</span></label>
+                        <input type="text" id="promoTitulo" class="form-control" maxlength="80"
+                               placeholder="Ej: 🏷️ Oferta especial este fin de semana">
+                        <div class="form-text"><span id="promoTituloCount">0</span>/80 caracteres</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Mensaje</label>
+                        <textarea id="promoCuerpo" class="form-control" rows="3" maxlength="200"
+                                  placeholder="Ej: Hasta 30% de descuento en productos seleccionados. ¡Solo hoy!"></textarea>
+                        <div class="form-text"><span id="promoCuerpoCount">0</span>/200 caracteres</div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">URL de destino</label>
+                        <input type="text" id="promoUrl" class="form-control" value="/marinero/shop.php"
+                               placeholder="/marinero/shop.php">
+                        <div class="form-text">Al tocar la notificación se abre esta URL.</div>
+                    </div>
+
+                    <!-- Vista previa -->
+                    <div class="mb-3 p-3 rounded" style="background:#f8f9fa;border:1px dashed #dee2e6;">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <img src="icon-192.png" width="24" height="24" class="rounded" alt="">
+                            <strong class="small" id="previewTitulo" style="color:#333;">Vista previa del título</strong>
+                        </div>
+                        <p class="small text-muted mb-0" id="previewCuerpo">El mensaje aparecerá aquí...</p>
+                    </div>
+
+                    <button type="button" class="btn btn-primary w-100 fw-bold py-2" id="btnEnviarPromo" onclick="enviarPromo()">
+                        <i class="fas fa-paper-plane me-2"></i> Enviar a <?php echo number_format($pushClientesCount); ?> suscriptores
+                    </button>
+
+                    <?php if ($pushClientesCount === 0): ?>
+                    <div class="alert alert-warning mt-3 small py-2">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        No hay suscriptores de tienda todavía. Los clientes deben activar las notificaciones en <a href="shop.php" target="_blank">shop.php</a>.
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- Historial de campañas -->
+        <div class="col-lg-7">
+            <div class="card shadow-sm border-0 h-100">
+                <div class="card-header bg-white fw-bold py-3 d-flex justify-content-between align-items-center">
+                    <span><i class="fas fa-history text-secondary me-2"></i> Historial de Campañas</span>
+                    <span class="badge bg-secondary"><?php echo count($pushHistorialPromo); ?> recientes</span>
+                </div>
+                <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
+                    <?php if (empty($pushHistorialPromo)): ?>
+                    <div class="text-center text-muted py-5">
+                        <i class="fas fa-inbox fa-3x mb-3 opacity-25"></i>
+                        <p>Aún no se han enviado campañas promocionales.</p>
+                    </div>
+                    <?php else: ?>
+                    <table class="table table-hover mb-0 small">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th class="ps-3" style="width:55%;">Mensaje</th>
+                                <th>Fecha y Hora</th>
+                                <th class="text-center">URL</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach ($pushHistorialPromo as $pn): ?>
+                        <tr>
+                            <td class="ps-3">
+                                <div class="fw-semibold"><?php echo htmlspecialchars($pn['titulo']); ?></div>
+                                <?php if (!empty($pn['cuerpo'])): ?>
+                                <div class="text-muted" style="font-size:.75rem;"><?php echo htmlspecialchars(mb_substr($pn['cuerpo'], 0, 80)); ?><?php echo strlen($pn['cuerpo']) > 80 ? '…' : ''; ?></div>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-muted" style="white-space:nowrap;">
+                                <?php echo date('d/m/y H:i', strtotime($pn['created_at'])); ?>
+                            </td>
+                            <td class="text-center">
+                                <?php if (!empty($pn['url'])): ?>
+                                <a href="<?php echo htmlspecialchars($pn['url']); ?>" target="_blank"
+                                   class="text-primary" title="<?php echo htmlspecialchars($pn['url']); ?>">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </a>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        </div><!-- /row -->
+        </div><!-- /inner -->
+        </div><!-- /tab-promo -->
+        <!-- TAB AUDITORÍA ─────────────────────────────────────────────────────
+             Audit trail inmutable: toda anulación, descuento y devolución
+             queda firmada con cajero + IP + SHA1 checksum. -->
+        <div class="tab-pane fade" id="tab-auditoria">
+
+            <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1">
+                <i class="fas fa-shield-alt me-2 text-danger"></i>
+                Audit Trail — Eventos Firmados
+                <small class="text-muted fw-normal ms-2" style="font-size:.7rem;text-transform:none;">
+                    <?php echo $fechaInicio; ?> → <?php echo $fechaFin; ?> · <?php echo $auditKpi['total']; ?> registros
+                </small>
+            </h6>
+
+            <!-- KPIs del período -->
+            <div class="row g-3 mb-4">
+                <div class="col-6 col-md-3">
+                    <div class="card card-stat kpi-critico kpi-audit-anuladas h-100 shadow-sm">
+                        <div class="card-body py-3">
+                            <h6 class="text-muted fw-bold small text-uppercase mb-1">Anulaciones</h6>
+                            <h3 class="fw-bold mb-0"><?php echo $auditKpi['anulaciones']; ?></h3>
+                            <i class="fas fa-ban icon-stat"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card card-stat kpi-audit-descuentos h-100 shadow-sm">
+                        <div class="card-body py-3">
+                            <h6 class="text-muted fw-bold small text-uppercase mb-1">Descuentos</h6>
+                            <h3 class="fw-bold mb-0"><?php echo $auditKpi['descuentos']; ?></h3>
+                            <i class="fas fa-tag icon-stat" style="color:#f59e0b"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card card-stat kpi-audit-devol h-100 shadow-sm">
+                        <div class="card-body py-3">
+                            <h6 class="text-muted fw-bold small text-uppercase mb-1">Devoluciones</h6>
+                            <h3 class="fw-bold mb-0"><?php echo $auditKpi['devoluciones']; ?></h3>
+                            <i class="fas fa-undo icon-stat" style="color:#6f42c1"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card card-stat kpi-audit-integ h-100 shadow-sm">
+                        <div class="card-body py-3">
+                            <h6 class="text-muted fw-bold small text-uppercase mb-1">Integridad SHA1</h6>
+                            <?php if ($auditKpi['integridad_err'] > 0): ?>
+                                <h3 class="fw-bold mb-0 text-danger">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <?php echo $auditKpi['integridad_err']; ?> FALLO<?php echo $auditKpi['integridad_err'] > 1 ? 'S' : ''; ?>
+                                </h3>
+                            <?php else: ?>
+                                <h3 class="fw-bold mb-0 text-success">
+                                    <i class="fas fa-check-circle"></i>
+                                    <?php echo $auditKpi['integridad_ok']; ?> OK
+                                </h3>
+                            <?php endif; ?>
+                            <i class="fas fa-fingerprint icon-stat" style="color:#198754"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <?php if ($auditKpi['integridad_err'] > 0): ?>
+            <div class="alert alert-danger d-flex align-items-center gap-2 py-2 mb-3">
+                <i class="fas fa-exclamation-circle fs-5"></i>
+                <div><strong>¡Alerta de integridad!</strong> <?php echo $auditKpi['integridad_err']; ?> registro(s) tienen checksum SHA1 incorrecto. Posible manipulación directa de la base de datos.</div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Barra de filtros client-side -->
+            <div class="card shadow-sm border-0 mb-3">
+                <div class="card-body py-2 audit-filter-bar">
+                    <div class="row g-2 align-items-center">
+                        <div class="col-auto">
+                            <select id="auditFilterType" class="form-select form-select-sm" onchange="auditFilter()">
+                                <option value="">— Todos los tipos —</option>
+                                <option value="VENTA_ANULADA">Anulaciones</option>
+                                <option value="DESCUENTO">Descuentos (Item + Global)</option>
+                                <option value="DEVOLUCION">Devoluciones</option>
+                                <option value="VENTA_GUARDADA">Ventas guardadas</option>
+                                <option value="SESION">Apertura / Cierre sesión</option>
+                            </select>
+                        </div>
+                        <div class="col-auto">
+                            <select id="auditFilterUser" class="form-select form-select-sm" onchange="auditFilter()">
+                                <option value="">— Todos los cajeros —</option>
+                                <?php
+                                $usuarios = array_unique(array_column($auditRows, 'usuario'));
+                                sort($usuarios);
+                                foreach ($usuarios as $u): ?>
+                                    <option value="<?php echo htmlspecialchars($u); ?>"><?php echo htmlspecialchars($u); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col">
+                            <input type="text" id="auditSearch" class="form-control form-control-sm" placeholder="Buscar en datos (motivo, producto, ticket...)" oninput="auditFilter()">
+                        </div>
+                        <div class="col-auto">
+                            <button class="btn btn-sm btn-outline-secondary" onclick="location.reload()" title="Actualizar">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                        <div class="col-auto">
+                            <span class="text-muted small" id="auditCount"><?php echo count($auditRows); ?> eventos</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabla de eventos -->
+            <div class="card shadow-sm border-0">
+                <div class="card-body p-0">
+                    <div class="table-responsive" style="max-height:600px;overflow-y:auto;">
+                        <table class="table table-hover mb-0 audit-table" id="auditTable">
+                            <thead class="table-dark sticky-top" style="font-size:.75rem;">
+                                <tr>
+                                    <th style="width:45px">#</th>
+                                    <th style="width:130px">Fecha / Hora</th>
+                                    <th style="width:130px">Tipo</th>
+                                    <th style="width:120px">Cajero / Admin</th>
+                                    <th>Detalle</th>
+                                    <th style="width:80px">IP</th>
+                                    <th style="width:45px" title="Integridad SHA1">🔒</th>
+                                </tr>
+                            </thead>
+                            <tbody id="auditTableBody">
+                            <?php if (empty($auditRows)): ?>
+                                <tr>
+                                    <td colspan="7" class="text-center py-5 text-muted">
+                                        <i class="fas fa-shield-alt fa-2x mb-2 d-block opacity-25"></i>
+                                        Sin eventos de auditoría en este período.<br>
+                                        <small>Los eventos aparecen en tiempo real al registrar ventas, anulaciones y descuentos.</small>
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                            <?php foreach ($auditRows as $r):
+                                $accion  = $r['accion'];
+                                $datos   = json_decode($r['datos'] ?? '{}', true) ?? [];
+                                $ts      = $r['created_at'] ?? 'Sin fecha';
+                                $ipAddr  = $r['ip'] ? htmlspecialchars($r['ip']) : '<span class="text-muted">—</span>';
+
+                                // Clase de fila por tipo
+                                $rowClass = 'audit-other';
+                                if ($accion === 'VENTA_ANULADA')  $rowClass = 'audit-anulada';
+                                elseif (str_starts_with($accion, 'DESCUENTO'))  $rowClass = 'audit-descuento';
+                                elseif (str_starts_with($accion, 'DEVOLUCION')) $rowClass = 'audit-devolucion';
+                                elseif (str_starts_with($accion, 'SESION'))     $rowClass = 'audit-sesion';
+                                elseif ($accion === 'VENTA_GUARDADA')            $rowClass = 'audit-venta';
+
+                                // Verificar integridad
+                                $ip_raw   = $r['ip'] ?? '';
+                                $esperado = sha1($accion . '|' . $r['usuario'] . '|' . ($r['datos'] ?? '') . '|' . $ip_raw);
+                                if (!$r['checksum']) {
+                                    $intHtml = '<span class="audit-integrity-na" title="Sin checksum (registro antiguo)">—</span>';
+                                } elseif ($r['checksum'] === $esperado) {
+                                    $intHtml = '<span class="audit-integrity-ok" title="SHA1 verificado">✓</span>';
+                                } else {
+                                    $intHtml = '<span class="audit-integrity-err" title="¡Checksum no coincide! Posible manipulación">✗ !</span>';
+                                }
+
+                                // Datos legibles para búsqueda JS
+                                $dataBusq = strtolower(json_encode($datos, JSON_UNESCAPED_UNICODE) . ' ' . $r['usuario'] . ' ' . $accion);
+                            ?>
+                            <tr class="<?php echo $rowClass; ?>"
+                                data-accion="<?php echo htmlspecialchars($accion); ?>"
+                                data-usuario="<?php echo htmlspecialchars(strtolower($r['usuario'])); ?>"
+                                data-busq="<?php echo htmlspecialchars($dataBusq); ?>">
+                                <td class="text-muted" style="font-size:.7rem"><?php echo $r['id']; ?></td>
+                                <td style="font-size:.72rem;white-space:nowrap">
+                                    <?php echo $ts !== 'Sin fecha' ? date('d/m H:i:s', strtotime($ts)) : '<span class="text-muted">—</span>'; ?>
+                                </td>
+                                <td><?php echo auditBadgeHtml($accion); ?></td>
+                                <td class="fw-bold" style="font-size:.78rem"><?php echo htmlspecialchars($r['usuario']); ?></td>
+                                <td style="font-size:.78rem"><?php echo auditResumen($accion, $datos); ?></td>
+                                <td style="font-size:.65rem;color:#94a3b8"><?php echo $ipAddr; ?></td>
+                                <td class="text-center"><?php echo $intHtml; ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                            <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-light py-1 text-muted" style="font-size:.7rem;">
+                    <i class="fas fa-info-circle me-1"></i>
+                    Tabla de solo-lectura · SHA1 por fila · Mostrando máx. 500 eventos por período ·
+                    <strong class="text-danger">Nunca</strong> se ejecutan UPDATE/DELETE sobre esta tabla desde la aplicación.
+                </div>
+            </div>
+
+        </div><!-- /tab-auditoria -->
+
+    </div><!-- /tab-content -->
+</div><!-- /container-fluid -->
 
 <div class="modal fade" id="manageModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
@@ -1137,9 +1646,134 @@ function getCanalBadge($canal) {
     setInterval(() => {
         if(!document.querySelector('.modal.show')) location.reload();
     }, 60000);
+
+    // ── TAB PROMOCIONES PUSH ───────────────────────────────────────────────────
+
+    // Plantillas rápidas
+    const PROMO_PLANTILLAS = {
+        oferta:   { titulo: '🏷️ Oferta especial hoy', cuerpo: 'Tenemos productos seleccionados con precios especiales. ¡Visítanos ahora!' },
+        nuevo:    { titulo: '🆕 Nuevo producto disponible', cuerpo: 'Acabamos de incorporar novedades a nuestro catálogo. ¡Échale un vistazo!' },
+        urgente:  { titulo: '⏰ ¡Últimas horas de la oferta!', cuerpo: 'La promoción termina pronto. No te quedes sin tu pedido.' },
+        descuento:{ titulo: '💰 Descuento especial para ti', cuerpo: 'Aprovecha esta oportunidad única con precios rebajados en nuestra tienda.' },
+    };
+
+    function cargarPlantilla(tipo) {
+        const p = PROMO_PLANTILLAS[tipo];
+        if (!p) return;
+        document.getElementById('promoTitulo').value = p.titulo;
+        document.getElementById('promoCuerpo').value = p.cuerpo;
+        actualizarPreviewPromo();
+        actualizarContadoresPromo();
+    }
+
+    function actualizarPreviewPromo() {
+        const titulo = document.getElementById('promoTitulo').value || 'Vista previa del título';
+        const cuerpo = document.getElementById('promoCuerpo').value || 'El mensaje aparecerá aquí...';
+        document.getElementById('previewTitulo').textContent = titulo;
+        document.getElementById('previewCuerpo').textContent = cuerpo;
+    }
+
+    function actualizarContadoresPromo() {
+        const t = document.getElementById('promoTitulo');
+        const c = document.getElementById('promoCuerpo');
+        if (t) document.getElementById('promoTituloCount').textContent = t.value.length;
+        if (c) document.getElementById('promoCuerpoCount').textContent = c.value.length;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const t = document.getElementById('promoTitulo');
+        const c = document.getElementById('promoCuerpo');
+        if (t) { t.addEventListener('input', () => { actualizarPreviewPromo(); actualizarContadoresPromo(); }); }
+        if (c) { c.addEventListener('input', () => { actualizarPreviewPromo(); actualizarContadoresPromo(); }); }
+    });
+
+    async function enviarPromo() {
+        const titulo  = (document.getElementById('promoTitulo').value || '').trim();
+        const cuerpo  = (document.getElementById('promoCuerpo').value || '').trim();
+        const url     = (document.getElementById('promoUrl').value     || '/marinero/shop.php').trim();
+        const feedback = document.getElementById('promoFeedback');
+        const btn     = document.getElementById('btnEnviarPromo');
+
+        if (!titulo) {
+            feedback.innerHTML = '<div class="alert alert-danger py-2 small"><i class="fas fa-exclamation-triangle me-1"></i> El título es obligatorio.</div>';
+            feedback.style.display = 'block';
+            return;
+        }
+
+        const oldHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Enviando...';
+        feedback.style.display = 'none';
+
+        try {
+            const resp = await fetch('push_api.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'send', tipo: 'cliente', titulo, cuerpo, url })
+            });
+            const data = await resp.json();
+
+            if (data.status === 'ok') {
+                feedback.innerHTML = `<div class="alert alert-success py-2 small"><i class="fas fa-check-circle me-1"></i> ${data.msg || 'Enviado correctamente'}</div>`;
+                document.getElementById('promoTitulo').value = '';
+                document.getElementById('promoCuerpo').value = '';
+                actualizarPreviewPromo(); actualizarContadoresPromo();
+                // Recargar historial tras 2s
+                setTimeout(() => location.reload(), 2500);
+            } else {
+                feedback.innerHTML = `<div class="alert alert-danger py-2 small"><i class="fas fa-times-circle me-1"></i> ${data.error || 'Error desconocido'}</div>`;
+            }
+        } catch (e) {
+            feedback.innerHTML = '<div class="alert alert-danger py-2 small"><i class="fas fa-wifi me-1"></i> Error de conexión.</div>';
+        }
+
+        feedback.style.display = 'block';
+        btn.disabled = false;
+        btn.innerHTML = oldHtml;
+    }
 </script>
 
 
+
+<script>
+// ── Filtro client-side del tab Auditoría ─────────────────────────────────────
+function auditFilter() {
+    const tipo    = document.getElementById('auditFilterType')?.value  || '';
+    const usuario = (document.getElementById('auditFilterUser')?.value || '').toLowerCase();
+    const busq    = (document.getElementById('auditSearch')?.value     || '').toLowerCase();
+
+    const rows = document.querySelectorAll('#auditTableBody tr[data-accion]');
+    let visibles = 0;
+
+    rows.forEach(tr => {
+        const accion  = tr.dataset.accion  || '';
+        const usr     = tr.dataset.usuario || '';
+        const dataBusq= tr.dataset.busq    || '';
+
+        let ok = true;
+
+        // Filtro por tipo
+        if (tipo) {
+            if (tipo === 'DESCUENTO' && !accion.startsWith('DESCUENTO')) ok = false;
+            else if (tipo === 'DEVOLUCION' && !accion.startsWith('DEVOLUCION')) ok = false;
+            else if (tipo === 'SESION' && !accion.startsWith('SESION')) ok = false;
+            else if (tipo !== 'DESCUENTO' && tipo !== 'DEVOLUCION' && tipo !== 'SESION' && accion !== tipo) ok = false;
+        }
+
+        // Filtro por usuario
+        if (usuario && !usr.includes(usuario)) ok = false;
+
+        // Búsqueda libre en datos
+        if (busq && !dataBusq.includes(busq)) ok = false;
+
+        tr.style.display = ok ? '' : 'none';
+        if (ok) visibles++;
+    });
+
+    const countEl = document.getElementById('auditCount');
+    if (countEl) countEl.textContent = visibles + ' eventos';
+}
+</script>
 
 <?php include_once 'menu_master.php'; ?>
 </body>

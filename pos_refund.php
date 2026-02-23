@@ -18,6 +18,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 }
 
 require_once 'db.php';
+require_once 'pos_audit.php';
 
 // Verificar motor de inventario
 $kardexAvailable = false;
@@ -150,6 +151,28 @@ try {
     }
 
     $pdo->commit();
+
+    // ── Audit trail (fuera de transacción) ────────────────────────────────────
+    if ($idDetalle > 0) {
+        log_audit($pdo, AUDIT_DEVOLUCION_ITEM, $usuarioNombre, [
+            'id_detalle'  => $idDetalle,
+            'id_venta'    => $item['id_ticket'],
+            'producto'    => $item['nombre_producto'],
+            'codigo'      => $item['id_producto'],
+            'cantidad'    => floatval($item['cantidad']),
+            'precio'      => floatval($item['precio']),
+            'monto'       => $montoRestar,
+        ]);
+    } elseif ($idTicket > 0) {
+        log_audit($pdo, AUDIT_DEVOLUCION_TICKET, $usuarioNombre, [
+            'id_venta'    => $idTicket,
+            'total'       => floatval($venta['total']),
+            'cliente'     => $venta['cliente_nombre'] ?? '',
+            'metodo_pago' => $venta['metodo_pago'],
+            'items_count' => count($detalles),
+        ]);
+    }
+
     echo json_encode(['status' => 'success', 'msg' => 'Devolución procesada correctamente']);
 
 } catch (Exception $e) {

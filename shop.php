@@ -67,9 +67,68 @@ try {
     $pdo->prepare("INSERT INTO metricas_web (ip, url_visitada, user_agent, session_id) VALUES (?, ?, ?, ?)")
         ->execute([$userIP, $uri, $userAgent, $sessId]);
 
-} catch (Exception $e) { 
+} catch (Exception $e) {
     die("Error DB: " . $e->getMessage());
 }
+
+// ── Crear tablas de reseñas y variantes (ANTES de cualquier SELECT) ──
+// COLLATE utf8mb4_unicode_ci para coincidir con la colación de la tabla productos
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS resenas_productos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        producto_codigo VARCHAR(50) NOT NULL,
+        cliente_id INT NOT NULL,
+        cliente_nombre VARCHAR(100) NOT NULL,
+        rating TINYINT(1) NOT NULL,
+        comentario TEXT,
+        fecha DATETIME DEFAULT NOW(),
+        aprobada TINYINT(1) DEFAULT 1,
+        UNIQUE KEY uniq_cliente_prod (cliente_id, producto_codigo),
+        INDEX idx_codigo (producto_codigo)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS producto_variantes (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        producto_codigo VARCHAR(50) NOT NULL,
+        nombre VARCHAR(100) NOT NULL,
+        precio_extra DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        activo TINYINT(1) NOT NULL DEFAULT 1,
+        orden TINYINT UNSIGNED DEFAULT 0,
+        INDEX idx_codigo (producto_codigo)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    // Corregir colación si las tablas ya existían con utf8mb4_general_ci
+    $pdo->exec("ALTER TABLE resenas_productos   CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $pdo->exec("ALTER TABLE producto_variantes  CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+} catch (Exception $e) {}
+
+// ── Tablas auxiliares: vistas, carritos abandonados, restock avisos ──
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS vistas_productos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        codigo_producto VARCHAR(50) NOT NULL,
+        ip VARCHAR(45),
+        fecha DATETIME DEFAULT NOW(),
+        INDEX idx_codigo (codigo_producto)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS carritos_abandonados (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        session_id VARCHAR(128) NOT NULL,
+        items_json TEXT,
+        total DECIMAL(12,2) DEFAULT 0,
+        fecha_actualizacion DATETIME DEFAULT NOW(),
+        UNIQUE KEY uk_session (session_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS restock_avisos (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        producto_codigo VARCHAR(50) NOT NULL,
+        nombre VARCHAR(100) NOT NULL,
+        telefono VARCHAR(30) NOT NULL,
+        notificado TINYINT(1) DEFAULT 0,
+        fecha DATETIME DEFAULT NOW(),
+        INDEX idx_codigo (producto_codigo)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+} catch (Exception $e) {}
+// ── Agregar columna precio_oferta si aún no existe ──
+try { $pdo->exec("ALTER TABLE productos ADD COLUMN precio_oferta DECIMAL(12,2) DEFAULT NULL"); } catch (Exception $e) {}
 
 // --- SEO & META TAGS DINÁMICOS ---
 $storeName = $config['tienda_nombre'] ?? 'Marinero POS';
@@ -169,8 +228,8 @@ if (isset($_GET['ajax_search'])) {
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
-            $localPath = __DIR__ . '/../product_images/' . $r['codigo'] . '.jpg';
-            $r['hasImg'] = file_exists($localPath);
+            $b = __DIR__ . '/../product_images/' . $r['codigo'];
+            $r['hasImg'] = file_exists($b.'.avif') || file_exists($b.'.webp') || file_exists($b.'.jpg');
             $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
             $r['bg'] = "#" . substr(md5($r['nombre']), 0, 6);
             $r['initials'] = mb_strtoupper(mb_substr($r['nombre'], 0, 2));
@@ -204,11 +263,13 @@ try {
 }
 
 try {
-    $sql = "SELECT p.*, 
-            (SELECT COALESCE(SUM(s.cantidad), 0) 
-             FROM stock_almacen s 
-             WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock_total 
-            FROM productos p 
+    $sql = "SELECT p.*,
+            (SELECT COALESCE(SUM(s.cantidad), 0)
+             FROM stock_almacen s
+             WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock_total,
+            (SELECT ROUND(AVG(r.rating),1) FROM resenas_productos r WHERE r.producto_codigo = p.codigo AND r.aprobada = 1) as avg_rating,
+            (SELECT COUNT(*) FROM resenas_productos r WHERE r.producto_codigo = p.codigo AND r.aprobada = 1) as total_resenas
+            FROM productos p
             WHERE p.activo = 1 
               AND p.es_web = 1 
               AND p.id_empresa = ?
@@ -224,7 +285,8 @@ try {
     $sortMap = [
         'categoria_asc' => 'p.categoria ASC, p.nombre ASC',
         'price_asc' => 'p.precio ASC',
-        'price_desc' => 'p.precio DESC'
+        'price_desc' => 'p.precio DESC',
+        'popular' => '(SELECT COUNT(*) FROM vistas_productos v WHERE v.codigo_producto = p.codigo) DESC, p.nombre ASC',
     ];
     
     $sql .= " ORDER BY " . ($sortMap[$sort] ?? 'p.categoria ASC, p.nombre ASC');
@@ -236,10 +298,15 @@ try {
     
     // Obtener Wishlist si está logueado
     $userWishlist = [];
+    $clienteProfile = null;
     if (isset($_SESSION['client_id'])) {
         $stmtW = $pdo->prepare("SELECT producto_codigo FROM wishlist WHERE cliente_id = ?");
         $stmtW->execute([$_SESSION['client_id']]);
         $userWishlist = $stmtW->fetchAll(PDO::FETCH_COLUMN);
+
+        $stmtCP = $pdo->prepare("SELECT nombre, telefono, COALESCE(direccion,'') AS direccion FROM clientes_tienda WHERE id = ?");
+        $stmtCP->execute([$_SESSION['client_id']]);
+        $clienteProfile = $stmtCP->fetch(PDO::FETCH_ASSOC);
     }
     
 } catch (Exception $e) {
@@ -370,7 +437,16 @@ if (isset($input_client_api['action_client'])) {
             $stmtU->execute([$_SESSION['client_id']]);
             $user = $stmtU->fetch(PDO::FETCH_ASSOC);
 
-            $stmtP = $pdo->prepare("SELECT id, fecha, total, estado FROM pedidos_cabecera WHERE cliente_telefono = ? ORDER BY fecha DESC");
+            // Consultar en ventas_cabecera (todas las órdenes, no solo pedidos)
+            $stmtP = $pdo->prepare(
+                "SELECT id, fecha, total, tipo_servicio, estado_reserva, estado_pago,
+                        (SELECT COUNT(*) FROM ventas_detalle vd WHERE vd.id_venta_cabecera = vc.id) AS num_items
+                 FROM ventas_cabecera vc
+                 WHERE vc.cliente_telefono = ?
+                   AND vc.canal_origen IN ('Web','WhatsApp','Teléfono','Kiosko','ICS','Presencial','Otro')
+                 ORDER BY vc.fecha DESC
+                 LIMIT 30"
+            );
             $stmtP->execute([$user['telefono']]);
             $pedidos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
 
@@ -382,6 +458,21 @@ if (isset($input_client_api['action_client'])) {
             $sql = "UPDATE clientes_tienda SET nombre = ?, direccion = ? WHERE id = ?";
             $pdo->prepare($sql)->execute([$input_client_api['nombre'], $input_client_api['direccion'], $_SESSION['client_id']]);
             $_SESSION['client_name'] = $input_client_api['nombre'];
+            echo json_encode(['status' => 'success']);
+        }
+        // --- PUBLICAR RESEÑA ---
+        elseif ($act === 'submit_review') {
+            if (!isset($_SESSION['client_id'])) throw new Exception("Debes iniciar sesión para dejar una reseña.");
+            $codigo   = trim($input_client_api['codigo'] ?? '');
+            $rating   = intval($input_client_api['rating'] ?? 0);
+            $comment  = trim($input_client_api['comentario'] ?? '');
+            if (!$codigo || $rating < 1 || $rating > 5) throw new Exception("Datos inválidos.");
+            $stmtChk = $pdo->prepare("SELECT id FROM resenas_productos WHERE producto_codigo = ? AND cliente_id = ?");
+            $stmtChk->execute([$codigo, $_SESSION['client_id']]);
+            if ($stmtChk->fetch()) throw new Exception("Ya dejaste una reseña para este producto.");
+            $nombre = $_SESSION['client_name'] ?? 'Cliente';
+            $pdo->prepare("INSERT INTO resenas_productos (producto_codigo, cliente_id, cliente_nombre, rating, comentario) VALUES (?,?,?,?,?)")
+                ->execute([$codigo, $_SESSION['client_id'], $nombre, $rating, $comment]);
             echo json_encode(['status' => 'success']);
         }
     } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
@@ -412,6 +503,113 @@ if (isset($_GET['action_view_product'])) {
     }
     echo json_encode(['status' => 'ok']);
     exit;
+}
+
+// =========================================================
+//  API: RESTOCK AVISOS — POST
+// =========================================================
+if (isset($input_client_api['action_restock_aviso'])) {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $codigo   = trim($input_client_api['codigo']   ?? '');
+    $nombre   = trim($input_client_api['nombre']   ?? '');
+    $telefono = trim($input_client_api['telefono'] ?? '');
+    if (!$codigo || !$nombre || !$telefono) {
+        echo json_encode(['error' => 'Datos incompletos']); exit;
+    }
+    try {
+        $pdo->prepare("INSERT INTO restock_avisos (producto_codigo, nombre, telefono) VALUES (?, ?, ?)")
+            ->execute([$codigo, $nombre, $telefono]);
+        echo json_encode(['status' => 'ok']);
+    } catch (Exception $e) {
+        echo json_encode(['error' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// =========================================================
+//  API: RESEÑAS — GET
+// =========================================================
+if (isset($_GET['action_reviews'])) {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $codigo = trim($_GET['codigo'] ?? '');
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT r.cliente_nombre, r.rating, r.comentario,
+                    DATE_FORMAT(r.fecha,'%d/%m/%Y') as fecha
+             FROM resenas_productos r
+             WHERE r.producto_codigo = ? AND r.aprobada = 1
+             ORDER BY r.fecha DESC LIMIT 20"
+        );
+        $stmt->execute([$codigo]);
+        $resenas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $stmtAvg = $pdo->prepare(
+            "SELECT ROUND(AVG(rating),1) as avg, COUNT(*) as total
+             FROM resenas_productos WHERE producto_codigo = ? AND aprobada = 1"
+        );
+        $stmtAvg->execute([$codigo]);
+        $stats = $stmtAvg->fetch(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'resenas' => $resenas,
+            'avg'     => floatval($stats['avg'] ?? 0),
+            'total'   => intval($stats['total'])
+        ]);
+    } catch (Exception $e) {
+        echo json_encode(['resenas' => [], 'avg' => 0, 'total' => 0]);
+    }
+    exit;
+}
+
+// =========================================================
+//  API: VARIANTES — GET
+// =========================================================
+if (isset($_GET['action_variants'])) {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $codigo = trim($_GET['codigo'] ?? '');
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT id, nombre, precio_extra
+             FROM producto_variantes
+             WHERE producto_codigo = ? AND activo = 1
+             ORDER BY orden, id"
+        );
+        $stmt->execute([$codigo]);
+        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Exception $e) {
+        echo json_encode([]);
+    }
+    exit;
+}
+
+// ── Build compact product list for client-side JS cache (Feature 11) ──
+$productsJs = [];
+foreach ($productos as $_p) {
+    $_b = $localImgPath . $_p['codigo'];
+    $_hasImg = false; $_pImgUrl = null;
+    foreach (['.avif','.webp','.jpg'] as $_e) {
+        if (file_exists($_b.$_e)) { $_hasImg = true; $_pImgUrl = 'image.php?code='.urlencode($_p['codigo']); break; }
+    }
+    $productsJs[] = [
+        'codigo'       => $_p['codigo'],
+        'nombre'       => $_p['nombre'],
+        'precio'       => floatval($_p['precio']),
+        'precioOferta' => floatval($_p['precio_oferta'] ?? 0),
+        'descripcion'  => $_p['descripcion'] ?? '',
+        'imgUrl'       => $_pImgUrl,
+        'bg'           => '#'.substr(md5($_p['nombre']),0,6),
+        'initials'     => mb_strtoupper(mb_substr($_p['nombre'],0,2)),
+        'hasImg'       => $_hasImg,
+        'hasStock'     => floatval($_p['stock_total'] ?? 0) > 0,
+        'stock'        => floatval($_p['stock_total'] ?? 0),
+        'categoria'    => $_p['categoria'] ?? 'General',
+        'unidad_medida'=> $_p['unidad_medida'] ?? '',
+        'color'        => $_p['color'] ?? '',
+        'esReservable' => intval($_p['es_reservable'] ?? 0) === 1,
+    ];
 }
 
 ob_end_flush();
@@ -477,9 +675,9 @@ ob_end_flush();
     }
     </script>
 
-    <!-- PWA -->
+    <!-- PWA Tienda -->
     <meta name="theme-color" content="#0d6efd">
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="manifest-shop.php">
     <link rel="apple-touch-icon" href="icon-192.png">
 
     <!-- Performance: preconnect -->
@@ -844,6 +1042,56 @@ ob_end_flush();
         
         .stock-badge.in-stock { color: var(--success); }
         .stock-badge.out-of-stock { color: var(--danger); }
+
+        /* ── Estrellas en tarjetas ── */
+        .card-stars {
+            display: flex; align-items: center; gap: 3px;
+            font-size: .7rem; color: #f59e0b;
+            margin-bottom: .35rem;
+        }
+        .card-stars .stars-count { color: #6b7280; font-size:.65rem; }
+
+        /* ── Variantes en modal ── */
+        .variant-btn { font-size: .82rem; transition: all .15s; padding: .3rem .85rem; }
+        .variant-btn.active {
+            background: #3b82f6 !important;
+            color: white !important;
+            border-color: #3b82f6 !important;
+        }
+
+        /* ── Picker de estrellas en formulario reseña ── */
+        .star-pick { transition: transform .1s; display: inline-block; }
+        .star-pick:hover { transform: scale(1.25); }
+
+        /* ── Time Slots ── */
+        .slot-card {
+            border: 2px solid #e2e8f0;
+            border-radius: 14px;
+            padding: 12px 8px;
+            text-align: center;
+            cursor: pointer;
+            transition: all .2s;
+            background: white;
+            user-select: none;
+        }
+        .slot-card:hover {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            transform: translateY(-2px);
+        }
+        .slot-card.active {
+            border-color: #3b82f6;
+            background: #dbeafe;
+            box-shadow: 0 0 0 3px rgba(59,130,246,.2);
+        }
+        .slot-card.disabled {
+            opacity: .38;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .slot-icon  { font-size: 1.6rem; margin-bottom: 4px; }
+        .slot-name  { font-weight: 800; font-size: .9rem; color: #1e293b; }
+        .slot-hours { font-size: .7rem; color: #64748b; margin-top: 2px; }
         
         .product-body {
             padding: 0.875rem;
@@ -957,6 +1205,38 @@ ob_end_flush();
         .msg-admin { align-self: flex-start; background: #e9ecef; color: #333; border-bottom-left-radius: 2px; }
         .chat-badge-notify { position: absolute; top: 0; right: 0; background: red; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: none; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+        /* Thumbnails galería detalle producto */
+        .detail-thumb {
+            width: 56px; height: 56px; object-fit: cover;
+            border-radius: 8px; cursor: pointer;
+            border: 2px solid transparent;
+            transition: border-color 0.2s, transform 0.15s, opacity 0.15s;
+            opacity: 0.65;
+        }
+        .detail-thumb:hover { transform: scale(1.1); opacity: 1; }
+        .detail-thumb.active { border-color: #0d6efd; opacity: 1; box-shadow: 0 0 0 3px rgba(13,110,253,0.25); }
+
+        /* Feature 2: precio tachado */
+        .price-original { font-size:.82em; color:#999; text-decoration:line-through; margin-right:4px; }
+        .price-oferta { color:#dc3545; font-weight:700; }
+
+        /* Feature 13: fly-to-cart dot */
+        .fly-dot { position:fixed; width:14px; height:14px; border-radius:50%; background:var(--primary,#0d6efd);
+                   z-index:9999; pointer-events:none;
+                   transition:left .55s cubic-bezier(.3,.8,.7,.2),top .55s cubic-bezier(.3,.8,.7,.2),
+                               opacity .45s ease-in,transform .45s ease-in; }
+        @keyframes cartBounce { 0%,100%{transform:scale(1)} 40%{transform:scale(1.4)} 70%{transform:scale(0.88)} }
+        .cart-bounce { animation: cartBounce .45s ease-in-out; }
+
+        /* Feature 12: abandoned cart banner */
+        .abandoned-banner { background:linear-gradient(135deg,#fff3cd,#ffe69c); border-left:4px solid #f59e0b;
+                            border-radius:8px; padding:10px 16px; margin-bottom:12px;
+                            display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+        .abandoned-banner .ab-msg { flex:1; font-weight:600; font-size:.92rem; }
+
+        /* Feature 1: restock aviso form */
+        .aviso-form-wrap { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:12px; margin-top:8px; }
     </style>
 </head>
 <body>
@@ -977,6 +1257,9 @@ ob_end_flush();
                 <a href="como_comprar.php" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold" title="¿Cómo comprar?">
                     <i class="fas fa-question-circle me-1"></i> <span class="d-none d-md-inline">Ayuda</span>
                 </a>
+                <a href="quienes_somos.php" class="btn btn-outline-info btn-sm rounded-pill px-3 fw-bold" title="Quiénes Somos">
+                    <i class="fas fa-building me-1"></i> <span class="d-none d-md-inline">Nosotros</span>
+                </a>
                 
                 <div id="authButtons">
                     <?php if(isset($_SESSION['client_id'])): ?>
@@ -986,6 +1269,7 @@ ob_end_flush();
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
                                 <li><a class="dropdown-item" href="#" onclick="openProfileModal()"><i class="fas fa-user-edit me-2 text-primary"></i>Mi Perfil</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="openProfileModal(); setTimeout(()=>document.getElementById('orderHistoryContent')?.scrollIntoView({behavior:'smooth'}),400)"><i class="fas fa-box-open me-2 text-warning"></i>Mis Pedidos</a></li>
                                 <li><hr class="dropdown-divider"></li>
                                 <li><a class="dropdown-item" href="#" onclick="logoutClient()"><i class="fas fa-sign-out-alt me-2 text-danger"></i>Salir</a></li>
                             </ul>
@@ -1058,6 +1342,7 @@ ob_end_flush();
                     <option value="categoria_asc" <?= $sort==='categoria_asc'?'selected':'' ?>>Ordenar: Categoría</option>
                     <option value="price_asc" <?= $sort==='price_asc'?'selected':'' ?>>Precio: Menor a Mayor</option>
                     <option value="price_desc" <?= $sort==='price_desc'?'selected':'' ?>>Precio: Mayor a Menor</option>
+                    <option value="popular" <?= $sort==='popular'?'selected':'' ?>>🔥 Más populares</option>
                 </select>
             </div>
         </div>
@@ -1117,9 +1402,22 @@ ob_end_flush();
         <?php endif; ?>
         
         <?php foreach($productos as $p):
-            $imgPath = $localImgPath . $p['codigo'] . '.jpg';
-            $hasImg = file_exists($imgPath);
-            $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) : null;
+            $b = $localImgPath . $p['codigo'];
+            $hasImg = false; $imgV = '';
+            foreach (['.avif','.webp','.jpg'] as $_e) {
+                if (file_exists($b.$_e)) { $hasImg = true; $imgV = '&v='.filemtime($b.$_e); break; }
+            }
+            $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
+            $b1 = $localImgPath . $p['codigo'] . '_extra1';
+            $hasExtra1 = false; $imgV1 = '';
+            foreach (['.avif','.webp','.jpg'] as $_e) {
+                if (file_exists($b1.$_e)) { $hasExtra1 = true; $imgV1 = '&v='.filemtime($b1.$_e); break; }
+            }
+            $b2 = $localImgPath . $p['codigo'] . '_extra2';
+            $hasExtra2 = false; $imgV2 = '';
+            foreach (['.avif','.webp','.jpg'] as $_e) {
+                if (file_exists($b2.$_e)) { $hasExtra2 = true; $imgV2 = '&v='.filemtime($b2.$_e); break; }
+            }
             $stock = floatval($p['stock_total'] ?? 0);
             $hasStock = $stock > 0;
             $esReservable = intval($p['es_reservable'] ?? 0) === 1;
@@ -1132,6 +1430,8 @@ ob_end_flush();
             "price"       => floatval($p['precio']),
             "desc"        => $p['descripcion'] ?? '',
             "img"         => $imgUrl,
+            "imgExtra1"   => $hasExtra1 ? 'image.php?code=' . urlencode($p['codigo'] . '_extra1') . $imgV1 : null,
+            "imgExtra2"   => $hasExtra2 ? 'image.php?code=' . urlencode($p['codigo'] . '_extra2') . $imgV2 : null,
             "bg"          => $bg,
             "initials"    => $initials,
             "hasImg"      => $hasImg,
@@ -1141,7 +1441,8 @@ ob_end_flush();
             "cat"         => $p['categoria'],
             "unit"        => $p['unidad_medida'] ?? '',
             "color"       => $p['color'] ?? '',
-            "esReservable"=> $esReservable,
+            "esReservable"  => $esReservable,
+            "precioOferta"  => floatval($p['precio_oferta'] ?? 0),
         ], JSON_UNESCAPED_UNICODE) ?>)'>
             <div class="product-image-wrapper">
                 <?php if(isset($_SESSION['client_id'])): 
@@ -1169,12 +1470,15 @@ ob_end_flush();
                 <?php endif; ?>
 
                 <?php if($hasImg): ?>
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'%3E%3C/svg%3E" 
-                         data-src="<?= $imgUrl ?>" 
-                         class="product-image lazy-img" 
-                         alt="<?= htmlspecialchars($p['nombre']) ?>"
-                         loading="lazy"
-                         onload="this.classList.add('loaded'); this.src=this.dataset.src; this.onload=null;">
+                    <picture>
+                        <source type="image/avif" srcset="<?= $imgUrl ?>&amp;fmt=avif">
+                        <source type="image/webp" srcset="<?= $imgUrl ?>&amp;fmt=webp">
+                        <img src="<?= $imgUrl ?>&amp;fmt=jpg"
+                             class="product-image lazy-img"
+                             alt="<?= htmlspecialchars($p['nombre']) ?>"
+                             loading="lazy"
+                             onload="this.classList.add('loaded')">
+                    </picture>
                 <?php else: ?>
                     <div class="product-placeholder" style="background: <?= $bg ?>cc"><?= $initials ?></div>
                 <?php endif; ?>
@@ -1192,8 +1496,30 @@ ob_end_flush();
                 <div class="product-category"><?= htmlspecialchars($p['categoria'] ?? 'General') ?></div>
                 <h6 class="product-name"><?= htmlspecialchars($p['nombre']) ?></h6>
 
+                <?php if (floatval($p['avg_rating'] ?? 0) > 0): ?>
+                <div class="card-stars">
+                    <?php
+                    $avg = floatval($p['avg_rating']);
+                    for ($s = 1; $s <= 5; $s++) {
+                        if ($s <= floor($avg)) echo '<i class="fas fa-star"></i>';
+                        elseif ($s - $avg < 1) echo '<i class="fas fa-star-half-alt"></i>';
+                        else echo '<i class="far fa-star"></i>';
+                    }
+                    ?>
+                    <span class="stars-count">(<?= intval($p['total_resenas']) ?>)</span>
+                </div>
+                <?php endif; ?>
+
                 <div class="product-footer">
-                    <div class="product-price">$<?= number_format($p['precio'], 2) ?></div>
+                    <div class="product-price">
+                        <?php $precioOferta = floatval($p['precio_oferta'] ?? 0); ?>
+                        <?php if ($precioOferta > 0 && $precioOferta < floatval($p['precio'])): ?>
+                            <span class="price-original">$<?= number_format($p['precio'], 2) ?></span>
+                            <span class="price-oferta">$<?= number_format($precioOferta, 2) ?></span>
+                        <?php else: ?>
+                            $<?= number_format($p['precio'], 2) ?>
+                        <?php endif; ?>
+                    </div>
                     <?php if ($hasStock): ?>
                         <button class="btn-add-cart"
                                 onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)">
@@ -1205,7 +1531,10 @@ ob_end_flush();
                             📅 Reservar
                         </button>
                     <?php else: ?>
-                        <button class="btn-add-cart" disabled>Agotado</button>
+                        <button class="btn-add-cart" style="background:#6c757d;border-color:#6c757d;font-size:.76rem;"
+                                onclick="event.stopPropagation(); this.closest('.product-card').click()">
+                            🔔 Avísame
+                        </button>
                     <?php endif; ?>
                 </div>
             </div>
@@ -1257,19 +1586,30 @@ ob_end_flush();
             </div>
             <div class="modal-body pt-0">
                 <div class="row g-4">
-                    <div class="col-md-5 d-flex align-items-center justify-content-center bg-light rounded-3 p-3 position-relative" style="min-height: 250px;">
-                         <img id="detailImg" class="d-none img-fluid rounded shadow-sm" style="max-height: 250px; object-fit: contain;">
+                    <div class="col-md-5 d-flex flex-column align-items-center justify-content-center bg-light rounded-3 p-3 position-relative" style="min-height: 250px;">
+                         <img id="detailImg" class="d-none img-fluid rounded shadow-sm" style="max-height: 210px; object-fit: contain;">
                          <div id="detailPlaceholder" class="d-none rounded shadow-sm d-flex align-items-center justify-content-center text-white fw-bold display-4" style="width: 150px; height: 150px;"></div>
                          <span id="detailStockBadge" class="position-absolute top-0 start-0 m-3 badge rounded-pill"></span>
+                         <div id="detailThumbs" class="justify-content-center flex-wrap gap-2 mt-3" style="display:none;"></div>
                     </div>
 
-                    <div class="col-md-7 d-flex flex-column">
+                    <div class="col-md-7 d-flex flex-column" style="max-height:70vh;overflow-y:auto;padding-right:4px;">
                         <small class="text-uppercase text-muted fw-bold mb-1" id="detailCat">Categoría</small>
                         <h3 class="fw-bold mb-2" id="detailName">Nombre Producto</h3>
                         
-                        <div class="d-flex align-items-center mb-3">
-                            <h2 class="text-primary fw-bold mb-0 me-3" id="detailPrice">$0.00</h2>
+                        <div class="d-flex align-items-center mb-2">
+                            <div class="me-3">
+                                <span id="detailPriceOriginal" class="price-original" style="display:none"></span>
+                                <h2 class="text-primary fw-bold mb-0 d-inline" id="detailPrice">$0.00</h2>
+                            </div>
                             <small class="text-muted" id="detailUnit"></small>
+                            <span id="detailAvgStars" class="ms-auto text-warning small fw-bold"></span>
+                        </div>
+
+                        <!-- Variantes -->
+                        <div id="variantSection" class="mb-3" style="display:none">
+                            <p class="mb-1 small text-uppercase text-muted fw-bold" style="letter-spacing:.5px">Presentación</p>
+                            <div id="variantButtons" class="d-flex flex-wrap gap-2"></div>
                         </div>
 
                         <div class="row g-2 mb-3 small text-muted border-top border-bottom py-2">
@@ -1290,6 +1630,34 @@ ob_end_flush();
                             <button type="button" id="btnAddDetail" class="btn btn-primary w-100 py-2 fw-bold shadow-sm rounded-pill">
                                 <i class="fas fa-cart-plus me-2"></i> AGREGAR AL CARRITO
                             </button>
+                            <!-- Feature 1: restock aviso (visible sólo cuando agotado) -->
+                            <div id="restockAvisoSection" style="display:none" class="aviso-form-wrap mt-2">
+                                <p class="small text-muted mb-2"><i class="fas fa-bell me-1 text-warning"></i>Recibe un aviso cuando llegue:</p>
+                                <div class="row g-1">
+                                    <div class="col-5"><input type="text" id="avisoNombre" class="form-control form-control-sm" placeholder="Tu nombre"></div>
+                                    <div class="col-5"><input type="tel" id="avisoTelefono" class="form-control form-control-sm" placeholder="Teléfono"></div>
+                                    <div class="col-2"><button class="btn btn-warning btn-sm w-100" onclick="submitRestock()"><i class="fas fa-bell"></i></button></div>
+                                </div>
+                            </div>
+                            <!-- Feature 15: share -->
+                            <div class="text-center mt-2">
+                                <button class="btn btn-outline-secondary btn-sm px-3" onclick="shareCurrentProduct()">
+                                    <i class="fas fa-share-alt me-1"></i>Compartir
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- ── Sección de reseñas ── -->
+                        <hr class="mt-3 mb-2">
+                        <div id="reviewsSection">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <h6 class="fw-bold mb-0" style="font-size:.9rem">
+                                    <i class="fas fa-star text-warning me-1"></i>Opiniones
+                                </h6>
+                                <span id="reviewsAvgDisplay" class="small text-muted"></span>
+                            </div>
+                            <div id="reviewsList" style="max-height:160px;overflow-y:auto;"></div>
+                            <div id="reviewFormWrap" class="mt-2"></div>
                         </div>
                     </div>
                 </div>
@@ -1363,9 +1731,48 @@ ob_end_flush();
                         
                         <div class="mb-3">
                             <label class="form-label fw-bold">Fecha de Entrega/Recogida *</label>
-                            <input type="date" id="cliDate" class="form-control" required>
+                            <input type="date" id="cliDate" class="form-control" required onchange="updateSlotsAvailability()">
                         </div>
-                        
+
+                        <div class="mb-4">
+                            <label class="form-label fw-bold">
+                                <i class="fas fa-clock me-1 text-primary"></i>Horario de Entrega *
+                            </label>
+                            <div class="row g-2" id="timeSlotGrid">
+                                <div class="col-6">
+                                    <div class="slot-card" data-slot="manana" data-label="Mañana (9am–12pm)" onclick="selectSlot(this)">
+                                        <div class="slot-icon">🌅</div>
+                                        <div class="slot-name">Mañana</div>
+                                        <div class="slot-hours">9:00 AM – 12:00 PM</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="slot-card" data-slot="mediodia" data-label="Mediodía (12pm–3pm)" onclick="selectSlot(this)">
+                                        <div class="slot-icon">☀️</div>
+                                        <div class="slot-name">Mediodía</div>
+                                        <div class="slot-hours">12:00 PM – 3:00 PM</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="slot-card" data-slot="tarde" data-label="Tarde (3pm–6pm)" onclick="selectSlot(this)">
+                                        <div class="slot-icon">🌆</div>
+                                        <div class="slot-name">Tarde</div>
+                                        <div class="slot-hours">3:00 PM – 6:00 PM</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="slot-card" data-slot="noche" data-label="Noche (6pm–9pm)" onclick="selectSlot(this)">
+                                        <div class="slot-icon">🌙</div>
+                                        <div class="slot-name">Noche</div>
+                                        <div class="slot-hours">6:00 PM – 9:00 PM</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="slotErrorMsg" class="text-danger small mt-1" style="display:none;">
+                                <i class="fas fa-exclamation-circle me-1"></i>Selecciona un horario de entrega.
+                            </div>
+                        </div>
+
                         <div class="mb-3">
                             <label class="form-label fw-bold">Notas Adicionales</label>
                             <textarea id="cliNotes" class="form-control" rows="3" placeholder="Ej: El cake de relleno chocolate y color rosado el merengue. Entregar antes de las 3 PM."></textarea>
@@ -1481,10 +1888,17 @@ ob_end_flush();
 
             <!-- Vista: pago confirmado -->
             <div id="pagoConfirmadoView" style="display:none;">
-                <div class="modal-body text-center py-5">
-                    <div style="font-size: 5rem; margin-bottom: 1rem;">🎉</div>
-                    <h3 class="fw-bold mb-3 text-success">¡Pago Confirmado!</h3>
-                    <p class="text-muted fs-5">Tu transferencia fue verificada exitosamente.<br>Tu pedido está en proceso.</p>
+                <div class="modal-body text-center py-4">
+                    <div style="font-size: 4.5rem; margin-bottom: 0.5rem;">🎉</div>
+                    <h3 class="fw-bold mb-1 text-success">¡Pago Confirmado!</h3>
+                    <p class="text-muted mb-3">Tu transferencia fue verificada exitosamente.</p>
+                    <div class="bg-success bg-opacity-10 border border-success rounded-3 px-4 py-3 mb-3 mx-auto" style="max-width:320px;">
+                        <div class="text-muted small mb-1">Número de pedido</div>
+                        <div class="fw-bold text-success" style="font-size:2rem; letter-spacing:2px;">#<span id="confirmadoPedido">—</span></div>
+                        <div class="text-muted small mt-2">Guarda este número para consultar el estado de tu pedido.</div>
+                    </div>
+                    <p class="fs-5 fw-bold text-dark mb-0">¡Gracias, <span id="confirmadoNombre">Cliente</span>!</p>
+                    <p class="text-muted small">Tu pedido está en proceso. Te avisaremos cuando esté listo.</p>
                 </div>
                 <div class="modal-footer border-0 justify-content-center">
                     <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
@@ -1657,6 +2071,30 @@ ob_end_flush();
      style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;min-width:240px;"></div>
 
 <script>
+    // Feature 11: product catalog for client-side search + localStorage cache
+    const PRODUCTS_DATA = <?= json_encode($productsJs, JSON_UNESCAPED_UNICODE) ?>;
+    const PRODUCTS_CACHE_KEY = 'palweb_products_v1_<?= $SUC_ID ?>';
+    const PRODUCTS_CACHE_TS  = 'palweb_products_ts_<?= $SUC_ID ?>';
+    const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+
+    // Guardar catálogo en localStorage al cargar
+    try {
+        localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(PRODUCTS_DATA));
+        localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString());
+    } catch(e) {}
+
+    function getProductsFromCache() {
+        try {
+            const ts = parseInt(localStorage.getItem(PRODUCTS_CACHE_TS) || '0');
+            if (Date.now() - ts > CACHE_TTL_MS) return null;
+            const raw = localStorage.getItem(PRODUCTS_CACHE_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch(e) { return null; }
+    }
+
+    // Variable para el producto actualmente mostrado en modal (Feature 15)
+    let _currentDetailProduct = null;
+
     // INICIALIZACIÓN
     window.addEventListener('load', () => {
         const skeleton = document.getElementById('skeletonLoader');
@@ -1694,6 +2132,161 @@ ob_end_flush();
         setTimeout(() => { if (el.parentNode) el.remove(); }, duration);
     }
     window.showToast = showToast;
+
+    // ========================================================
+    // HELPER HTML ESCAPE
+    // ========================================================
+    function escHtml(str) {
+        return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    // ========================================================
+    // VARIANTES DE PRODUCTO
+    // ========================================================
+    let currentVariant = null;
+
+    async function loadVariants(codigo, basePrice, hasStock, esReservable) {
+        currentVariant = null;
+        const section  = document.getElementById('variantSection');
+        const container = document.getElementById('variantButtons');
+        section.style.display = 'none';
+        container.innerHTML = '';
+
+        try {
+            const res = await fetch(`shop.php?action_variants=1&codigo=${encodeURIComponent(codigo)}`);
+            const variants = await res.json();
+            if (!variants || variants.length === 0) return;
+
+            section.style.display = 'block';
+            const btn = document.getElementById('btnAddDetail');
+            const priceEl = document.getElementById('detailPrice');
+
+            variants.forEach((v, i) => {
+                const extra = parseFloat(v.precio_extra);
+                const label = extra > 0 ? `${v.nombre} (+$${extra.toFixed(2)})` :
+                              extra < 0 ? `${v.nombre} (-$${Math.abs(extra).toFixed(2)})` : v.nombre;
+                const b = document.createElement('button');
+                b.className = 'btn btn-outline-secondary btn-sm variant-btn rounded-pill';
+                b.textContent = label;
+                b.onclick = () => {
+                    document.querySelectorAll('.variant-btn').forEach(x => x.classList.remove('active'));
+                    b.classList.add('active');
+                    currentVariant = { nombre: v.nombre, precio_extra: extra };
+                    priceEl.innerText = '$' + (basePrice + extra).toFixed(2);
+                    if (hasStock) {
+                        btn.onclick = () => { addToCart(codigo, document.getElementById('detailName').innerText, basePrice, false, currentVariant); modalDetail.hide(); };
+                    } else if (esReservable) {
+                        btn.onclick = () => { addToCart(codigo, document.getElementById('detailName').innerText, basePrice, true, currentVariant); modalDetail.hide(); };
+                    }
+                };
+                if (i === 0) setTimeout(() => b.click(), 0); // auto-seleccionar primera
+                container.appendChild(b);
+            });
+        } catch(e) { console.error('Error cargando variantes:', e); }
+    }
+
+    // ========================================================
+    // RESEÑAS
+    // ========================================================
+    const IS_LOGGED_IN = <?= isset($_SESSION['client_id']) ? 'true' : 'false' ?>;
+
+    async function loadReviews(codigo) {
+        const list    = document.getElementById('reviewsList');
+        const avgDisp = document.getElementById('reviewsAvgDisplay');
+        const formWrap = document.getElementById('reviewFormWrap');
+        list.innerHTML = '<div class="text-center text-muted py-2 small">Cargando reseñas...</div>';
+        avgDisp.innerHTML = '';
+        formWrap.innerHTML = '';
+
+        try {
+            const res  = await fetch(`shop.php?action_reviews=1&codigo=${encodeURIComponent(codigo)}`);
+            const data = await res.json();
+
+            // Stars en el header del modal
+            const avgStarsEl = document.getElementById('detailAvgStars');
+            if (data.total > 0) {
+                avgDisp.innerHTML = `<span class="text-warning">★</span> ${data.avg} <span class="text-muted">(${data.total})</span>`;
+                if (avgStarsEl) avgStarsEl.innerHTML = `<span class="text-warning small">★ ${data.avg}</span>`;
+            } else {
+                if (avgStarsEl) avgStarsEl.innerHTML = '';
+            }
+
+            if (data.resenas && data.resenas.length > 0) {
+                list.innerHTML = data.resenas.map(r => `
+                    <div class="py-2 border-bottom">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <strong class="small">${escHtml(r.cliente_nombre)}</strong>
+                            <span class="text-warning" style="font-size:.85rem">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                            <span class="text-muted" style="font-size:.72rem">${escHtml(r.fecha)}</span>
+                        </div>
+                        ${r.comentario ? `<p class="mb-0 text-secondary" style="font-size:.85rem">${escHtml(r.comentario)}</p>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                list.innerHTML = '<div class="text-center text-muted py-2 small">Sin reseñas aún. ¡Sé el primero!</div>';
+            }
+
+            if (IS_LOGGED_IN) {
+                formWrap.innerHTML = `
+                    <div class="border rounded-3 p-3 bg-light mt-2">
+                        <p class="fw-bold mb-2 small">Tu valoración</p>
+                        <div id="starInput" data-codigo="${escHtml(codigo)}" data-rating="0" class="mb-2">
+                            ${[1,2,3,4,5].map(n =>
+                                `<span class="star-pick" data-val="${n}" style="font-size:1.6rem;cursor:pointer;color:#d1d5db;">★</span>`
+                            ).join('')}
+                        </div>
+                        <textarea id="reviewComment" class="form-control form-control-sm mb-2" rows="2"
+                            placeholder="Cuéntanos tu experiencia (opcional)" maxlength="400"></textarea>
+                        <button class="btn btn-warning btn-sm rounded-pill px-3 fw-bold"
+                            onclick="submitReview('${escHtml(codigo)}')">
+                            <i class="fas fa-paper-plane me-1"></i> Publicar
+                        </button>
+                    </div>`;
+
+                // Interacción con las estrellas
+                let selectedRating = 0;
+                const picks = formWrap.querySelectorAll('.star-pick');
+                picks.forEach(s => {
+                    s.addEventListener('mouseover', () =>
+                        picks.forEach(x => x.style.color = parseInt(x.dataset.val) <= parseInt(s.dataset.val) ? '#f59e0b' : '#d1d5db'));
+                    s.addEventListener('click', () => {
+                        selectedRating = parseInt(s.dataset.val);
+                        document.getElementById('starInput').dataset.rating = selectedRating;
+                        picks.forEach(x => x.style.color = parseInt(x.dataset.val) <= selectedRating ? '#f59e0b' : '#d1d5db');
+                    });
+                });
+                formWrap.querySelector('#starInput').addEventListener('mouseleave', () =>
+                    picks.forEach(x => x.style.color = parseInt(x.dataset.val) <= selectedRating ? '#f59e0b' : '#d1d5db'));
+            } else {
+                formWrap.innerHTML = `<p class="text-center text-muted small mt-2">
+                    <a href="#" onclick="toggleAuthModal()">Inicia sesión</a> para dejar una reseña.</p>`;
+            }
+        } catch(e) {
+            list.innerHTML = '<div class="text-center text-muted py-2 small">No se pudieron cargar las reseñas.</div>';
+        }
+    }
+
+    async function submitReview(codigo) {
+        const starInput = document.getElementById('starInput');
+        const rating    = parseInt(starInput?.dataset.rating ?? 0);
+        const comment   = document.getElementById('reviewComment')?.value.trim() ?? '';
+        if (rating < 1 || rating > 5) { showToast('Selecciona de 1 a 5 estrellas'); return; }
+
+        try {
+            const res = await fetch('shop.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action_client: 1, action: 'submit_review', codigo, rating, comentario: comment })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                showToast('¡Reseña publicada! Gracias por tu opinión.');
+                loadReviews(codigo); // Recargar
+            } else {
+                showToast(data.msg || 'Error al publicar reseña');
+            }
+        } catch(e) { showToast('Error de conexión'); }
+    }
 
     // ========================================================
     // GESTIÓN DE WISHLIST
@@ -1739,25 +2332,54 @@ ob_end_flush();
 
     function renderHistory(pedidos) {
         const div = document.getElementById('orderHistoryContent');
-        if (pedidos.length === 0) {
-            div.innerHTML = '<div class="text-center py-5 text-muted">Aún no tienes pedidos registrados.</div>';
+        if (!pedidos || pedidos.length === 0) {
+            div.innerHTML = '<div class="text-center py-5 text-muted"><i class="fas fa-box-open fa-2x mb-2 d-block opacity-50"></i>Aún no tienes pedidos registrados.</div>';
             return;
         }
 
-        let html = '<div class="list-group shadow-sm">';
+        const estadoBadge = (p) => {
+            const ep = (p.estado_pago || '').toLowerCase();
+            const er = (p.estado_reserva || '').toUpperCase();
+            if (ep === 'rechazado' || er === 'CANCELADO') return '<span class="badge bg-danger">Cancelado</span>';
+            if (ep === 'verificando')                    return '<span class="badge bg-warning text-dark">Verificando pago</span>';
+            if (er === 'ENTREGADO')                      return '<span class="badge bg-success">Entregado</span>';
+            if (er === 'EN_CAMINO')                      return '<span class="badge bg-info text-dark">En camino</span>';
+            if (er === 'EN_PREPARACION')                 return '<span class="badge bg-primary">Preparando</span>';
+            return '<span class="badge bg-secondary">Pendiente</span>';
+        };
+
+        const tipoIcon = (ts) => {
+            if (ts === 'domicilio') return '<i class="fas fa-motorcycle text-primary me-1"></i>';
+            if (ts === 'recogida')  return '<i class="fas fa-store text-success me-1"></i>';
+            if (ts === 'reserva')   return '<i class="fas fa-calendar-check text-warning me-1"></i>';
+            return '<i class="fas fa-shopping-bag text-muted me-1"></i>';
+        };
+
+        const fmt = (f) => {
+            try { return new Date(f.replace(' ','T')).toLocaleDateString('es-CU', {day:'2-digit',month:'short',year:'numeric'}); }
+            catch(e) { return f; }
+        };
+
+        let html = '<div class="list-group list-group-flush">';
         pedidos.forEach(p => {
-            let badge = 'bg-secondary';
-            if (p.estado === 'Pendiente') badge = 'bg-warning text-dark';
-            if (p.estado === 'Entregado') badge = 'bg-success';
-            
+            const idPad = String(p.id).padStart(5,'0');
             html += `
-            <div class="list-group-item border-0 border-bottom p-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="fw-bold">Pedido #${p.id}</span>
-                    <span class="badge ${badge} small">${p.estado}</span>
+            <div class="list-group-item px-0 py-3 border-bottom">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <div class="fw-bold">${tipoIcon(p.tipo_servicio)}Pedido #${idPad}</div>
+                        <div class="small text-muted">${fmt(p.fecha)} · ${p.num_items} producto(s)</div>
+                    </div>
+                    <div class="text-end">
+                        ${estadoBadge(p)}
+                        <div class="fw-bold text-primary mt-1">${parseFloat(p.total).toLocaleString('es-CU')} CUP</div>
+                    </div>
                 </div>
-                <div class="small text-muted mb-1">${p.fecha}</div>
-                <div class="fw-bold text-primary">$${parseFloat(p.total).toFixed(2)}</div>
+                <div class="mt-2">
+                    <a href="ticket_view.php?id=${p.id}" target="_blank" class="btn btn-outline-secondary btn-sm py-0 px-2">
+                        <i class="fas fa-receipt me-1"></i>Ver ticket
+                    </a>
+                </div>
             </div>`;
         });
         html += '</div>';
@@ -1790,6 +2412,9 @@ ob_end_flush();
     const CFG_TITULAR = <?= json_encode($CFG_TITULAR) ?>;
     const CFG_BANCO   = <?= json_encode($CFG_BANCO)   ?>;
 
+    // Perfil del cliente logueado (null si no hay sesión)
+    const CLIENT_PROFILE = <?= json_encode($clienteProfile) ?>;
+
     let cart = JSON.parse(localStorage.getItem('palweb_cart') || '[]');
     let cartSyncTimeout = null;
     let flujoActual = 'reserva'; // 'reserva' | 'compra'
@@ -1799,20 +2424,79 @@ ob_end_flush();
     function toggleTrackingModal() { trackingModal.show(); }
     function toggleAuthModal() { authModal.show(); }
     
-    // ===== BUSCADOR AJAX =====
+    // ===== BUSCADOR (Feature 11: usa caché local si disponible, AJAX como fallback) =====
     const searchInput = document.getElementById('searchInput');
     const searchResults = document.getElementById('searchResults');
     let searchTimeout = null;
 
+    function renderSearchItem(item) {
+        const div = document.createElement('div');
+        div.className = 'search-item';
+        const imgHTML = item.hasImg
+            ? `<picture>
+                <source type="image/avif" srcset="${item.imgUrl}&fmt=avif">
+                <source type="image/webp" srcset="${item.imgUrl}&fmt=webp">
+                <img src="${item.imgUrl}&fmt=jpg" class="search-thumb" loading="lazy">
+               </picture>`
+            : `<div class="search-placeholder" style="background:${item.bg}">${item.initials}</div>`;
+        const priceDisplay = (item.precioOferta > 0 && item.precioOferta < item.precio)
+            ? `<s style="font-size:.8em;color:#999">$${parseFloat(item.precio).toFixed(2)}</s> <span style="color:#dc3545;font-weight:700">$${parseFloat(item.precioOferta).toFixed(2)}</span>`
+            : `$${parseFloat(item.precio).toFixed(2)}`;
+        div.innerHTML = `${imgHTML}
+            <div style="flex:1"><div style="font-weight:600">${escHtml(item.nombre)}</div>
+            <small class="text-muted">${escHtml(item.categoria||'')}</small></div>
+            <div style="font-weight:700;color:var(--primary)">${priceDisplay}</div>`;
+        div.onclick = function() {
+            searchInput.value = '';
+            searchResults.style.display = 'none';
+            openProductDetail({
+                id: item.codigo, name: item.nombre,
+                price: item.precioOferta > 0 && item.precioOferta < item.precio ? item.precioOferta : item.precio,
+                precioOferta: item.precioOferta || 0,
+                desc: item.descripcion || '',
+                img: item.imgUrl, bg: item.bg, initials: item.initials,
+                hasImg: item.hasImg, hasStock: item.hasStock, stock: item.stock,
+                code: item.codigo, cat: item.categoria,
+                unit: item.unidad_medida, color: item.color,
+                esReservable: item.esReservable || false
+            });
+        };
+        return div;
+    }
+
+    function doClientSearch(query) {
+        const cached = getProductsFromCache();
+        if (!cached) return false; // usar AJAX
+        const q = query.toLowerCase();
+        const matches = cached.filter(p =>
+            p.nombre.toLowerCase().includes(q) ||
+            (p.categoria||'').toLowerCase().includes(q) ||
+            (p.descripcion||'').toLowerCase().includes(q) ||
+            p.codigo.toLowerCase().includes(q)
+        ).slice(0, 12);
+        searchResults.innerHTML = '';
+        if (matches.length > 0) {
+            matches.forEach(item => searchResults.appendChild(renderSearchItem(item)));
+        } else {
+            searchResults.innerHTML = '<div class="p-3 text-center text-muted">No se encontraron productos</div>';
+        }
+        searchResults.style.display = 'block';
+        return true;
+    }
+
     searchInput.addEventListener('input', function() {
         const query = this.value.trim();
         clearTimeout(searchTimeout);
-        
+
         if (query.length < 1) {
             searchResults.style.display = 'none';
             return;
         }
 
+        // Intentar búsqueda client-side instantánea
+        if (doClientSearch(query)) return;
+
+        // Fallback a AJAX si no hay caché
         searchResults.innerHTML = '<div class="p-3 text-center">🔍 Buscando...</div>';
         searchResults.style.display = 'block';
 
@@ -1820,61 +2504,17 @@ ob_end_flush();
             try {
                 const response = await fetch(`shop.php?ajax_search=${encodeURIComponent(query)}`);
                 const data = await response.json();
-                
                 searchResults.innerHTML = '';
-                
                 if (data.error) {
                     searchResults.innerHTML = `<div class="p-3 text-danger">❌ ${data.message}</div>`;
                     return;
                 }
-                
                 if (data.length > 0) {
-                    data.forEach(item => {
-                        const div = document.createElement('div');
-                        div.className = 'search-item';
-                        
-                        const imgHTML = item.hasImg 
-                            ? `<img src="${item.imgUrl}" class="search-thumb">`
-                            : `<div class="search-placeholder" style="background: ${item.bg}">${item.initials}</div>`;
-                        
-                        div.innerHTML = `
-                            ${imgHTML}
-                            <div style="flex: 1;">
-                                <div style="font-weight: 600;">${item.nombre}</div>
-                                <small class="text-muted">${item.categoria || ''}</small>
-                            </div>
-                            <div style="font-weight: 700; color: var(--primary);">$${parseFloat(item.precio).toFixed(2)}</div>
-                        `;
-                        
-                        div.onclick = function() {
-                            searchInput.value = '';
-                            searchResults.style.display = 'none';
-                            openProductDetail({
-                                id:          item.codigo,
-                                name:        item.nombre,
-                                price:       item.precio,
-                                desc:        item.descripcion || '',
-                                img:         item.imgUrl,
-                                bg:          item.bg,
-                                initials:    item.initials,
-                                hasImg:      item.hasImg,
-                                hasStock:    item.hasStock,
-                                stock:       item.stock,
-                                code:        item.codigo,
-                                cat:         item.categoria,
-                                unit:        item.unidad_medida,
-                                color:       item.color,
-                                esReservable: item.esReservable || false
-                            });
-                        };
-                        
-                        searchResults.appendChild(div);
-                    });
+                    data.forEach(item => searchResults.appendChild(renderSearchItem(item)));
                 } else {
                     searchResults.innerHTML = '<div class="p-3 text-center text-muted">No se encontraron productos</div>';
                 }
             } catch (error) {
-                console.error('Error:', error);
                 searchResults.innerHTML = '<div class="p-3 text-danger">Error al buscar</div>';
             }
         }, 300);
@@ -1898,18 +2538,31 @@ ob_end_flush();
         if (typeof syncCartWithServer === 'function') syncCartWithServer();
     }
     
-    function addToCart(id, name, price, isReserva = false) {
-        if (event) event.stopPropagation();
-        const existing = cart.find(i => i.id === id && i.isReserva === isReserva);
+    function addToCart(id, name, price, isReserva = false, variant = null) {
+        // Feature 13: capturar posición del botón antes de stopPropagation
+        const _evt = typeof event !== 'undefined' ? event : null;
+        if (_evt) _evt.stopPropagation();
+
+        const vNombre = variant?.nombre ?? null;
+        const finalPrice = variant ? (parseFloat(price) + parseFloat(variant.precio_extra)) : parseFloat(price);
+        const existing = cart.find(i => i.id === id && i.isReserva === isReserva && (i.variant?.nombre ?? null) === vNombre);
         if (existing) {
             existing.qty++;
         } else {
-            cart.push({ id, name, price, qty: 1, isReserva });
+            cart.push({ id, name, price: finalPrice, qty: 1, isReserva, variant: variant || null });
         }
         updateCounters();
+
+        // Feature 13: animación fly-to-cart
+        if (_evt && _evt.target) {
+            const r = _evt.target.getBoundingClientRect();
+            flyToCart(r.left + r.width / 2, r.top + r.height / 2);
+        }
+
+        const variantLabel = variant ? ` (${variant.nombre})` : '';
         const msg = isReserva
-            ? '📅 Reserva agregada al carrito'
-            : '✓ Producto agregado al carrito';
+            ? `📅 Reserva agregada${variantLabel}`
+            : `✓ Agregado al carrito${variantLabel}`;
         showToast(msg);
     }
     
@@ -1927,10 +2580,13 @@ ob_end_flush();
                 const reservaBadge = item.isReserva
                     ? `<span class="badge ms-1" style="background:#f59e0b;color:#1a1a1a;font-size:.65rem;">📅 RESERVA</span>`
                     : '';
+                const variantBadge = item.variant
+                    ? `<span class="badge bg-secondary ms-1" style="font-size:.65rem;">${item.variant.nombre}</span>`
+                    : '';
                 tbody.innerHTML += `
                     <tr>
                         <td>
-                            <div class="fw-bold">${item.name}${reservaBadge}</div>
+                            <div class="fw-bold">${item.name}${reservaBadge}${variantBadge}</div>
                         </td>
                         <td class="text-center">
                             <div class="btn-group">
@@ -1982,17 +2638,35 @@ ob_end_flush();
     }
     
     function openProductDetail(data) {
+        // Guardar referencia para compartir (Feature 15)
+        _currentDetailProduct = data;
+
         // Registrar vista en el servidor para estadísticas
         fetch(`shop.php?action_view_product&code=${data.id}`).catch(e => {});
 
         // Llenar campos con el nuevo diseño profesional
         document.getElementById('detailName').innerText = data.name;
-        document.getElementById('detailPrice').innerText = '$' + parseFloat(data.price).toFixed(2);
         document.getElementById('detailDesc').innerText = data.desc || 'Sin descripción detallada.';
         document.getElementById('detailCat').innerText = data.cat || 'General';
         document.getElementById('detailSku').innerText = data.code || '-';
         document.getElementById('detailUnit').innerText = data.unit ? '/ ' + data.unit : '';
-        
+
+        // Feature 2: precio tachado en modal
+        const priceEl    = document.getElementById('detailPrice');
+        const priceOrig  = document.getElementById('detailPriceOriginal');
+        const po = parseFloat(data.precioOferta || 0);
+        const bp = parseFloat(data.price || 0);
+        if (po > 0 && po < bp) {
+            priceOrig.textContent = '$' + bp.toFixed(2);
+            priceOrig.style.display = 'inline';
+            priceEl.textContent = '$' + po.toFixed(2);
+            priceEl.classList.add('price-oferta');
+        } else {
+            priceOrig.style.display = 'none';
+            priceEl.textContent = '$' + bp.toFixed(2);
+            priceEl.classList.remove('price-oferta');
+        }
+
         // Manejo de color
         if(data.color) {
             document.getElementById('divDetailColor').style.display = 'block';
@@ -2004,7 +2678,9 @@ ob_end_flush();
         // Manejo de Stock
         const stockBadge = document.getElementById('detailStockBadge');
         const btn = document.getElementById('btnAddDetail');
-        
+        const avisoSection = document.getElementById('restockAvisoSection');
+        avisoSection.style.display = 'none';
+
         if (data.hasStock) {
             stockBadge.innerText = '✓ Disponible';
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-success';
@@ -2012,7 +2688,7 @@ ob_end_flush();
             btn.style.background = '';
             btn.innerHTML = '<i class="fas fa-cart-plus me-2"></i> AGREGAR AL CARRITO';
             btn.onclick = () => {
-                addToCart(data.id, data.name, data.price, false);
+                addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, false);
                 modalDetail.hide();
             };
         } else if (data.esReservable) {
@@ -2022,23 +2698,34 @@ ob_end_flush();
             btn.style.background = '#f59e0b';
             btn.innerHTML = '📅 RESERVAR PRODUCTO';
             btn.onclick = () => {
-                addToCart(data.id, data.name, data.price, true);
+                addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, true);
                 modalDetail.hide();
             };
         } else {
+            // Feature 1: mostrar form de aviso restock
             stockBadge.innerText = '✗ Agotado';
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-danger';
             btn.disabled = true;
-            btn.style.background = '';
-            btn.innerHTML = 'PRODUCTO AGOTADO';
+            btn.style.background = '#6c757d';
+            btn.innerHTML = '✗ PRODUCTO AGOTADO';
+            avisoSection.style.display = 'block';
+            avisoSection.setAttribute('data-codigo', data.id);
         }
         
-        // Imagen
-        const img = document.getElementById('detailImg');
+        // Imagen principal + galería de extras
+        const img         = document.getElementById('detailImg');
         const placeholder = document.getElementById('detailPlaceholder');
-        
-        if (data.hasImg) {
-            img.src = data.img;
+        const thumbsWrap  = document.getElementById('detailThumbs');
+
+        // Recopilar todas las imágenes disponibles en orden
+        const allImgs = [];
+        if (data.img)       allImgs.push(data.img);
+        if (data.imgExtra1) allImgs.push(data.imgExtra1);
+        if (data.imgExtra2) allImgs.push(data.imgExtra2);
+
+        // Mostrar imagen activa (la primera)
+        if (allImgs.length > 0) {
+            img.src = allImgs[0];
             img.classList.remove('d-none');
             placeholder.classList.add('d-none');
         } else {
@@ -2047,11 +2734,35 @@ ob_end_flush();
             img.classList.add('d-none');
             placeholder.classList.remove('d-none');
         }
-        
+
+        // Thumbnails — solo si hay más de 1 imagen
+        thumbsWrap.innerHTML = '';
+        if (allImgs.length > 1) {
+            thumbsWrap.style.display = 'flex';
+            allImgs.forEach((src, i) => {
+                const t = document.createElement('img');
+                t.src       = src;
+                t.className = 'detail-thumb' + (i === 0 ? ' active' : '');
+                t.alt       = 'Vista ' + (i + 1);
+                t.onclick   = () => {
+                    img.src = src;
+                    thumbsWrap.querySelectorAll('.detail-thumb').forEach(x => x.classList.remove('active'));
+                    t.classList.add('active');
+                };
+                thumbsWrap.appendChild(t);
+            });
+        } else {
+            thumbsWrap.style.display = 'none';
+        }
+
+        // Cargar variantes y reseñas para este producto
+        loadVariants(data.id, parseFloat(data.price), data.hasStock, data.esReservable);
+        loadReviews(data.id);
+
         modalDetail.show();
     }
 
-    function openCart() { 
+    function openCart() {
         showCartView(); 
         renderCart(); 
         modalCart.show(); 
@@ -2112,6 +2823,63 @@ ob_end_flush();
         }
     }
 
+    // ========================================================
+    // TIME SLOTS DE ENTREGA
+    // ========================================================
+    const TIME_SLOTS = [
+        { id: 'manana',   label: 'Mañana (9am–12pm)',   start: 9,  end: 12 },
+        { id: 'mediodia', label: 'Mediodía (12pm–3pm)',  start: 12, end: 15 },
+        { id: 'tarde',    label: 'Tarde (3pm–6pm)',      start: 15, end: 18 },
+        { id: 'noche',    label: 'Noche (6pm–9pm)',      start: 18, end: 21 },
+    ];
+    let selectedSlot = null;
+
+    function selectSlot(el) {
+        if (el.classList.contains('disabled')) return;
+        document.querySelectorAll('.slot-card').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        selectedSlot = { id: el.dataset.slot, label: el.dataset.label };
+        document.getElementById('slotErrorMsg').style.display = 'none';
+    }
+    window.selectSlot = selectSlot;
+
+    function updateSlotsAvailability() {
+        const dateVal = document.getElementById('cliDate')?.value ?? '';
+        const todayStr = new Date().toISOString().split('T')[0];
+        const nowHour = new Date().getHours();
+        const isToday = dateVal === todayStr;
+
+        document.querySelectorAll('.slot-card').forEach(card => {
+            const slot = TIME_SLOTS.find(s => s.id === card.dataset.slot);
+            if (!slot) return;
+            // Para hoy, deshabilitar slots cuyo horario ya pasó
+            if (isToday && nowHour >= slot.end) {
+                card.classList.add('disabled');
+                if (selectedSlot?.id === slot.id) {
+                    card.classList.remove('active');
+                    selectedSlot = null;
+                }
+            } else {
+                card.classList.remove('disabled');
+            }
+        });
+
+        // Auto-seleccionar el primer slot disponible si ninguno está activo
+        if (!selectedSlot) {
+            const first = document.querySelector('.slot-card:not(.disabled)');
+            if (first) selectSlot(first);
+        }
+    }
+    window.updateSlotsAvailability = updateSlotsAvailability;
+
+    function resetSlots() {
+        selectedSlot = null;
+        document.querySelectorAll('.slot-card').forEach(c => {
+            c.classList.remove('active', 'disabled');
+        });
+        document.getElementById('slotErrorMsg').style.display = 'none';
+    }
+
     function abrirCheckoutInterno(flujo) {
         flujoActual = flujo;
         document.getElementById('cartItemsView').style.display = 'none';
@@ -2143,6 +2911,20 @@ ob_end_flush();
         dateInput.min = today;
         dateInput.max = flujo === 'compra' ? tomorrow : '';
         if (!dateInput.value) dateInput.value = tomorrow;
+
+        // Reiniciar y actualizar slots según la fecha seleccionada
+        resetSlots();
+        updateSlotsAvailability();
+
+        // Auto-rellenar datos del cliente si está logueado
+        if (CLIENT_PROFILE) {
+            const nameEl = document.getElementById('cliName');
+            const telEl  = document.getElementById('cliTel');
+            const dirEl  = document.getElementById('cliDir');
+            if (nameEl && !nameEl.value) nameEl.value = CLIENT_PROFILE.nombre || '';
+            if (telEl  && !telEl.value)  telEl.value  = CLIENT_PROFILE.telefono || '';
+            if (dirEl  && !dirEl.value)  dirEl.value  = CLIENT_PROFILE.direccion || '';
+        }
     }
 
     function onPayMethodChange() {
@@ -2184,6 +2966,10 @@ ob_end_flush();
                     clearInterval(pollInterval);
                     pollInterval = null;
                     document.getElementById('waitingPaymentView').style.display = 'none';
+                    // Rellenar # pedido y nombre del cliente
+                    const nombre = (res.cliente_nombre || '').split(' ').slice(0,2).join(' ');
+                    document.getElementById('confirmadoNombre').textContent  = nombre || 'Cliente';
+                    document.getElementById('confirmadoPedido').textContent  = res.id ? String(res.id).padStart(5,'0') : '—';
                     document.getElementById('pagoConfirmadoView').style.display = 'block';
                 } else if (res.estado_pago === 'rechazado') {
                     clearInterval(pollInterval);
@@ -2312,7 +3098,17 @@ ob_end_flush();
             }
         }
 
+        // Validar time slot
+        if (!selectedSlot) {
+            document.getElementById('slotErrorMsg').style.display = 'block';
+            document.getElementById('slotErrorMsg').scrollIntoView({ behavior: 'smooth', block: 'center' });
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+            return;
+        }
+
         const uuid = 'WEB-' + Date.now();
+        const slotPrefix = `[⏰ ${selectedSlot.label}] `;
         const data = {
             uuid,
             total:              parseFloat(document.getElementById('grandTotal').innerText),
@@ -2322,7 +3118,7 @@ ob_end_flush();
             cliente_telefono:   document.getElementById('cliTel').value,
             cliente_direccion:  address,
             fecha_reserva:      document.getElementById('cliDate').value,
-            mensajero_nombre:   notes,
+            mensajero_nombre:   slotPrefix + notes,
             codigo_pago:        codigoPago,
             estado_pago:        estadoPago,
             canal_origen:       'Web',
@@ -2330,7 +3126,7 @@ ob_end_flush();
         };
 
         try {
-            const res = await fetch('pos_save.php', {
+            const res = await fetch('ventas_api.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data)
@@ -2712,6 +3508,303 @@ ob_end_flush();
     </div>
   </div>
 </footer>
+
+<!-- ── Campana de notificaciones push (tienda) ── -->
+<div id="shopPushBell" style="position:fixed;bottom:80px;right:16px;z-index:9800;display:none;">
+    <button id="shopBellBtn" onclick="handleShopBellClick()"
+            style="width:46px;height:46px;border-radius:50%;border:none;font-size:1.1rem;
+                   box-shadow:0 3px 12px rgba(0,0,0,.25);cursor:pointer;transition:.2s;
+                   background:#0d6efd;color:#fff;"
+            title="Activar notificaciones de ofertas">
+        <i id="shopBellIcon" class="fas fa-bell-slash"></i>
+    </button>
+</div>
+
+<script>
+// ── Service Worker Tienda (scope exclusivo shop.php) ──
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw-shop.js', { scope: '/marinero/shop.php' })
+        .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
+        .catch(err => console.warn('[Shop PWA] SW error:', err));
+}
+
+// ── Push Notifications Tienda ─────────────────────────────────────────────
+const SHOP_PUSH_TIPO  = 'cliente';
+const SHOP_PUSH_CACHE = 'push-config-v1';
+const SHOP_PUSH_API   = 'push_api.php';
+
+function urlB64ToUint8ArrayShop(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw     = atob(base64);
+    return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+}
+
+async function saveShopTipoToCache(tipo) {
+    try {
+        const cache = await caches.open(SHOP_PUSH_CACHE);
+        await cache.put('push-tipo', new Response(tipo));
+    } catch (e) {}
+}
+
+async function subscribeShopPush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        alert('Tu navegador no soporta notificaciones push.');
+        return;
+    }
+    try {
+        const resp = await fetch(SHOP_PUSH_API + '?action=vapid_key');
+        const { publicKey } = await resp.json();
+
+        const reg = await navigator.serviceWorker.register('sw-shop.js', { scope: '/marinero/shop.php' });
+        const swReg = await Promise.race([
+            navigator.serviceWorker.ready,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
+        ]);
+
+        const sub = await swReg.pushManager.subscribe({
+            userVisibleOnly:      true,
+            applicationServerKey: urlB64ToUint8ArrayShop(publicKey)
+        });
+
+        await saveShopTipoToCache(SHOP_PUSH_TIPO);
+
+        await fetch(SHOP_PUSH_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                action:       'subscribe',
+                subscription: sub.toJSON(),
+                tipo:         SHOP_PUSH_TIPO,
+                device:       navigator.userAgent.substring(0, 100)
+            })
+        });
+
+        updateShopBellUI('active');
+    } catch (err) {
+        if (err.name === 'NotAllowedError') {
+            updateShopBellUI('denied');
+        } else {
+            console.error('[ShopPush] subscribe error:', err);
+        }
+    }
+}
+
+async function unsubscribeShopPush() {
+    try {
+        const reg = await navigator.serviceWorker.getRegistration('/marinero/shop.php');
+        if (!reg) return;
+        const sub = await reg.pushManager.getSubscription();
+        if (!sub) { updateShopBellUI('off'); return; }
+        const endpoint = sub.endpoint;
+        await sub.unsubscribe();
+        await fetch(SHOP_PUSH_API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'unsubscribe', endpoint })
+        });
+        updateShopBellUI('off');
+    } catch (err) {
+        console.error('[ShopPush] unsubscribe error:', err);
+    }
+}
+
+function updateShopBellUI(state) {
+    const btn  = document.getElementById('shopBellBtn');
+    const icon = document.getElementById('shopBellIcon');
+    if (!btn) return;
+    if (state === 'active') {
+        btn.style.background = '#198754'; icon.className = 'fas fa-bell';
+        btn.title = 'Notificaciones de ofertas activas — clic para desactivar';
+    } else if (state === 'denied') {
+        btn.style.background = '#dc3545'; icon.className = 'fas fa-bell-slash';
+        btn.title = 'Notificaciones bloqueadas por el sistema';
+    } else {
+        btn.style.background = '#0d6efd'; icon.className = 'fas fa-bell-slash';
+        btn.title = 'Activar notificaciones de ofertas';
+    }
+}
+
+async function handleShopBellClick() {
+    if (Notification.permission === 'denied') {
+        alert('Las notificaciones están bloqueadas. Actívalas en la configuración del navegador.');
+        return;
+    }
+    const reg = await navigator.serviceWorker.getRegistration('/marinero/shop.php');
+    const sub = reg ? await reg.pushManager.getSubscription() : null;
+    if (sub) {
+        await unsubscribeShopPush();
+    } else {
+        await subscribeShopPush();
+    }
+}
+
+async function initShopPush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const wrap = document.getElementById('shopPushBell');
+    if (wrap) wrap.style.display = 'block';
+
+    if (Notification.permission === 'denied') {
+        updateShopBellUI('denied'); return;
+    }
+    try {
+        const reg = await navigator.serviceWorker.getRegistration('/marinero/shop.php');
+        const sub = reg ? await reg.pushManager.getSubscription() : null;
+        updateShopBellUI(sub ? 'active' : 'off');
+    } catch (e) {
+        updateShopBellUI('off');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => { setTimeout(initShopPush, 1200); });
+
+// =========================================================
+// Feature 13: FLY-TO-CART ANIMATION
+// =========================================================
+function flyToCart(srcX, srcY) {
+    const cartBtn = document.querySelector('.cart-float');
+    if (!cartBtn) return;
+    const cartRect = cartBtn.getBoundingClientRect();
+    const dot = document.createElement('div');
+    dot.className = 'fly-dot';
+    dot.style.left = (srcX - 7) + 'px';
+    dot.style.top  = (srcY - 7) + 'px';
+    document.body.appendChild(dot);
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            dot.style.left    = (cartRect.left + cartRect.width  / 2 - 7) + 'px';
+            dot.style.top     = (cartRect.top  + cartRect.height / 2 - 7) + 'px';
+            dot.style.opacity = '0';
+            dot.style.transform = 'scale(0.2)';
+        });
+    });
+    setTimeout(() => {
+        dot.remove();
+        cartBtn.classList.add('cart-bounce');
+        setTimeout(() => cartBtn.classList.remove('cart-bounce'), 500);
+    }, 620);
+}
+
+// =========================================================
+// Feature 15: COMPARTIR PRODUCTO
+// =========================================================
+function shareCurrentProduct() {
+    if (!_currentDetailProduct) return;
+    const prod = _currentDetailProduct;
+    const url  = location.origin + location.pathname + '?producto=' + encodeURIComponent(prod.id || prod.code);
+    const text = prod.name + ' — $' + parseFloat(prod.price || 0).toFixed(2);
+    if (navigator.share) {
+        navigator.share({ title: prod.name, text, url }).catch(() => {});
+    } else {
+        navigator.clipboard.writeText(url).then(() => showToast('🔗 Enlace copiado al portapapeles')).catch(() => {
+            prompt('Copia este enlace:', url);
+        });
+    }
+}
+
+// Abrir producto desde URL ?producto=CODE
+(function() {
+    const params = new URLSearchParams(location.search);
+    const code = params.get('producto');
+    if (!code) return;
+    const cached = getProductsFromCache();
+    const list = cached || PRODUCTS_DATA;
+    const prod = list.find(p => p.codigo === code);
+    if (prod) {
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => openProductDetail({
+                id: prod.codigo, name: prod.nombre,
+                price: prod.precioOferta > 0 && prod.precioOferta < prod.precio ? prod.precioOferta : prod.precio,
+                precioOferta: prod.precioOferta || 0,
+                desc: prod.descripcion || '', img: prod.imgUrl,
+                bg: prod.bg, initials: prod.initials, hasImg: prod.hasImg,
+                hasStock: prod.hasStock, stock: prod.stock, code: prod.codigo,
+                cat: prod.categoria, unit: prod.unidad_medida, color: prod.color,
+                esReservable: prod.esReservable || false
+            }), 600);
+        });
+    }
+})();
+
+// =========================================================
+// Feature 1: AVÍSAME CUANDO LLEGUE (restock)
+// =========================================================
+function notifyRestock(codigo, nombre) {
+    const modal = document.getElementById('restockAvisoSection');
+    if (modal) {
+        // Si el modal de detalle está abierto, scroll to aviso section
+        modal.setAttribute('data-codigo', codigo);
+        modal.style.display = 'block';
+        modal.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    } else {
+        // Fallback prompt si se llama desde la card
+        const tel = prompt(`Ingresa tu teléfono para avisar cuando "${nombre}" esté disponible:`);
+        if (!tel) return;
+        fetch('shop.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action_restock_aviso: 1, codigo, nombre: 'Cliente', telefono: tel })
+        }).then(() => showToast('🔔 ¡Te avisamos cuando llegue!')).catch(() => {});
+    }
+}
+
+function submitRestock() {
+    const section  = document.getElementById('restockAvisoSection');
+    const codigo   = section?.getAttribute('data-codigo') || (_currentDetailProduct?.id ?? '');
+    const nombre   = document.getElementById('avisoNombre')?.value.trim() || 'Cliente';
+    const telefono = document.getElementById('avisoTelefono')?.value.trim() || '';
+    if (!telefono) { showToast('Ingresa tu teléfono'); return; }
+    fetch('shop.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action_restock_aviso: 1, codigo, nombre, telefono })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.status === 'ok') {
+            showToast('🔔 ¡Te avisamos cuando llegue!', 4000);
+            if (section) section.style.display = 'none';
+        } else {
+            showToast('Error: ' + (res.error || 'inténtalo de nuevo'));
+        }
+    })
+    .catch(() => showToast('Error al registrar aviso'));
+}
+
+// =========================================================
+// Feature 12: CARRITO ABANDONADO — banner de recuperación
+// =========================================================
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('palweb_cart');
+    if (!saved) return;
+    let items;
+    try { items = JSON.parse(saved); } catch(e) { return; }
+    if (!Array.isArray(items) || items.length === 0) return;
+
+    // Mostrar banner sólo si hay productos guardados Y el carrito actual está vacío
+    if (cart.length > 0) return; // ya se restauró
+
+    const container = document.querySelector('.container');
+    if (!container) return;
+    const total = items.reduce((s, i) => s + (i.price * i.qty), 0);
+    const banner = document.createElement('div');
+    banner.className = 'abandoned-banner mt-3';
+    banner.innerHTML = `
+        <span class="ab-msg">🛒 Tienes ${items.length} artículo(s) guardados por $${total.toFixed(2)} CUP</span>
+        <button class="btn btn-warning btn-sm fw-bold" onclick="restoreAbandonedCart(this.closest('.abandoned-banner'))">
+            Ver carrito
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="this.closest('.abandoned-banner').remove(); localStorage.removeItem('palweb_cart');">
+            Descartar
+        </button>`;
+    container.insertBefore(banner, container.firstChild);
+});
+
+function restoreAbandonedCart(banner) {
+    if (banner) banner.remove();
+    openCart();
+}
+</script>
 
 </body>
 </html>

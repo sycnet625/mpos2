@@ -4,7 +4,7 @@
 // ── Cabeceras de Seguridad HTTP ──────────────────────────────────────────────
 // pos.php usa autenticación por PIN (sin sesión PHP), por tanto no se
 // configura session_set_cookie_params aquí.
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://assets.mixkit.co; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; media-src 'self' https://assets.mixkit.co; connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://stats.g.doubleclick.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 header("Alt-Svc: h2=\":443\"; ma=86400");
 header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
 header("X-Content-Type-Options: nosniff");
@@ -84,21 +84,26 @@ if (isset($_GET['load_products'])) {
         $params = $config['categorias_ocultas'];
         
         $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
-                    (SELECT COALESCE(SUM(s.cantidad), 0) 
-                     FROM stock_almacen s 
+                    COALESCE(p.favorito,0) as favorito,
+                    (SELECT COALESCE(SUM(s.cantidad), 0)
+                     FROM stock_almacen s
                      WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
-                    FROM productos p 
-                    WHERE $where 
+                    FROM productos p
+                    WHERE $where
                     ORDER BY p.nombre";
-        
+
         $stmtProd = $pdo->prepare($sqlProd);
         $stmtProd->execute($params);
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-        
+
         // Procesar para incluir colores e imágenes
         $localPath = '/home/marinero/product_images/';
         foreach ($prods as &$p) {
-            $p['has_image'] = file_exists($localPath . $p['codigo'] . '.jpg');
+            $b = $localPath . $p['codigo'];
+            $p['has_image'] = false; $p['img_version'] = 0;
+            foreach (['.avif','.webp','.jpg'] as $_e) {
+                if (file_exists($b.$_e)) { $p['has_image'] = true; $p['img_version'] = filemtime($b.$_e); break; }
+            }
             $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
             $p['stock'] = floatval($p['stock']);
         }
@@ -120,6 +125,22 @@ if (isset($_GET['ping'])) {
     exit;
 }
 
+// ENDPOINT: Toggle favorito de producto
+if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    $inp = json_decode(file_get_contents('php://input'), true);
+    $codigo = trim($inp['codigo'] ?? '');
+    if ($codigo) {
+        $pdo->prepare("UPDATE productos SET favorito = 1 - favorito WHERE codigo = ?")->execute([$codigo]);
+        $favStmt = $pdo->prepare("SELECT favorito FROM productos WHERE codigo = ?");
+        $favStmt->execute([$codigo]);
+        echo json_encode(['status' => 'success', 'favorito' => (int)$favStmt->fetchColumn()]);
+    } else {
+        echo json_encode(['status' => 'error']);
+    }
+    exit;
+}
+
 // Config
 $configFile = 'pos.cfg';
 $config = [ "tienda_nombre" => "MI TIENDA", "cajeros" => [["nombre"=>"Admin", "pin"=>"0000"]], "id_almacen" => 1, "id_sucursal" => 1, "mostrar_materias_primas" => false, "mostrar_servicios" => true, "categorias_ocultas" => [] ];
@@ -128,9 +149,12 @@ if (file_exists($configFile)) {
     if ($loaded) $config = array_merge($config, $loaded);
 }
 
+// Asegurar columna favorito en productos
+try { $pdo->exec("ALTER TABLE productos ADD COLUMN favorito TINYINT(1) NOT NULL DEFAULT 0"); } catch (Exception $e) {}
+
 // Carga de Datos
 $prods = [];
-$clientsData = []; 
+$clientsData = [];
 $mensajeros = []; // Array para mensajeros
 
 try {
@@ -147,17 +171,18 @@ try {
     $params = $config['categorias_ocultas'];
 
     // Categorias
-    $stmtCat = $pdo->prepare("SELECT DISTINCT categoria FROM productos p WHERE $where ORDER BY categoria");
+    $stmtCat = $pdo->prepare("SELECT DISTINCT p.categoria as nombre_categoria, c.color, c.emoji FROM productos p LEFT JOIN categorias c ON p.categoria = c.nombre WHERE $where ORDER BY p.categoria");
     $stmtCat->execute($params);
-    $cats = $stmtCat->fetchAll(PDO::FETCH_COLUMN);
+    $catsData = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
     // Productos
     $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
-                (SELECT COALESCE(SUM(s.cantidad), 0) 
-                 FROM stock_almacen s 
+                COALESCE(p.favorito,0) as favorito,
+                (SELECT COALESCE(SUM(s.cantidad), 0)
+                 FROM stock_almacen s
                  WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
-                FROM productos p 
-                WHERE $where 
+                FROM productos p
+                WHERE $where
                 ORDER BY p.nombre";
     
     $stmtProd = $pdo->prepare($sqlProd);
@@ -182,10 +207,24 @@ try {
 // Procesamiento visual
 $localPath = '/home/marinero/product_images/';
 foreach ($prods as &$p) {
-    $p['has_image'] = file_exists($localPath . $p['codigo'] . '.jpg');
+    $b = $localPath . $p['codigo'];
+    $p['has_image'] = false; $p['img_version'] = 0;
+    foreach (['.avif','.webp','.jpg'] as $_e) {
+        if (file_exists($b.$_e)) { $p['has_image'] = true; $p['img_version'] = filemtime($b.$_e); break; }
+    }
     $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
     $p['stock'] = floatval($p['stock']);
 } unset($p);
+
+// Query de más vendidos (para sugerencias cuando no hay favoritos)
+$mostSoldCodes = [];
+try {
+    $stmtMs = $pdo->query(
+        "SELECT codigo_producto FROM ventas_detalle
+         GROUP BY codigo_producto ORDER BY SUM(cantidad) DESC LIMIT 10"
+    );
+    $mostSoldCodes = $stmtMs->fetchAll(PDO::FETCH_COLUMN);
+} catch (Exception $e) { $mostSoldCodes = []; }
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -212,7 +251,7 @@ foreach ($prods as &$p) {
         .top-bar { flex-shrink: 0; }
         .cart-list { flex-grow: 1; overflow-y: auto; background: #fff; border-bottom: 1px solid #eee; min-height: 150px; }
         .controls-wrapper { padding: 8px; padding-bottom: 60px; background: #fff; flex-shrink: 0; border-top: 1px solid #eee; }
-        .right-panel { flex-grow: 1; display: flex; flex-direction: column; background: #e9ecef; padding: 10px; overflow: hidden; }
+        .right-panel { flex-grow: 1; display: flex; flex-direction: column; background: #e9ecef; padding: 10px; overflow: hidden; position: relative; }
         @media (orientation: landscape) { .pos-container { flex-direction: row; } .left-panel { width: 35%; min-width: 340px; max-width: 420px; } .right-panel { width: 65%; } #keypadContainer { display: grid !important; } #toggleKeypadBtn { display: none !important; } }
         @media (orientation: portrait) { .pos-container { flex-direction: column; } .left-panel { width: 100%; height: 45%; border-right: none; border-bottom: 2px solid #ccc; order: 1; } .right-panel { width: 100%; height: 55%; order: 2; padding: 5px; } #keypadContainer { display: none; } #toggleKeypadBtn { display: block; width: 100%; margin-bottom: 5px; } .controls-wrapper { padding-bottom: 10px; } }
         .cart-item { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; position: relative; font-size: 0.95rem; }
@@ -229,7 +268,7 @@ foreach ($prods as &$p) {
         .c-grey { background-color: #6c757d; color: white; border-color: #6c757d; }
         .c-blue { background-color: #0d6efd; color: white; border-color: #0d6efd; }
         .c-purple { background-color: #6f42c1; color: white; border-color: #6f42c1; }
-        .category-bar { display: flex; overflow-x: auto; gap: 8px; margin-bottom: 8px; padding-bottom: 2px; scrollbar-width: none; }
+        .category-bar { display: flex; overflow-x: auto; overflow-y: hidden; gap: 8px; margin-bottom: 8px; padding-bottom: 5px; scrollbar-width: none; height: 52px; align-items: center; flex-shrink: 0; }
         .category-btn { padding: 8px 16px; border: none; border-radius: 20px; font-weight: 600; background: white; color: #555; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .category-btn.active { background: #0d6efd; color: white; }
         .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 10px; overflow-y: auto; padding-bottom: 80px; }
@@ -276,6 +315,62 @@ foreach ($prods as &$p) {
 
         /* FIX: BOTÓN SYNC VISIBLE */
         #btnSync { z-index: 100; position: relative; margin-right: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+
+        /* Reloj digital 7 segmentos */
+        #posClock {
+            font-family: 'Courier New', 'Lucida Console', monospace;
+            font-size: 1.3rem;
+            font-weight: bold;
+            letter-spacing: 0.12em;
+            background: #0a100a;
+            color: #00e676;
+            text-shadow: 0 0 6px #00e676, 0 0 14px rgba(0,230,118,0.45);
+            padding: 0 14px;
+            border-radius: 8px;
+            white-space: nowrap;
+            flex-shrink: 0;
+            min-width: 108px;
+            text-align: center;
+            border: 1px solid #143314;
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.7), 0 1px 3px rgba(0,0,0,0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+        }
+        #posClock.blink-colon .clock-sep { opacity: 0.2; }
+
+        /* Panel de atajos de teclado */
+        #hotkeyPanel { position: absolute; top: 50px; right: 10px; z-index: 1000;
+            background: white; border-radius: 10px; padding: 12px 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            min-width: 280px; font-size: 0.8rem; display: none; }
+        #hotkeyPanel.show { display: block; }
+        #hotkeyPanel kbd { background: #2c3e50; color: white; border: 1px solid #1a252f;
+            border-radius: 4px; padding: 2px 6px; font-size: 0.75rem; }
+
+        /* Barra de favoritos */
+        .fav-card { flex-shrink: 0; width: 88px; min-height: 54px;
+            background: white; border-radius: 8px; cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.1); padding: 5px 6px;
+            border: 2px solid transparent; transition: border-color 0.15s, transform 0.1s;
+            display: flex; flex-direction: column; justify-content: center; }
+        .fav-card:hover { border-color: #ffc107; transform: translateY(-1px); }
+        .fav-card .fav-name { font-size: 0.68rem; font-weight: 600; line-height: 1.2;
+            overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical; color: #333; }
+        .fav-card .fav-price { font-size: 0.75rem; color: #0d6efd; font-weight: 800; margin-top: 2px; }
+        .fav-card.out-of-stock { opacity: 0.5; }
+
+        /* Estrella ★ en card principal */
+        .star-btn { position: absolute; top: 5px; left: 5px; z-index: 11;
+            background: rgba(255,255,255,0.88); border: none; border-radius: 50%;
+            width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+            font-size: 0.85rem; cursor: pointer; padding: 0; line-height: 1;
+            transition: transform 0.1s; }
+        .star-btn:hover { transform: scale(1.25); }
+        .star-btn.active { color: #ffc107; }
+        .star-btn.inactive { color: #bbb; }
         
         /* Estilos adicionales para modal de pago grande */
         .total-display-large { font-size: 3rem; font-weight: 800; color: #198754; text-shadow: 1px 1px 0px #fff; }
@@ -308,9 +403,11 @@ foreach ($prods as &$p) {
 
 <div id="pinOverlay">
     <div class="pin-box">
-        <h3 class="mb-2">Acceso</h3>
-        <div class="fs-1 mb-3" id="pinDisplay">••••</div>
-        <div class="pin-grid">
+        <h3 class="mb-2">Acceso POS</h3>
+        <div class="fs-1 mb-2" id="pinDisplay">••••</div>
+        <div id="pinAttemptsDots" class="mb-2 text-muted small" style="min-height:1.2em;"></div>
+        <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 d-none small"></div>
+        <div class="pin-grid" id="pinGrid">
             <button class="pin-btn" onclick="typePin(1)">1</button><button class="pin-btn" onclick="typePin(2)">2</button><button class="pin-btn" onclick="typePin(3)">3</button>
             <button class="pin-btn" onclick="typePin(4)">4</button><button class="pin-btn" onclick="typePin(5)">5</button><button class="pin-btn" onclick="typePin(6)">6</button>
             <button class="pin-btn" onclick="typePin(7)">7</button><button class="pin-btn" onclick="typePin(8)">8</button><button class="pin-btn" onclick="typePin(9)">9</button>
@@ -342,7 +439,7 @@ foreach ($prods as &$p) {
                     <span id="netStatus" class="badge bg-success" style="font-size: 0.7rem;">
                         <i class="fas fa-wifi"></i>
                     </span>
-                    <button onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2" title="Caja">
+                    <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2" title="Caja">
                         <i class="fas fa-cash-register"></i>
                     </button>
                     <button onclick="showParkedOrders()" class="btn btn-sm btn-light text-warning px-2" title="Pausados">
@@ -405,7 +502,7 @@ foreach ($prods as &$p) {
                 <div class="keypad-grid">
                     <button class="btn-ctrl c-grey" onclick="askQty()">Cnt</button>
                     <button class="btn-ctrl c-purple" onclick="applyDiscount()">% Item</button>
-                    <button class="btn-ctrl c-purple" onclick="applyGlobalDiscount()">% Total</button>
+                    <button id="btnGlobalDiscount" class="btn-ctrl c-purple" onclick="applyGlobalDiscount()">% Total</button>
                     <button class="btn-ctrl c-blue" onclick="addNote()"><i class="fas fa-pen"></i></button>
                     <button class="btn-ctrl c-orange" onclick="parkOrder()"><i class="fas fa-pause"></i></button>
                     <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
@@ -421,30 +518,67 @@ foreach ($prods as &$p) {
     </div>
 
     <div class="right-panel">
-        <div class="input-group mb-2 shadow-sm" style="flex-shrink:0;">
-            <button id="btnRefresh" onclick="refreshProducts()" class="btn btn-primary border-0"><i class="fas fa-sync-alt"></i></button>
-            
-            <button id="btnForceDownload" onclick="forceDownloadProducts()" class="btn btn-danger border-0" title="Forzar descarga del servidor">
-                <i class="fas fa-cloud-download-alt"></i>
-            </button>
-            
-            <button id="btnStockFilter" class="btn btn-light border-0" onclick="toggleStockFilter()" title="Solo con existencias">
-                <i class="fas fa-cubes"></i>
-            </button>
-            
-            <button id="btnToggleImages" class="btn btn-light border-0" onclick="toggleImages()" title="Mostrar/Ocultar imagenes">
-                <i class="fas fa-image"></i>
-            </button>
+        <div class="d-flex align-items-stretch gap-2 mb-2" style="flex-shrink:0;">
+            <div class="input-group shadow-sm" style="flex:1;">
+                <button id="btnRefresh" onclick="refreshProducts()" class="btn btn-primary border-0"><i class="fas fa-sync-alt"></i></button>
 
-            <span class="input-group-text bg-white border-0"><i class="fas fa-search"></i></span>
-            <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()">
-            <button class="btn btn-light border-0" onclick="document.getElementById('searchInput').value='';filterProducts()">X</button>
+                <button id="btnForceDownload" onclick="forceDownloadProducts()" class="btn btn-danger border-0" title="Forzar descarga del servidor">
+                    <i class="fas fa-cloud-download-alt"></i>
+                </button>
+
+                <button id="btnStockFilter" class="btn btn-light border-0" onclick="toggleStockFilter()" title="Solo con existencias">
+                    <i class="fas fa-cubes"></i>
+                </button>
+
+                <button id="btnToggleImages" class="btn btn-light border-0" onclick="toggleImages()" title="Mostrar/Ocultar imagenes">
+                    <i class="fas fa-image"></i>
+                </button>
+
+                <span class="input-group-text bg-white border-0"><i class="fas fa-search"></i></span>
+                <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()">
+                <button class="btn btn-light border-0" onclick="document.getElementById('searchInput').value='';filterProducts()">X</button>
+                <button id="btnHotkeyHelp" class="btn btn-light border-0" onclick="toggleHotkeyPanel()" title="Atajos de teclado">⌨</button>
+            </div>
+            <div id="posClock"><span class="clock-h">12</span><span class="clock-sep">:</span><span class="clock-m">00</span><span class="clock-ampm" style="font-size:0.7rem; letter-spacing:0; margin-left:3px; opacity:0.85;">AM</span></div>
+        </div>
+        <div id="hotkeyPanel">
+            <div class="fw-bold mb-2 text-secondary" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Atajos de Teclado</div>
+            <div class="row g-1">
+                <div class="col-6"><kbd>F1</kbd> Abrir/Cerrar Caja</div>
+                <div class="col-6"><kbd>F2</kbd> Descuento Global</div>
+                <div class="col-6"><kbd>F3</kbd> Autopedidos</div>
+                <div class="col-6"><kbd>F4</kbd> Pausar Pedido</div>
+                <div class="col-6"><kbd>F5</kbd> Ir a Búsqueda</div>
+                <div class="col-6"><kbd>F6</kbd> Historial Tickets</div>
+                <div class="col-6"><kbd>F7</kbd> Nuevo Cliente</div>
+                <div class="col-6"><kbd>F8</kbd> Forzar Descarga</div>
+                <div class="col-6"><kbd>F9</kbd> Descuento Ítem</div>
+                <div class="col-6"><kbd>F10</kbd> Modificar Cantidad</div>
+                <div class="col-6"><kbd>Del</kbd> Eliminar Ítem</div>
+                <div class="col-6"><kbd>Enter</kbd> Cobrar</div>
+            </div>
         </div>
         <div class="category-bar">
             <button class="category-btn active" onclick="filterCategory('all', this)">TODOS</button>
-            <?php foreach($cats as $cat): ?>
-                <button class="category-btn" onclick="filterCategory('<?php echo htmlspecialchars($cat); ?>', this)"><?php echo htmlspecialchars($cat); ?></button>
+            <?php foreach($catsData as $catData): ?>
+                <?php
+                    $bgColor = htmlspecialchars($catData['color'] ?? '#ffffff');
+                    $textColor = (isset($catData['color']) && sscanf($catData['color'], "#%02x%02x%02x") == 3 && array_sum(sscanf($catData['color'], "#%02x%02x%02x")) < 382) ? '#ffffff' : '#000000';
+                    $emoji = htmlspecialchars($catData['emoji'] ?? '');
+                ?>
+                <button class="category-btn" style="background-color: <?php echo $bgColor; ?>; color: <?php echo $textColor; ?>;" onclick="filterCategory('<?php echo htmlspecialchars($catData['nombre_categoria']); ?>', this)">
+                    <?php echo $emoji . ' ' . htmlspecialchars($catData['nombre_categoria']); ?>
+                </button>
             <?php endforeach; ?>
+        </div>
+        <div id="favoritesBar" style="flex-shrink:0; display:none;">
+            <div class="d-flex align-items-center gap-2 mb-1 px-1" style="min-height:32px;">
+                <span id="favBarLabel" class="text-warning fw-bold" style="font-size:0.72rem; white-space:nowrap; flex-shrink:0;">
+                    <i class="fas fa-star"></i> FAVORITOS
+                </span>
+                <div id="favCardsRow" class="d-flex gap-2 pb-1" style="overflow-x:auto; scrollbar-width:none; flex:1;"></div>
+            </div>
+            <div style="height:1px; background:#dee2e6; margin-bottom:6px;"></div>
         </div>
         <div class="product-grid" id="productContainer"></div>
     </div>
@@ -482,6 +616,38 @@ foreach ($prods as &$p) {
 
 <div class="modal fade" id="cashModal" tabindex="-1"><div class="modal-dialog modal-sm"><div class="modal-content"><div class="modal-header bg-dark text-white"><h5 class="modal-title">Caja</h5><button class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div><div class="modal-body" id="cashModalBody"></div></div></div></div>
 <div class="modal fade" id="parkModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header bg-warning"><h5 class="modal-title">Espera</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="list-group list-group-flush" id="parkList"></div></div></div></div></div>
+
+<!-- MODAL ANULAR VENTA ─────────────────────────────────────────────────────
+     Audit trail: registra cajero + motivo + timestamp en auditoria_pos.
+     Solo ventas de la sesión activa. Requiere PIN del cajero. -->
+<div class="modal fade" id="voidModal" tabindex="-1">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-danger text-white py-2">
+                <h6 class="modal-title fw-bold"><i class="fas fa-ban me-2"></i>Anular Venta #<span id="voidTicketId">-</span></h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body pb-2">
+                <p class="text-muted small mb-3">Esta acción es permanente y quedará registrada en el audit trail con su nombre y hora exacta.</p>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Motivo de Anulación <span class="text-danger">*</span></label>
+                    <textarea id="voidMotivo" class="form-control form-control-sm" rows="3"
+                        placeholder="Ej: Error en precio, cliente canceló, producto incorrecto..."
+                        maxlength="200"></textarea>
+                    <div class="form-text text-muted" style="font-size:0.7rem">Mínimo 5 caracteres. Quedará firmado con su cajero.</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Su PIN de Cajero</label>
+                    <input type="password" id="voidPin" class="form-control form-control-sm text-center fw-bold"
+                        maxlength="8" placeholder="••••" autocomplete="off">
+                </div>
+                <button class="btn btn-danger w-100 fw-bold btn-void-confirm" onclick="confirmVoid()">
+                    <i class="fas fa-ban me-1"></i> CONFIRMAR ANULACIÓN
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <div class="modal fade" id="historialModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
@@ -526,6 +692,7 @@ foreach ($prods as &$p) {
     let currentPaymentMode = 'cash';
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
     const CAJEROS_CONFIG = <?php echo json_encode($config['cajeros'] ?? []); ?>;
+    const MOST_SOLD_CODES = <?php echo json_encode($mostSoldCodes); ?>;
     let CLIENTS_DATA = <?php echo json_encode($clientsData); ?>; // Lista inicial
 
     // --- LÓGICA DE CLIENTES ---
@@ -549,6 +716,18 @@ foreach ($prods as &$p) {
         document.getElementById('ncNit').value = '';
         modal.show();
     }
+
+    function toggleHotkeyPanel() {
+        const panel = document.getElementById('hotkeyPanel');
+        if (panel) panel.classList.toggle('show');
+    }
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const panel = document.getElementById('hotkeyPanel');
+            if (panel) panel.classList.remove('show');
+        }
+    });
 
     function saveNewClient() {
         const data = {

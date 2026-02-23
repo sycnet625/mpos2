@@ -637,7 +637,31 @@ $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
                     <div class="mock-input filled">Calle 23 #456, Vedado, La Habana ✓</div>
 
                     <label class="mock-label">¿Cuándo quieres recibirlo?</label>
-                    <div class="mock-input">📅 Selecciona una fecha</div>
+                    <div class="mock-input filled">📅 25 de febrero, 2026 ✓</div>
+
+                    <label class="mock-label" style="margin-top:6px;">⏰ Horario de entrega *</label>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+                        <div style="border:2px solid #d1d5db; border-radius:10px; padding:7px 5px; text-align:center; font-size:0.7rem; color:#9ca3af;">
+                            <div style="font-size:1.1rem;">🌅</div>
+                            <div style="font-weight:700;">Mañana</div>
+                            <div style="font-size:0.62rem;">9am – 12pm</div>
+                        </div>
+                        <div style="border:2px solid #3b82f6; border-radius:10px; padding:7px 5px; text-align:center; font-size:0.7rem; background:#dbeafe; color:#1d4ed8; box-shadow:0 0 0 2px rgba(59,130,246,.2);">
+                            <div style="font-size:1.1rem;">☀️</div>
+                            <div style="font-weight:800;">Mediodía ✓</div>
+                            <div style="font-size:0.62rem;">12pm – 3pm</div>
+                        </div>
+                        <div style="border:2px solid #d1d5db; border-radius:10px; padding:7px 5px; text-align:center; font-size:0.7rem; color:#9ca3af;">
+                            <div style="font-size:1.1rem;">🌆</div>
+                            <div style="font-weight:700;">Tarde</div>
+                            <div style="font-size:0.62rem;">3pm – 6pm</div>
+                        </div>
+                        <div style="border:2px solid #d1d5db; border-radius:10px; padding:7px 5px; text-align:center; font-size:0.7rem; color:#9ca3af;">
+                            <div style="font-size:1.1rem;">🌙</div>
+                            <div style="font-weight:700;">Noche</div>
+                            <div style="font-size:0.62rem;">6pm – 9pm</div>
+                        </div>
+                    </div>
 
                     <label class="mock-label">Mensaje para nosotros (opcional)</label>
                     <div class="mock-input" style="height:40px; color:#9ca3af;">Ej: Llamen antes de llegar...</div>
@@ -659,9 +683,13 @@ $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
                             <strong>🏠 Tu dirección</strong><br>
                             <span style="color:#6b7280;">Solo si quieres que te lo llevemos. Si vas a buscarlo tú, no hace falta.</span>
                         </div>
-                        <div>
+                        <div style="margin-bottom:10px;">
                             <strong>📅 La fecha</strong><br>
                             <span style="color:#6b7280;">¿Para qué día quieres el pedido?</span>
+                        </div>
+                        <div style="background:#eff6ff; border-radius:10px; padding:10px; border-left:3px solid #3b82f6;">
+                            <strong>⏰ El horario</strong><br>
+                            <span style="color:#6b7280;">Elige la franja del día en que quieres recibir tu pedido: mañana, mediodía, tarde o noche. Si seleccionas <em>hoy</em>, los horarios que ya pasaron aparecen deshabilitados automáticamente.</span>
                         </div>
                     </div>
                 </div>
@@ -670,7 +698,7 @@ $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
 
         <div class="consejo">
             <strong>💡 Consejo:</strong>
-            Los campos con <span style="color:#dc2626; font-weight:700;">*</span> son obligatorios. Los demás puedes dejarlos en blanco si no aplican.
+            Los campos con <span style="color:#dc2626; font-weight:700;">*</span> son obligatorios. El horario es importante para que nuestros mensajeros organicen bien la ruta del día — ¡elige el que más te convenga!
         </div>
     </div>
 

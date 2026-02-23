@@ -81,6 +81,16 @@ let barcodeTimeout;
 let globalDiscountPct = 0;
 window.stockFilterActive = false;
 
+// ── Roles y seguridad ─────────────────────────────────────────────────────────
+let currentRole     = 'cajero';   // rol del usuario logueado
+let pinAttempts     = 0;          // intentos fallidos acumulados
+const PIN_MAX_ATTEMPTS = 3;       // máx antes de bloquear
+const PIN_LOCKOUT_MS   = 30000;   // 30 segundos de bloqueo
+let pinLockedUntil  = 0;          // timestamp de fin de bloqueo
+let pinLockInterval = null;       // interval del countdown
+let inactivityTimer = null;       // timer de auto-logout
+const INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos de inactividad
+
 // ==========================================
 // INICIALIZACION
 // ==========================================
@@ -93,20 +103,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }, 300);
     
-    if (typeof PRODUCTS_DATA !== 'undefined' && Array.isArray(PRODUCTS_DATA) && PRODUCTS_DATA.length > 0) { 
+    if (typeof PRODUCTS_DATA !== 'undefined' && Array.isArray(PRODUCTS_DATA) && PRODUCTS_DATA.length > 0) {
         console.log('Cargando ' + PRODUCTS_DATA.length + ' productos desde servidor...');
         window.productsDB = PRODUCTS_DATA;
         productsDB = window.productsDB;
-        saveToCache(productsDB); 
+        saveToCache(productsDB);
         renderProducts('all');
-    } else { 
+        renderFavoritesBar();
+    } else {
         console.log('PRODUCTS_DATA vacio, cargando desde cache...');
         loadFromCacheOrRefresh();
     }
     
     updatePinDisplay();
+    startPosClock();
+    document.addEventListener('keydown', handleHotkeys);
     document.addEventListener('keydown', handleBarcodeScanner);
     document.body.addEventListener('click', () => { if(audioCtx.state === 'suspended') audioCtx.resume(); }, {once:true});
+
+    // Eventos de actividad para reset del inactivity timer
+    ['click', 'keydown', 'touchstart'].forEach(ev => {
+        document.addEventListener(ev, resetInactivityTimer, { passive: true });
+    });
     checkCashStatusSilent();
     
     window.addEventListener('online', () => { 
@@ -383,6 +401,85 @@ async function refreshProducts() {
 }
 
 // ==========================================
+// RELOJ DIGITAL
+// ==========================================
+function startPosClock() {
+    let lastBeepMinute = -1;
+
+    function tick() {
+        const now = new Date();
+        const hours24 = now.getHours();
+        const h12 = hours24 % 12 || 12;
+        const m = String(now.getMinutes()).padStart(2, '0');
+        const ampm = hours24 < 12 ? 'AM' : 'PM';
+
+        const elH    = document.querySelector('#posClock .clock-h');
+        const elM    = document.querySelector('#posClock .clock-m');
+        const elAmpm = document.querySelector('#posClock .clock-ampm');
+        const clock  = document.getElementById('posClock');
+
+        if (elH)    elH.textContent = String(h12).padStart(2, '0');
+        if (elM)    elM.textContent = m;
+        if (elAmpm) elAmpm.textContent = ampm;
+
+        // Parpadeo del separador : sincronizado con los segundos
+        if (clock) clock.classList.toggle('blink-colon', now.getSeconds() % 2 === 1);
+
+        // Beeps en segundo 0 de cada minuto
+        const totalMin = hours24 * 60 + now.getMinutes();
+        if (now.getSeconds() === 0 && totalMin !== lastBeepMinute) {
+            lastBeepMinute = totalMin;
+            if (now.getMinutes() === 0) {
+                // Hora en punto: ding-dong (Do6 → Sol5)
+                Synth.playTone(1047, 'sine', 0.55, 0.18);
+                setTimeout(() => Synth.playTone(784, 'sine', 0.55, 0.24), 480);
+            } else if (now.getMinutes() === 30) {
+                // Media hora: un beep suave (La5)
+                Synth.playTone(880, 'sine', 0.45, 0.16);
+            }
+        }
+    }
+
+    tick();
+    setInterval(tick, 1000);
+}
+
+// ==========================================
+// HOTKEYS F1-F10 / Del / Enter
+// ==========================================
+function handleHotkeys(e) {
+    const pinOverlay = document.getElementById('pinOverlay');
+    const pinVisible = pinOverlay && pinOverlay.style.display !== 'none' && pinOverlay.style.display !== '';
+    if (pinVisible) return;
+
+    const tag = document.activeElement?.tagName;
+    const inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+    const modalOpen = !!document.querySelector('.modal.show');
+
+    const map = {
+        'F1':     () => checkCashRegister(),
+        'F2':     () => applyGlobalDiscount(),
+        'F3':     () => openSelfOrdersModal(),
+        'F4':     () => parkOrder(),
+        'F5':     () => { const s = document.getElementById('searchInput'); if (s) { s.focus(); s.select(); } },
+        'F6':     () => showHistorialModal(),
+        'F7':     () => openNewClientModal(),
+        'F8':     () => forceDownloadProducts(),
+        'F9':     () => applyDiscount(),
+        'F10':    () => askQty(),
+        'Delete': () => { if (!inInput) removeItem(); },
+        'Enter':  () => { if (!inInput && !modalOpen && barcodeBuffer.length === 0) openPaymentModal(); }
+    };
+
+    if (!map[e.key]) return;
+    if (e.key === 'Delete' && inInput) return;
+    if (e.key === 'Enter' && (inInput || modalOpen || barcodeBuffer.length > 0)) return;
+
+    e.preventDefault();
+    map[e.key]();
+}
+
+// ==========================================
 // ESCANER Y TECLADO
 // ==========================================
 function handleBarcodeScanner(e) { 
@@ -433,68 +530,125 @@ function updatePinDisplay() {
 // VERIFICACION DE PIN (ONLINE/OFFLINE)
 // ==========================================
 async function verifyPin() {
-    if(enteredPin.length < 4) return;
-    
+    // Bloqueo activo: ignorar intentos
+    if (Date.now() < pinLockedUntil) return;
+    if (enteredPin.length < 4) return;
+
     let loginSuccess = false;
-    let cajeroNombre = null;
-    
+    let cajeroRol    = 'cajero';
+
     if (navigator.onLine) {
         try {
-            const resp = await fetch('pos_cash.php?action=login', { 
-                method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
+            const resp = await fetch('pos_cash.php?action=login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({ pin: enteredPin }),
                 signal: AbortSignal.timeout(5000)
             });
             const data = await resp.json();
-            if(data.status === 'success') { 
+            if (data.status === 'success') {
                 loginSuccess = true;
-                cajeroNombre = data.cajero;
                 currentCashier = data.cajero;
-                
-                if (typeof CAJEROS_CONFIG !== 'undefined' && 
-                    typeof window.posCache !== 'undefined' && 
+                cajeroRol = data.rol ?? 'cajero';
+
+                if (typeof CAJEROS_CONFIG !== 'undefined' &&
+                    typeof window.posCache !== 'undefined' &&
                     window.posCache.db &&
                     typeof window.posCache.saveCajeros === 'function') {
                     window.posCache.saveCajeros(CAJEROS_CONFIG);
                 }
             }
-        } catch(e) { 
+        } catch(e) {
             console.log('Login online fallo, intentando offline:', e.message);
         }
     }
-    
+
     if (!loginSuccess) {
         if (typeof CAJEROS_CONFIG !== 'undefined' && Array.isArray(CAJEROS_CONFIG)) {
             const cajero = CAJEROS_CONFIG.find(c => c.pin === enteredPin);
             if (cajero) {
                 loginSuccess = true;
-                cajeroNombre = cajero.nombre;
                 currentCashier = cajero.nombre;
+                cajeroRol = cajero.rol ?? 'cajero';
             }
         }
-        
+
         if (!loginSuccess && typeof window.posCache !== 'undefined' && typeof window.posCache.verifyCajeroOffline === 'function') {
             try {
                 const cajero = await window.posCache.verifyCajeroOffline(enteredPin);
                 if (cajero) {
                     loginSuccess = true;
-                    cajeroNombre = cajero.nombre;
                     currentCashier = cajero.nombre;
+                    cajeroRol = cajero.rol ?? 'cajero';
                 }
             } catch(e) {}
         }
     }
-    
+
     if (loginSuccess) {
+        currentRole = cajeroRol;
+        pinAttempts = 0;
+        showPinAttemptDots(); // limpiar dots
         Synth.tada();
+        applyRoleRestrictions();
+        startInactivityTimer();
         unlockPos();
     } else {
-        Synth.error();
-        showToast('PIN incorrecto', 'error');
+        pinAttempts++;
+        if (pinAttempts >= PIN_MAX_ATTEMPTS) {
+            activatePinLockout();
+        } else {
+            showPinAttemptDots();
+            showToast(`PIN incorrecto (${pinAttempts}/${PIN_MAX_ATTEMPTS})`, 'error');
+        }
         enteredPin = "";
         updatePinDisplay();
     }
+}
+
+// ── PIN Lockout ───────────────────────────────────────────────────────────────
+function activatePinLockout() {
+    pinLockedUntil = Date.now() + PIN_LOCKOUT_MS;
+    pinAttempts = 0;
+    enteredPin = "";
+    updatePinDisplay();
+
+    // Deshabilitar todos los botones del teclado PIN
+    const grid = document.getElementById('pinGrid');
+    if (grid) grid.querySelectorAll('button').forEach(b => b.disabled = true);
+
+    const lockMsg = document.getElementById('pinLockMsg');
+    const dotsEl  = document.getElementById('pinAttemptsDots');
+    if (dotsEl) dotsEl.textContent = '';
+
+    function updateCountdown() {
+        const remaining = Math.ceil((pinLockedUntil - Date.now()) / 1000);
+        if (remaining <= 0) {
+            clearInterval(pinLockInterval);
+            pinLockInterval = null;
+            pinLockedUntil = 0;
+            if (lockMsg) { lockMsg.textContent = ''; lockMsg.classList.add('d-none'); }
+            if (grid) grid.querySelectorAll('button').forEach(b => b.disabled = false);
+        } else {
+            if (lockMsg) {
+                lockMsg.classList.remove('d-none');
+                lockMsg.textContent = `🔒 Bloqueado por ${remaining} segundo${remaining !== 1 ? 's' : ''}`;
+            }
+        }
+    }
+    updateCountdown();
+    pinLockInterval = setInterval(updateCountdown, 1000);
+}
+
+function showPinAttemptDots() {
+    const dotsEl = document.getElementById('pinAttemptsDots');
+    if (!dotsEl) return;
+    if (pinAttempts === 0) { dotsEl.textContent = ''; return; }
+    const dots = [];
+    for (let i = 0; i < PIN_MAX_ATTEMPTS; i++) {
+        dots.push(i < pinAttempts ? '🔴' : '⚪');
+    }
+    dotsEl.textContent = dots.join(' ');
 }
 
 function unlockPos() {
@@ -503,6 +657,61 @@ function unlockPos() {
     if (overlay) overlay.style.display = 'none';
     if (cashierName) cashierName.innerText = currentCashier;
     checkCashStatusSilent();
+
+    // Restaurar carrito guardado antes del auto-logout
+    const lockedCart = sessionStorage.getItem('pos_cart_locked');
+    if (lockedCart) {
+        try {
+            const saved = JSON.parse(lockedCart);
+            if (saved.cart && saved.cart.length > 0) {
+                cart = saved.cart;
+                globalDiscountPct = saved.globalDiscountPct ?? 0;
+                renderCart();
+                showToast('Carrito restaurado (' + cart.length + ' items)', 'warning');
+            }
+        } catch(e) {}
+        sessionStorage.removeItem('pos_cart_locked');
+    }
+}
+
+// ── Restricciones de rol ─────────────────────────────────────────────────────
+function applyRoleRestrictions() {
+    const isCajero = currentRole === 'cajero';
+    const btnDiscount = document.getElementById('btnGlobalDiscount');
+    const btnCaja     = document.getElementById('btnCaja');
+    if (btnDiscount) btnDiscount.classList.toggle('d-none', isCajero);
+    if (btnCaja)     btnCaja.classList.toggle('d-none', isCajero);
+}
+
+// ── Inactividad / Auto-logout ─────────────────────────────────────────────────
+function startInactivityTimer() {
+    clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(lockPos, INACTIVITY_MS);
+}
+
+function resetInactivityTimer() {
+    const overlay = document.getElementById('pinOverlay');
+    // Solo resetear si el overlay NO está visible (usuario activo en el POS)
+    if (overlay && overlay.style.display !== 'none' && overlay.style.display !== '') return;
+    startInactivityTimer();
+}
+
+function lockPos() {
+    clearTimeout(inactivityTimer);
+    // Preservar carrito en sessionStorage antes de bloquear
+    if (cart && cart.length > 0) {
+        sessionStorage.setItem('pos_cart_locked', JSON.stringify({ cart, globalDiscountPct }));
+    }
+    currentCashier = 'Cajero';
+    currentRole    = 'cajero';
+    enteredPin     = '';
+    updatePinDisplay();
+    showPinAttemptDots();
+    const overlay = document.getElementById('pinOverlay');
+    if (overlay) overlay.style.display = 'flex';
+    // Re-aplicar restricciones (ocultar botones de supervisor/admin)
+    applyRoleRestrictions();
+    showToast('Sesión cerrada por inactividad', 'warning');
 }
 
 // ==========================================
@@ -648,7 +857,8 @@ function renderProducts(category, searchTerm) {
         
         let imgHTML = '<div class="product-img-container" style="background:' + (p.color || '#ccc') + '"><span class="placeholder-text">' + (p.nombre || '??').substring(0,2).toUpperCase() + '</span></div>';
         if(p.has_image) {
-            imgHTML = '<div class="product-img-container"><img src="image.php?code=' + p.codigo + '" class="product-img" onerror="this.style.display=\'none\'"></div>';
+            const imgV = p.img_version ? '&v=' + p.img_version : '';
+            imgHTML = '<div class="product-img-container"><img src="image.php?code=' + p.codigo + imgV + '" class="product-img" onerror="this.style.display=\'none\'"></div>';
         }
 
         card.innerHTML = 
@@ -667,18 +877,97 @@ function renderProducts(category, searchTerm) {
             card.onclick = () => { Synth.error(); showToast('Sin Stock', 'error'); }; // Feedback visual click en agotado
             card.style.cursor = 'not-allowed';
         }
-        
+
+        // Botón estrella ★ para favoritos
+        const starBtn = document.createElement('button');
+        starBtn.className = 'star-btn ' + (p.favorito == 1 ? 'active' : 'inactive');
+        starBtn.id = 'star-' + p.codigo;
+        starBtn.textContent = p.favorito == 1 ? '★' : '☆';
+        starBtn.title = p.favorito == 1 ? 'Quitar de favoritos' : 'Agregar a favoritos';
+        starBtn.onclick = (e) => toggleFavorite(p.codigo, e);
+        card.appendChild(starBtn);
+
         grid.appendChild(card);
     });
     // Sincronizar badges inmediatamente
     updateStockBadges();
+    renderFavoritesBar();
 }
 
-function filterCategory(cat, btn) { 
-    Synth.category(); 
-    document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active')); 
-    btn.classList.add('active'); 
-    renderProducts(cat); 
+// ==========================================
+// BARRA DE FAVORITOS
+// ==========================================
+function renderFavoritesBar() {
+    const bar = document.getElementById('favoritesBar');
+    const row = document.getElementById('favCardsRow');
+    const label = document.getElementById('favBarLabel');
+    if (!bar || !row || !label) return;
+
+    const db = window.productsDB || [];
+    let items = db.filter(p => p.favorito == 1);
+    let isMostSold = false;
+
+    if (items.length === 0) {
+        // Fallback: mostrar más vendidos
+        const codes = (typeof MOST_SOLD_CODES !== 'undefined') ? MOST_SOLD_CODES : [];
+        if (codes.length === 0) { bar.style.display = 'none'; return; }
+        items = codes.map(c => db.find(p => p.codigo == c)).filter(Boolean);
+        if (items.length === 0) { bar.style.display = 'none'; return; }
+        isMostSold = true;
+    }
+
+    label.innerHTML = isMostSold
+        ? '<i class="fas fa-fire-alt"></i> MÁS VENDIDOS'
+        : '<i class="fas fa-star"></i> FAVORITOS';
+    label.className = isMostSold ? 'text-danger fw-bold' : 'text-warning fw-bold';
+    label.style.cssText = 'font-size:0.72rem; white-space:nowrap; flex-shrink:0;';
+
+    row.innerHTML = '';
+    items.forEach(p => {
+        const stock = parseFloat(p.stock) || 0;
+        const hasStock = stock > 0 || p.es_servicio == 1;
+        const fc = document.createElement('div');
+        fc.className = 'fav-card' + (hasStock ? '' : ' out-of-stock');
+        fc.innerHTML = '<div class="fav-name">' + (p.nombre || '') + '</div>' +
+                       '<div class="fav-price">$' + parseFloat(p.precio || 0).toFixed(2) + '</div>';
+        fc.onclick = () => { if (hasStock) addToCart(p); else showToast('Sin Stock', 'error'); };
+        row.appendChild(fc);
+    });
+
+    bar.style.display = '';
+}
+
+function toggleFavorite(codigo, event) {
+    event.stopPropagation();
+    fetch('pos.php?toggle_fav=1', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codigo: codigo })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.status === 'success') {
+            // Actualizar en memoria
+            const p = (window.productsDB || []).find(x => x.codigo == codigo);
+            if (p) p.favorito = res.favorito;
+            // Actualizar botón visual
+            const btn = document.getElementById('star-' + codigo);
+            if (btn) {
+                btn.className = 'star-btn ' + (res.favorito == 1 ? 'active' : 'inactive');
+                btn.textContent = res.favorito == 1 ? '★' : '☆';
+                btn.title = res.favorito == 1 ? 'Quitar de favoritos' : 'Agregar a favoritos';
+            }
+            renderFavoritesBar();
+        }
+    })
+    .catch(e => console.error('Error toggling favorito:', e));
+}
+
+function filterCategory(cat, btn) {
+    Synth.category();
+    document.querySelectorAll('.category-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderProducts(cat);
 }
 
 function filterProducts() { 
@@ -982,6 +1271,17 @@ async function confirmPayment() {
     let cN = (cliNameEl ? cliNameEl.value : '').trim() || 'Consumidor Final';
     const itms = cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, note: i.note }));
 
+    // Descuentos para audit trail inmutable
+    const descuentosItems = cart
+        .filter(i => i.discountPct > 0)
+        .map(i => ({
+            codigo:          i.id,
+            nombre:          i.name,
+            precio_original: i.price,
+            descuento_pct:   i.discountPct,
+            precio_final:    +(i.price * (1 - i.discountPct / 100)).toFixed(2),
+        }));
+
     const payload = {
         uuid: crypto.randomUUID(),
         items: itms,
@@ -997,7 +1297,9 @@ async function confirmPayment() {
         id_caja: cashId,
         timestamp: Date.now(),
         canal_origen: 'POS',
-        estado_pago: 'confirmado'
+        estado_pago: 'confirmado',
+        descuentos_items:  descuentosItems,
+        descuento_global:  globalDiscountPct
     };
 
     // Guardar información para la pantalla del cliente (Vuelto)
@@ -1280,7 +1582,57 @@ window.refundItemFromHistorial = async function(detailId, prodName) {
     }
 };
 
-// Se eliminan las funciones redundantes...
+// ─── ANULACIÓN DE VENTA (Void) ─────────────────────────────────────────────────
+// Diferente a la devolución: PIN-based, solo sesión activa, requiere motivo.
+
+window.voidTicket = function(ticketId) {
+    const motEl = document.getElementById('voidMotivo');
+    const pinEl = document.getElementById('voidPin');
+    const idEl  = document.getElementById('voidTicketId');
+    if (!motEl || !pinEl || !idEl) {
+        return alert('Modal de anulación no disponible en esta página');
+    }
+    idEl.textContent = ticketId;
+    motEl.value = '';
+    pinEl.value = '';
+    window._voidTicketId = ticketId;
+    const voidModalEl = document.getElementById('voidModal');
+    if (voidModalEl) new bootstrap.Modal(voidModalEl).show();
+};
+
+window.confirmVoid = async function() {
+    const motivo = (document.getElementById('voidMotivo')?.value || '').trim();
+    const pin    = (document.getElementById('voidPin')?.value    || '').trim();
+
+    if (motivo.length < 5) return alert('El motivo debe tener al menos 5 caracteres');
+    if (!pin)              return alert('Ingrese su PIN de cajero para autorizar');
+
+    const btn = document.querySelector('#voidModal .btn-void-confirm');
+    const orig = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Anulando...'; }
+
+    try {
+        const r = await fetch('pos_void.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_venta: window._voidTicketId, motivo, pin }),
+        });
+        const d = await r.json();
+        if (d.status === 'success') {
+            const voidModalInst = bootstrap.Modal.getInstance(document.getElementById('voidModal'));
+            if (voidModalInst) voidModalInst.hide();
+            showToast('Venta anulada — ' + d.msg, 'success');
+            if (typeof Synth !== 'undefined') Synth.refund();
+            showHistorialModal();
+        } else {
+            alert('Error: ' + d.msg);
+            if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+        }
+    } catch (e) {
+        alert('Error de red al intentar anular');
+        if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+    }
+};
 
 function escapeHtml(text) {
     if (!text) return '';
@@ -1300,6 +1652,7 @@ async function forceDownloadProducts() {
         if (currentCashier) {
             sessionStorage.setItem('pos_session_reload', JSON.stringify({
                 cajero: currentCashier,
+                rol: currentRole,
                 cashOpen: cashOpen,
                 cashId: cashId,
                 timestamp: Date.now()
@@ -1338,6 +1691,7 @@ async function forceDownloadProducts() {
             const session = JSON.parse(saved);
             if (Date.now() - session.timestamp < 30000) {
                 currentCashier = session.cajero;
+                currentRole    = session.rol ?? 'cajero';
                 cashOpen = session.cashOpen;
                 cashId = session.cashId;
                 document.addEventListener('DOMContentLoaded', () => {
@@ -1345,6 +1699,8 @@ async function forceDownloadProducts() {
                     const pinOverlay = document.getElementById('pinOverlay');
                     if (cashierName) cashierName.innerText = currentCashier;
                     if (pinOverlay) pinOverlay.style.display = 'none';
+                    applyRoleRestrictions();
+                    startInactivityTimer();
                     checkCashStatusSilent();
                     showToast('Productos actualizados', 'success');
                 });
@@ -1354,8 +1710,50 @@ async function forceDownloadProducts() {
     }
 })();
 
-console.log('POS.js v3.2 cargado');
+// ==========================================
+// SCROLL HORIZONTAL CON DRAG GENÉRICO
+// ==========================================
+function initHorizontalScroll(selector) {
+    const element = document.querySelector(selector);
+    if (!element) return;
 
+    let isDragging = false;
+    let startPos = 0;
+    let scrollLeft = 0;
 
+    element.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        element.classList.add('dragging');
+        startPos = e.pageX - element.offsetLeft;
+        scrollLeft = element.scrollLeft;
+    });
 
+    element.addEventListener('mouseleave', () => {
+        isDragging = false;
+        element.classList.remove('dragging');
+    });
 
+    element.addEventListener('mouseup', () => {
+        isDragging = false;
+        element.classList.remove('dragging');
+    });
+
+    element.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        e.preventDefault();
+        const x = e.pageX - element.offsetLeft;
+        const walk = (x - startPos) * 1.5; // Ajusta la velocidad del scroll
+        element.scrollLeft = scrollLeft - walk;
+    });
+
+    // Evitar que el drag de la barra interfiera con el arrastre de texto
+    element.ondragstart = () => false;
+}
+
+// Inicializar el scroll por drag en las categorías y favoritos al cargar el DOM
+document.addEventListener('DOMContentLoaded', () => {
+    initHorizontalScroll('.category-bar');
+    initHorizontalScroll('#favCardsRow');
+});
+
+console.log('POS.js v3.4 cargado');
