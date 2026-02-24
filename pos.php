@@ -269,6 +269,8 @@ try {
         .c-blue { background-color: #0d6efd; color: white; border-color: #0d6efd; }
         .c-purple { background-color: #6f42c1; color: white; border-color: #6f42c1; }
         .category-bar { display: flex; overflow-x: auto; overflow-y: hidden; gap: 8px; margin-bottom: 8px; padding-bottom: 5px; scrollbar-width: none; height: 52px; align-items: center; flex-shrink: 0; }
+        body.pos-bars-hidden .category-bar,
+        body.pos-bars-hidden #favoritesBar { display: none !important; }
         .category-btn { padding: 8px 16px; border: none; border-radius: 20px; font-weight: 600; background: white; color: #555; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .category-btn.active { background: #0d6efd; color: white; }
         .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 10px; overflow-y: auto; padding-bottom: 80px; }
@@ -534,6 +536,10 @@ try {
                     <i class="fas fa-image"></i>
                 </button>
 
+                <button id="btnToggleBars" class="btn btn-light border-0" onclick="toggleBars()" title="Mostrar/Ocultar barras de categorías y favoritos">
+                    <i class="fas fa-bars"></i>
+                </button>
+
                 <span class="input-group-text bg-white border-0"><i class="fas fa-search"></i></span>
                 <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()">
                 <button class="btn btn-light border-0" onclick="document.getElementById('searchInput').value='';filterProducts()">X</button>
@@ -558,7 +564,7 @@ try {
                 <div class="col-6"><kbd>Enter</kbd> Cobrar</div>
             </div>
         </div>
-        <div class="category-bar">
+        <div class="category-bar" id="categoryBar">
             <button class="category-btn active" onclick="filterCategory('all', this)">TODOS</button>
             <?php foreach($catsData as $catData): ?>
                 <?php
