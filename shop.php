@@ -236,7 +236,7 @@ if (isset($_GET['ajax_search'])) {
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
-            $b = __DIR__ . '/../product_images/' . $r['codigo'];
+            $b = '/var/www/assets/product_images/' . $r['codigo'];
             $r['hasImg'] = file_exists($b.'.avif') || file_exists($b.'.webp') || file_exists($b.'.jpg');
             $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
             $r['bg'] = "#" . substr(md5($r['nombre']), 0, 6);
