@@ -525,6 +525,10 @@ function auditResumen(string $accion, array $d): string {
         .bg-ok { background-color: #198754; }
         .bg-fail { background-color: #dc3545; }
 
+        /* Punto parpadeante live */
+        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+        .blink-dot { animation: blink 1.4s ease-in-out infinite; }
+
         /* Estilos para Tabs con deslizamiento (Slide Effect) */
         .tab-content { 
             position: relative; 
@@ -611,6 +615,11 @@ function auditResumen(string $accion, array $d): string {
                 <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tab-negocios" type="button"><i class="fas fa-chart-line me-1"></i> Negocios</button>
             </li>
             <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-realtime" type="button" id="btnTabRealtime">
+                    <i class="fas fa-satellite-dish me-1 text-danger blink-dot"></i> Tiempo Real
+                </button>
+            </li>
+            <li class="nav-item">
                 <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-reservas" type="button"><i class="fas fa-calendar-check me-1"></i> Reservas</button>
             </li>
             <li class="nav-item">
@@ -650,6 +659,190 @@ function auditResumen(string $accion, array $d): string {
     </div>
 
     <div class="tab-content">
+        <!-- TAB: TIEMPO REAL -->
+        <div class="tab-pane fade" id="tab-realtime">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="text-uppercase fw-bold mb-0 ps-1" style="color:#ef4444">
+                    <i class="fas fa-satellite-dish me-2 blink-dot"></i> Ventas en Tiempo Real — Hoy
+                </h6>
+                <small id="rt-timestamp" class="text-muted fst-italic"></small>
+            </div>
+
+            <!-- KPIs principales -->
+            <div class="row g-3 mb-3">
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#4f46e5;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Ventas Hoy</div>
+                            <div class="fs-4 fw-bold" id="rt-venta">—</div>
+                            <div id="rt-vs-ayer" class="small mt-1 opacity-90">—</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#10b981;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Ganancia Neta</div>
+                            <div class="fs-4 fw-bold" id="rt-ganancia">—</div>
+                            <div id="rt-vs-sem" class="small mt-1 opacity-90">—</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#f59e0b;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Operaciones</div>
+                            <div class="fs-4 fw-bold" id="rt-ops">—</div>
+                            <div class="small opacity-75 mt-1">tickets hoy</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#8b5cf6;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Ticket Promedio</div>
+                            <div class="fs-4 fw-bold" id="rt-ticket">—</div>
+                            <div class="small opacity-75 mt-1">por operación</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#0ea5e9;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Mensajerías</div>
+                            <div class="fs-4 fw-bold" id="rt-mensajerias">—</div>
+                            <div class="small mt-1" id="rt-mensajerias-total">—</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card border-0 shadow-sm h-100" style="background:#f43f5e;color:white">
+                        <div class="card-body py-3">
+                            <div class="small opacity-75 text-uppercase fw-bold">Reservas</div>
+                            <div class="fs-4 fw-bold" id="rt-reservas">—</div>
+                            <div class="small mt-1" id="rt-reservas-total">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canal de origen + Autoservicio + Última venta -->
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body py-2">
+                            <div class="small text-uppercase text-muted fw-bold mb-2">Canal de Origen</div>
+                            <div class="d-flex gap-3 flex-wrap">
+                                <div class="text-center">
+                                    <div class="fs-5 fw-bold text-primary" id="rt-canal-pos">—</div>
+                                    <div class="small text-muted">POS</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="fs-5 fw-bold text-success" id="rt-canal-web">—</div>
+                                    <div class="small text-muted">Web</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="fs-5 fw-bold" style="color:#25d366" id="rt-canal-wa">—</div>
+                                    <div class="small text-muted">WhatsApp</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body py-2">
+                            <div class="small text-uppercase text-muted fw-bold mb-1">Local / Mostrador</div>
+                            <div class="fs-3 fw-bold text-dark" id="rt-autoservicio">—</div>
+                            <div class="small text-muted" id="rt-autoservicio-total">—</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-body py-2">
+                            <div class="small text-uppercase text-muted fw-bold mb-1"><i class="fas fa-receipt me-1"></i> Última Venta</div>
+                            <div id="rt-ultima-venta" class="small text-muted">—</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Gráfico por hora + Cocina/Caja -->
+            <div class="row g-3 mb-3">
+                <div class="col-lg-8">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white fw-bold py-2 small">
+                            <i class="fas fa-chart-bar text-primary me-2"></i> Ventas por Hora — Hoy vs Ayer
+                        </div>
+                        <div class="card-body">
+                            <div style="height:220px"><canvas id="rt-chart-horas"></canvas></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-white fw-bold py-2 small">
+                            <i class="fas fa-fire-alt text-danger me-2"></i> Cocina
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-2 text-center mb-3">
+                                <div class="col-4">
+                                    <div class="rounded p-2" style="background:#fff3cd">
+                                        <div class="fw-bold fs-4 text-warning" id="rt-cocina-p">—</div>
+                                        <div class="small text-muted">Pendientes</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="rounded p-2" style="background:#cff4fc">
+                                        <div class="fw-bold fs-4 text-info" id="rt-cocina-e">—</div>
+                                        <div class="small text-muted">En prep.</div>
+                                    </div>
+                                </div>
+                                <div class="col-4">
+                                    <div class="rounded p-2" style="background:#d1e7dd">
+                                        <div class="fw-bold fs-4 text-success" id="rt-cocina-t">—</div>
+                                        <div class="small text-muted">Listos</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="small text-uppercase text-muted fw-bold mb-2">
+                                <i class="fas fa-cash-register me-1"></i> Caja(s) Activa(s)
+                            </div>
+                            <div id="rt-cajas">
+                                <div class="text-muted text-center py-2 small">Cargando...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Top 10 + Métodos de pago -->
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white fw-bold py-2 small">
+                            <i class="fas fa-crown text-warning me-2"></i> Top 10 Productos del Día
+                        </div>
+                        <ul class="list-group list-group-flush small" id="rt-top10">
+                            <li class="list-group-item text-center text-muted">Cargando...</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-white fw-bold py-2 small">
+                            <i class="fas fa-wallet text-success me-2"></i> Recaudación por Método de Pago
+                        </div>
+                        <div class="card-body pb-1">
+                            <div style="height:160px"><canvas id="rt-chart-pagos"></canvas></div>
+                        </div>
+                        <ul class="list-group list-group-flush small" id="rt-pagos-tabla"></ul>
+                    </div>
+                </div>
+            </div>
+        </div><!-- /tab-realtime -->
+
         <!-- TAB 1: NEGOCIOS -->
         <div class="tab-pane fade show active" id="tab-negocios">
             <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1"><i class="fas fa-boxes me-2"></i> Estado del Inventario (<?php echo ucfirst($scope); ?>)</h6>
@@ -1773,6 +1966,155 @@ function auditFilter() {
     const countEl = document.getElementById('auditCount');
     if (countEl) countEl.textContent = visibles + ' eventos';
 }
+
+    // ── TAB TIEMPO REAL ────────────────────────────────────────────────────────
+    let rtChartHoras = null;
+    let rtChartPagos = null;
+    let rtInterval   = null;
+
+    document.getElementById('btnTabRealtime').addEventListener('shown.bs.tab', function() {
+        cargarRT();
+        rtInterval = setInterval(cargarRT, 30000);
+    });
+    document.getElementById('btnTabRealtime').addEventListener('hidden.bs.tab', function() {
+        clearInterval(rtInterval);
+        rtInterval = null;
+    });
+
+    async function cargarRT() {
+        try {
+            const r = await fetch('dashboard_rt_api.php');
+            if (!r.ok) return;
+            const d = await r.json();
+            renderRT(d);
+        } catch(e) { console.warn('RT fetch error:', e); }
+    }
+
+    function renderRT(d) {
+        const fmt  = v => '$' + Number(v).toLocaleString('es', {minimumFractionDigits:0, maximumFractionDigits:0});
+        const pct  = (a, b) => b > 0 ? ((a - b) / b * 100).toFixed(1) : (a > 0 ? '+∞' : '0');
+        const cPct = v => parseFloat(v) >= 0 ? 'text-success' : 'text-danger';
+        const icoP = v => parseFloat(v) >= 0 ? 'fa-arrow-up' : 'fa-arrow-down';
+
+        // KPIs
+        document.getElementById('rt-venta').textContent    = fmt(d.hoy.total);
+        document.getElementById('rt-ganancia').textContent = fmt(d.ganancia_hoy);
+        document.getElementById('rt-ops').textContent      = d.hoy.ops;
+        document.getElementById('rt-ticket').textContent   = d.hoy.ops > 0 ? fmt(d.hoy.total / d.hoy.ops) : '$0';
+        document.getElementById('rt-mensajerias').textContent       = d.mensajerias;
+        document.getElementById('rt-mensajerias-total').textContent = fmt(d.total_mensajeria);
+        document.getElementById('rt-reservas').textContent          = d.reservas;
+        document.getElementById('rt-reservas-total').textContent    = fmt(d.total_reservas);
+        document.getElementById('rt-autoservicio').textContent      = d.autoservicio;
+        document.getElementById('rt-autoservicio-total').textContent= fmt(d.total_autoservicio);
+
+        // Comparativas
+        const pAyer = pct(d.hoy.total, d.ayer.total);
+        const pSem  = pct(d.hoy.total, d.semana_pasada.total);
+        const ayerEl = document.getElementById('rt-vs-ayer');
+        const semEl  = document.getElementById('rt-vs-sem');
+        ayerEl.innerHTML = `<i class="fas ${icoP(pAyer)} me-1"></i>${pAyer}% vs ayer`;
+        ayerEl.className = `small mt-1 fw-bold ${cPct(pAyer)}`;
+        semEl.innerHTML  = `<i class="fas ${icoP(pSem)} me-1"></i>${pSem}% vs sem. ant.`;
+        semEl.className  = `small mt-1 fw-bold ${cPct(pSem)}`;
+
+        // Canales
+        const cm = {};
+        d.canales_hoy.forEach(c => cm[c.canal] = c);
+        document.getElementById('rt-canal-pos').textContent = (cm['POS']?.cnt       || 0) + ' ops';
+        document.getElementById('rt-canal-web').textContent = (cm['Web']?.cnt       || 0) + ' ops';
+        document.getElementById('rt-canal-wa').textContent  = (cm['WhatsApp']?.cnt  || 0) + ' ops';
+
+        // Cocina
+        document.getElementById('rt-cocina-p').textContent = d.cocina_pendiente;
+        document.getElementById('rt-cocina-e').textContent = d.cocina_elaboracion;
+        document.getElementById('rt-cocina-t').textContent = d.cocina_terminado;
+
+        // Cajas activas
+        const cajasEl = document.getElementById('rt-cajas');
+        cajasEl.innerHTML = d.cajas_abiertas.length
+            ? d.cajas_abiertas.map(c => `
+                <div class="d-flex justify-content-between align-items-center py-1 border-bottom small">
+                    <div><i class="fas fa-cash-register text-success me-2"></i><strong>${c.nombre_cajero}</strong></div>
+                    <div class="text-muted">${fmt(c.monto_inicial)} · desde ${String(c.fecha_apertura).slice(11,16)}</div>
+                </div>`).join('')
+            : '<div class="text-muted text-center py-2 small">Sin caja abierta</div>';
+
+        // Última venta
+        if (d.ultima_venta) {
+            document.getElementById('rt-ultima-venta').innerHTML =
+                `<span class="badge bg-light text-dark border me-1">${String(d.ultima_venta.fecha).slice(11,16)}</span>`
+                + `<strong>${fmt(d.ultima_venta.total)}</strong>`
+                + ` <span class="text-muted mx-1">·</span> ${d.ultima_venta.metodo_pago || 'Efectivo'}`
+                + ` <span class="text-muted mx-1">·</span> ${d.ultima_venta.tipo_servicio || ''}`
+                + ` <span class="text-muted mx-1">·</span> ${d.ultima_venta.cliente_nombre || ''}`;
+        }
+
+        // Top 10
+        document.getElementById('rt-top10').innerHTML = d.top10.length
+            ? d.top10.map((p, i) => `
+                <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                    <div><span class="badge bg-light text-dark border me-2">#${i+1}</span>${p.nombre}</div>
+                    <div>
+                        <span class="badge bg-primary rounded-pill me-1">${p.vendidos} un</span>
+                        <small class="text-muted">${fmt(p.total_venta)}</small>
+                    </div>
+                </li>`).join('')
+            : '<li class="list-group-item text-center text-muted">Sin ventas aún</li>';
+
+        // Chart ventas por hora
+        const hLabels = Array.from({length:24}, (_,i) => i+'h');
+        if (!rtChartHoras) {
+            rtChartHoras = new Chart(document.getElementById('rt-chart-horas').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: hLabels,
+                    datasets: [
+                        { label: 'Hoy', data: d.ventas_por_hora, backgroundColor: 'rgba(79,70,229,0.75)', borderRadius: 4, order: 2 },
+                        { label: 'Ayer', data: d.ayer_por_hora, type: 'line', borderColor: '#f59e0b', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 2, tension: 0.3, order: 1 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    scales: { y: { beginAtZero: true, ticks: { callback: v => '$'+Number(v).toLocaleString(), font: { size: 10 } } }, x: { ticks: { font: { size: 10 } } } }
+                }
+            });
+        } else {
+            rtChartHoras.data.datasets[0].data = d.ventas_por_hora;
+            rtChartHoras.data.datasets[1].data = d.ayer_por_hora;
+            rtChartHoras.update('none');
+        }
+
+        // Chart pagos donut
+        const pLabels = d.pagos_hoy.map(p => p.metodo);
+        const pValues = d.pagos_hoy.map(p => parseFloat(p.total));
+        const pColors = ['#4f46e5','#10b981','#f59e0b','#06b6d4','#ef4444','#8b5cf6','#f43f5e'];
+        if (!rtChartPagos) {
+            rtChartPagos = new Chart(document.getElementById('rt-chart-pagos').getContext('2d'), {
+                type: 'doughnut',
+                data: { labels: pLabels, datasets: [{ data: pValues, backgroundColor: pColors, borderWidth: 0 }] },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } },
+                    cutout: '68%'
+                }
+            });
+        } else {
+            rtChartPagos.data.labels = pLabels;
+            rtChartPagos.data.datasets[0].data = pValues;
+            rtChartPagos.update('none');
+        }
+
+        // Tabla métodos de pago
+        document.getElementById('rt-pagos-tabla').innerHTML = d.pagos_hoy.map(p => `
+            <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                <span>${p.metodo}</span>
+                <div><span class="badge bg-secondary me-2">${p.cnt} ops</span><strong>${fmt(p.total)}</strong></div>
+            </li>`).join('') || '<li class="list-group-item text-center text-muted">Sin pagos aún</li>';
+
+        document.getElementById('rt-timestamp').textContent = 'Actualizado ' + d.ts;
+    }
 </script>
 
 <?php include_once 'menu_master.php'; ?>
