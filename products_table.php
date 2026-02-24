@@ -147,10 +147,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // ── Master 800 px ─────────────────────────────────────────────────
             $master = imagecreatetruecolor(800, 800);
+            imagefill($master, 0, 0, imagecolorallocate($master, 255, 255, 255));
             imagecopyresampled($master, $src, 0, 0, $x, $y, 800, 800, $size, $size);
 
             // ── Thumb 200 px ──────────────────────────────────────────────────
             $thumb = imagecreatetruecolor(200, 200);
+            imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255));
             imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
             imagedestroy($src);
 
@@ -532,7 +534,7 @@ if ($isAjax) {
     </nav>
 </div>
 
-<input type="file" id="fileInput"       accept="image/jpeg, image/webp" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="fileInput"       accept="image/jpeg, image/webp, image/png" style="display:none" onchange="uploadPhoto()">
 <input type="file" id="editorFileInput" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
 
 <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">

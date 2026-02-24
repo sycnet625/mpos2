@@ -122,10 +122,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 $SUC_ID
             ]);
 
-            // Guardar Imagen si viene
+            // Guardar Imagen si viene — convierte a JPG/WebP/AVIF (acepta PNG, JPG, WebP)
             if (isset($_FILES['foto']) && $_FILES['foto']['error'] === UPLOAD_ERR_OK) {
-                $path = __DIR__ . '/../product_images/' . $codigo . '.jpg';
-                move_uploaded_file($_FILES['foto']['tmp_name'], $path);
+                $imgDir  = '/var/www/assets/product_images/';
+                $imgData = file_get_contents($_FILES['foto']['tmp_name']);
+                $src     = @imagecreatefromstring($imgData);
+                if ($src) {
+                    $w    = imagesx($src); $h = imagesy($src);
+                    $size = min($w, $h);
+                    $ox   = (int)(($w - $size) / 2); $oy = (int)(($h - $size) / 2);
+                    $out  = imagecreatetruecolor(800, 800);
+                    imagefill($out, 0, 0, imagecolorallocate($out, 255, 255, 255));
+                    imagecopyresampled($out, $src, 0, 0, $ox, $oy, 800, 800, $size, $size);
+                    imagedestroy($src);
+                    if (!is_dir($imgDir)) @mkdir($imgDir, 0777, true);
+                    $base = $imgDir . $codigo;
+                    foreach (['.avif','.webp','.jpg'] as $_e) { if (file_exists($base.$_e)) @unlink($base.$_e); }
+                    imagejpeg($out, $base . '.jpg', 85);
+                    if (function_exists('imagewebp'))  imagewebp($out,  $base . '.webp', 82);
+                    if (function_exists('imageavif'))  imageavif($out,  $base . '.avif', 60, 6);
+                    imagedestroy($out);
+                }
             }
 
             echo json_encode(['status' => 'success', 'msg' => 'Producto creado', 'data' => [
