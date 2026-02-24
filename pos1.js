@@ -1802,8 +1802,8 @@ window.toggleInventarioMode = function() {
     const posPanel = document.getElementById('posPanel');
     const invPanel = document.getElementById('inventarioPanel');
     const btnInv   = document.getElementById('btnInventario');
-    if (posPanel) posPanel.style.display = invModeActive ? 'none' : '';
-    if (invPanel) invPanel.style.display = invModeActive ? ''     : 'none';
+    if (posPanel) posPanel.style.display = invModeActive ? 'none'  : '';
+    if (invPanel) invPanel.style.display = invModeActive ? 'block' : 'none';
     if (btnInv)   btnInv.classList.toggle('inv-active', invModeActive);
 };
 
