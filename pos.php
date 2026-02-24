@@ -172,17 +172,18 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $costo = floatval($prod['costo']);
     $fecha = date('Y-m-d H:i:s');
+    $ke    = new KardexEngine($pdo);   // instancia para que __call inyecte $pdo correctamente
 
     try {
         if ($accion === 'entrada') {
             $nuevoCosto = floatval($input['costo_nuevo'] ?? $costo) ?: $costo;
-            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'ENTRADA', abs($qty), "ENTRADA POS: $motivo", $nuevoCosto, $usuario, $fecha);
+            $ke->registrarMovimiento($sku, $ALM, $SUC, 'ENTRADA', abs($qty), "ENTRADA POS: $motivo", $nuevoCosto, $usuario, $fecha);
             $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
             if ($nuevoCosto != $costo) $pdo->prepare("UPDATE productos SET costo=? WHERE codigo=?")->execute([$nuevoCosto, $sku]);
             echo json_encode(['status'=>'success','msg'=>"Entrada registrada: +".abs($qty)." de {$prod['nombre']}"]);
 
         } elseif ($accion === 'ajuste') {
-            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $qty, "AJUSTE POS: $motivo", $costo, $usuario, $fecha);
+            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $qty, "AJUSTE POS: $motivo", $costo, $usuario, $fecha);
             $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
             echo json_encode(['status'=>'success','msg'=>"Ajuste registrado: ".($qty>0?"+":"").$qty." de {$prod['nombre']}"]);
 
@@ -191,7 +192,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $s->execute([$sku, $ALM]);
             $stockActual = floatval($s->fetchColumn());
             $delta = $qty - $stockActual;
-            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $delta, "CONTEO FISICO POS: $stockActual → $qty", $costo, $usuario, $fecha);
+            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $delta, "CONTEO FISICO POS: $stockActual → $qty", $costo, $usuario, $fecha);
             $pdo->prepare("UPDATE stock_almacen SET cantidad=? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
             $signo = $delta >= 0 ? "+$delta" : "$delta";
             echo json_encode(['status'=>'success','msg'=>"Conteo aplicado: $signo (era $stockActual, ahora $qty)"]);
@@ -203,7 +204,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, id_sucursal, fecha_registro) VALUES (?,?,?,?,?)")->execute([$usuario, $motivo, $totalCosto, $SUC, $fecha]);
             $idMerma = $pdo->lastInsertId();
             $pdo->prepare("INSERT INTO mermas_detalle (id_merma, id_producto, cantidad, costo_al_momento, motivo_especifico) VALUES (?,?,?,?,?)")->execute([$idMerma, $sku, abs($qty), $costo, $motivo]);
-            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'MERMA', abs($qty), "MERMA #$idMerma POS", $costo, $usuario, $fecha);
+            $ke->registrarMovimiento($sku, $ALM, $SUC, 'MERMA', abs($qty), "MERMA #$idMerma POS", $costo, $usuario, $fecha);
             $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
             echo json_encode(['status'=>'success','msg'=>"Merma #$idMerma registrada: -".abs($qty)." de {$prod['nombre']}"]);
 
@@ -211,7 +212,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $destino = trim($input['destino'] ?? '');
             if (!$destino) { echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']); exit; }
             $ref = "TRANSFER→{$destino} POS: $motivo";
-            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', -abs($qty), $ref, $costo, $usuario, $fecha);
+            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', -abs($qty), $ref, $costo, $usuario, $fecha);
             $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
             // Registrar en sync_journal para que la sucursal destino lo reciba
             try {
