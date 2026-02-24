@@ -1260,14 +1260,22 @@ ob_end_flush();
 
             <div class="d-flex align-items-center gap-2">
                 <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="toggleTrackingModal()">
-                    <i class="fas fa-truck me-1"></i> <span class="d-none d-md-inline">Rastreo</span>
+                    <i class="fas fa-truck me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.tracking">Rastreo</span>
                 </button>
                 <a href="como_comprar.php" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold" title="¿Cómo comprar?">
-                    <i class="fas fa-question-circle me-1"></i> <span class="d-none d-md-inline">Ayuda</span>
+                    <i class="fas fa-question-circle me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.help">Ayuda</span>
                 </a>
                 <a href="quienes_somos.php" class="btn btn-outline-info btn-sm rounded-pill px-3 fw-bold" title="Quiénes Somos">
-                    <i class="fas fa-building me-1"></i> <span class="d-none d-md-inline">Nosotros</span>
+                    <i class="fas fa-building me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.about">Nosotros</span>
                 </a>
+
+                <!-- Selector de idioma -->
+                <div class="btn-group btn-group-sm" role="group" aria-label="Idioma">
+                    <button class="btn btn-sm btn-outline-secondary lang-btn active"
+                            data-lang="es" onclick="setLang('es')">🇨🇺 ES</button>
+                    <button class="btn btn-sm btn-outline-secondary lang-btn"
+                            data-lang="en" onclick="setLang('en')">🇺🇸 EN</button>
+                </div>
 
                 <!-- Toggle de moneda -->
                 <div class="btn-group btn-group-sm" id="shopCurrencyToggle" title="Cambiar moneda de visualización">
@@ -1283,15 +1291,15 @@ ob_end_flush();
                                 <i class="fas fa-user-circle me-1"></i> <?= htmlspecialchars(explode(' ', $_SESSION['client_name'])[0]) ?>
                             </button>
                             <ul class="dropdown-menu dropdown-menu-end shadow border-0 mt-2">
-                                <li><a class="dropdown-item" href="#" onclick="openProfileModal()"><i class="fas fa-user-edit me-2 text-primary"></i>Mi Perfil</a></li>
-                                <li><a class="dropdown-item" href="#" onclick="openProfileModal(); setTimeout(()=>document.getElementById('orderHistoryContent')?.scrollIntoView({behavior:'smooth'}),400)"><i class="fas fa-box-open me-2 text-warning"></i>Mis Pedidos</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="openProfileModal()"><i class="fas fa-user-edit me-2 text-primary"></i><span data-i18n="nav.profile">Mi Perfil</span></a></li>
+                                <li><a class="dropdown-item" href="#" onclick="openProfileModal(); setTimeout(()=>document.getElementById('orderHistoryContent')?.scrollIntoView({behavior:'smooth'}),400)"><i class="fas fa-box-open me-2 text-warning"></i><span data-i18n="nav.orders">Mis Pedidos</span></a></li>
                                 <li><hr class="dropdown-divider"></li>
-                                <li><a class="dropdown-item" href="#" onclick="logoutClient()"><i class="fas fa-sign-out-alt me-2 text-danger"></i>Salir</a></li>
+                                <li><a class="dropdown-item" href="#" onclick="logoutClient()"><i class="fas fa-sign-out-alt me-2 text-danger"></i><span data-i18n="nav.logout">Salir</span></a></li>
                             </ul>
                         </div>
                     <?php else: ?>
                         <button class="btn btn-light btn-sm rounded-pill px-3" onclick="toggleAuthModal()">
-                            <i class="fas fa-user me-1"></i> Mi Cuenta
+                            <i class="fas fa-user me-1"></i> <span data-i18n="nav.account">Mi Cuenta</span>
                         </button>
                     <?php endif; ?>
                 </div>
@@ -1299,7 +1307,7 @@ ob_end_flush();
             
             <div class="search-wrapper w-100 mt-2">
                 <i class="fas fa-search search-icon"></i>
-                <input type="text" id="searchInput" class="search-input" placeholder="Buscar productos..." autocomplete="off">
+                <input type="text" id="searchInput" class="search-input" placeholder="Buscar productos..." autocomplete="off" data-i18n-attr="placeholder:nav.search_ph">
                 <div id="searchResults" class="search-results"></div>
             </div>
         </div>
@@ -1348,23 +1356,23 @@ ob_end_flush();
         <div class="row align-items-center">
             <div class="col-md-6">
                 <h5 class="mb-3 mb-md-0 fw-bold">
-                    <i class="fas fa-filter me-2"></i>Categorías
+                    <i class="fas fa-filter me-2"></i><span data-i18n="filter.categories">Categorías</span>
                 </h5>
             </div>
             <div class="col-md-6 text-md-end">
                 <label for="sortSelect" class="visually-hidden">Ordenar productos</label>
                 <select id="sortSelect" class="form-select d-inline-block w-auto" onchange="location.href='?cat=<?= urlencode($catFilter) ?>&sort='+this.value">
-                    <option value="categoria_asc" <?= $sort==='categoria_asc'?'selected':'' ?>>Ordenar: Categoría</option>
-                    <option value="price_asc" <?= $sort==='price_asc'?'selected':'' ?>>Precio: Menor a Mayor</option>
-                    <option value="price_desc" <?= $sort==='price_desc'?'selected':'' ?>>Precio: Mayor a Menor</option>
-                    <option value="popular" <?= $sort==='popular'?'selected':'' ?>>🔥 Más populares</option>
+                    <option value="categoria_asc" <?= $sort==='categoria_asc'?'selected':'' ?> data-i18n="sort.category">Ordenar: Categoría</option>
+                    <option value="price_asc" <?= $sort==='price_asc'?'selected':'' ?> data-i18n="sort.price_asc">Precio: Menor a Mayor</option>
+                    <option value="price_desc" <?= $sort==='price_desc'?'selected':'' ?> data-i18n="sort.price_desc">Precio: Mayor a Menor</option>
+                    <option value="popular" <?= $sort==='popular'?'selected':'' ?> data-i18n="sort.popular">🔥 Más populares</option>
                 </select>
             </div>
         </div>
         
         <div class="category-pills">
             <a href="?sort=<?= htmlspecialchars($sort) ?>" class="cat-pill <?= empty($catFilter)?'active':'' ?>">
-                <i class="fas fa-th me-1"></i> Todas
+                <i class="fas fa-th me-1"></i> <span data-i18n="filter.all">Todas</span>
             </a>
             <?php foreach($cats as $c): ?>
                 <a href="?cat=<?= urlencode($c) ?>&sort=<?= htmlspecialchars($sort) ?>" 
@@ -1378,9 +1386,9 @@ ob_end_flush();
 
 <div class="container">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold mb-0">Productos Disponibles</h4>
+        <h4 class="fw-bold mb-0" data-i18n="prod.available_title">Productos Disponibles</h4>
         <span class="badge bg-primary" style="font-size: 1rem; padding: 0.5rem 1rem;">
-            <?= count($productos) ?> productos
+            <?= count($productos) ?> <span data-i18n="prod.count" data-i18n-n="<?= count($productos) ?>">productos</span>
         </span>
     </div>
     
@@ -1499,11 +1507,11 @@ ob_end_flush();
                 <?php endif; ?>
                 
                 <?php if ($hasStock): ?>
-                <div class="stock-badge in-stock">✓ Disponible</div>
+                <div class="stock-badge in-stock" data-i18n="prod.available">✓ Disponible</div>
                 <?php elseif ($esReservable): ?>
-                <div class="stock-badge" style="background:rgba(255,193,7,0.92);color:#1a1a1a;">📅 Reservable</div>
+                <div class="stock-badge" style="background:rgba(255,193,7,0.92);color:#1a1a1a;" data-i18n="prod.reservable">📅 Reservable</div>
                 <?php else: ?>
-                <div class="stock-badge out-of-stock">✗ Agotado</div>
+                <div class="stock-badge out-of-stock" data-i18n="prod.out_of_stock">✗ Agotado</div>
                 <?php endif; ?>
             </div>
 
@@ -1538,17 +1546,17 @@ ob_end_flush();
                     <?php if ($hasStock): ?>
                         <button class="btn-add-cart"
                                 onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)">
-                            + Agregar
+                            <span data-i18n="prod.add">+ Agregar</span>
                         </button>
                     <?php elseif ($esReservable): ?>
                         <button class="btn-add-cart" style="background:#f59e0b;border-color:#f59e0b;font-size:.78rem;"
                                 onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>, true)">
-                            📅 Reservar
+                            <span data-i18n="prod.reserve">📅 Reservar</span>
                         </button>
                     <?php else: ?>
                         <button class="btn-add-cart" style="background:#6c757d;border-color:#6c757d;font-size:.76rem;"
                                 onclick="event.stopPropagation(); this.closest('.product-card').click()">
-                            🔔 Avísame
+                            <span data-i18n="prod.notify">🔔 Avísame</span>
                         </button>
                     <?php endif; ?>
                 </div>
@@ -1578,8 +1586,8 @@ ob_end_flush();
 
 <div class="chat-window" id="chatWindow">
     <div class="chat-header">
-        <span><i class="fas fa-headset me-2"></i> Soporte en Línea</span>
-        <button type="button" class="btn-close btn-close-white" onclick="toggleChat()" aria-label="Cerrar chat"></button>
+        <span><i class="fas fa-headset me-2"></i> <span data-i18n="chat.title">Soporte en Línea</span></span>
+        <button type="button" class="btn-close btn-close-white" onclick="toggleChat()" aria-label="Cerrar chat" data-i18n-attr="aria-label:chat.close_aria"></button>
     </div>
     <div class="chat-body" id="chatBody">
         <div class="text-center text-muted small mt-5">
@@ -1588,8 +1596,8 @@ ob_end_flush();
         </div>
     </div>
     <div class="chat-footer">
-        <input type="text" id="chatInput" class="form-control" placeholder="Escribe aquí..." onkeypress="if(event.key==='Enter') sendClientMsg()">
-        <button class="btn btn-primary" onclick="sendClientMsg()" aria-label="Enviar mensaje"><i class="fas fa-paper-plane" aria-hidden="true"></i></button>
+        <input type="text" id="chatInput" class="form-control" placeholder="Escribe aquí..." onkeypress="if(event.key==='Enter') sendClientMsg()" data-i18n-attr="placeholder:chat.input_ph">
+        <button class="btn btn-primary" onclick="sendClientMsg()" aria-label="Enviar mensaje" data-i18n-attr="aria-label:chat.send_aria"><i class="fas fa-paper-plane" aria-hidden="true"></i></button>
     </div>
 </div>
 
@@ -1647,17 +1655,17 @@ ob_end_flush();
                             </button>
                             <!-- Feature 1: restock aviso (visible sólo cuando agotado) -->
                             <div id="restockAvisoSection" style="display:none" class="aviso-form-wrap mt-2">
-                                <p class="small text-muted mb-2"><i class="fas fa-bell me-1 text-warning"></i>Recibe un aviso cuando llegue:</p>
+                                <p class="small text-muted mb-2"><i class="fas fa-bell me-1 text-warning"></i><span data-i18n="restock.notice">Recibe un aviso cuando llegue:</span></p>
                                 <div class="row g-1">
-                                    <div class="col-5"><input type="text" id="avisoNombre" class="form-control form-control-sm" placeholder="Tu nombre"></div>
-                                    <div class="col-5"><input type="tel" id="avisoTelefono" class="form-control form-control-sm" placeholder="Teléfono"></div>
+                                    <div class="col-5"><input type="text" id="avisoNombre" class="form-control form-control-sm" placeholder="Tu nombre" data-i18n-attr="placeholder:restock.name_ph"></div>
+                                    <div class="col-5"><input type="tel" id="avisoTelefono" class="form-control form-control-sm" placeholder="Teléfono" data-i18n-attr="placeholder:restock.tel_ph"></div>
                                     <div class="col-2"><button class="btn btn-warning btn-sm w-100" onclick="submitRestock()"><i class="fas fa-bell"></i></button></div>
                                 </div>
                             </div>
                             <!-- Feature 15: share -->
                             <div class="text-center mt-2">
                                 <button class="btn btn-outline-secondary btn-sm px-3" onclick="shareCurrentProduct()">
-                                    <i class="fas fa-share-alt me-1"></i>Compartir
+                                    <i class="fas fa-share-alt me-1"></i><span data-i18n="modal.share">Compartir</span>
                                 </button>
                             </div>
                         </div>
@@ -1667,7 +1675,7 @@ ob_end_flush();
                         <div id="reviewsSection">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <h6 class="fw-bold mb-0" style="font-size:.9rem">
-                                    <i class="fas fa-star text-warning me-1"></i>Opiniones
+                                    <i class="fas fa-star text-warning me-1"></i><span data-i18n="modal.reviews">Opiniones</span>
                                 </h6>
                                 <span id="reviewsAvgDisplay" class="small text-muted"></span>
                             </div>
@@ -1685,7 +1693,7 @@ ob_end_flush();
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content" style="border-radius: 20px; border: none;">
             <div class="modal-header border-0">
-                <h5 class="modal-title fw-bold"><i class="fas fa-shopping-cart me-2"></i>Tu Carrito</h5>
+                <h5 class="modal-title fw-bold"><i class="fas fa-shopping-cart me-2"></i><span data-i18n="cart.title">Tu Carrito</span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar carrito"></button>
             </div>
 
@@ -1694,9 +1702,9 @@ ob_end_flush();
                     <table class="table table-hover">
                         <thead class="table-light">
                             <tr>
-                                <th>Producto</th>
-                                <th class="text-center">Cantidad</th>
-                                <th class="text-end">Subtotal</th>
+                                <th data-i18n="cart.product_col">Producto</th>
+                                <th class="text-center" data-i18n="cart.qty_col">Cantidad</th>
+                                <th class="text-end" data-i18n="cart.subtotal_col">Subtotal</th>
                                 <th class="text-end"></th>
                             </tr>
                         </thead>
@@ -1705,20 +1713,20 @@ ob_end_flush();
                     <div class="text-end fs-3 fw-bold">Total: $<span id="cartTotal">0.00</span></div>
                 </div>
                 <div class="modal-footer border-0 flex-column gap-2">
-                    <div id="reservaCartNotice" class="alert alert-warning py-2 px-3 w-100 mb-0 small" style="display:none;">
+                    <div id="reservaCartNotice" class="alert alert-warning py-2 px-3 w-100 mb-0 small" style="display:none;" data-i18n-html="cart.reserva_notice">
                         📅 Tu carrito incluye productos <strong>de reserva</strong> (sin stock). Usa <strong>Reservar</strong> para procesarlos.
                     </div>
                     <div class="d-flex w-100 gap-2">
                         <button class="btn btn-outline-danger" onclick="clearCart()">
-                            <i class="fas fa-trash me-1"></i> Vaciar
+                            <i class="fas fa-trash me-1"></i> <span data-i18n="cart.empty_btn">Vaciar</span>
                         </button>
                         <button class="btn btn-outline-primary flex-fill" onclick="iniciarFlujo('reserva')">
-                            📅 Reservar
-                            <small class="d-block" style="font-size:.7rem;opacity:.8">Sin stock OK</small>
+                            <span data-i18n="cart.reserve_btn">📅 Reservar</span>
+                            <small class="d-block" style="font-size:.7rem;opacity:.8" data-i18n="cart.no_stock_ok">Sin stock OK</small>
                         </button>
                         <button class="btn btn-success flex-fill" onclick="iniciarFlujo('compra')">
-                            💳 Pagar Ahora
-                            <small class="d-block" style="font-size:.7rem;opacity:.8">Solo con stock</small>
+                            <span data-i18n="cart.pay_btn">💳 Pagar Ahora</span>
+                            <small class="d-block" style="font-size:.7rem;opacity:.8" data-i18n="cart.only_stock">Solo con stock</small>
                         </button>
                     </div>
                 </div>
@@ -1727,31 +1735,31 @@ ob_end_flush();
             <div id="checkoutView" style="display:none;">
                 <form onsubmit="submitOrder(event)">
                     <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                        <h5 class="fw-bold mb-4"><i class="fas fa-user me-2"></i>Datos del Cliente</h5>
-                        
+                        <h5 class="fw-bold mb-4"><i class="fas fa-user me-2"></i><span data-i18n="checkout.title">Datos del Cliente</span></h5>
+
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Nombre Completo *</label>
-                            <input type="text" id="cliName" class="form-control" placeholder="Ej: Juan Pérez" required>
+                            <label class="form-label fw-bold" data-i18n="checkout.name">Nombre Completo *</label>
+                            <input type="text" id="cliName" class="form-control" placeholder="Ej: Juan Pérez" required data-i18n-attr="placeholder:checkout.name_ph">
                         </div>
-                        
+
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Teléfono *</label>
-                            <input type="tel" id="cliTel" class="form-control" placeholder="Ej: +53 5555-5555" required>
+                            <label class="form-label fw-bold" data-i18n="checkout.phone">Teléfono *</label>
+                            <input type="tel" id="cliTel" class="form-control" placeholder="Ej: +53 5555-5555" required data-i18n-attr="placeholder:checkout.phone_ph">
                         </div>
-                        
+
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Dirección *</label>
-                            <textarea id="cliDir" class="form-control" rows="2" placeholder="Calle, número, entre calles..." required></textarea>
+                            <label class="form-label fw-bold" data-i18n="checkout.address">Dirección *</label>
+                            <textarea id="cliDir" class="form-control" rows="2" placeholder="Calle, número, entre calles..." required data-i18n-attr="placeholder:checkout.address_ph"></textarea>
                         </div>
-                        
+
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Fecha de Entrega/Recogida *</label>
+                            <label class="form-label fw-bold" data-i18n="checkout.date">Fecha de Entrega/Recogida *</label>
                             <input type="date" id="cliDate" class="form-control" required onchange="updateSlotsAvailability()">
                         </div>
 
                         <div class="mb-4">
                             <label class="form-label fw-bold">
-                                <i class="fas fa-clock me-1 text-primary"></i>Horario de Entrega *
+                                <i class="fas fa-clock me-1 text-primary"></i><span data-i18n="checkout.time_slot">Horario de Entrega *</span>
                             </label>
                             <div class="row g-2" id="timeSlotGrid">
                                 <div class="col-6">
@@ -1784,19 +1792,19 @@ ob_end_flush();
                                 </div>
                             </div>
                             <div id="slotErrorMsg" class="text-danger small mt-1" style="display:none;">
-                                <i class="fas fa-exclamation-circle me-1"></i>Selecciona un horario de entrega.
+                                <i class="fas fa-exclamation-circle me-1"></i><span data-i18n="checkout.slot_required">Selecciona un horario de entrega.</span>
                             </div>
                         </div>
 
                         <div class="mb-3">
-                            <label class="form-label fw-bold">Notas Adicionales</label>
-                            <textarea id="cliNotes" class="form-control" rows="3" placeholder="Ej: El cake de relleno chocolate y color rosado el merengue. Entregar antes de las 3 PM."></textarea>
-                            <small class="text-muted">Especifica detalles importantes como colores, sabores, horarios, etc.</small>
+                            <label class="form-label fw-bold" data-i18n="checkout.notes">Notas Adicionales</label>
+                            <textarea id="cliNotes" class="form-control" rows="3" placeholder="Ej: El cake de relleno chocolate y color rosado el merengue. Entregar antes de las 3 PM." data-i18n-attr="placeholder:checkout.notes_ph"></textarea>
+                            <small class="text-muted" data-i18n="checkout.notes_hint">Especifica detalles importantes como colores, sabores, horarios, etc.</small>
                         </div>
                         
                         <div class="form-check mb-3" style="padding: 1rem; background: #f8f9fa; border-radius: 12px;">
                             <input class="form-check-input" type="checkbox" id="delHome" onchange="toggleDelivery()">
-                            <label class="form-check-label fw-bold" for="delHome">
+                            <label class="form-check-label fw-bold" for="delHome" data-i18n="checkout.home_delivery">
                                 <i class="fas fa-truck me-2"></i>Entrega a domicilio
                             </label>
                         </div>
@@ -1805,33 +1813,33 @@ ob_end_flush();
                             <h6 class="fw-bold mb-3"><i class="fas fa-map-marker-alt me-2"></i>Ubicación de Entrega</h6>
                             <div class="row g-3">
                                 <div class="col-md-6">
-                                    <label class="form-label" for="cMun">Municipio</label>
+                                    <label class="form-label" for="cMun" data-i18n="checkout.municipality">Municipio</label>
                                     <select id="cMun" class="form-control" onchange="loadBarrios()">
-                                        <option value="">Seleccione municipio...</option>
+                                        <option value="" data-i18n="checkout.municipality_ph">Seleccione municipio...</option>
                                     </select>
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label" for="cBar">Barrio</label>
+                                    <label class="form-label" for="cBar" data-i18n="checkout.neighborhood">Barrio</label>
                                     <select id="cBar" class="form-control" onchange="calcShip()">
-                                        <option value="">Seleccione barrio...</option>
+                                        <option value="" data-i18n="checkout.neighborhood_ph">Seleccione barrio...</option>
                                     </select>
                                 </div>
                             </div>
                         </div>
                         
                         <div class="mt-4 p-4" style="background: #f8f9fa; border-radius: 12px;">
-                            <h6 class="fw-bold mb-3">Resumen del Pedido</h6>
+                            <h6 class="fw-bold mb-3" data-i18n="checkout.summary">Resumen del Pedido</h6>
                             <div class="d-flex justify-content-between py-2">
-                                <span>Subtotal Productos:</span>
+                                <span data-i18n="checkout.subtotal">Subtotal Productos:</span>
                                 <span class="fw-bold">$<span id="cartTotal2">0.00</span></span>
                             </div>
                             <div class="d-flex justify-content-between py-2">
-                                <span>Costo de Envío:</span>
+                                <span data-i18n="checkout.shipping">Costo de Envío:</span>
                                 <span class="fw-bold">$<span id="shipCost">0.00</span></span>
                             </div>
                             <hr>
                             <div class="d-flex justify-content-between fs-4">
-                                <span class="fw-bold">TOTAL A PAGAR:</span>
+                                <span class="fw-bold" data-i18n="checkout.total">TOTAL A PAGAR:</span>
                                 <span class="fw-bold" style="color: var(--primary);">$<span id="grandTotal">0.00</span></span>
                             </div>
                         </div>
@@ -1839,7 +1847,7 @@ ob_end_flush();
                         <!-- SECCIÓN DE PAGO (solo para flujo 'compra') -->
                         <div id="paymentSection" style="display:none; margin-top:1rem;">
                             <div class="p-3 border rounded-3">
-                                <h6 class="fw-bold mb-3"><i class="fas fa-credit-card me-2 text-primary"></i>Método de Pago</h6>
+                                <h6 class="fw-bold mb-3"><i class="fas fa-credit-card me-2 text-primary"></i><span data-i18n="checkout.payment_method">Método de Pago</span></h6>
                                 <div id="shopPaymentMethodsContainer">
                                     <!-- Renderizado dinámico por renderShopPaymentMethods() -->
                                 </div>
@@ -1848,10 +1856,10 @@ ob_end_flush();
                     </div>
                     <div class="modal-footer border-0">
                         <button type="button" class="btn btn-secondary" onclick="showCartView()">
-                            <i class="fas fa-arrow-left me-1"></i> Volver
+                            <i class="fas fa-arrow-left me-1"></i> <span data-i18n="checkout.back">Volver</span>
                         </button>
                         <button type="submit" id="btnConfirmarPedido" class="btn btn-success btn-lg px-4">
-                            <i class="fas fa-check-circle me-2"></i> Confirmar Pedido
+                            <i class="fas fa-check-circle me-2"></i> <span data-i18n="checkout.confirm">Confirmar Pedido</span>
                         </button>
                     </div>
                 </form>
@@ -1860,11 +1868,11 @@ ob_end_flush();
             <div id="successView" style="display:none;">
                 <div class="modal-body text-center py-5">
                     <div style="font-size: 5rem; margin-bottom: 1rem;">✅</div>
-                    <h3 class="fw-bold mb-3">¡Pedido Recibido!</h3>
-                    <p class="text-muted fs-5">Gracias por tu compra. Te contactaremos pronto para confirmar tu orden.</p>
+                    <h3 class="fw-bold mb-3" data-i18n="order.received">¡Pedido Recibido!</h3>
+                    <p class="text-muted fs-5" data-i18n="order.thanks">Gracias por tu compra. Te contactaremos pronto para confirmar tu orden.</p>
                 </div>
                 <div class="modal-footer border-0 justify-content-center">
-                    <button class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
+                    <button class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
                 </div>
             </div>
 
@@ -1872,10 +1880,10 @@ ob_end_flush();
             <div id="waitingPaymentView" style="display:none;">
                 <div class="modal-body text-center py-5">
                     <div style="font-size: 4rem; margin-bottom: 1rem; animation: spin 2s linear infinite; display:inline-block;">⏳</div>
-                    <h4 class="fw-bold mb-3">Verificando tu transferencia...</h4>
-                    <p class="text-muted">El operador confirmará tu pago en breve.<br>Esta pantalla se actualizará automáticamente.</p>
+                    <h4 class="fw-bold mb-3" data-i18n="payment.verifying">Verificando tu transferencia...</h4>
+                    <p class="text-muted" data-i18n="payment.verifying_sub">El operador confirmará tu pago en breve.<br>Esta pantalla se actualizará automáticamente.</p>
                     <div class="mt-3 p-3 bg-light rounded">
-                        <small class="text-muted">Código enviado: <strong id="codigoPagoDisplay"></strong></small>
+                        <small class="text-muted"><span data-i18n="payment.sent_code">Código enviado:</span> <strong id="codigoPagoDisplay"></strong></small>
                     </div>
                 </div>
             </div>
@@ -1884,18 +1892,18 @@ ob_end_flush();
             <div id="pagoConfirmadoView" style="display:none;">
                 <div class="modal-body text-center py-4">
                     <div style="font-size: 4.5rem; margin-bottom: 0.5rem;">🎉</div>
-                    <h3 class="fw-bold mb-1 text-success">¡Pago Confirmado!</h3>
-                    <p class="text-muted mb-3">Tu transferencia fue verificada exitosamente.</p>
+                    <h3 class="fw-bold mb-1 text-success" data-i18n="payment.confirmed">¡Pago Confirmado!</h3>
+                    <p class="text-muted mb-3" data-i18n="payment.confirmed_sub">Tu transferencia fue verificada exitosamente.</p>
                     <div class="bg-success bg-opacity-10 border border-success rounded-3 px-4 py-3 mb-3 mx-auto" style="max-width:320px;">
-                        <div class="text-muted small mb-1">Número de pedido</div>
+                        <div class="text-muted small mb-1" data-i18n="order.number">Número de pedido</div>
                         <div class="fw-bold text-success" style="font-size:2rem; letter-spacing:2px;">#<span id="confirmadoPedido">—</span></div>
-                        <div class="text-muted small mt-2">Guarda este número para consultar el estado de tu pedido.</div>
+                        <div class="text-muted small mt-2" data-i18n="order.save_number">Guarda este número para consultar el estado de tu pedido.</div>
                     </div>
-                    <p class="fs-5 fw-bold text-dark mb-0">¡Gracias, <span id="confirmadoNombre">Cliente</span>!</p>
-                    <p class="text-muted small">Tu pedido está en proceso. Te avisaremos cuando esté listo.</p>
+                    <p class="fs-5 fw-bold text-dark mb-0">¡<span data-i18n="payment.thanks">Gracias,</span> <span id="confirmadoNombre">Cliente</span>!</p>
+                    <p class="text-muted small" data-i18n="order.in_process">Tu pedido está en proceso. Te avisaremos cuando esté listo.</p>
                 </div>
                 <div class="modal-footer border-0 justify-content-center">
-                    <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
+                    <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
                 </div>
             </div>
 
@@ -1903,15 +1911,15 @@ ob_end_flush();
             <div id="pagoRechazadoView" style="display:none;">
                 <div class="modal-body text-center py-5">
                     <div style="font-size: 5rem; margin-bottom: 1rem;">❌</div>
-                    <h3 class="fw-bold mb-3 text-danger">Transferencia Rechazada</h3>
-                    <p class="text-muted fs-5">El operador no pudo verificar tu transferencia.<br>Por favor contáctanos para más información.</p>
+                    <h3 class="fw-bold mb-3 text-danger" data-i18n="payment.rejected">Transferencia Rechazada</h3>
+                    <p class="text-muted fs-5" data-i18n="payment.rejected_sub">El operador no pudo verificar tu transferencia.<br>Por favor contáctanos para más información.</p>
                     <div id="motivoRechazoDiv" class="alert alert-warning mt-3" style="display:none;">
-                        <strong>Motivo:</strong> <span id="motivoRechazoTxt"></span>
+                        <strong data-i18n="payment.reason">Motivo:</strong> <span id="motivoRechazoTxt"></span>
                     </div>
                 </div>
                 <div class="modal-footer border-0 justify-content-center gap-2">
-                    <button class="btn btn-outline-secondary btn-lg px-4" data-bs-dismiss="modal" onclick="location.reload()">Cerrar</button>
-                    <button class="btn btn-primary btn-lg px-4" onclick="showCheckout()">Intentar de nuevo</button>
+                    <button class="btn btn-outline-secondary btn-lg px-4" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
+                    <button class="btn btn-primary btn-lg px-4" onclick="showCheckout()" data-i18n="payment.try_again">Intentar de nuevo</button>
                 </div>
             </div>
         </div>
@@ -1923,12 +1931,12 @@ ob_end_flush();
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4">
             <div class="modal-header border-0 bg-primary text-white p-4">
-                <h5 class="modal-title fw-bold"><i class="fas fa-truck me-2"></i>Seguimiento de Pedido</h5>
+                <h5 class="modal-title fw-bold"><i class="fas fa-truck me-2"></i><span data-i18n="tracking.title">Seguimiento de Pedido</span></h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar seguimiento"></button>
             </div>
             <div class="modal-body p-4">
                 <div class="input-group mb-3 shadow-sm">
-                    <input type="text" id="trackInput" class="form-control border-0 bg-light p-3" placeholder="Nº Pedido o Teléfono...">
+                    <input type="text" id="trackInput" class="form-control border-0 bg-light p-3" placeholder="Nº Pedido o Teléfono..." data-i18n-attr="placeholder:tracking.input_ph">
                     <button class="btn btn-primary px-4" onclick="searchTrack()" aria-label="Buscar pedido">
                         <i class="fas fa-search" aria-hidden="true"></i>
                     </button>
@@ -1936,7 +1944,7 @@ ob_end_flush();
                 <div id="trackResults" class="mt-4">
                     <div class="text-center text-muted py-3">
                         <i class="fas fa-info-circle fa-2x mb-2 d-block"></i>
-                        Ingresa tus datos para ver el estado de tus compras recientes.
+                        <span data-i18n="tracking.initial">Ingresa tus datos para ver el estado de tus compras recientes.</span>
                     </div>
                 </div>
             </div>
@@ -1949,34 +1957,34 @@ ob_end_flush();
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content border-0 shadow-lg rounded-4">
             <div class="modal-header border-0 bg-dark text-white p-4">
-                <h5 class="modal-title fw-bold"><i class="fas fa-user-circle me-2" aria-hidden="true"></i>Mi Perfil de Cliente</h5>
+                <h5 class="modal-title fw-bold"><i class="fas fa-user-circle me-2" aria-hidden="true"></i><span data-i18n="profile.title">Mi Perfil de Cliente</span></h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar perfil"></button>
             </div>
             <div class="modal-body p-0">
                 <div class="row g-0">
                     <div class="col-md-4 bg-light p-4 border-end">
-                        <h6 class="fw-bold mb-3 text-uppercase small text-muted">Mis Datos</h6>
+                        <h6 class="fw-bold mb-3 text-uppercase small text-muted" data-i18n="profile.my_data">Mis Datos</h6>
                         <div class="mb-3">
-                            <label class="small fw-bold">Nombre</label>
+                            <label class="small fw-bold" data-i18n="profile.name">Nombre</label>
                             <input type="text" id="profNom" class="form-control form-control-sm">
                         </div>
                         <div class="mb-3">
-                            <label class="small fw-bold">Teléfono</label>
+                            <label class="small fw-bold" data-i18n="profile.phone">Teléfono</label>
                             <input type="text" id="profTel" class="form-control form-control-sm" disabled>
                         </div>
                         <div class="mb-4">
-                            <label class="small fw-bold">Dirección</label>
+                            <label class="small fw-bold" data-i18n="profile.address">Dirección</label>
                             <textarea id="profDir" class="form-control form-control-sm" rows="3"></textarea>
                         </div>
-                        <button class="btn btn-primary btn-sm w-100 fw-bold" onclick="updateProfile()">
+                        <button class="btn btn-primary btn-sm w-100 fw-bold" onclick="updateProfile()" data-i18n="profile.update">
                             Actualizar Datos
                         </button>
                     </div>
                     <div class="col-md-8 p-4">
-                        <h6 class="fw-bold mb-3 text-uppercase small text-muted">Historial de Pedidos</h6>
+                        <h6 class="fw-bold mb-3 text-uppercase small text-muted" data-i18n="profile.history">Historial de Pedidos</h6>
                         <div id="orderHistoryContent" style="max-height: 400px; overflow-y: auto;">
                             <div class="text-center py-5 text-muted">
-                                <i class="fas fa-spinner fa-spin fa-2x mb-2"></i><br>Cargando pedidos...
+                                <i class="fas fa-spinner fa-spin fa-2x mb-2"></i><br><span data-i18n="profile.loading_orders">Cargando pedidos...</span>
                             </div>
                         </div>
                     </div>
@@ -1993,10 +2001,10 @@ ob_end_flush();
             <div class="modal-body p-0">
                 <ul class="nav nav-pills nav-justified bg-light p-2 rounded-top-4" id="authTabs">
                     <li class="nav-item">
-                        <a class="nav-link active fw-bold" data-bs-toggle="pill" href="#loginTab">Iniciar Sesión</a>
+                        <a class="nav-link active fw-bold" data-bs-toggle="pill" href="#loginTab" data-i18n="auth.login">Iniciar Sesión</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link fw-bold" data-bs-toggle="pill" href="#registerTab" onclick="generateCaptcha()">Crear Cuenta</a>
+                        <a class="nav-link fw-bold" data-bs-toggle="pill" href="#registerTab" onclick="generateCaptcha()" data-i18n="auth.register">Crear Cuenta</a>
                     </li>
                 </ul>
                 <div class="tab-content p-4">
@@ -2004,15 +2012,15 @@ ob_end_flush();
                     <div class="tab-pane fade show active" id="loginTab">
                         <form onsubmit="loginClient(); return false;">
                             <div class="mb-3">
-                                <label class="small fw-bold text-muted" for="logTel">Teléfono</label>
-                                <input type="text" id="logTel" class="form-control bg-light border-0 p-3" placeholder="Tu número..." required>
+                                <label class="small fw-bold text-muted" for="logTel" data-i18n="auth.phone">Teléfono</label>
+                                <input type="text" id="logTel" class="form-control bg-light border-0 p-3" placeholder="Tu número..." required data-i18n-attr="placeholder:auth.phone_ph">
                             </div>
                             <div class="mb-4">
-                                <label class="small fw-bold text-muted" for="logPass">Contraseña</label>
-                                <input type="password" id="logPass" class="form-control bg-light border-0 p-3" placeholder="••••••••" required autocomplete="current-password">
+                                <label class="small fw-bold text-muted" for="logPass" data-i18n="auth.password">Contraseña</label>
+                                <input type="password" id="logPass" class="form-control bg-light border-0 p-3" placeholder="••••••••" required autocomplete="current-password" data-i18n-attr="placeholder:auth.password_ph">
                             </div>
                             <button type="submit" class="btn btn-primary w-100 py-3 fw-bold rounded-3 shadow">
-                                Entrar <i class="fas fa-sign-in-alt ms-2"></i>
+                                <span data-i18n="auth.enter">Entrar</span> <i class="fas fa-sign-in-alt ms-2"></i>
                             </button>
                         </form>
                     </div>
@@ -2021,24 +2029,24 @@ ob_end_flush();
                         <form onsubmit="registerClient(); return false;">
                             <div class="row g-3">
                                 <div class="col-12">
-                                    <label class="small fw-bold text-muted">Nombre Completo</label>
-                                    <input type="text" id="regNom" class="form-control bg-light border-0 p-2" placeholder="Ej. Juan Pérez" required autocomplete="name">
+                                    <label class="small fw-bold text-muted" data-i18n="auth.full_name">Nombre Completo</label>
+                                    <input type="text" id="regNom" class="form-control bg-light border-0 p-2" placeholder="Ej. Juan Pérez" required autocomplete="name" data-i18n-attr="placeholder:auth.full_name_ph">
                                 </div>
                                 <div class="col-12">
-                                    <label class="small fw-bold text-muted">Teléfono</label>
+                                    <label class="small fw-bold text-muted" data-i18n="auth.phone">Teléfono</label>
                                     <input type="text" id="regTel" class="form-control bg-light border-0 p-2" placeholder="Ej. 5352... " required autocomplete="tel">
                                 </div>
                                 <div class="col-12">
-                                    <label class="small fw-bold text-muted">Contraseña</label>
-                                    <input type="password" id="regPass" class="form-control bg-light border-0 p-2" placeholder="Mín. 6 caracteres" required autocomplete="new-password">
+                                    <label class="small fw-bold text-muted" data-i18n="auth.new_password">Contraseña</label>
+                                    <input type="password" id="regPass" class="form-control bg-light border-0 p-2" placeholder="Mín. 6 caracteres" required autocomplete="new-password" data-i18n-attr="placeholder:auth.new_password_ph">
                                 </div>
                                 <div class="col-12">
-                                    <label class="small fw-bold text-muted">Dirección (Opcional)</label>
-                                    <input type="text" id="regDir" class="form-control bg-light border-0 p-2" placeholder="Calle, Nº, e/...">
+                                    <label class="small fw-bold text-muted" data-i18n="auth.address_opt">Dirección (Opcional)</label>
+                                    <input type="text" id="regDir" class="form-control bg-light border-0 p-2" placeholder="Calle, Nº, e/..." data-i18n-attr="placeholder:auth.address_ph">
                                 </div>
                                 <div class="col-12">
                                     <div class="bg-warning bg-opacity-10 p-3 rounded-3 border border-warning border-opacity-20">
-                                        <label class="small fw-bold text-warning-emphasis mb-2 d-block">Verificación Humana</label>
+                                        <label class="small fw-bold text-warning-emphasis mb-2 d-block" data-i18n="auth.captcha">Verificación Humana</label>
                                         <div class="d-flex align-items-center gap-2">
                                             <span id="captchaLabel" class="fw-bold fs-5 text-dark"></span>
                                             <input type="number" id="regCaptcha" class="form-control border-warning p-2" style="width: 80px" placeholder="?" required>
@@ -2048,7 +2056,7 @@ ob_end_flush();
                                 </div>
                             </div>
                             <button type="submit" class="btn btn-success w-100 py-3 mt-4 fw-bold rounded-3 shadow">
-                                Registrarme <i class="fas fa-user-plus ms-2"></i>
+                                <span data-i18n="auth.register_btn">Registrarme</span> <i class="fas fa-user-plus ms-2"></i>
                             </button>
                         </form>
                     </div>
@@ -2057,6 +2065,277 @@ ob_end_flush();
         </div>
     </div>
 </div>
+
+<!-- ── i18n Engine ──────────────────────────────────────────────────── -->
+<script>
+// ── i18n ──────────────────────────────────────────────────────────────
+const LANG_ES = {
+  // Navbar
+  'nav.tracking':     'Rastreo',
+  'nav.help':         'Ayuda',
+  'nav.about':        'Nosotros',
+  'nav.account':      'Mi Cuenta',
+  'nav.profile':      'Mi Perfil',
+  'nav.orders':       'Mis Pedidos',
+  'nav.logout':       'Salir',
+  'nav.search_ph':    'Buscar productos...',
+  'nav.cart_aria':    'Ver carrito de compras',
+  // Filtros
+  'filter.categories':'Categorías',
+  'filter.all':       'Todas',
+  'sort.category':    'Ordenar: Categoría',
+  'sort.price_asc':   'Precio: Menor a Mayor',
+  'sort.price_desc':  'Precio: Mayor a Menor',
+  'sort.popular':     '🔥 Más populares',
+  // Productos
+  'prod.available':       '✓ Disponible',
+  'prod.reservable':      '📅 Reservable',
+  'prod.out_of_stock':    '✗ Agotado',
+  'prod.add':             '+ Agregar',
+  'prod.reserve':         '📅 Reservar',
+  'prod.notify':          '🔔 Avísame',
+  'prod.count':           '{n} productos',
+  'prod.none':            'No hay productos disponibles',
+  'prod.available_title': 'Productos Disponibles',
+  'prod.only_left':       '¡Solo {n} disponibles!',
+  // Stock badges
+  'stock.available':  '✓ Disponible',
+  'stock.reservable': '📅 Disponible bajo reserva',
+  'stock.out_of_stock':'✗ Agotado',
+  // Modal detalle
+  'modal.category':       'Categoría',
+  'modal.product_name':   'Nombre Producto',
+  'modal.description':    'Descripción',
+  'modal.no_desc':        'Sin descripción detallada.',
+  'modal.add_to_cart':    'AGREGAR AL CARRITO',
+  'modal.reserve_product':'📅 RESERVAR PRODUCTO',
+  'modal.out_of_stock':   '✗ PRODUCTO AGOTADO',
+  'modal.presentation':   'Presentación',
+  'modal.reviews':        'Opiniones',
+  'modal.share':          'Compartir',
+  'modal.close_detail':   'Cerrar detalle del producto',
+  'modal.sku':            'SKU',
+  'modal.color':          'Color',
+  // Restock
+  'restock.notice':   'Recibe un aviso cuando llegue:',
+  'restock.name_ph':  'Tu nombre',
+  'restock.tel_ph':   'Teléfono',
+  'restock.toast_ok': '🔔 ¡Te avisamos cuando llegue!',
+  'restock.tel_required': 'Ingresa tu teléfono',
+  'restock.error':    'Error al registrar aviso',
+  // Reseñas
+  'reviews.login_prompt': 'Inicia sesión para dejar una reseña.',
+  'reviews.login_link':   'Inicia sesión',
+  'reviews.empty':        'Sin reseñas aún. ¡Sé el primero!',
+  'reviews.loading':      'Cargando reseñas...',
+  'reviews.load_error':   'No se pudieron cargar las reseñas.',
+  'reviews.your_rating':  'Tu valoración',
+  'reviews.comment_ph':   'Cuéntanos tu experiencia (opcional)',
+  'reviews.submit':       'Publicar',
+  // Carrito
+  'cart.title':           'Tu Carrito',
+  'cart.product_col':     'Producto',
+  'cart.qty_col':         'Cantidad',
+  'cart.subtotal_col':    'Subtotal',
+  'cart.total':           'Total:',
+  'cart.empty_btn':       'Vaciar',
+  'cart.reserve_btn':     '📅 Reservar',
+  'cart.pay_btn':         '💳 Pagar Ahora',
+  'cart.no_stock_ok':     'Sin stock OK',
+  'cart.only_stock':      'Solo con stock',
+  'cart.empty_state':     'Carrito vacío',
+  'cart.confirm_clear':   '¿Vaciar el carrito?',
+  'cart.reserva_notice':  '📅 Tu carrito incluye productos <strong>de reserva</strong> (sin stock). Usa <strong>Reservar</strong> para procesarlos.',
+  'cart.close_aria':      'Cerrar carrito',
+  // Checkout
+  'checkout.title':       'Datos del Cliente',
+  'checkout.name':        'Nombre Completo *',
+  'checkout.name_ph':     'Ej: Juan Pérez',
+  'checkout.phone':       'Teléfono *',
+  'checkout.phone_ph':    'Ej: +53 5555-5555',
+  'checkout.address':     'Dirección *',
+  'checkout.address_ph':  'Calle, número, entre calles...',
+  'checkout.date':        'Fecha de Entrega/Recogida *',
+  'checkout.time_slot':   'Horario de Entrega *',
+  'checkout.notes':       'Notas Adicionales',
+  'checkout.notes_ph':    'Ej: El cake de relleno chocolate y color rosado el merengue. Entregar antes de las 3 PM.',
+  'checkout.notes_hint':  'Especifica detalles importantes como colores, sabores, horarios, etc.',
+  'checkout.home_delivery':'Entrega a domicilio',
+  'checkout.municipality': 'Municipio',
+  'checkout.municipality_ph': 'Seleccione municipio...',
+  'checkout.neighborhood': 'Barrio',
+  'checkout.neighborhood_ph': 'Seleccione barrio...',
+  'checkout.summary':     'Resumen del Pedido',
+  'checkout.subtotal':    'Subtotal Productos:',
+  'checkout.shipping':    'Costo de Envío:',
+  'checkout.total':       'TOTAL A PAGAR:',
+  'checkout.payment_method': 'Método de Pago',
+  'checkout.back':        'Volver',
+  'checkout.confirm':     'Confirmar Pedido',
+  'checkout.sending':     'Enviando...',
+  'checkout.slot_required':  'Selecciona un horario de entrega.',
+  'checkout.mun_bar_required':'Por favor selecciona municipio y barrio',
+  'checkout.transfer_code_required': 'Por favor ingresa el código de confirmación de la transferencia.',
+  'checkout.card_label':  'Tarjeta:',
+  'checkout.holder_label':'Titular:',
+  'checkout.bank_label':  'Banco:',
+  'checkout.code_label':  'Código de confirmación *',
+  'checkout.code_ph':     'Ej: TRF-20260220-001234',
+  'checkout.code_hint':   'Código de confirmación de la transferencia.',
+  // Slots
+  'slot.morning':    'Mañana',
+  'slot.noon':       'Mediodía',
+  'slot.afternoon':  'Tarde',
+  'slot.evening':    'Noche',
+  // Orden
+  'order.received':   '¡Pedido Recibido!',
+  'order.thanks':     'Gracias por tu compra. Te contactaremos pronto para confirmar tu orden.',
+  'order.close':      'Cerrar',
+  'order.number':     'Número de pedido',
+  'order.save_number':'Guarda este número para consultar el estado de tu pedido.',
+  'order.in_process': 'Tu pedido está en proceso. Te avisaremos cuando esté listo.',
+  // Pago
+  'payment.verifying':      'Verificando tu transferencia...',
+  'payment.verifying_sub':  'El operador confirmará tu pago en breve.\nEsta pantalla se actualizará automáticamente.',
+  'payment.sent_code':      'Código enviado:',
+  'payment.confirmed':      '¡Pago Confirmado!',
+  'payment.confirmed_sub':  'Tu transferencia fue verificada exitosamente.',
+  'payment.thanks':         'Gracias,',
+  'payment.rejected':       'Transferencia Rechazada',
+  'payment.rejected_sub':   'El operador no pudo verificar tu transferencia.\nPor favor contáctanos para más información.',
+  'payment.reason':         'Motivo:',
+  'payment.try_again':      'Intentar de nuevo',
+  // Tracking
+  'tracking.title':     'Seguimiento de Pedido',
+  'tracking.input_ph':  'Nº Pedido o Teléfono...',
+  'tracking.initial':   'Ingresa tus datos para ver el estado de tus compras recientes.',
+  'tracking.not_found': 'No se encontraron pedidos con ese dato.',
+  'tracking.error':     'Error al consultar.',
+  'tracking.order':     'Pedido #{id}',
+  'tracking.client':    'Cliente:',
+  'tracking.total':     'Total:',
+  'tracking.products':  'Productos:',
+  'status.unknown':         'Estado desconocido.',
+  'status.pendiente':       'Tu pedido ha sido recibido y está esperando confirmación. ¡Pronto empezaremos a prepararlo!',
+  'status.en_preparacion':  '¡Estamos preparando tu pedido con mucho cariño! En breve estará listo para salir.',
+  'status.en_camino':       '¡Buenas noticias! Tu pedido ha salido del local y va en camino. El mensajero está de ruta.',
+  'status.entregado':       '¡Tu pedido ha sido entregado con éxito! Esperamos que lo disfrutes.',
+  'status.cancelado':       'Lamentamos informarte que tu pedido ha sido cancelado. Por favor, contáctanos si tienes alguna duda.',
+  // Perfil
+  'profile.title':          'Mi Perfil de Cliente',
+  'profile.my_data':        'Mis Datos',
+  'profile.name':           'Nombre',
+  'profile.phone':          'Teléfono',
+  'profile.address':        'Dirección',
+  'profile.update':         'Actualizar Datos',
+  'profile.history':        'Historial de Pedidos',
+  'profile.loading_orders': 'Cargando pedidos...',
+  'profile.no_orders':      'Aún no tienes pedidos registrados.',
+  'profile.view_ticket':    'Ver ticket',
+  'profile.products':       '{n} producto(s)',
+  // Auth
+  'auth.login':             'Iniciar Sesión',
+  'auth.register':          'Crear Cuenta',
+  'auth.phone':             'Teléfono',
+  'auth.phone_ph':          'Tu número...',
+  'auth.password':          'Contraseña',
+  'auth.password_ph':       '••••••••',
+  'auth.enter':             'Entrar',
+  'auth.full_name':         'Nombre Completo',
+  'auth.full_name_ph':      'Ej. Juan Pérez',
+  'auth.new_password':      'Contraseña',
+  'auth.new_password_ph':   'Mín. 6 caracteres',
+  'auth.address_opt':       'Dirección (Opcional)',
+  'auth.address_ph':        'Calle, Nº, e/...',
+  'auth.captcha':           'Verificación Humana',
+  'auth.register_btn':      'Registrarme',
+  'auth.register_success':  'Cuenta creada con éxito. Ya puedes iniciar sesión.',
+  'auth.fill_fields':       'Completa los campos.',
+  'auth.conn_error':        'Error de conexión.',
+  // Chat
+  'chat.title':       'Soporte en Línea',
+  'chat.input_ph':    'Escribe aquí...',
+  'chat.greeting':    '¡Hola! 👋\nEscribe tu consulta.\nSi no estamos, deja un mensaje.',
+  'chat.close_aria':  'Cerrar chat',
+  'chat.send_aria':   'Enviar mensaje',
+  // Footer
+  'footer.follow':    'Síguenos',
+  // Toasts
+  'toast.added':           '✓ Agregado al carrito',
+  'toast.reserved':        '📅 Reserva agregada',
+  'toast.review_ok':       '¡Reseña publicada! Gracias por tu opinión.',
+  'toast.cart_empty':      'El carrito está vacío',
+  'toast.rating_required': 'Selecciona de 1 a 5 estrellas',
+  'toast.conn_error':      'Error de conexión',
+  'toast.link_copied':     '🔗 Enlace copiado al portapapeles',
+  'toast.no_stock_warning':'Sin stock: {list}',
+  'toast.profile_updated': 'Perfil actualizado correctamente.',
+  'toast.wishlist_error':  'Error al guardar favorito',
+  // Carrito abandonado
+  'abandoned.msg':        '🛒 Tienes {n} artículo(s) guardados por ${total} CUP',
+  'abandoned.view_cart':  'Ver carrito',
+  'abandoned.dismiss':    'Descartar',
+  // Búsqueda
+  'search.not_found': 'No se encontraron productos',
+  'search.searching': '🔍 Buscando...',
+  'search.error':     'Error al buscar',
+  // Misc
+  'btn.close':   'Cerrar',
+  'btn.back':    'Volver',
+  'btn.loading': 'Cargando...',
+  'wishlist.add_aria':    'Agregar a favoritos',
+  'wishlist.remove_aria': 'Quitar de favoritos',
+};
+
+const LANG_EN = {}; // filled lazily from lang/en.json
+
+let currentLang = localStorage.getItem('palweb_lang') || 'es';
+
+function t(key, vars = {}) {
+    const dict = currentLang === 'en' ? LANG_EN : LANG_ES;
+    let str = dict[key] ?? LANG_ES[key] ?? key;
+    Object.entries(vars).forEach(([k, v]) => { str = str.replaceAll('{' + k + '}', v); });
+    return str;
+}
+
+async function setLang(lang) {
+    if (lang === 'en' && Object.keys(LANG_EN).length === 0) {
+        try {
+            const r = await fetch('lang/en.json');
+            if (r.ok) Object.assign(LANG_EN, await r.json());
+        } catch(e) { console.warn('No se pudo cargar lang/en.json'); }
+    }
+    currentLang = lang;
+    localStorage.setItem('palweb_lang', lang);
+    applyLang();
+    updateLangSelector();
+}
+
+function applyLang() {
+    // Textos en nodos de texto
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+        el.textContent = t(el.dataset.i18n);
+    });
+    // Atributos (placeholder, title, aria-label, etc.)
+    document.querySelectorAll('[data-i18n-attr]').forEach(el => {
+        const [attr, key] = el.dataset.i18nAttr.split(':');
+        el.setAttribute(attr, t(key));
+    });
+}
+
+function updateLangSelector() {
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === currentLang);
+    });
+}
+
+// Inicializar al cargar
+document.addEventListener('DOMContentLoaded', () => {
+    updateLangSelector();
+    if (currentLang === 'en') setLang('en');
+});
+</script>
+<!-- ── /i18n Engine ─────────────────────────────────────────────────── -->
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 
@@ -2188,7 +2467,7 @@ ob_end_flush();
         const list    = document.getElementById('reviewsList');
         const avgDisp = document.getElementById('reviewsAvgDisplay');
         const formWrap = document.getElementById('reviewFormWrap');
-        list.innerHTML = '<div class="text-center text-muted py-2 small">Cargando reseñas...</div>';
+        list.innerHTML = `<div class="text-center text-muted py-2 small">${t('reviews.loading')}</div>`;
         avgDisp.innerHTML = '';
         formWrap.innerHTML = '';
 
@@ -2217,23 +2496,23 @@ ob_end_flush();
                     </div>
                 `).join('');
             } else {
-                list.innerHTML = '<div class="text-center text-muted py-2 small">Sin reseñas aún. ¡Sé el primero!</div>';
+                list.innerHTML = `<div class="text-center text-muted py-2 small">${t('reviews.empty')}</div>`;
             }
 
             if (IS_LOGGED_IN) {
                 formWrap.innerHTML = `
                     <div class="border rounded-3 p-3 bg-light mt-2">
-                        <p class="fw-bold mb-2 small">Tu valoración</p>
+                        <p class="fw-bold mb-2 small">${t('reviews.your_rating')}</p>
                         <div id="starInput" data-codigo="${escHtml(codigo)}" data-rating="0" class="mb-2">
                             ${[1,2,3,4,5].map(n =>
                                 `<span class="star-pick" data-val="${n}" style="font-size:1.6rem;cursor:pointer;color:#d1d5db;">★</span>`
                             ).join('')}
                         </div>
                         <textarea id="reviewComment" class="form-control form-control-sm mb-2" rows="2"
-                            placeholder="Cuéntanos tu experiencia (opcional)" maxlength="400"></textarea>
+                            placeholder="${t('reviews.comment_ph')}" maxlength="400"></textarea>
                         <button class="btn btn-warning btn-sm rounded-pill px-3 fw-bold"
                             onclick="submitReview('${escHtml(codigo)}')">
-                            <i class="fas fa-paper-plane me-1"></i> Publicar
+                            <i class="fas fa-paper-plane me-1"></i> ${t('reviews.submit')}
                         </button>
                     </div>`;
 
@@ -2253,10 +2532,10 @@ ob_end_flush();
                     picks.forEach(x => x.style.color = parseInt(x.dataset.val) <= selectedRating ? '#f59e0b' : '#d1d5db'));
             } else {
                 formWrap.innerHTML = `<p class="text-center text-muted small mt-2">
-                    <a href="#" onclick="toggleAuthModal()">Inicia sesión</a> para dejar una reseña.</p>`;
+                    <a href="#" onclick="toggleAuthModal()">${t('reviews.login_link')}</a> ${t('reviews.login_prompt')}</p>`;
             }
         } catch(e) {
-            list.innerHTML = '<div class="text-center text-muted py-2 small">No se pudieron cargar las reseñas.</div>';
+            list.innerHTML = `<div class="text-center text-muted py-2 small">${t('reviews.load_error')}</div>`;
         }
     }
 
@@ -2264,7 +2543,7 @@ ob_end_flush();
         const starInput = document.getElementById('starInput');
         const rating    = parseInt(starInput?.dataset.rating ?? 0);
         const comment   = document.getElementById('reviewComment')?.value.trim() ?? '';
-        if (rating < 1 || rating > 5) { showToast('Selecciona de 1 a 5 estrellas'); return; }
+        if (rating < 1 || rating > 5) { showToast(t('toast.rating_required')); return; }
 
         try {
             const res = await fetch('shop.php', {
@@ -2274,12 +2553,12 @@ ob_end_flush();
             });
             const data = await res.json();
             if (data.status === 'success') {
-                showToast('¡Reseña publicada! Gracias por tu opinión.');
+                showToast(t('toast.review_ok'));
                 loadReviews(codigo); // Recargar
             } else {
                 showToast(data.msg || 'Error al publicar reseña');
             }
-        } catch(e) { showToast('Error de conexión'); }
+        } catch(e) { showToast(t('toast.conn_error')); }
     }
 
     // ========================================================
@@ -2327,7 +2606,7 @@ ob_end_flush();
     function renderHistory(pedidos) {
         const div = document.getElementById('orderHistoryContent');
         if (!pedidos || pedidos.length === 0) {
-            div.innerHTML = '<div class="text-center py-5 text-muted"><i class="fas fa-box-open fa-2x mb-2 d-block opacity-50"></i>Aún no tienes pedidos registrados.</div>';
+            div.innerHTML = `<div class="text-center py-5 text-muted"><i class="fas fa-box-open fa-2x mb-2 d-block opacity-50"></i>${t('profile.no_orders')}</div>`;
             return;
         }
 
@@ -2361,8 +2640,8 @@ ob_end_flush();
             <div class="list-group-item px-0 py-3 border-bottom">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <div class="fw-bold">${tipoIcon(p.tipo_servicio)}Pedido #${idPad}</div>
-                        <div class="small text-muted">${fmt(p.fecha)} · ${p.num_items} producto(s)</div>
+                        <div class="fw-bold">${tipoIcon(p.tipo_servicio)}${t('tracking.order', {id: idPad})}</div>
+                        <div class="small text-muted">${fmt(p.fecha)} · ${t('profile.products', {n: p.num_items})}</div>
                     </div>
                     <div class="text-end">
                         ${estadoBadge(p)}
@@ -2371,7 +2650,7 @@ ob_end_flush();
                 </div>
                 <div class="mt-2">
                     <a href="ticket_view.php?id=${p.id}" target="_blank" class="btn btn-outline-secondary btn-sm py-0 px-2">
-                        <i class="fas fa-receipt me-1"></i>Ver ticket
+                        <i class="fas fa-receipt me-1"></i>${t('profile.view_ticket')}
                     </a>
                 </div>
             </div>`;
@@ -2477,7 +2756,7 @@ ob_end_flush();
         if (matches.length > 0) {
             matches.forEach(item => searchResults.appendChild(renderSearchItem(item)));
         } else {
-            searchResults.innerHTML = '<div class="p-3 text-center text-muted">No se encontraron productos</div>';
+            searchResults.innerHTML = `<div class="p-3 text-center text-muted">${t('search.not_found')}</div>`;
         }
         searchResults.style.display = 'block';
         return true;
@@ -2496,7 +2775,7 @@ ob_end_flush();
         if (doClientSearch(query)) return;
 
         // Fallback a AJAX si no hay caché
-        searchResults.innerHTML = '<div class="p-3 text-center">🔍 Buscando...</div>';
+        searchResults.innerHTML = `<div class="p-3 text-center">${t('search.searching')}</div>`;
         searchResults.style.display = 'block';
 
         searchTimeout = setTimeout(async () => {
@@ -2511,10 +2790,10 @@ ob_end_flush();
                 if (data.length > 0) {
                     data.forEach(item => searchResults.appendChild(renderSearchItem(item)));
                 } else {
-                    searchResults.innerHTML = '<div class="p-3 text-center text-muted">No se encontraron productos</div>';
+                    searchResults.innerHTML = `<div class="p-3 text-center text-muted">${t('search.not_found')}</div>`;
                 }
             } catch (error) {
-                searchResults.innerHTML = '<div class="p-3 text-danger">Error al buscar</div>';
+                searchResults.innerHTML = `<div class="p-3 text-danger">${t('search.error')}</div>`;
             }
         }, 300);
     });
@@ -2560,8 +2839,8 @@ ob_end_flush();
 
         const variantLabel = variant ? ` (${variant.nombre})` : '';
         const msg = isReserva
-            ? `📅 Reserva agregada${variantLabel}`
-            : `✓ Agregado al carrito${variantLabel}`;
+            ? t('toast.reserved') + variantLabel
+            : t('toast.added') + variantLabel;
         showToast(msg);
     }
     
@@ -2571,7 +2850,7 @@ ob_end_flush();
         let total = 0;
         
         if (cart.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-4 text-muted">Carrito vacío</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="4" class="text-center py-4 text-muted">${t('cart.empty_state')}</td></tr>`;
         } else {
             cart.forEach((item, index) => {
                 const subtotal = item.qty * item.price;
@@ -2629,7 +2908,7 @@ ob_end_flush();
     }
     
     function clearCart() {
-        if (confirm('¿Vaciar el carrito?')) {
+        if (confirm(t('cart.confirm_clear'))) {
             cart = [];
             updateCounters();
             renderCart();
@@ -2645,7 +2924,7 @@ ob_end_flush();
 
         // Llenar campos con el nuevo diseño profesional
         document.getElementById('detailName').innerText = data.name;
-        document.getElementById('detailDesc').innerText = data.desc || 'Sin descripción detallada.';
+        document.getElementById('detailDesc').innerText = data.desc || t('modal.no_desc');
         document.getElementById('detailCat').innerText = data.cat || 'General';
         document.getElementById('detailSku').innerText = data.code || '-';
         document.getElementById('detailUnit').innerText = data.unit ? '/ ' + data.unit : '';
@@ -2681,32 +2960,32 @@ ob_end_flush();
         avisoSection.style.display = 'none';
 
         if (data.hasStock) {
-            stockBadge.innerText = '✓ Disponible';
+            stockBadge.innerText = t('stock.available');
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-success';
             btn.disabled = false;
             btn.style.background = '';
-            btn.innerHTML = '<i class="fas fa-cart-plus me-2"></i> AGREGAR AL CARRITO';
+            btn.innerHTML = `<i class="fas fa-cart-plus me-2"></i> ${t('modal.add_to_cart')}`;
             btn.onclick = () => {
                 addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, false);
                 modalDetail.hide();
             };
         } else if (data.esReservable) {
-            stockBadge.innerText = '📅 Disponible bajo reserva';
+            stockBadge.innerText = t('stock.reservable');
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-warning text-dark';
             btn.disabled = false;
             btn.style.background = '#f59e0b';
-            btn.innerHTML = '📅 RESERVAR PRODUCTO';
+            btn.innerHTML = t('modal.reserve_product');
             btn.onclick = () => {
                 addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, true);
                 modalDetail.hide();
             };
         } else {
             // Feature 1: mostrar form de aviso restock
-            stockBadge.innerText = '✗ Agotado';
+            stockBadge.innerText = t('stock.out_of_stock');
             stockBadge.className = 'position-absolute top-0 start-0 m-3 badge rounded-pill bg-danger';
             btn.disabled = true;
             btn.style.background = '#6c757d';
-            btn.innerHTML = '✗ PRODUCTO AGOTADO';
+            btn.innerHTML = t('modal.out_of_stock');
             avisoSection.style.display = 'block';
             avisoSection.setAttribute('data-codigo', data.id);
         }
@@ -2782,7 +3061,7 @@ ob_end_flush();
     }
 
     function iniciarFlujo(flujo) {
-        if (cart.length === 0) { showToast('El carrito está vacío'); return; }
+        if (cart.length === 0) { showToast(t('toast.cart_empty')); return; }
         flujoActual = flujo;
 
         if (flujo === 'compra') {
@@ -3073,7 +3352,7 @@ ob_end_flush();
             const res = await fetch('shop.php?action_geo=list_mun');
             const muns = await res.json();
             const sel = document.getElementById('cMun');
-            sel.innerHTML = '<option value="">Seleccione municipio...</option>';
+            sel.innerHTML = `<option value="">${t('checkout.municipality_ph')}</option>`;
             muns.forEach(m => sel.innerHTML += `<option value="${m}">${m}</option>`);
         } catch(e) {
             console.error('Error cargando municipios:', e);
@@ -3086,7 +3365,7 @@ ob_end_flush();
             const res = await fetch(`shop.php?action_geo=list_bar&m=${encodeURIComponent(mun)}`);
             const bars = await res.json();
             const sel = document.getElementById('cBar');
-            sel.innerHTML = '<option value="">Seleccione barrio...</option>';
+            sel.innerHTML = `<option value="">${t('checkout.neighborhood_ph')}</option>`;
             bars.forEach(b => sel.innerHTML += `<option value="${b}">${b}</option>`);
             calcShip();
         } catch(e) {
@@ -3131,7 +3410,7 @@ ob_end_flush();
         e.preventDefault();
         const btn = e.target.querySelector('button[type="submit"]');
         btn.disabled = true;
-        btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Enviando...';
+        btn.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>${t('checkout.sending')}`;
 
         let address = document.getElementById('cliDir').value;
         const notes = document.getElementById('cliNotes').value;
@@ -3141,9 +3420,9 @@ ob_end_flush();
             const mun = document.getElementById('cMun').value;
             const bar = document.getElementById('cBar').value;
             if (!mun || !bar) {
-                alert('Por favor selecciona municipio y barrio');
+                alert(t('checkout.mun_bar_required'));
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+                btn.innerHTML = `<i class="fas fa-check-circle me-2"></i> ${t('checkout.confirm')}`;
                 return;
             }
             address = `[MENSAJERÍA: ${mun} - ${bar}] ${address}`;
@@ -3166,9 +3445,9 @@ ob_end_flush();
                 const codigoInput = document.getElementById('codigoPago_' + metodoPago.replace(/\W/g, '_'));
                 codigoPago = (codigoInput?.value || '').trim();
                 if (!codigoPago) {
-                    alert('Por favor ingresa el código de confirmación de la transferencia.');
+                    alert(t('checkout.transfer_code_required'));
                     btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+                    btn.innerHTML = `<i class="fas fa-check-circle me-2"></i> ${t('checkout.confirm')}`;
                     return;
                 }
                 estadoPago = 'verificando';
@@ -3183,7 +3462,7 @@ ob_end_flush();
             document.getElementById('slotErrorMsg').style.display = 'block';
             document.getElementById('slotErrorMsg').scrollIntoView({ behavior: 'smooth', block: 'center' });
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+            btn.innerHTML = `<i class="fas fa-check-circle me-2"></i> ${t('checkout.confirm')}`;
             return;
         }
 
@@ -3236,7 +3515,7 @@ ob_end_flush();
             alert('Error de red al enviar el pedido. Verifica tu conexión.');
         } finally {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check-circle me-2"></i>Confirmar Pedido';
+            btn.innerHTML = `<i class="fas fa-check-circle me-2"></i> ${t('checkout.confirm')}`;
         }
     }
     
@@ -3320,7 +3599,7 @@ ob_end_flush();
             body.innerHTML = ''; // Limpiar y repintar (simple pero efectivo)
             
             if (msgs.length === 0) {
-                body.innerHTML = '<div class="text-center text-muted small mt-5">¡Hola! 👋<br>Escribe tu consulta.<br>Si no estamos, deja un mensaje.</div>';
+                body.innerHTML = `<div class="text-center text-muted small mt-5">${t('chat.greeting').replace(/\n/g,'<br>')}</div>`;
                 return;
             }
 
@@ -3367,41 +3646,41 @@ ob_end_flush();
             }
 
             if (data.length === 0) {
-                resultsDiv.innerHTML = '<div class="alert alert-warning">No se encontraron pedidos con ese dato.</div>';
+                resultsDiv.innerHTML = `<div class="alert alert-warning">${t('tracking.not_found')}</div>`;
                 return;
             }
-            
+
             let html = '<div class="list-group shadow-sm">';
             data.forEach(p => {
                 let badgeClass = 'bg-secondary';
-                let statusText = 'Estado desconocido.';
-                
+                let statusText = t('status.unknown');
+
                 switch (p.estado) {
                     case 'Pendiente':
                         badgeClass = 'bg-warning text-dark';
-                        statusText = 'Tu pedido ha sido recibido y está esperando confirmación. ¡Pronto empezaremos a prepararlo!';
+                        statusText = t('status.pendiente');
                         break;
                     case 'En Preparación':
                         badgeClass = 'bg-info';
-                        statusText = '¡Estamos preparando tu pedido con mucho cariño! En breve estará listo para salir.';
+                        statusText = t('status.en_preparacion');
                         break;
                     case 'En Camino':
                         badgeClass = 'bg-primary';
-                        statusText = '¡Buenas noticias! Tu pedido ha salido del local y va en camino. El mensajero está de ruta.';
+                        statusText = t('status.en_camino');
                         break;
                     case 'Entregado':
                         badgeClass = 'bg-success';
-                        statusText = '¡Tu pedido ha sido entregado con éxito! Esperamos que lo disfrutes.';
+                        statusText = t('status.entregado');
                         break;
                     case 'Cancelado':
                         badgeClass = 'bg-danger';
-                        statusText = 'Lamentamos informarte que tu pedido ha sido cancelado. Por favor, contáctanos si tienes alguna duda.';
+                        statusText = t('status.cancelado');
                         break;
                 }
-                
+
                 let productsHtml = '';
                 if (p.items && p.items.length > 0) {
-                    productsHtml = '<div class="small mt-3 pt-2 border-top border-light-subtle"><b>Productos:</b><ul>';
+                    productsHtml = `<div class="small mt-3 pt-2 border-top border-light-subtle"><b>${t('tracking.products')}</b><ul>`;
                     p.items.forEach(item => {
                         productsHtml += `<li>${item.qty}x ${item.name} ($${parseFloat(item.price).toFixed(2)})</li>`;
                     });
@@ -3411,16 +3690,16 @@ ob_end_flush();
                 html += `
                 <div class="list-group-item border-0 border-bottom p-3 animate__animated animate__fadeIn">
                     <div class="d-flex justify-content-between align-items-center mb-2">
-                        <span class="fw-bold">Pedido #${p.id}</span>
+                        <span class="fw-bold">${t('tracking.order', {id: p.id})}</span>
                         <span class="badge ${badgeClass}">${p.estado}</span>
                     </div>
                     <div class="small text-muted mb-1">
                         <i class="fas fa-calendar-alt me-1"></i> ${p.fecha}
                     </div>
                     <div class="mb-2">
-                        <i class="fas fa-user me-1"></i> Cliente: <span class="fw-bold text-dark">${p.cliente_nombre || 'N/A'}</span>
+                        <i class="fas fa-user me-1"></i> ${t('tracking.client')} <span class="fw-bold text-dark">${p.cliente_nombre || 'N/A'}</span>
                     </div>
-                    <div class="fw-bold text-primary mb-2">Total: $${parseFloat(p.total).toFixed(2)}</div>
+                    <div class="fw-bold text-primary mb-2">${t('tracking.total')} $${parseFloat(p.total).toFixed(2)}</div>
                     <div class="alert alert-light border small py-2 animate__animated animate__fadeIn">
                         <i class="fas fa-info-circle me-1"></i> ${statusText}
                     </div>
@@ -3429,7 +3708,7 @@ ob_end_flush();
             });
             html += '</div>';
             resultsDiv.innerHTML = html;
-        } catch (e) { resultsDiv.innerHTML = '<div class="alert alert-danger">Error al consultar.</div>'; }
+        } catch (e) { resultsDiv.innerHTML = `<div class="alert alert-danger">${t('tracking.error')}</div>`; }
     }
 
     // ========================================================
@@ -3445,7 +3724,7 @@ ob_end_flush();
     async function loginClient() {
         const tel = document.getElementById('logTel').value;
         const pass = document.getElementById('logPass').value;
-        if (!tel || !pass) return alert("Completa los campos.");
+        if (!tel || !pass) return alert(t('auth.fill_fields'));
 
         try {
             const res = await fetch('shop.php', {
@@ -3459,7 +3738,7 @@ ob_end_flush();
             } else {
                 alert(data.msg);
             }
-        } catch (e) { alert("Error de conexión."); }
+        } catch (e) { alert(t('auth.conn_error')); }
     }
 
     async function registerClient() {
@@ -3554,7 +3833,7 @@ ob_end_flush();
 
       <!-- Redes Sociales -->
       <div class="col-12 col-md-4 text-center">
-        <p class="mb-2" style="font-size:.8rem;opacity:.8;text-transform:uppercase;letter-spacing:.05em;">Síguenos</p>
+        <p class="mb-2" style="font-size:.8rem;opacity:.8;text-transform:uppercase;letter-spacing:.05em;" data-i18n="footer.follow">Síguenos</p>
         <div class="d-flex justify-content-center gap-3 flex-wrap">
           <?php if ($fbUrl): ?>
           <a href="<?php echo htmlspecialchars($fbUrl); ?>" target="_blank" rel="noopener noreferrer"
@@ -3583,8 +3862,12 @@ ob_end_flush();
         </div>
       </div>
 
-      <!-- Sistema -->
+      <!-- Sistema + selector de idioma -->
       <div class="col-12 col-md-4 text-center text-md-end">
+        <div class="mb-2">
+            <button class="btn btn-sm btn-outline-light lang-btn me-1" data-lang="es" onclick="setLang('es')">🇨🇺 ES</button>
+            <button class="btn btn-sm btn-outline-light lang-btn" data-lang="en" onclick="setLang('en')">🇺🇸 EN</button>
+        </div>
         <small style="opacity:.65;font-size:.72rem;">Sistema PALWEB POS v3.0</small>
       </div>
 
