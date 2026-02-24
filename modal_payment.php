@@ -163,7 +163,9 @@ function renderMixedInputsPOS() {
         const dark   = color === 'warning' ? 'text-dark' : 'text-white';
         container.innerHTML += `
             <div class="input-group mb-2">
-                <span class="input-group-text bg-${color} ${dark}" style="width:130px;">${m.nombre}</span>
+                <span class="input-group-text bg-${color} ${dark}" style="width:130px; cursor:pointer;"
+                      onclick="fillRemainingMixed('${m.id.replace(/'/g,"\\'")}')"
+                      title="Click para completar restante">${m.nombre}</span>
                 <input type="number" class="form-control split-payment-input text-end"
                        id="payMixed_${m.id.replace(/\W/g,'_')}" data-method-id="${m.id}"
                        placeholder="0.00" min="0" step="0.01"
@@ -259,6 +261,21 @@ window.calculateMixedTotals = function() {
             document.getElementById('btn-confirm-payment').disabled = false;
         }
     }
+};
+
+window.fillRemainingMixed = function(targetMethodId) {
+    const inputs = Array.from(document.querySelectorAll('.split-payment-input'));
+    const safeId = targetMethodId.replace(/\W/g, '_');
+    const target = document.getElementById('payMixed_' + safeId);
+    if (!target) return;
+    let otherTotal = 0;
+    inputs.forEach(inp => {
+        if (inp.dataset.methodId !== targetMethodId)
+            otherTotal += parseFloat(inp.value) || 0;
+    });
+    const remaining = currentSaleTotal - otherTotal;
+    target.value = remaining > 0 ? remaining.toFixed(2) : '0.00';
+    calculateMixedTotals();
 };
 
 function autoCompleteMixedDynamic(sourceId) {
