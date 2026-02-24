@@ -107,7 +107,7 @@ $stmt->execute([$sku, $EMP_ID]);
 $p = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$p) die('<div class="alert alert-warning">Producto no encontrado.</div>');
 
-$localPath = '/home/marinero/product_images/';
+$localPath = '/var/www/assets/product_images/';
 
 // Colores predefinidos para etiqueta
 $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#22c55e'=>'Verde','#3b82f6'=>'Azul','#8b5cf6'=>'Morado','#ec4899'=>'Rosa'];

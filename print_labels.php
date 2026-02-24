@@ -12,7 +12,7 @@ require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
-$localPath = '/home/marinero/product_images/'; 
+$localPath = '/var/www/assets/product_images/'; 
 
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)

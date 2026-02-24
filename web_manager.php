@@ -18,7 +18,7 @@ require_once 'db.php';
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
-$localPath = '/home/marinero/product_images/'; 
+$localPath = '/var/www/assets/product_images/'; 
 
 // 2. PROCESAR PETICIONES AJAX (GUARDADO AUTOMÁTICO)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {

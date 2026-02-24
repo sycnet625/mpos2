@@ -11,7 +11,7 @@ require_once 'db.php';
 require_once 'config_loader.php';
 
 // ── Configuración ────────────────────────────────────────────────────────────
-define('IMG_DIR',      '/home/marinero/product_images/');
+define('IMG_DIR',      '/var/www/assets/product_images/');
 define('WEBP_QUALITY', 82);    // 0-100 (mayor = mejor calidad, mayor tamaño)
 define('AVIF_QUALITY', 60);    // 0-100 (AVIF logra calidad equivalente a JPEG-85 con 55-65)
 define('AVIF_SPEED',   6);     // 0-10 (0=lento/mejor compresión, 10=rápido/peor compresión)

@@ -8,7 +8,7 @@ require_once 'db.php';
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
-$localPath = '/home/marinero/product_images/'; 
+$localPath = '/var/www/assets/product_images/'; 
 
 // =========================================================
 //  BACKEND: PROCESAR SOLICITUDES (AJAX)

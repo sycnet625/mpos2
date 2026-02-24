@@ -8,7 +8,7 @@
 // Pega aquí tu clave de Pexels:
 define('PEXELS_API_KEY', 'RIF7J3NM9hhMei93oSqqlg7JPeC9qfuIiGF2eR8jDPWMPyLOxM8UnLM4'); 
 
-$localImgPath = '/home/marinero/product_images/';
+$localImgPath = '/var/www/assets/product_images/';
 
 set_time_limit(0);
 ini_set('display_errors', 1);

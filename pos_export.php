@@ -3,7 +3,7 @@
 require_once 'db.php';
 
 // --- CONFIGURACIÓN ---
-$localPath = '/home/marinero/product_images/'; // Ruta definida en pos.php y products_table.php
+$localPath = '/var/www/assets/product_images/'; // Ruta definida en pos.php y products_table.php
 
 // OBTENER CATEGORÍAS PARA EL FILTRO
 $cats = $pdo->query("SELECT DISTINCT categoria FROM productos ORDER BY categoria")->fetchAll(PDO::FETCH_COLUMN);

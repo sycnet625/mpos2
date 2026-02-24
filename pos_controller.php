@@ -49,7 +49,7 @@ try {
 }
 
 // Procesamiento visual
-$localPath = '/home/marinero/product_images/';
+$localPath = '/var/www/assets/product_images/';
 foreach ($prods as &$p) {
     $p['has_image'] = file_exists($localPath . $p['codigo'] . '.jpg');
     $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);

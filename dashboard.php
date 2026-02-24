@@ -51,7 +51,7 @@ function getRows($pdo, $sql, $params = []) {
 
 // --- CHEQUEO DE SISTEMA ---
 function getSystemStatus() {
-    $imgDir = '/home/marinero/product_images/';
+    $imgDir = '/var/www/assets/product_images/';
     return [
         'gd' => extension_loaded('gd'),
         'zip' => class_exists('ZipArchive'),

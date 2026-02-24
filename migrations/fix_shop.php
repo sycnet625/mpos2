@@ -30,7 +30,7 @@ try {
 
     // 2. VERIFICAR PERMISOS DE IMÁGENES
     echo "<hr><h3>2. Verificando Acceso a Imágenes...</h3>";
-    $path = '/home/marinero/product_images/';
+    $path = '/var/www/assets/product_images/';
     
     // Ver si la restricción open_basedir está activa
     $basedir = ini_get('open_basedir');

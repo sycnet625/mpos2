@@ -86,10 +86,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 id_sucursal_origen
             ) VALUES (
                 ?, ?, ?, ?, ?,
-                ?, ?, ?, 1, ?,
+                ?, ?, ?, ?, 1,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?
             )";
 
             $stmt = $pdo->prepare($sql);

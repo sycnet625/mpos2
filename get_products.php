@@ -47,7 +47,7 @@ try {
     $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 4. PROCESAMIENTO ADICIONAL
-    $localPath = '/home/marinero/product_images/'; // Ajusta si tu ruta de imágenes es diferente
+    $localPath = '/var/www/assets/product_images/'; // Ajusta si tu ruta de imágenes es diferente
     
     foreach ($prods as &$p) {
         $p['precio'] = floatval($p['precio']);

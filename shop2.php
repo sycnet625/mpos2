@@ -100,7 +100,7 @@ if (isset($_GET['ajax_search'])) {
 // CARGA INICIAL
 $sort = $_GET['sort'] ?? 'categoria_asc';
 $catFilter = trim($_GET['cat'] ?? '');
-$localImgPath = '/home/marinero/product_images/';
+$localImgPath = '/var/www/assets/product_images/';
 
 try {
     $stmtCats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND es_web=1 AND es_materia_prima=0 AND id_empresa=$EMP_ID ORDER BY categoria ASC");

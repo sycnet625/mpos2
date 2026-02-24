@@ -256,7 +256,7 @@ if (isset($_GET['ajax_search'])) {
 // =========================================================
 $catFilter = trim($_GET['cat'] ?? '');
 $sort = $_GET['sort'] ?? 'categoria_asc';
-$localImgPath = '/home/marinero/product_images/';
+$localImgPath = '/var/www/assets/product_images/';
 
 try {
     $catSql = "SELECT DISTINCT categoria FROM productos 

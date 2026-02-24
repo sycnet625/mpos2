@@ -11,7 +11,7 @@ if (empty($code)) {
     exit;
 }
 
-$base      = '/home/marinero/product_images/' . $code;
+$base      = '/var/www/assets/product_images/' . $code;
 $accept    = $_SERVER['HTTP_ACCEPT'] ?? '';
 $supAvif   = str_contains($accept, 'image/avif');
 $supWebp   = str_contains($accept, 'image/webp');
