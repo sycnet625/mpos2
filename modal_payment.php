@@ -58,6 +58,8 @@ window.POS_MONEDA_DEFAULT = <?= json_encode($config['moneda_default_pos'] ?? 'CU
                     </div>
                 </div>
 
+                <div id="especialPaymentSection" class="d-none"></div>
+
                 <div id="simplePaymentSection" class="d-none"><div class="alert alert-info text-center"><i class="fas fa-check-circle me-1"></i> Pago por el monto exacto.</div></div>
 
                 <div id="mixedPaymentSection" class="d-none">
@@ -204,6 +206,8 @@ window.setPaymentMode = function(mode) {
     currentPaymentMode = mode;
     ['cashPaymentSection', 'simplePaymentSection', 'mixedPaymentSection'].forEach(id =>
         document.getElementById(id).classList.add('d-none'));
+    document.getElementById('especialPaymentSection').classList.add('d-none');
+    document.getElementById('especialPaymentSection').innerHTML = '';
 
     const metodoEfectivo = (window.METODOS_PAGO_POS || [])[0]?.id || 'Efectivo';
     if (mode === metodoEfectivo) {
@@ -220,6 +224,14 @@ window.setPaymentMode = function(mode) {
         setTimeout(() => first?.select(), 100);
     } else {
         document.getElementById('simplePaymentSection').classList.remove('d-none');
+    }
+
+    // Mostrar texto especial si el método lo tiene
+    const metodoObj = (window.METODOS_PAGO_POS || []).find(m => m.id === mode);
+    if (metodoObj?.es_especial && metodoObj?.texto_especial) {
+        const espSection = document.getElementById('especialPaymentSection');
+        espSection.innerHTML = `<div class="alert alert-warning border-0 text-center mb-2"><i class="fas fa-info-circle me-1"></i> ${metodoObj.texto_especial.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+        espSection.classList.remove('d-none');
     }
 };
 

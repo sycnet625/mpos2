@@ -34,9 +34,9 @@ if (!isset($config)) {
         "tipo_cambio_mlc"    => 310.00,
         "moneda_default_pos" => "CUP",
         "metodos_pago" => [
-            ["id"=>"Efectivo",      "nombre"=>"Efectivo",      "icono"=>"fa-money-bill-wave","color_bootstrap"=>"success","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>false],
-            ["id"=>"Transferencia", "nombre"=>"Transferencia", "icono"=>"fa-university",     "color_bootstrap"=>"primary","activo"=>true,"requiere_codigo"=>true, "aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>true],
-            ["id"=>"Tarjeta",       "nombre"=>"Tarjeta/Gasto", "icono"=>"fa-credit-card",    "color_bootstrap"=>"warning","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>false,"es_transferencia"=>false],
+            ["id"=>"Efectivo",      "nombre"=>"Efectivo",      "icono"=>"fa-money-bill-wave","color_bootstrap"=>"success","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>false,"es_especial"=>false,"texto_especial"=>""],
+            ["id"=>"Transferencia", "nombre"=>"Transferencia", "icono"=>"fa-university",     "color_bootstrap"=>"primary","activo"=>true,"requiere_codigo"=>true, "aplica_pos"=>true, "aplica_shop"=>true, "es_transferencia"=>true, "es_especial"=>false,"texto_especial"=>""],
+            ["id"=>"Tarjeta",       "nombre"=>"Tarjeta/Gasto", "icono"=>"fa-credit-card",    "color_bootstrap"=>"warning","activo"=>true,"requiere_codigo"=>false,"aplica_pos"=>true, "aplica_shop"=>false,"es_transferencia"=>false,"es_especial"=>false,"texto_especial"=>""],
         ],
     ];
 

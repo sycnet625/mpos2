@@ -2990,18 +2990,33 @@ ob_end_flush();
                         <small class="text-muted">Código de confirmación de la transferencia.</small>
                     </div>`;
             }
+            if (m.es_especial && m.texto_especial) {
+                const safeId = m.id.replace(/\W/g,'_');
+                container.innerHTML += `
+                    <div id="especialInfo_${safeId}" style="display:none;" class="mb-2">
+                        <div class="p-3 rounded" style="background:#fff8e1; border-left:4px solid #ffc107;">
+                            <div class="small"><i class="fas fa-info-circle me-1 text-warning"></i>${m.texto_especial.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+                        </div>
+                    </div>`;
+            }
         });
     }
 
     function onPayMethodChange() {
         const val = document.querySelector('input[name=metodoPago]:checked')?.value;
-        // Ocultar todos los paneles de transferencia
+        // Ocultar todos los paneles de transferencia y especiales
         document.querySelectorAll('[id^="transInfo_"]').forEach(d => d.style.display = 'none');
+        document.querySelectorAll('[id^="especialInfo_"]').forEach(d => d.style.display = 'none');
         if (val) {
+            const safeVal = val.replace(/\W/g, '_');
             const metodo = (window.SHOP_METODOS || []).find(x => x.id === val);
             if (metodo?.es_transferencia) {
-                const transDiv = document.getElementById('transInfo_' + val.replace(/\W/g, '_'));
+                const transDiv = document.getElementById('transInfo_' + safeVal);
                 if (transDiv) transDiv.style.display = 'block';
+            }
+            if (metodo?.es_especial && metodo?.texto_especial) {
+                const espDiv = document.getElementById('especialInfo_' + safeVal);
+                if (espDiv) espDiv.style.display = 'block';
             }
         }
     }
