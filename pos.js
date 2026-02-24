@@ -183,7 +183,169 @@ window.saveCartState = function() { localStorage.setItem('pos_cart_state', JSON.
 window.restoreCartState = function() { try{const s=JSON.parse(localStorage.getItem('pos_cart_state')); if(s){cart=s.cart;globalDiscountPct=s.globalDiscountPct;renderCart();}}catch(e){} };
 window.updatePinDisplay = function() { const d=document.getElementById('pinDisplay'); if(d) d.innerText = '•'.repeat(enteredPin.length); };
 window.typePin = function(v) { Synth.click(); if(v==='C') enteredPin=""; else if(enteredPin.length<4) enteredPin+=v; updatePinDisplay(); };
-window.verifyPin = function() { if(enteredPin==="0000"){ document.getElementById('pinOverlay').style.display='none'; Synth.tada(); checkCashStatusSilent(); } else { Synth.error(); enteredPin=""; updatePinDisplay(); showToast("Error PIN","error"); } };
+window.verifyPin = function() {
+    const cfg = (typeof CAJEROS_CONFIG !== 'undefined') ? CAJEROS_CONFIG : [];
+    const matched = cfg.find(c => String(c.pin) === String(enteredPin));
+    if (matched) {
+        window.currentCajero    = matched.nombre;
+        window.currentCajeroRol = matched.rol || 'cajero';
+        document.getElementById('pinOverlay').style.display = 'none';
+        const nameEl = document.getElementById('cashierName');
+        if (nameEl) nameEl.textContent = matched.nombre;
+        Synth.tada();
+        checkCashStatusSilent();
+        const btnInv = document.getElementById('btnInventario');
+        if (btnInv) btnInv.style.display = window.currentCajeroRol === 'admin' ? '' : 'none';
+    } else {
+        Synth.error(); enteredPin = ""; updatePinDisplay(); showToast("Error PIN", "error");
+    }
+};
+
+// ── MÓDULO INVENTARIO POS ────────────────────────────────────────────────────
+const INV_CONFIG = {
+    entrada: { title: 'Recepción de Mercancía', icon: 'fa-truck-loading',  color: 'success', qtyLabel: 'Cantidad recibida' },
+    ajuste:  { title: 'Ajuste de Conteo',       icon: 'fa-sliders-h',      color: 'warning', qtyLabel: 'Cantidad a ajustar' },
+    conteo:  { title: 'Conteo Físico',           icon: 'fa-barcode',        color: 'info',    qtyLabel: 'Cantidad contada (total real)' },
+    merma:   { title: 'Registrar Merma',         icon: 'fa-trash-alt',      color: 'danger',  qtyLabel: 'Cantidad a dar de baja' },
+};
+
+window.toggleInventarioMode = function() {
+    const kp    = document.getElementById('keypadContainer');
+    const ip    = document.getElementById('inventarioPanel');
+    const cobrar = document.querySelector('.btn-pay');
+    const btnInv = document.getElementById('btnInventario');
+    const isInv  = ip.style.display !== 'none';
+    kp.style.display    = isInv ? '' : 'none';
+    ip.style.display    = isInv ? 'none' : '';
+    cobrar.style.display = isInv ? '' : 'none';
+    if (btnInv) btnInv.style.display = '';
+};
+
+window.openInvModal = function(tipo) {
+    window.currentInvTipo = tipo;
+    window.currentInvProd = null;
+    const cfg = INV_CONFIG[tipo];
+    document.getElementById('invModalTitle').innerHTML = `<i class="fas ${cfg.icon} me-2 text-${cfg.color}"></i>${cfg.title}`;
+    document.getElementById('invSkuInput').value     = '';
+    document.getElementById('invProductInfo').innerHTML = '';
+    document.getElementById('invSuggestions').style.display = 'none';
+    document.getElementById('invQtyInput').value    = '';
+    document.getElementById('invQtyLabel').textContent = cfg.qtyLabel;
+    document.getElementById('invMotivoInput').value = '';
+    document.getElementById('invCostoInput').value  = '';
+    document.getElementById('invCostoRow').style.display  = tipo === 'entrada' ? '' : 'none';
+    document.getElementById('invAjusteRow').style.display = tipo === 'ajuste'  ? '' : 'none';
+    document.getElementById('signoPos').checked = true;
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('invModal'));
+    modal.show();
+    setTimeout(() => document.getElementById('invSkuInput').focus(), 350);
+};
+
+window.invBuscarProducto = function(e) {
+    // Permite buscar con Enter o con el botón
+    if (e && e.type === 'keyup' && e.key !== 'Enter') {
+        // Mostrar sugerencias dinámicas
+        const term = document.getElementById('invSkuInput').value.trim().toLowerCase();
+        const sug  = document.getElementById('invSuggestions');
+        if (term.length < 2) { sug.style.display = 'none'; return; }
+        const matches = (window.productsDB || []).filter(p =>
+            p.codigo.toLowerCase().includes(term) || p.nombre.toLowerCase().includes(term)
+        ).slice(0, 8);
+        if (!matches.length) { sug.style.display = 'none'; return; }
+        sug.innerHTML = matches.map(p =>
+            `<button type="button" class="list-group-item list-group-item-action py-1 small" onclick="invSeleccionarProd('${p.codigo}')">
+                <strong class="me-2">${p.codigo}</strong>${p.nombre}
+                <span class="float-end text-muted">Stock: ${p.stock}</span>
+            </button>`
+        ).join('');
+        sug.style.display = '';
+        return;
+    }
+    // Búsqueda exacta (Enter o botón)
+    const term = document.getElementById('invSkuInput').value.trim();
+    document.getElementById('invSuggestions').style.display = 'none';
+    if (!term) return;
+    const prod = (window.productsDB || []).find(p =>
+        p.codigo.toLowerCase() === term.toLowerCase() || p.nombre.toLowerCase() === term.toLowerCase()
+    ) || (window.productsDB || []).find(p =>
+        p.codigo.toLowerCase().includes(term.toLowerCase()) || p.nombre.toLowerCase().includes(term.toLowerCase())
+    );
+    if (prod) invSeleccionarProd(prod.codigo);
+    else document.getElementById('invProductInfo').innerHTML = '<div class="alert alert-warning py-2 small mb-0">Producto no encontrado</div>';
+};
+
+window.invSeleccionarProd = function(codigo) {
+    const prod = (window.productsDB || []).find(p => p.codigo == codigo);
+    if (!prod) return;
+    window.currentInvProd = prod;
+    document.getElementById('invSkuInput').value = prod.codigo;
+    document.getElementById('invSuggestions').style.display = 'none';
+    document.getElementById('invProductInfo').innerHTML =
+        `<div class="alert alert-success py-2 small mb-0">
+            <strong>${prod.nombre}</strong><br>
+            <span class="me-3">Stock actual: <strong>${prod.stock}</strong></span>
+            <span>Costo: <strong>$${prod.costo || 0}</strong></span>
+        </div>`;
+    document.getElementById('invCostoInput').value = prod.costo || '';
+    document.getElementById('invQtyInput').focus();
+};
+
+window.invConfirmar = async function() {
+    if (!window.currentInvProd) return showToast('Seleccione un producto', 'warning');
+    const qty    = parseFloat(document.getElementById('invQtyInput').value);
+    const motivo = document.getElementById('invMotivoInput').value.trim();
+    if (!qty || qty <= 0) return showToast('Ingrese una cantidad válida', 'warning');
+    if (!motivo)          return showToast('El motivo es obligatorio', 'warning');
+
+    let finalQty = qty;
+    if (window.currentInvTipo === 'ajuste') {
+        const signo = document.querySelector('input[name="ajusteSigno"]:checked')?.value;
+        if (signo === 'neg') finalQty = -Math.abs(qty);
+    }
+
+    const payload = {
+        accion:     window.currentInvTipo,
+        sku:        window.currentInvProd.codigo,
+        cantidad:   finalQty,
+        motivo:     motivo,
+        usuario:    window.currentCajero || 'POS-Admin',
+        costo_nuevo: parseFloat(document.getElementById('invCostoInput').value) || undefined,
+    };
+
+    const btn = document.getElementById('btnInvConfirmar');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Procesando...';
+
+    try {
+        const r = await fetch('pos.php?inventario_api=1', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (d.status === 'success') {
+            showToast(d.msg, 'success');
+            bootstrap.Modal.getInstance(document.getElementById('invModal')).hide();
+            // Actualizar stock local en productsDB para reflejar el cambio
+            const p = window.productsDB.find(x => x.codigo == window.currentInvProd.codigo);
+            if (p) {
+                const tipo = window.currentInvTipo;
+                if      (tipo === 'entrada') p.stock = parseFloat(p.stock) + Math.abs(finalQty);
+                else if (tipo === 'ajuste')  p.stock = parseFloat(p.stock) + finalQty;
+                else if (tipo === 'conteo')  p.stock = qty;
+                else if (tipo === 'merma')   p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
+                window.renderProducts();
+            }
+        } else {
+            showToast(d.msg || 'Error desconocido', 'error');
+        }
+    } catch (e) {
+        showToast('Error de conexión', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-check me-1"></i>Confirmar';
+    }
+};
 window.showToast = function(msg, type='success') { if(typeof Swal!=='undefined') Swal.fire({toast:true,position:'bottom-end',icon:type,title:msg,showConfirmButton:false,timer:3000}); else alert(msg); };
 let barcodeBuffer = ""; let barcodeTimeout;
 function handleBarcodeScanner(e) { if(e.target.tagName==='INPUT' && e.target.id!=='searchInput') return; if(e.key==='Enter'){ if(barcodeBuffer){ processBarcode(barcodeBuffer); barcodeBuffer=""; } } else if(e.key.length===1){ barcodeBuffer+=e.key; clearTimeout(barcodeTimeout); barcodeTimeout=setTimeout(()=>barcodeBuffer="",100); } }

@@ -141,6 +141,81 @@ if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
+// ENDPOINT: Inventario desde POS (solo admin, validado por PIN en frontend)
+if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    ini_set('display_errors', 0);
+    $input   = json_decode(file_get_contents('php://input'), true) ?: [];
+    $accion  = $input['accion']   ?? '';
+    $sku     = trim($input['sku'] ?? '');
+    $qty     = floatval($input['cantidad'] ?? 0);
+    $motivo  = trim($input['motivo'] ?? '');
+    $usuario = trim($input['usuario'] ?? 'POS-Admin');
+
+    // Config necesaria para IDs
+    $cfgFile = 'pos.cfg';
+    $cfg = ["id_almacen"=>1,"id_sucursal"=>1,"id_empresa"=>1];
+    if (file_exists($cfgFile)) { $tmp = json_decode(file_get_contents($cfgFile),true); if($tmp) $cfg = array_merge($cfg,$tmp); }
+    $ALM = intval($cfg['id_almacen']);
+    $SUC = intval($cfg['id_sucursal']);
+    $EMP = intval($cfg['id_empresa']);
+
+    if (!$sku || $qty == 0) { echo json_encode(['status'=>'error','msg'=>'SKU y cantidad requeridos']); exit; }
+
+    require_once 'db.php';
+    require_once 'kardex_engine.php';
+
+    $prod = $pdo->prepare("SELECT codigo, nombre, costo FROM productos WHERE codigo=? AND id_empresa=?");
+    $prod->execute([$sku, $EMP]);
+    $prod = $prod->fetch(PDO::FETCH_ASSOC);
+    if (!$prod) { echo json_encode(['status'=>'error','msg'=>'Producto no encontrado']); exit; }
+
+    $costo = floatval($prod['costo']);
+    $fecha = date('Y-m-d H:i:s');
+
+    try {
+        if ($accion === 'entrada') {
+            $nuevoCosto = floatval($input['costo_nuevo'] ?? $costo) ?: $costo;
+            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'ENTRADA', abs($qty), "ENTRADA POS: $motivo", $nuevoCosto, $usuario, $fecha);
+            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
+            if ($nuevoCosto != $costo) $pdo->prepare("UPDATE productos SET costo=? WHERE codigo=?")->execute([$nuevoCosto, $sku]);
+            echo json_encode(['status'=>'success','msg'=>"Entrada registrada: +".abs($qty)." de {$prod['nombre']}"]);
+
+        } elseif ($accion === 'ajuste') {
+            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $qty, "AJUSTE POS: $motivo", $costo, $usuario, $fecha);
+            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
+            echo json_encode(['status'=>'success','msg'=>"Ajuste registrado: ".($qty>0?"+":"").$qty." de {$prod['nombre']}"]);
+
+        } elseif ($accion === 'conteo') {
+            $s = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+            $s->execute([$sku, $ALM]);
+            $stockActual = floatval($s->fetchColumn());
+            $delta = $qty - $stockActual;
+            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $delta, "CONTEO FISICO POS: $stockActual → $qty", $costo, $usuario, $fecha);
+            $pdo->prepare("UPDATE stock_almacen SET cantidad=? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
+            $signo = $delta >= 0 ? "+$delta" : "$delta";
+            echo json_encode(['status'=>'success','msg'=>"Conteo aplicado: $signo (era $stockActual, ahora $qty)"]);
+
+        } elseif ($accion === 'merma') {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_detalle (id INT AUTO_INCREMENT PRIMARY KEY, id_merma INT, id_producto VARCHAR(50), cantidad DECIMAL(10,3), costo_al_momento DECIMAL(12,2), motivo_especifico TEXT) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $totalCosto = abs($qty) * $costo;
+            $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, id_sucursal, fecha_registro) VALUES (?,?,?,?,?)")->execute([$usuario, $motivo, $totalCosto, $SUC, $fecha]);
+            $idMerma = $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO mermas_detalle (id_merma, id_producto, cantidad, costo_al_momento, motivo_especifico) VALUES (?,?,?,?,?)")->execute([$idMerma, $sku, abs($qty), $costo, $motivo]);
+            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'MERMA', abs($qty), "MERMA #$idMerma POS", $costo, $usuario, $fecha);
+            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
+            echo json_encode(['status'=>'success','msg'=>"Merma #$idMerma registrada: -".abs($qty)." de {$prod['nombre']}"]);
+
+        } else {
+            echo json_encode(['status'=>'error','msg'=>'Acción no reconocida']);
+        }
+    } catch (Exception $e) {
+        echo json_encode(['status'=>'error','msg'=>$e->getMessage()]);
+    }
+    exit;
+}
+
 // Config
 $configFile = 'pos.cfg';
 $config = [ "tienda_nombre" => "MI TIENDA", "cajeros" => [["nombre"=>"Admin", "pin"=>"0000"]], "id_almacen" => 1, "id_sucursal" => 1, "mostrar_materias_primas" => false, "mostrar_servicios" => true, "categorias_ocultas" => [] ];
@@ -374,6 +449,11 @@ try {
         .star-btn.active { color: #ffc107; }
         .star-btn.inactive { color: #bbb; }
         
+        /* Panel de inventario */
+        .inv-action-btn { font-size: 0.82rem; font-weight: 700; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 72px; }
+        .inv-action-btn i { margin-bottom: 4px; }
+        #inventarioPanel { display: none; }
+
         /* Estilos adicionales para modal de pago grande */
         .total-display-large { font-size: 3rem; font-weight: 800; color: #198754; text-shadow: 1px 1px 0px #fff; }
         .bg-primary-custom { background-color: #2c3e50 !important; }
@@ -493,6 +573,43 @@ try {
             <button id="toggleKeypadBtn" class="btn btn-sm btn-outline-secondary mb-2" style="width:100%; display:none;" onclick="toggleMobileKeypad()">
                 <i class="fas fa-keyboard"></i> Teclado
             </button>
+
+            <!-- Botón inventario — visible solo para admin tras login -->
+            <button id="btnInventario" class="btn btn-sm btn-outline-warning w-100 mb-2 fw-bold" style="display:none;" onclick="toggleInventarioMode()">
+                <i class="fas fa-boxes me-1"></i> INVENTARIO
+            </button>
+
+            <!-- Panel de inventario (sustituye al keypad cuando está activo) -->
+            <div id="inventarioPanel">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleInventarioMode()">
+                        <i class="fas fa-arrow-left me-1"></i> POS
+                    </button>
+                    <span class="fw-bold small text-warning"><i class="fas fa-boxes me-1"></i> INVENTARIO</span>
+                </div>
+                <div class="row g-2 mb-1">
+                    <div class="col-6">
+                        <button class="btn btn-success w-100 inv-action-btn" onclick="openInvModal('entrada')">
+                            <i class="fas fa-truck-loading fa-lg"></i> Recepción
+                        </button>
+                    </div>
+                    <div class="col-6">
+                        <button class="btn btn-warning w-100 inv-action-btn" onclick="openInvModal('ajuste')">
+                            <i class="fas fa-sliders-h fa-lg"></i> Ajuste
+                        </button>
+                    </div>
+                    <div class="col-6">
+                        <button class="btn btn-info w-100 inv-action-btn text-white" onclick="openInvModal('conteo')">
+                            <i class="fas fa-barcode fa-lg"></i> Conteo Físico
+                        </button>
+                    </div>
+                    <div class="col-6">
+                        <button class="btn btn-danger w-100 inv-action-btn" onclick="openInvModal('merma')">
+                            <i class="fas fa-trash-alt fa-lg"></i> Merma
+                        </button>
+                    </div>
+                </div>
+            </div>
 
             <div id="keypadContainer">
                 <div class="action-row">
@@ -783,6 +900,80 @@ try {
             <div id="progressBar" class="progress-bar-fill">0%</div>
         </div>
         <p id="progressDetail" class="progress-detail"></p>
+    </div>
+</div>
+
+<!-- Modal Inventario POS -->
+<div class="modal fade" id="invModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header py-2">
+                <h6 class="modal-title fw-bold" id="invModalTitle"></h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <!-- Búsqueda de producto -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Producto (SKU o nombre)</label>
+                    <div class="input-group">
+                        <input type="text" id="invSkuInput" class="form-control"
+                               placeholder="Escanear o escribir..."
+                               onkeyup="invBuscarProducto(event)"
+                               autocomplete="off">
+                        <button class="btn btn-outline-secondary" onclick="invBuscarProducto(null)">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <div id="invProductInfo" class="mt-2"></div>
+                    <!-- Lista de sugerencias -->
+                    <div id="invSuggestions" class="list-group mt-1" style="max-height:160px;overflow-y:auto;display:none;"></div>
+                </div>
+
+                <!-- Signo para ajuste -->
+                <div id="invAjusteRow" class="mb-3" style="display:none;">
+                    <label class="form-label small fw-bold">Dirección del ajuste</label>
+                    <div class="d-flex gap-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="ajusteSigno" id="signoPos" value="pos" checked>
+                            <label class="form-check-label text-success fw-bold" for="signoPos">+ Incremento</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="ajusteSigno" id="signoNeg" value="neg">
+                            <label class="form-check-label text-danger fw-bold" for="signoNeg">− Reducción</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cantidad -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold" id="invQtyLabel">Cantidad</label>
+                    <input type="number" id="invQtyInput" class="form-control form-control-lg text-center fw-bold"
+                           min="0" step="0.001" placeholder="0">
+                </div>
+
+                <!-- Costo nuevo (solo entrada) -->
+                <div id="invCostoRow" class="mb-3" style="display:none;">
+                    <label class="form-label small fw-bold">Costo unitario (opcional)</label>
+                    <div class="input-group">
+                        <span class="input-group-text">$</span>
+                        <input type="number" id="invCostoInput" class="form-control" min="0" step="0.01" placeholder="Sin cambio">
+                    </div>
+                    <div class="form-text">Déjalo vacío para mantener el costo actual.</div>
+                </div>
+
+                <!-- Motivo -->
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Motivo <span class="text-danger">*</span></label>
+                    <input type="text" id="invMotivoInput" class="form-control" placeholder="Describe el motivo..." autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" id="btnInvConfirmar" class="btn btn-primary fw-bold" onclick="invConfirmar()">
+                    <i class="fas fa-check me-1"></i> Confirmar
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
