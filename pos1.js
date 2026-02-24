@@ -684,16 +684,15 @@ function applyRoleRestrictions() {
     // Botón de inventario: solo admin
     const btnInv = document.getElementById('btnInventario');
     if (btnInv) btnInv.style.display = (currentRole === 'admin') ? '' : 'none';
-    // Si se bloquea el POS y el panel inventario está abierto, volver al keypad
-    if (isCajero) {
-        const ip = document.getElementById('inventarioPanel');
-        const kp = document.getElementById('keypadContainer');
-        const cobrar = document.querySelector('.btn-pay');
-        if (ip && ip.style.display !== 'none') {
-            ip.style.display = 'none';
-            if (kp) kp.style.display = '';
-            if (cobrar) cobrar.style.display = '';
-        }
+    // Si no es admin y el panel inventario está abierto, volver al panel normal
+    if (isCajero && invModeActive) {
+        invModeActive = false;
+        const posPanel = document.getElementById('posPanel');
+        const invPanel = document.getElementById('inventarioPanel');
+        if (posPanel) posPanel.style.display = '';
+        if (invPanel) invPanel.style.display = 'none';
+        const btnInv = document.getElementById('btnInventario');
+        if (btnInv) btnInv.classList.remove('inv-active');
     }
 }
 
@@ -1788,22 +1787,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── MÓDULO INVENTARIO POS ────────────────────────────────────────────────────
 const INV_CONFIG = {
-    entrada: { title: 'Recepción de Mercancía', icon: 'fa-truck-loading', color: 'success', qtyLabel: 'Cantidad recibida' },
-    ajuste:  { title: 'Ajuste de Conteo',       icon: 'fa-sliders-h',     color: 'warning', qtyLabel: 'Cantidad a ajustar' },
-    conteo:  { title: 'Conteo Físico',           icon: 'fa-barcode',       color: 'info',    qtyLabel: 'Cantidad contada (total real)' },
-    merma:   { title: 'Registrar Merma',         icon: 'fa-trash-alt',     color: 'danger',  qtyLabel: 'Cantidad a dar de baja' },
+    entrada:      { title: 'Recepción de Mercancía',   icon: 'fa-truck-loading', color: 'success',   qtyLabel: 'Cantidad recibida' },
+    ajuste:       { title: 'Ajuste de Conteo',         icon: 'fa-sliders-h',     color: 'warning',   qtyLabel: 'Cantidad a ajustar' },
+    conteo:       { title: 'Conteo Físico',             icon: 'fa-barcode',       color: 'info',      qtyLabel: 'Cantidad contada (total real)' },
+    merma:        { title: 'Registrar Merma',           icon: 'fa-trash-alt',     color: 'danger',    qtyLabel: 'Cantidad a dar de baja' },
+    transferencia:{ title: 'Transferencia a Sucursal', icon: 'fa-exchange-alt',  color: 'primary',   qtyLabel: 'Cantidad a transferir' },
+    consultar:    { title: 'Consultar Existencias',    icon: 'fa-search',         color: 'secondary', qtyLabel: '' },
 };
 
+let invModeActive = false;
+
 window.toggleInventarioMode = function() {
-    const kp     = document.getElementById('keypadContainer');
-    const ip     = document.getElementById('inventarioPanel');
-    const cobrar = document.querySelector('.btn-pay');
-    const btnInv = document.getElementById('btnInventario');
-    const isInv  = ip && ip.style.display !== 'none';
-    if (kp)     kp.style.display     = isInv ? '' : 'none';
-    if (ip)     ip.style.display     = isInv ? 'none' : '';
-    if (cobrar) cobrar.style.display = isInv ? '' : 'none';
-    if (btnInv) btnInv.style.display = '';
+    invModeActive = !invModeActive;
+    const posPanel = document.getElementById('posPanel');
+    const invPanel = document.getElementById('inventarioPanel');
+    const btnInv   = document.getElementById('btnInventario');
+    if (posPanel) posPanel.style.display = invModeActive ? 'none' : '';
+    if (invPanel) invPanel.style.display = invModeActive ? ''     : 'none';
+    if (btnInv)   btnInv.classList.toggle('inv-active', invModeActive);
 };
 
 window.openInvModal = function(tipo) {
@@ -1812,15 +1813,22 @@ window.openInvModal = function(tipo) {
     const cfg = INV_CONFIG[tipo];
     document.getElementById('invModalTitle').innerHTML =
         `<i class="fas ${cfg.icon} me-2 text-${cfg.color}"></i>${cfg.title}`;
-    document.getElementById('invSkuInput').value       = '';
+    document.getElementById('invSkuInput').value        = '';
     document.getElementById('invProductInfo').innerHTML = '';
     document.getElementById('invSuggestions').style.display = 'none';
-    document.getElementById('invQtyInput').value       = '';
-    document.getElementById('invQtyLabel').textContent = cfg.qtyLabel;
-    document.getElementById('invMotivoInput').value    = '';
-    document.getElementById('invCostoInput').value     = '';
-    document.getElementById('invCostoRow').style.display  = tipo === 'entrada' ? '' : 'none';
-    document.getElementById('invAjusteRow').style.display = tipo === 'ajuste'  ? '' : 'none';
+    document.getElementById('invQtyInput').value        = '';
+    document.getElementById('invQtyLabel').textContent  = cfg.qtyLabel;
+    document.getElementById('invMotivoInput').value     = '';
+    document.getElementById('invCostoInput').value      = '';
+    const isConsultar = tipo === 'consultar';
+    document.getElementById('invCostoRow').style.display          = tipo === 'entrada'       ? '' : 'none';
+    document.getElementById('invAjusteRow').style.display         = tipo === 'ajuste'        ? '' : 'none';
+    document.getElementById('invTransferenciaRow').style.display  = tipo === 'transferencia' ? '' : 'none';
+    document.getElementById('invQtyRow').style.display            = isConsultar ? 'none' : '';
+    document.getElementById('invMotivoRow').style.display         = isConsultar ? 'none' : '';
+    document.getElementById('invConsultarInfo').innerHTML         = '';
+    document.getElementById('invConsultarInfo').style.display     = 'none';
+    document.getElementById('btnInvConfirmar').style.display      = isConsultar ? 'none' : '';
     const signoPos = document.getElementById('signoPos');
     if (signoPos) signoPos.checked = true;
     bootstrap.Modal.getOrCreateInstance(document.getElementById('invModal')).show();
@@ -1871,7 +1879,43 @@ window.invSeleccionarProd = function(codigo) {
             <span>Costo: <strong>$${prod.costo || 0}</strong></span>
          </div>`;
     document.getElementById('invCostoInput').value = prod.costo || '';
-    document.getElementById('invQtyInput').focus();
+    if (window.currentInvTipo === 'consultar') {
+        invConsultarStock(prod.codigo);
+    } else {
+        document.getElementById('invQtyInput').focus();
+    }
+};
+
+window.invConsultarStock = async function(sku) {
+    const infoEl = document.getElementById('invConsultarInfo');
+    infoEl.style.display = '';
+    infoEl.innerHTML = '<div class="text-center py-2"><i class="fas fa-spinner fa-spin"></i> Consultando...</div>';
+    try {
+        const r = await fetch('pos.php?inventario_api=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accion: 'consultar', sku }),
+        });
+        const d = await r.json();
+        if (d.status === 'success') {
+            const rows = (d.kardex || []).map(m =>
+                `<tr><td class="small">${m.fecha}</td><td class="small">${m.tipo_movimiento}</td>
+                 <td class="small text-end">${m.cantidad > 0 ? '+' : ''}${m.cantidad}</td>
+                 <td class="small text-muted">${m.referencia || ''}</td></tr>`
+            ).join('');
+            infoEl.innerHTML = `
+                <div class="alert alert-info py-2 mb-2 small">
+                    <i class="fas fa-warehouse me-1"></i>
+                    Stock en almacén: <strong class="fs-5">${d.stock}</strong>
+                </div>
+                ${rows ? `<div class="small fw-bold text-secondary mb-1">Últimos movimientos:</div>
+                <table class="table table-sm table-striped mb-0 small"><tbody>${rows}</tbody></table>` : ''}`;
+        } else {
+            infoEl.innerHTML = `<div class="alert alert-danger py-2 small">${d.msg}</div>`;
+        }
+    } catch (e) {
+        infoEl.innerHTML = '<div class="alert alert-danger py-2 small">Error de conexión</div>';
+    }
 };
 
 window.invConfirmar = async function() {
@@ -1894,6 +1938,7 @@ window.invConfirmar = async function() {
         motivo:      motivo,
         usuario:     currentCashier || 'POS-Admin',
         costo_nuevo: parseFloat(document.getElementById('invCostoInput').value) || undefined,
+        destino:     (document.getElementById('invDestinoInput')?.value || '').trim() || undefined,
     };
 
     const btn = document.getElementById('btnInvConfirmar');
@@ -1913,10 +1958,11 @@ window.invConfirmar = async function() {
             const p = productsDB.find(x => x.codigo == window.currentInvProd.codigo);
             if (p) {
                 const tipo = window.currentInvTipo;
-                if      (tipo === 'entrada') p.stock = parseFloat(p.stock) + Math.abs(finalQty);
-                else if (tipo === 'ajuste')  p.stock = parseFloat(p.stock) + finalQty;
-                else if (tipo === 'conteo')  p.stock = qty;
-                else if (tipo === 'merma')   p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
+                if      (tipo === 'entrada')      p.stock = parseFloat(p.stock) + Math.abs(finalQty);
+                else if (tipo === 'ajuste')       p.stock = parseFloat(p.stock) + finalQty;
+                else if (tipo === 'conteo')       p.stock = qty;
+                else if (tipo === 'merma')        p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
+                else if (tipo === 'transferencia')p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
                 renderProducts();
             }
         } else {

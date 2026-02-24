@@ -207,6 +207,30 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
             echo json_encode(['status'=>'success','msg'=>"Merma #$idMerma registrada: -".abs($qty)." de {$prod['nombre']}"]);
 
+        } elseif ($accion === 'transferencia') {
+            $destino = trim($input['destino'] ?? '');
+            if (!$destino) { echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']); exit; }
+            $ref = "TRANSFER→{$destino} POS: $motivo";
+            KardexEngine::registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', -abs($qty), $ref, $costo, $usuario, $fecha);
+            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
+            // Registrar en sync_journal para que la sucursal destino lo reciba
+            try {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS transfer_pendiente (id INT AUTO_INCREMENT PRIMARY KEY, sku VARCHAR(50), cantidad DECIMAL(10,3), costo DECIMAL(12,2), sucursal_origen INT, destino_nombre VARCHAR(100), usuario VARCHAR(100), motivo TEXT, estado VARCHAR(20) DEFAULT 'PENDIENTE', fecha DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                $pdo->prepare("INSERT INTO transfer_pendiente (sku, cantidad, costo, sucursal_origen, destino_nombre, usuario, motivo) VALUES (?,?,?,?,?,?,?)")->execute([
+                    $sku, abs($qty), $costo, $SUC, $destino, $usuario, $motivo
+                ]);
+            } catch (Exception $e2) {}
+            echo json_encode(['status'=>'success','msg'=>"Transferencia registrada: -".abs($qty)." de {$prod['nombre']} → $destino"]);
+
+        } elseif ($accion === 'consultar') {
+            $s = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+            $s->execute([$sku, $ALM]);
+            $stockAct = floatval($s->fetchColumn() ?: 0);
+            $k = $pdo->prepare("SELECT tipo_movimiento, cantidad, referencia, fecha FROM kardex WHERE id_producto=? AND id_almacen=? ORDER BY fecha DESC LIMIT 8");
+            $k->execute([$sku, $ALM]);
+            $movimientos = $k->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode(['status'=>'success','stock'=>$stockAct,'producto'=>$prod['nombre'],'kardex'=>$movimientos]);
+
         } else {
             echo json_encode(['status'=>'error','msg'=>'Acción no reconocida']);
         }
@@ -450,9 +474,15 @@ try {
         .star-btn.inactive { color: #bbb; }
         
         /* Panel de inventario */
-        .inv-action-btn { font-size: 0.82rem; font-weight: 700; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 72px; }
-        .inv-action-btn i { margin-bottom: 4px; }
         #inventarioPanel { display: none; }
+        .inv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
+        .inv-btn { height: 68px; border: none; border-radius: 10px; font-weight: 700; font-size: 0.78rem;
+                   display: flex; flex-direction: column; align-items: center; justify-content: center;
+                   gap: 4px; cursor: pointer; transition: filter 0.15s, transform 0.1s; }
+        .inv-btn:active { transform: scale(0.95); filter: brightness(0.88); }
+        .inv-btn i { font-size: 1.3rem; }
+        #btnInventario.inv-active { background: #2c3e50 !important; color: #ffc107 !important;
+                                    border-color: #ffc107 !important; }
 
         /* Estilos adicionales para modal de pago grande */
         .total-display-large { font-size: 3rem; font-weight: 800; color: #198754; text-shadow: 1px 1px 0px #fff; }
@@ -574,65 +604,58 @@ try {
                 <i class="fas fa-keyboard"></i> Teclado
             </button>
 
-            <!-- Botón inventario — visible solo para admin tras login -->
+            <!-- Botón toggle inventario — solo admin -->
             <button id="btnInventario" class="btn btn-sm btn-outline-warning w-100 mb-2 fw-bold" style="display:none;" onclick="toggleInventarioMode()">
                 <i class="fas fa-boxes me-1"></i> INVENTARIO
             </button>
 
-            <!-- Panel de inventario (sustituye al keypad cuando está activo) -->
+            <!-- Panel POS clásico -->
+            <div id="posPanel">
+                <div id="keypadContainer">
+                    <div class="action-row">
+                        <button class="btn-ctrl c-yellow flex-grow-1" onclick="modifyQty(-1)"><i class="fas fa-minus"></i></button>
+                        <button class="btn-ctrl c-green flex-grow-1" onclick="modifyQty(1)"><i class="fas fa-plus"></i></button>
+                        <button class="btn-ctrl c-red flex-grow-1" onclick="removeItem()"><i class="fas fa-trash"></i></button>
+                    </div>
+                    <div class="keypad-grid">
+                        <button class="btn-ctrl c-grey" onclick="askQty()">Cnt</button>
+                        <button class="btn-ctrl c-purple" onclick="applyDiscount()">% Item</button>
+                        <button id="btnGlobalDiscount" class="btn-ctrl c-purple" onclick="applyGlobalDiscount()">% Total</button>
+                        <button class="btn-ctrl c-blue" onclick="addNote()"><i class="fas fa-pen"></i></button>
+                        <button class="btn-ctrl c-orange" onclick="parkOrder()"><i class="fas fa-pause"></i></button>
+                        <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
+                        <button class="btn-ctrl" style="background:#17a2b8;color:white;border-color:#17a2b8;" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
+                        <button id="btnSyncKeypad" class="btn-ctrl" style="background:#fd7e14;color:white;border-color:#fd7e14;opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
+                    <i class="fas fa-check-circle me-2"></i> COBRAR
+                </button>
+            </div>
+
+            <!-- Panel de inventario -->
             <div id="inventarioPanel">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <button class="btn btn-sm btn-outline-secondary" onclick="toggleInventarioMode()">
-                        <i class="fas fa-arrow-left me-1"></i> POS
+                <div class="inv-grid">
+                    <button class="inv-btn" style="background:#198754;color:white;" onclick="openInvModal('entrada')">
+                        <i class="fas fa-truck-loading"></i> Entrada
                     </button>
-                    <span class="fw-bold small text-warning"><i class="fas fa-boxes me-1"></i> INVENTARIO</span>
-                </div>
-                <div class="row g-2 mb-1">
-                    <div class="col-6">
-                        <button class="btn btn-success w-100 inv-action-btn" onclick="openInvModal('entrada')">
-                            <i class="fas fa-truck-loading fa-lg"></i> Recepción
-                        </button>
-                    </div>
-                    <div class="col-6">
-                        <button class="btn btn-warning w-100 inv-action-btn" onclick="openInvModal('ajuste')">
-                            <i class="fas fa-sliders-h fa-lg"></i> Ajuste
-                        </button>
-                    </div>
-                    <div class="col-6">
-                        <button class="btn btn-info w-100 inv-action-btn text-white" onclick="openInvModal('conteo')">
-                            <i class="fas fa-barcode fa-lg"></i> Conteo Físico
-                        </button>
-                    </div>
-                    <div class="col-6">
-                        <button class="btn btn-danger w-100 inv-action-btn" onclick="openInvModal('merma')">
-                            <i class="fas fa-trash-alt fa-lg"></i> Merma
-                        </button>
-                    </div>
+                    <button class="inv-btn" style="background:#dc3545;color:white;" onclick="openInvModal('merma')">
+                        <i class="fas fa-trash-alt"></i> Merma
+                    </button>
+                    <button class="inv-btn" style="background:#ffc107;color:#212529;" onclick="openInvModal('ajuste')">
+                        <i class="fas fa-sliders-h"></i> Ajuste
+                    </button>
+                    <button class="inv-btn" style="background:#0dcaf0;color:#212529;" onclick="openInvModal('conteo')">
+                        <i class="fas fa-barcode"></i> Conteo
+                    </button>
+                    <button class="inv-btn" style="background:#0d6efd;color:white;" onclick="openInvModal('transferencia')">
+                        <i class="fas fa-exchange-alt"></i> Transferir
+                    </button>
+                    <button class="inv-btn" style="background:#6c757d;color:white;" onclick="openInvModal('consultar')">
+                        <i class="fas fa-search"></i> Consultar
+                    </button>
                 </div>
             </div>
-
-            <div id="keypadContainer">
-                <div class="action-row">
-                    <button class="btn-ctrl c-yellow flex-grow-1" onclick="modifyQty(-1)"><i class="fas fa-minus"></i></button>
-                    <button class="btn-ctrl c-green flex-grow-1" onclick="modifyQty(1)"><i class="fas fa-plus"></i></button>
-                    <button class="btn-ctrl c-red flex-grow-1" onclick="removeItem()"><i class="fas fa-trash"></i></button>
-                </div>
-                
-                <div class="keypad-grid">
-                    <button class="btn-ctrl c-grey" onclick="askQty()">Cnt</button>
-                    <button class="btn-ctrl c-purple" onclick="applyDiscount()">% Item</button>
-                    <button id="btnGlobalDiscount" class="btn-ctrl c-purple" onclick="applyGlobalDiscount()">% Total</button>
-                    <button class="btn-ctrl c-blue" onclick="addNote()"><i class="fas fa-pen"></i></button>
-                    <button class="btn-ctrl c-orange" onclick="parkOrder()"><i class="fas fa-pause"></i></button>
-                    <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
-                    <button class="btn-ctrl" style="background:#17a2b8; color:white; border-color:#17a2b8;" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
-                    <button id="btnSyncKeypad" class="btn-ctrl" style="background:#fd7e14; color:white; border-color:#fd7e14; opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
-                </div>
-            </div>
-
-            <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
-                <i class="fas fa-check-circle me-2"></i> COBRAR
-            </button>
         </div>
     </div>
 
@@ -944,8 +967,16 @@ try {
                     </div>
                 </div>
 
+                <!-- Sucursal destino (solo transferencia) -->
+                <div id="invTransferenciaRow" class="mb-3" style="display:none;">
+                    <label class="form-label small fw-bold">Sucursal destino <span class="text-danger">*</span></label>
+                    <input type="text" id="invDestinoInput" class="form-control"
+                           placeholder="Nombre o ID de la sucursal destino" autocomplete="off">
+                    <div class="form-text">Se registra salida aquí; la sucursal destino deberá confirmar la recepción.</div>
+                </div>
+
                 <!-- Cantidad -->
-                <div class="mb-3">
+                <div id="invQtyRow" class="mb-3">
                     <label class="form-label small fw-bold" id="invQtyLabel">Cantidad</label>
                     <input type="number" id="invQtyInput" class="form-control form-control-lg text-center fw-bold"
                            min="0" step="0.001" placeholder="0">
@@ -962,10 +993,13 @@ try {
                 </div>
 
                 <!-- Motivo -->
-                <div class="mb-3">
+                <div id="invMotivoRow" class="mb-3">
                     <label class="form-label small fw-bold">Motivo <span class="text-danger">*</span></label>
                     <input type="text" id="invMotivoInput" class="form-control" placeholder="Describe el motivo..." autocomplete="off">
                 </div>
+
+                <!-- Resultado consulta (solo consultar) -->
+                <div id="invConsultarInfo" style="display:none;"></div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
