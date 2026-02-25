@@ -395,14 +395,21 @@ try {
         .btn-ctrl:active { transform: translateY(1px) scale(0.97); filter: brightness(0.92); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
         .btn-pay {
             height: 58px; font-size: 1.35rem; width: 100%; border-radius: 12px; cursor: pointer;
-            background: linear-gradient(175deg, #4d96ff 0%, #0d6efd 55%, #0a54d4 100%);
-            border: 1px solid #0849a4;
+            background: linear-gradient(-45deg, #0d6efd, #4d96ff);
+            border-width: 0;
             color: white;
-            box-shadow: 0 4px 14px rgba(13,110,253,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
-            transition: transform 0.1s, box-shadow 0.1s;
+            position: relative; overflow: hidden;
+            box-shadow: 0 3px 0 0 #0849a4, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset;
+            transition: box-shadow 0.2s, transform 0.2s;
         }
-        .btn-pay:hover  { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(13,110,253,0.6), inset 0 1px 0 rgba(255,255,255,0.25); }
-        .btn-pay:active { transform: translateY(1px); box-shadow: 0 2px 6px rgba(13,110,253,0.4); }
+        .btn-pay::after {
+            content: ""; display: block; position: absolute; top: 0; left: 0;
+            width: 100%; height: 52%; pointer-events: none;
+            background: linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0) 100%);
+            border-radius: 12px 12px 0 0;
+        }
+        .btn-pay:hover  { transform: none; box-shadow: 0 3px 0 0 #0849a4, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 22px 6px rgba(200,210,230,0.38); }
+        .btn-pay:active { transform: translateY(3px); box-shadow: 0 0 0 0 #052d6a, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset; }
         .keypad-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
         .action-row { display: flex; gap: 6px; margin-bottom: 6px; }
         .c-yellow {
@@ -454,10 +461,24 @@ try {
         .action-row .btn-ctrl {
             border-width: 0 !important;
             border-radius: 8px !important;
+            position: relative !important; overflow: hidden !important;
             transition: box-shadow 0.2s, transform 0.2s !important;
             filter: none !important;
         }
-        .action-row .btn-ctrl:hover  { transform: none !important; filter: none !important; box-shadow: 0 2px 14px rgba(0,0,0,0.52) !important; }
+        /* Glossy crystal — capa superior translúcida */
+        .action-row .btn-ctrl::after {
+            content: ""; display: block; position: absolute; top: 0; left: 0;
+            width: 100%; height: 52%; pointer-events: none;
+            background: linear-gradient(180deg, rgba(255,255,255,0.28) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0) 100%);
+            border-radius: 8px 8px 0 0;
+        }
+        /* Hover: glow gris difuso alrededor */
+        .action-row .btn-ctrl:hover  { transform: none !important; filter: none !important; }
+        .action-row .btn-ctrl.c-yellow:hover { box-shadow: 0 3px 0 0 #a07400, 0 4px 4px -1px rgba(0,0,0,0.4), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 20px 6px rgba(200,200,200,0.32) !important; }
+        .action-row .btn-ctrl.c-green:hover  { box-shadow: 0 3px 0 0 #0e5233, 0 4px 4px -1px rgba(0,0,0,0.4), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 20px 6px rgba(200,200,200,0.32) !important; }
+        .action-row .btn-ctrl.c-red:hover    { box-shadow: 0 3px 0 0 #8f2230, 0 4px 4px -1px rgba(0,0,0,0.4), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 20px 6px rgba(200,200,200,0.32) !important; }
+        .action-row .btn-ctrl.c-blue:hover   { box-shadow: 0 3px 0 0 #0849a4, 0 4px 4px -1px rgba(0,0,0,0.4), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 20px 6px rgba(200,200,200,0.32) !important; }
+        .action-row .btn-ctrl.c-orange:hover { box-shadow: 0 3px 0 0 #b85300, 0 4px 4px -1px rgba(0,0,0,0.4), 0 18px 32px -2px rgba(255,255,255,0.12) inset, 0 0 20px 6px rgba(200,200,200,0.32) !important; }
         .action-row .btn-ctrl:active { transform: translateY(3px) !important; filter: none !important; }
 
         .action-row .btn-ctrl.c-yellow {
