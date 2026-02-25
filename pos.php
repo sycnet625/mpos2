@@ -573,7 +573,8 @@ try {
         }
         .inv-btn:hover  { filter: brightness(1.1) !important; transform: translateY(-1px) !important; box-shadow: 0 1px 0 0 rgba(255,255,255,0.2) inset, 0 3px 6px 0 rgba(0,0,0,0.35) !important; }
         .inv-btn:active { transform: scale(0.97) !important; filter: none !important; box-shadow: 0 2px 4px -2px rgba(0,0,0,0.2) inset, 0 1px 3px 0 rgba(0,0,0,0.12) !important; }
-        .top-bar .inv-btn { padding-top: 2px !important; padding-bottom: 2px !important; }
+        .top-bar .inv-btn { height: auto !important; padding: 2px 6px !important; flex-direction: row !important; border-radius: 5px !important; font-size: 0.8rem !important; gap: 0 !important; }
+        .top-bar .inv-btn i { font-size: 0.8rem !important; }
         .category-bar { display: flex; overflow-x: auto; overflow-y: hidden; gap: 8px; margin-bottom: 8px; padding-bottom: 5px; scrollbar-width: none; height: 52px; align-items: center; flex-shrink: 0; }
         body.pos-bars-hidden .category-bar,
         body.pos-bars-hidden #favoritesBar { display: none !important; }
