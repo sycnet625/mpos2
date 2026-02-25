@@ -765,7 +765,10 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <span id="cashStatusBadge" class="cash-status cash-closed ms-2" style="font-size: 0.7rem;">CERRADA</span>
                 </div>
                 
-                <div class="d-flex align-items-center gap-1 flex-nowrap"> 
+                <div class="d-flex align-items-center gap-1 flex-nowrap">
+                    <a href="customer_display.php" target="_blank" class="btn btn-sm btn-outline-info px-2" title="Pantalla del cliente">
+                        <i class="fas fa-desktop"></i>
+                    </a>
                     <button class="btn btn-sm btn-outline-warning position-relative px-2 me-1 animate__animated" id="btnSelfOrders" onclick="openSelfOrdersModal()" title="Autopedidos">
                         <i class="fas fa-mobile-alt"></i>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="selfOrderBadge" style="font-size: 0.6rem;">
@@ -798,17 +801,6 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <i class="fas fa-warehouse"></i> Almacén: <?php echo intval($config['id_almacen']); ?>
                 </span>
                 
-                <button onclick="refreshProducts()" class="btn btn-sm btn-light px-2" title="Recargar productos" style="font-size: 0.7rem;">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
-                
-                <button onclick="toggleImages()" class="btn btn-sm btn-light px-2" title="Activar/Desactivar imágenes" style="font-size: 0.7rem;">
-                    <i class="fas fa-image"></i>
-                </button>
-                
-                <button id="stockFilterBtn" onclick="toggleStockFilter()" class="btn btn-sm btn-light px-2" title="Filtrar productos" style="font-size: 0.7rem;">
-                    <i class="fas fa-boxes"></i>
-                </button>
             </div>
         </div>
 
