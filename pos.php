@@ -757,30 +757,41 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
 <div class="pos-container">
     <div class="left-panel">
-        <div class="p-2 bg-dark-blue text-white top-bar shadow-sm" style="height: 75px; display: flex; flex-direction: column; justify-content: space-between;">
+        <div class="px-2 pt-2 pb-1 bg-dark-blue text-white top-bar shadow-sm" style="display:flex; flex-direction:column; gap:6px;">
+            <!-- Fila 1: Cajero + Estado de conexión -->
             <div class="d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    <i class="fas fa-user me-1"></i>
-                    <span id="cashierName" style="font-weight: 600; font-size: 0.95rem;">Cajero</span>
-                    <span id="cashStatusBadge" class="cash-status cash-closed ms-2" style="font-size: 0.7rem;">CERRADA</span>
+                <div class="d-flex align-items-center gap-1">
+                    <i class="fas fa-user" style="font-size:0.8rem; opacity:0.75;"></i>
+                    <span id="cashierName" style="font-weight:700; font-size:0.9rem; line-height:1;">Cajero</span>
+                    <span id="cashStatusBadge" class="cash-status cash-closed">CERRADA</span>
                 </div>
-                
-                <div class="d-flex align-items-center gap-1 flex-nowrap">
+                <div class="d-flex align-items-center gap-1">
+                    <button id="btnSync" onclick="syncOfflineQueue()" class="btn btn-sm btn-warning text-dark px-2 d-none" title="Sincronizar cola offline">
+                        <i class="fas fa-sync"></i>
+                    </button>
+                    <span id="netStatus" class="badge bg-success px-2" style="font-size:0.7rem;">
+                        <i class="fas fa-wifi"></i>
+                    </span>
+                </div>
+            </div>
+            <!-- Fila 2: Sucursal/Almacén + Botones de acción -->
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-1">
+                    <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Sucursal">
+                        <i class="fas fa-building"></i> <?php echo intval($config['id_sucursal'] ?? 1); ?>
+                    </span>
+                    <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Almacén">
+                        <i class="fas fa-warehouse"></i> <?php echo intval($config['id_almacen']); ?>
+                    </span>
+                </div>
+                <div class="d-flex align-items-center gap-1">
                     <a href="customer_display.php" target="_blank" class="btn btn-sm btn-outline-info px-2" title="Pantalla del cliente">
                         <i class="fas fa-desktop"></i>
                     </a>
-                    <button class="btn btn-sm btn-outline-warning position-relative px-2 me-1 animate__animated" id="btnSelfOrders" onclick="openSelfOrdersModal()" title="Autopedidos">
+                    <button class="btn btn-sm btn-outline-warning position-relative px-2 animate__animated" id="btnSelfOrders" onclick="openSelfOrdersModal()" title="Autopedidos">
                         <i class="fas fa-mobile-alt"></i>
-                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="selfOrderBadge" style="font-size: 0.6rem;">
-                            0
-                        </span>
+                        <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="selfOrderBadge" style="font-size:0.6rem;">0</span>
                     </button>
-                    <button id="btnSync" onclick="syncOfflineQueue()" class="btn btn-sm btn-warning text-dark px-2 d-none" title="Sync">
-                        <i class="fas fa-sync"></i>
-                    </button>
-                    <span id="netStatus" class="badge bg-success" style="font-size: 0.7rem;">
-                        <i class="fas fa-wifi"></i>
-                    </span>
                     <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2" title="Caja">
                         <i class="fas fa-cash-register"></i>
                     </button>
@@ -791,16 +802,6 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <i class="fas fa-chart-line"></i>
                     </a>
                 </div>
-            </div>
-            
-            <div class="d-flex align-items-center" style="gap: 8px;">
-                <span class="badge bg-info" style="font-size: 0.75rem; padding: 4px 8px;">
-                    <i class="fas fa-building"></i> Sucursal: <?php echo intval($config['id_sucursal'] ?? 1); ?>
-                </span>
-                <span class="badge bg-info" style="font-size: 0.75rem; padding: 4px 8px;">
-                    <i class="fas fa-warehouse"></i> Almacén: <?php echo intval($config['id_almacen']); ?>
-                </span>
-                
             </div>
         </div>
 
