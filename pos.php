@@ -445,6 +445,119 @@ try {
             color: #212529 !important; border-color: #0891ae !important;
             box-shadow: 0 2px 8px rgba(13,202,240,0.45), inset 0 1px 0 rgba(255,255,255,0.3) !important;
         }
+
+        /* ================================================================
+           ALPHA — action-row (botones - / + / Vaciar / trash)
+           Estilo: 3D raised, sombra inferior gruesa, sin border visible
+           Ref: loupbrun.ca/buttons — Alpha
+        ================================================================ */
+        .action-row .btn-ctrl {
+            border-width: 0 !important;
+            border-radius: 8px !important;
+            transition: box-shadow 0.2s, transform 0.2s !important;
+            filter: none !important;
+        }
+        .action-row .btn-ctrl:hover  { transform: none !important; filter: none !important; box-shadow: 0 2px 14px rgba(0,0,0,0.52) !important; }
+        .action-row .btn-ctrl:active { transform: translateY(3px) !important; filter: none !important; }
+
+        .action-row .btn-ctrl.c-yellow {
+            background: linear-gradient(-45deg, #ffc107, #ffe066) !important; color: #212529 !important;
+            box-shadow: 0 3px 0 0 #a07400, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset !important;
+        }
+        .action-row .btn-ctrl.c-yellow:active { box-shadow: 0 0 0 0 #7a5800, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset !important; color: #a07400 !important; }
+        .action-row .btn-ctrl.c-green {
+            background: linear-gradient(-45deg, #198754, #34c47a) !important; color: white !important;
+            box-shadow: 0 3px 0 0 #0e5233, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset !important;
+        }
+        .action-row .btn-ctrl.c-green:active  { box-shadow: 0 0 0 0 #07361f, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset !important; color: #0e5233 !important; }
+        .action-row .btn-ctrl.c-red {
+            background: linear-gradient(-45deg, #dc3545, #f06070) !important; color: white !important;
+            box-shadow: 0 3px 0 0 #8f2230, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset !important;
+        }
+        .action-row .btn-ctrl.c-red:active    { box-shadow: 0 0 0 0 #621520, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset !important; color: #8f2230 !important; }
+        .action-row .btn-ctrl.c-blue {
+            background: linear-gradient(-45deg, #0d6efd, #4d96ff) !important; color: white !important;
+            box-shadow: 0 3px 0 0 #0849a4, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset !important;
+        }
+        .action-row .btn-ctrl.c-blue:active   { box-shadow: 0 0 0 0 #052d6a, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset !important; color: #0849a4 !important; }
+        .action-row .btn-ctrl.c-orange {
+            background: linear-gradient(-45deg, #fd7e14, #ff9f43) !important; color: white !important;
+            box-shadow: 0 3px 0 0 #b85300, 0 4px 4px -1px rgba(0,0,0,0.55), 0 4px 6px 1px rgba(0,0,0,0.28), 0 18px 32px -2px rgba(255,255,255,0.12) inset !important;
+        }
+        .action-row .btn-ctrl.c-orange:active { box-shadow: 0 0 0 0 #7a3600, 0 1px 2px 1px rgba(0,0,0,0.5) inset, 0 -18px 32px -2px rgba(255,255,255,0.1) inset !important; color: #b85300 !important; }
+
+        /* ================================================================
+           ETA — keypad-grid (Cnt / % Item / % Total / Nota / Pause / etc.)
+           Estilo: vidrio profundo, brillo diagonal, borde doble inferior
+           Ref: loupbrun.ca/buttons — Eta
+        ================================================================ */
+        .keypad-grid .btn-ctrl {
+            border-width: 2px !important; border-style: solid !important; border-radius: 7px !important;
+            position: relative !important; overflow: hidden !important;
+            text-shadow: 0 -1px 0 rgba(0,0,0,0.2) !important;
+            transition: box-shadow 0.4s cubic-bezier(0.23,1,0.32,1) !important;
+            transform: none !important; filter: none !important;
+        }
+        .keypad-grid .btn-ctrl::after {
+            content: ""; display: block; position: absolute; top: 0; left: 0;
+            height: 100%; width: 100%; pointer-events: none;
+            transform: rotate(-19deg) translateY(-1.3em) scale(1.05); filter: blur(1px);
+            background-image: linear-gradient(-90deg, rgba(255,255,255,0.13) 20%, rgba(255,255,255,0));
+        }
+        .keypad-grid .btn-ctrl:hover  { transform: none !important; filter: none !important; }
+        .keypad-grid .btn-ctrl:active { transform: none !important; filter: none !important; text-shadow: 0 1px 0 rgba(255,255,255,0.2) !important; transition-duration: 0.1s !important; }
+        .keypad-grid .btn-ctrl:active::after { background-image: linear-gradient(-90deg, rgba(255,255,255,0.02) 20%, rgba(255,255,255,0)); }
+
+        .keypad-grid .btn-ctrl.c-grey {
+            background-color: #6c757d !important; color: white !important;
+            border-color: #454d55 !important; border-bottom-color: #2e3338 !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(108,117,125,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-grey:active   { background-color: #5f666d !important; color: #2e3338 !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(108,117,125,.1) !important; }
+        .keypad-grid .btn-ctrl.c-purple {
+            background-color: #6f42c1 !important; color: white !important;
+            border-color: #472690 !important; border-bottom-color: #2e195c !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(111,66,193,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-purple:active { background-color: #6238ae !important; color: #2e195c !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(111,66,193,.1) !important; }
+        .keypad-grid .btn-ctrl.c-blue {
+            background-color: #0d6efd !important; color: white !important;
+            border-color: #0849a4 !important; border-bottom-color: #052d6a !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(13,110,253,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-blue:active   { background-color: #0c63e4 !important; color: #052d6a !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(13,110,253,.1) !important; }
+        .keypad-grid .btn-ctrl.c-red {
+            background-color: #dc3545 !important; color: white !important;
+            border-color: #8f2230 !important; border-bottom-color: #621520 !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(220,53,69,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-red:active    { background-color: #c22d3d !important; color: #8f2230 !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(220,53,69,.1) !important; }
+        .keypad-grid .btn-ctrl.c-teal {
+            background-color: #0dcaf0 !important; color: #212529 !important;
+            border-color: #0891ae !important; border-bottom-color: #055e73 !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(13,202,240,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-teal:active   { background-color: #0bb5d7 !important; color: #055e73 !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(13,202,240,.1) !important; }
+        .keypad-grid .btn-ctrl.c-orange {
+            background-color: #fd7e14 !important; color: white !important;
+            border-color: #b85300 !important; border-bottom-color: #7a3600 !important;
+            box-shadow: 0 1px 1px -1px rgba(255,255,255,.9) inset, 0 40px 20px -20px rgba(255,255,255,.15) inset, 0 -1px 1px -1px rgba(0,0,0,.7) inset, 0 -40px 20px -20px rgba(0,0,0,.06) inset, 0 9px 8px -4px rgba(0,0,0,.4), 0 2px 1px -1px rgba(0,0,0,.3), 7px 7px 8px -4px rgba(0,0,0,.1), -7px 7px 8px -4px rgba(0,0,0,.1), 0 -4px 12px 2px rgba(253,126,20,.2) !important;
+        }
+        .keypad-grid .btn-ctrl.c-orange:active { background-color: #e2720f !important; color: #7a3600 !important; box-shadow: 0 -1px 1px -1px rgba(255,255,255,.4) inset, 0 -40px 20px -20px rgba(255,255,255,.1) inset, 0 1px 1px -1px rgba(0,0,0,.7) inset, 0 40px 20px -20px rgba(0,0,0,.06) inset, 0 7px 8px -4px rgba(0,0,0,.4), 7px 7px 8px -4px rgba(0,0,0,.05), -7px 7px 8px -4px rgba(0,0,0,.05), 0 -4px 12px 2px rgba(253,126,20,.1) !important; }
+
+        /* ================================================================
+           ZETA — inv-btn (panel de inventario)
+           Estilo: minimalista, gradiente fino 0deg, sombra plana, sin radius
+           Ref: loupbrun.ca/buttons — Zeta
+        ================================================================ */
+        .inv-btn {
+            border-width: 1px !important; border-style: solid !important;
+            border-radius: 5px !important;
+            box-shadow: 0 1px 0 0 rgba(255,255,255,0.2) inset, 0 1px 3px 0 rgba(0,0,0,0.45) !important;
+            transition: filter 0.15s, transform 0.1s !important;
+        }
+        .inv-btn:hover  { filter: brightness(1.1) !important; transform: translateY(-1px) !important; box-shadow: 0 1px 0 0 rgba(255,255,255,0.2) inset, 0 3px 6px 0 rgba(0,0,0,0.35) !important; }
+        .inv-btn:active { transform: scale(0.97) !important; filter: none !important; box-shadow: 0 2px 4px -2px rgba(0,0,0,0.2) inset, 0 1px 3px 0 rgba(0,0,0,0.12) !important; }
         .category-bar { display: flex; overflow-x: auto; overflow-y: hidden; gap: 8px; margin-bottom: 8px; padding-bottom: 5px; scrollbar-width: none; height: 52px; align-items: center; flex-shrink: 0; }
         body.pos-bars-hidden .category-bar,
         body.pos-bars-hidden #favoritesBar { display: none !important; }
