@@ -785,20 +785,20 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     </span>
                 </div>
                 <div class="d-flex align-items-center gap-1">
-                    <a href="customer_display.php" target="_blank" class="btn btn-sm btn-outline-info px-2" title="Pantalla del cliente">
+                    <a href="customer_display.php" target="_blank" class="btn btn-sm btn-outline-info px-2 inv-btn" title="Pantalla del cliente">
                         <i class="fas fa-desktop"></i>
                     </a>
-                    <button class="btn btn-sm btn-outline-warning position-relative px-2 animate__animated" id="btnSelfOrders" onclick="openSelfOrdersModal()" title="Autopedidos">
+                    <button class="btn btn-sm btn-outline-warning position-relative px-2 animate__animated inv-btn" id="btnSelfOrders" onclick="openSelfOrdersModal()" title="Autopedidos">
                         <i class="fas fa-mobile-alt"></i>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="selfOrderBadge" style="font-size:0.6rem;">0</span>
                     </button>
-                    <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2" title="Caja">
+                    <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Caja">
                         <i class="fas fa-cash-register"></i>
                     </button>
-                    <button onclick="showParkedOrders()" class="btn btn-sm btn-light text-warning px-2" title="Pausados">
+                    <button onclick="showParkedOrders()" class="btn btn-sm btn-light text-warning px-2 inv-btn" title="Pausados">
                         <i class="fas fa-pause"></i>
                     </button>
-                    <a href="reportes_caja.php" class="btn btn-sm btn-light text-primary px-2" title="Reportes">
+                    <a href="reportes_caja.php" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Reportes">
                         <i class="fas fa-chart-line"></i>
                     </a>
                 </div>
