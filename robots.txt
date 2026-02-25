@@ -1,0 +1,43 @@
+User-agent: *
+Allow: /shop.php
+Allow: /shop2.php
+Allow: /image.php
+Allow: /icon-192.png
+Allow: /icon-512.png
+Allow: /manifest.json
+
+# Bloquear páginas administrativas y de sistema
+Disallow: /dashboard.php
+Disallow: /pos.php
+Disallow: /pos_*.php
+Disallow: /pos_admin.php
+Disallow: /login.php
+Disallow: /logout.php
+Disallow: /db.php
+Disallow: /db_debug.php
+Disallow: /config_loader.php
+Disallow: /pos.cfg
+Disallow: /pos.js.save
+Disallow: /pos.js.save.1
+Disallow: /index.php
+Disallow: /s.php
+Disallow: /dash.php
+Disallow: /admin/
+Disallow: /migrations/
+Disallow: /_deprecated/
+Disallow: /backups/
+Disallow: /debug.log
+Disallow: /production_debug.log
+Disallow: /*_api.php
+Disallow: /accounting_*.php
+Disallow: /fix_*.php
+Disallow: /rebuild_*.php
+Disallow: /update_*.php
+Disallow: /sync_*.php
+Disallow: /api_*.php
+Disallow: /chequear_*.php
+Disallow: /palweb_ai.py
+Disallow: /venv/
+
+# Sitemap
+Sitemap: https://palweb.net/marinero/sitemap.xml

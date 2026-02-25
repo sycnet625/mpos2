@@ -482,8 +482,11 @@ function handleHotkeys(e) {
 // ==========================================
 // ESCANER Y TECLADO
 // ==========================================
-function handleBarcodeScanner(e) { 
-    if(e.target.tagName === 'INPUT' && e.target.id !== 'searchInput') return; 
+function handleBarcodeScanner(e) {
+    // No capturar teclas mientras el PIN overlay está visible
+    const pinOverlay = document.getElementById('pinOverlay');
+    if (pinOverlay && pinOverlay.style.display !== 'none' && pinOverlay.style.display !== '') return;
+    if(e.target.tagName === 'INPUT' && e.target.id !== 'searchInput') return;
     if(e.ctrlKey || e.altKey || e.metaKey) return; 
     clearTimeout(barcodeTimeout); 
     barcodeTimeout = setTimeout(() => { barcodeBuffer = ""; }, 100); 
@@ -656,6 +659,9 @@ function unlockPos() {
     const cashierName = document.getElementById('cashierName');
     if (overlay) overlay.style.display = 'none';
     if (cashierName) cashierName.innerText = currentCashier;
+    // Limpiar buscador por si el browser autollenó algo durante el PIN
+    const si = document.getElementById('searchInput');
+    if (si) { si.value = ''; si.blur(); }
     checkCashStatusSilent();
 
     // Restaurar carrito guardado antes del auto-logout
@@ -780,9 +786,9 @@ async function checkCashStatusSilent() {
 // RENDERIZADO DE PRODUCTOS
 // ==========================================
 window.shouldShowProduct = function(p) {
+    if (invModeActive) return true; // inventario muestra todo
     if (!window.stockFilterActive) return true;
-    const stock = parseFloat(p.stock) || 0;
-    return stock > 0 || p.es_servicio == 1;
+    return parseFloat(p.stock) > 0 || p.es_servicio == 1;
 };
 
 window.toggleStockFilter = function() {
@@ -890,11 +896,15 @@ function renderProducts(category, searchTerm) {
                 '<div class="product-price">$' + parseFloat(p.precio || 0).toFixed(2) + '</div>' +
             '</div>';
         
-        if (hasStock) {
+        if (hasStock || invModeActive) {
             card.onclick = () => addToCart(p);
             card.style.cursor = 'pointer';
+            // En modo inventario los productos agotados tienen badge diferente
+            if (invModeActive && !hasStock) {
+                card.querySelector('.stock-badge')?.classList.replace('stock-zero','stock-inv');
+            }
         } else {
-            card.onclick = () => { Synth.error(); showToast('Sin Stock', 'error'); }; // Feedback visual click en agotado
+            card.onclick = () => { Synth.error(); showToast('Sin Stock', 'error'); };
             card.style.cursor = 'not-allowed';
         }
 
@@ -1003,7 +1013,7 @@ function addToCart(p) {
     const currentQtyInCart = (idx >= 0) ? cart[idx].qty : 0;
     const stockAvailable = parseFloat(p.stock) || 0;
 
-    if(p.es_servicio == 0 && (currentQtyInCart + 1) > stockAvailable) {
+    if(!invModeActive && p.es_servicio == 0 && (currentQtyInCart + 1) > stockAvailable) {
         return showToast("Stock insuficiente (" + stockAvailable + " disp)", "error");
     }
 
@@ -1089,12 +1099,18 @@ window.updateStockBadges = function() {
                 const card = badge.closest('.product-card');
                 
                 if (stockVisual <= 0 && p.es_servicio == 0) {
-                    badge.className = 'stock-badge stock-zero';
+                    badge.className = 'stock-badge ' + (invModeActive ? 'stock-inv' : 'stock-zero');
                     if (card) {
-                         card.classList.add('stock-zero-card');
-                         card.style.opacity = '0.6';
-                         card.onclick = () => { Synth.error(); showToast('Sin Stock', 'error'); };
-                         card.style.cursor = 'not-allowed';
+                        card.classList.add('stock-zero-card');
+                        if (invModeActive) {
+                            card.style.opacity = '1';
+                            card.onclick = () => addToCart(p);
+                            card.style.cursor = 'pointer';
+                        } else {
+                            card.style.opacity = '0.6';
+                            card.onclick = () => { Synth.error(); showToast('Sin Stock', 'error'); };
+                            card.style.cursor = 'not-allowed';
+                        }
                     }
                 } else {
                     badge.className = 'stock-badge stock-ok';
@@ -1116,7 +1132,7 @@ function modifyQty(d) {
     const prod = productsDB.find(x => x.codigo == item.id);
     
     // Verificacion de stock al incrementar
-    if(d > 0 && prod && prod.es_servicio == 0 && (item.qty + d) > parseFloat(prod.stock)) {
+    if(!invModeActive && d > 0 && prod && prod.es_servicio == 0 && (item.qty + d) > parseFloat(prod.stock)) {
         Synth.error();
         return showToast("Sin mas stock", "error");
     }
@@ -1787,158 +1803,151 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ── MÓDULO INVENTARIO POS ────────────────────────────────────────────────────
 const INV_CONFIG = {
-    entrada:      { title: 'Recepción de Mercancía',   icon: 'fa-truck-loading', color: 'success',   qtyLabel: 'Cantidad recibida' },
-    ajuste:       { title: 'Ajuste de Conteo',         icon: 'fa-sliders-h',     color: 'warning',   qtyLabel: 'Cantidad a ajustar' },
-    conteo:       { title: 'Conteo Físico',             icon: 'fa-barcode',       color: 'info',      qtyLabel: 'Cantidad contada (total real)' },
-    merma:        { title: 'Registrar Merma',           icon: 'fa-trash-alt',     color: 'danger',    qtyLabel: 'Cantidad a dar de baja' },
-    transferencia:{ title: 'Transferencia a Sucursal', icon: 'fa-exchange-alt',  color: 'primary',   qtyLabel: 'Cantidad a transferir' },
-    consultar:    { title: 'Consultar Existencias',    icon: 'fa-search',         color: 'secondary', qtyLabel: '' },
+    entrada:      { title: 'Recepción de Mercancía',   icon: 'fa-truck-loading', color: 'success'  },
+    merma:        { title: 'Registrar Merma',           icon: 'fa-trash-alt',     color: 'danger'   },
+    ajuste:       { title: 'Ajuste de Existencias',    icon: 'fa-sliders-h',     color: 'warning'  },
+    conteo:       { title: 'Conteo Físico',             icon: 'fa-barcode',       color: 'info'     },
+    transferencia:{ title: 'Transferencia a Sucursal', icon: 'fa-exchange-alt',  color: 'primary'  },
+    consultar:    { title: 'Consultar Existencias',    icon: 'fa-search',         color: 'secondary'},
 };
 
 let invModeActive = false;
 
 window.toggleInventarioMode = function() {
     invModeActive = !invModeActive;
-    const posPanel = document.getElementById('posPanel');
-    const invPanel = document.getElementById('inventarioPanel');
-    const btnInv   = document.getElementById('btnInventario');
+
+    const posPanel  = document.getElementById('posPanel');
+    const invPanel  = document.getElementById('inventarioPanel');
+    const btnInv    = document.getElementById('btnInventario');
+    const banner    = document.getElementById('invModeBanner');
+
     if (posPanel) posPanel.style.display = invModeActive ? 'none'  : '';
     if (invPanel) invPanel.style.display = invModeActive ? 'block' : 'none';
     if (btnInv)   btnInv.classList.toggle('inv-active', invModeActive);
+    if (banner)   banner.style.display   = invModeActive ? '' : 'none';
+
+    if (invModeActive) {
+        // Limpiar carrito al entrar en modo inventario
+        cart = [];
+        renderCart();
+        showToast('Modo inventario activo — todos los productos están disponibles', 'warning');
+    } else {
+        cart = [];
+        renderCart();
+    }
+    // Refrescar productos: en modo inv se muestran todos (incluye stock=0)
+    renderProducts();
 };
 
 window.openInvModal = function(tipo) {
-    window.currentInvTipo = tipo;
-    window.currentInvProd = null;
-    const cfg = INV_CONFIG[tipo];
-    document.getElementById('invModalTitle').innerHTML =
-        `<i class="fas ${cfg.icon} me-2 text-${cfg.color}"></i>${cfg.title}`;
-    document.getElementById('invSkuInput').value        = '';
-    document.getElementById('invProductInfo').innerHTML = '';
-    document.getElementById('invSuggestions').style.display = 'none';
-    document.getElementById('invQtyInput').value        = '';
-    document.getElementById('invQtyLabel').textContent  = cfg.qtyLabel;
-    document.getElementById('invMotivoInput').value     = '';
-    document.getElementById('invCostoInput').value      = '';
-    const isConsultar = tipo === 'consultar';
-    document.getElementById('invCostoRow').style.display          = tipo === 'entrada'       ? '' : 'none';
-    document.getElementById('invAjusteRow').style.display         = tipo === 'ajuste'        ? '' : 'none';
-    document.getElementById('invTransferenciaRow').style.display  = tipo === 'transferencia' ? '' : 'none';
-    document.getElementById('invQtyRow').style.display            = isConsultar ? 'none' : '';
-    document.getElementById('invMotivoRow').style.display         = isConsultar ? 'none' : '';
-    document.getElementById('invConsultarInfo').innerHTML         = '';
-    document.getElementById('invConsultarInfo').style.display     = 'none';
-    document.getElementById('btnInvConfirmar').style.display      = isConsultar ? 'none' : '';
-    const signoPos = document.getElementById('signoPos');
-    if (signoPos) signoPos.checked = true;
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('invModal')).show();
-    setTimeout(() => document.getElementById('invSkuInput').focus(), 350);
-};
-
-window.invBuscarProducto = function(e) {
-    if (e && e.type === 'keyup' && e.key !== 'Enter') {
-        const term = document.getElementById('invSkuInput').value.trim().toLowerCase();
-        const sug  = document.getElementById('invSuggestions');
-        if (term.length < 2) { sug.style.display = 'none'; return; }
-        const matches = (productsDB || []).filter(p =>
-            p.codigo.toLowerCase().includes(term) || p.nombre.toLowerCase().includes(term)
-        ).slice(0, 8);
-        if (!matches.length) { sug.style.display = 'none'; return; }
-        sug.innerHTML = matches.map(p =>
-            `<button type="button" class="list-group-item list-group-item-action py-1 small"
-                     onclick="invSeleccionarProd('${p.codigo}')">
-                <strong class="me-2">${p.codigo}</strong>${p.nombre}
-                <span class="float-end text-muted">Stock: ${p.stock}</span>
-             </button>`
-        ).join('');
-        sug.style.display = '';
+    if (cart.length === 0) {
+        showToast('Agrega productos al carrito primero', 'warning');
         return;
     }
-    const term = document.getElementById('invSkuInput').value.trim();
-    document.getElementById('invSuggestions').style.display = 'none';
-    if (!term) return;
-    const prod = (productsDB || []).find(p => p.codigo.toLowerCase() === term.toLowerCase())
-              || (productsDB || []).find(p => p.nombre.toLowerCase() === term.toLowerCase())
-              || (productsDB || []).find(p => p.codigo.toLowerCase().includes(term.toLowerCase())
-                                          || p.nombre.toLowerCase().includes(term.toLowerCase()));
-    if (prod) invSeleccionarProd(prod.codigo);
-    else document.getElementById('invProductInfo').innerHTML =
-        '<div class="alert alert-warning py-2 small mb-0">Producto no encontrado</div>';
+    window.currentInvTipo = tipo;
+    const cfg = INV_CONFIG[tipo];
+
+    document.getElementById('invModalTitle').innerHTML =
+        `<i class="fas ${cfg.icon} me-2 text-${cfg.color}"></i>${cfg.title}`;
+
+    // Tabla resumen del carrito
+    const rows = cart.map(i =>
+        `<tr>
+            <td class="small text-muted">${i.id}</td>
+            <td class="small fw-bold">${i.name}</td>
+            <td class="text-center fw-bold text-primary fs-6">${i.qty}</td>
+         </tr>`
+    ).join('');
+    document.getElementById('invCartSummary').innerHTML =
+        `<div class="small text-secondary fw-bold mb-1">${cart.length} producto(s) en el carrito:</div>
+         <table class="table table-sm table-bordered mb-0">
+            <thead class="table-dark"><tr>
+                <th class="small">SKU</th><th class="small">Producto</th>
+                <th class="text-center small">Cantidad</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+         </table>`;
+
+    // Fecha por defecto hoy
+    document.getElementById('invFechaInput').value =
+        new Date().toISOString().split('T')[0];
+    document.getElementById('invMotivoInput').value = '';
+
+    // Mostrar/ocultar destino (solo transferencia)
+    document.getElementById('invDestinoCol').style.display = tipo === 'transferencia' ? '' : 'none';
+    if (tipo === 'transferencia')
+        document.getElementById('invDestinoInput').value = '';
+
+    // Para conteo: cargar comparación con BD
+    const conteoInfo = document.getElementById('invConteoInfo');
+    conteoInfo.innerHTML = '';
+    conteoInfo.style.display = 'none';
+    if (tipo === 'conteo') invCargarConteo();
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('invModal')).show();
+    setTimeout(() => document.getElementById('invMotivoInput').focus(), 350);
 };
 
-window.invSeleccionarProd = function(codigo) {
-    const prod = (productsDB || []).find(p => p.codigo == codigo);
-    if (!prod) return;
-    window.currentInvProd = prod;
-    document.getElementById('invSkuInput').value = prod.codigo;
-    document.getElementById('invSuggestions').style.display = 'none';
-    document.getElementById('invProductInfo').innerHTML =
-        `<div class="alert alert-success py-2 small mb-0">
-            <strong>${prod.nombre}</strong><br>
-            <span class="me-3">Stock actual: <strong>${prod.stock}</strong></span>
-            <span>Costo: <strong>$${prod.costo || 0}</strong></span>
-         </div>`;
-    document.getElementById('invCostoInput').value = prod.costo || '';
-    if (window.currentInvTipo === 'consultar') {
-        invConsultarStock(prod.codigo);
-    } else {
-        document.getElementById('invQtyInput').focus();
-    }
-};
-
-window.invConsultarStock = async function(sku) {
-    const infoEl = document.getElementById('invConsultarInfo');
+// Carga comparación conteo vs BD
+window.invCargarConteo = async function() {
+    const infoEl = document.getElementById('invConteoInfo');
     infoEl.style.display = '';
-    infoEl.innerHTML = '<div class="text-center py-2"><i class="fas fa-spinner fa-spin"></i> Consultando...</div>';
+    infoEl.innerHTML = '<div class="text-center py-2 small"><i class="fas fa-spinner fa-spin me-1"></i>Comparando con base de datos...</div>';
     try {
         const r = await fetch('pos.php?inventario_api=1', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ accion: 'consultar', sku }),
+            body: JSON.stringify({ accion: 'consultar_bulk', skus: cart.map(i => i.id) }),
         });
         const d = await r.json();
-        if (d.status === 'success') {
-            const rows = (d.kardex || []).map(m =>
-                `<tr><td class="small">${m.fecha}</td><td class="small">${m.tipo_movimiento}</td>
-                 <td class="small text-end">${m.cantidad > 0 ? '+' : ''}${m.cantidad}</td>
-                 <td class="small text-muted">${m.referencia || ''}</td></tr>`
-            ).join('');
-            infoEl.innerHTML = `
-                <div class="alert alert-info py-2 mb-2 small">
-                    <i class="fas fa-warehouse me-1"></i>
-                    Stock en almacén: <strong class="fs-5">${d.stock}</strong>
-                </div>
-                ${rows ? `<div class="small fw-bold text-secondary mb-1">Últimos movimientos:</div>
-                <table class="table table-sm table-striped mb-0 small"><tbody>${rows}</tbody></table>` : ''}`;
-        } else {
-            infoEl.innerHTML = `<div class="alert alert-danger py-2 small">${d.msg}</div>`;
-        }
-    } catch (e) {
-        infoEl.innerHTML = '<div class="alert alert-danger py-2 small">Error de conexión</div>';
+        if (d.status !== 'success') throw new Error(d.msg);
+        const rows = cart.map(item => {
+            const enBD  = d.stocks[item.id] ?? 0;
+            const diff  = item.qty - enBD;
+            const cls   = diff === 0 ? 'text-success' : (diff > 0 ? 'text-warning' : 'text-danger');
+            const label = diff === 0 ? '<i class="fas fa-check"></i>' : (diff > 0 ? `+${diff}` : `${diff}`);
+            return `<tr>
+                <td class="small">${item.id}</td>
+                <td class="small">${item.name}</td>
+                <td class="text-center">${enBD}</td>
+                <td class="text-center fw-bold">${item.qty}</td>
+                <td class="text-center fw-bold ${cls}">${label}</td>
+            </tr>`;
+        }).join('');
+        infoEl.innerHTML =
+            `<div class="small text-secondary fw-bold mb-1">Comparación conteo físico vs sistema:</div>
+             <table class="table table-sm table-bordered mb-0 small">
+                <thead class="table-warning"><tr>
+                    <th>SKU</th><th>Producto</th>
+                    <th class="text-center">En BD</th>
+                    <th class="text-center">Contado</th>
+                    <th class="text-center">Diferencia</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+             </table>`;
+    } catch(e) {
+        infoEl.innerHTML = '<div class="alert alert-warning py-2 small mb-0">No se pudo obtener datos de BD</div>';
     }
 };
 
 window.invConfirmar = async function() {
-    if (!window.currentInvProd) return showToast('Seleccione un producto', 'warning');
-    const qty    = parseFloat(document.getElementById('invQtyInput').value);
-    const motivo = document.getElementById('invMotivoInput').value.trim();
-    if (!qty || qty <= 0) return showToast('Ingrese una cantidad válida', 'warning');
-    if (!motivo)          return showToast('El motivo es obligatorio', 'warning');
+    const motivo  = document.getElementById('invMotivoInput').value.trim();
+    const fecha   = document.getElementById('invFechaInput').value;
+    const tipo    = window.currentInvTipo;
 
-    let finalQty = qty;
-    if (window.currentInvTipo === 'ajuste') {
-        const signo = document.querySelector('input[name="ajusteSigno"]:checked')?.value;
-        if (signo === 'neg') finalQty = -Math.abs(qty);
+    if (!motivo) return showToast('El motivo es obligatorio', 'warning');
+    if (tipo === 'transferencia') {
+        const dest = (document.getElementById('invDestinoInput')?.value || '').trim();
+        if (!dest) return showToast('Indica la sucursal destino', 'warning');
     }
 
     const payload = {
-        accion:      window.currentInvTipo,
-        sku:         window.currentInvProd.codigo,
-        cantidad:    finalQty,
-        motivo:      motivo,
-        usuario:     currentCashier || 'POS-Admin',
-        costo_nuevo: parseFloat(document.getElementById('invCostoInput').value) || undefined,
-        destino:     (document.getElementById('invDestinoInput')?.value || '').trim() || undefined,
+        accion:   tipo,
+        items:    cart.map(i => ({ sku: i.id, cantidad: i.qty })),
+        fecha,
+        motivo,
+        usuario:  currentCashier || 'POS-Admin',
+        destino:  (document.getElementById('invDestinoInput')?.value || '').trim() || undefined,
     };
 
     const btn = document.getElementById('btnInvConfirmar');
@@ -1955,20 +1964,20 @@ window.invConfirmar = async function() {
         if (d.status === 'success') {
             showToast(d.msg, 'success');
             bootstrap.Modal.getInstance(document.getElementById('invModal')).hide();
-            const p = productsDB.find(x => x.codigo == window.currentInvProd.codigo);
-            if (p) {
-                const tipo = window.currentInvTipo;
-                if      (tipo === 'entrada')      p.stock = parseFloat(p.stock) + Math.abs(finalQty);
-                else if (tipo === 'ajuste')       p.stock = parseFloat(p.stock) + finalQty;
-                else if (tipo === 'conteo')       p.stock = qty;
-                else if (tipo === 'merma')        p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
-                else if (tipo === 'transferencia')p.stock = Math.max(0, parseFloat(p.stock) - Math.abs(finalQty));
-                renderProducts();
+            // Actualizar caché local de stock
+            if (d.stocks_updated) {
+                d.stocks_updated.forEach(s => {
+                    const p = productsDB.find(x => x.codigo == s.sku);
+                    if (p) p.stock = s.nuevo_stock;
+                });
             }
+            cart = [];
+            renderCart();
+            renderProducts();
         } else {
-            showToast(d.msg || 'Error desconocido', 'error');
+            showToast(d.msg || 'Error', 'error');
         }
-    } catch (e) {
+    } catch(e) {
         showToast('Error de conexión', 'error');
     } finally {
         btn.disabled = false;

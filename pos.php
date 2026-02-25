@@ -141,18 +141,18 @@ if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-// ENDPOINT: Inventario desde POS (solo admin, validado por PIN en frontend)
+// ENDPOINT: Inventario desde POS — opera sobre el carrito completo
 if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     ini_set('display_errors', 0);
     $input   = json_decode(file_get_contents('php://input'), true) ?: [];
-    $accion  = $input['accion']   ?? '';
-    $sku     = trim($input['sku'] ?? '');
-    $qty     = floatval($input['cantidad'] ?? 0);
-    $motivo  = trim($input['motivo'] ?? '');
+    $accion  = $input['accion']  ?? '';
+    $motivo  = trim($input['motivo']  ?? '');
     $usuario = trim($input['usuario'] ?? 'POS-Admin');
+    $items   = $input['items']   ?? [];
+    $fechaRaw = trim($input['fecha'] ?? '');
+    $fecha   = ($fechaRaw && strlen($fechaRaw) >= 10) ? (substr($fechaRaw,0,10).' '.date('H:i:s')) : date('Y-m-d H:i:s');
 
-    // Config necesaria para IDs
     $cfgFile = 'pos.cfg';
     $cfg = ["id_almacen"=>1,"id_sucursal"=>1,"id_empresa"=>1];
     if (file_exists($cfgFile)) { $tmp = json_decode(file_get_contents($cfgFile),true); if($tmp) $cfg = array_merge($cfg,$tmp); }
@@ -160,81 +160,104 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $SUC = intval($cfg['id_sucursal']);
     $EMP = intval($cfg['id_empresa']);
 
-    if (!$sku || $qty == 0) { echo json_encode(['status'=>'error','msg'=>'SKU y cantidad requeridos']); exit; }
-
     require_once 'db.php';
     require_once 'kardex_engine.php';
 
-    $prod = $pdo->prepare("SELECT codigo, nombre, costo FROM productos WHERE codigo=? AND id_empresa=?");
-    $prod->execute([$sku, $EMP]);
-    $prod = $prod->fetch(PDO::FETCH_ASSOC);
-    if (!$prod) { echo json_encode(['status'=>'error','msg'=>'Producto no encontrado']); exit; }
+    // Consulta bulk de stock para el conteo visual (sin modificar datos)
+    if ($accion === 'consultar_bulk') {
+        $skus = $input['skus'] ?? [];
+        $stocks = [];
+        foreach ($skus as $s) {
+            $s = trim($s);
+            if (!$s) continue;
+            $q = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+            $q->execute([$s, $ALM]);
+            $stocks[$s] = floatval($q->fetchColumn() ?: 0);
+        }
+        echo json_encode(['status'=>'success','stocks'=>$stocks]);
+        exit;
+    }
 
-    $costo = floatval($prod['costo']);
-    $fecha = date('Y-m-d H:i:s');
-    $ke    = new KardexEngine($pdo);   // instancia para que __call inyecte $pdo correctamente
+    if (empty($items)) { echo json_encode(['status'=>'error','msg'=>'Carrito vacío']); exit; }
+
+    $ke = new KardexEngine($pdo);
+    $results = [];
+    $stocks_updated = [];
 
     try {
-        if ($accion === 'entrada') {
-            $nuevoCosto = floatval($input['costo_nuevo'] ?? $costo) ?: $costo;
-            $ke->registrarMovimiento($sku, $ALM, $SUC, 'ENTRADA', abs($qty), "ENTRADA POS: $motivo", $nuevoCosto, $usuario, $fecha);
-            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
-            if ($nuevoCosto != $costo) $pdo->prepare("UPDATE productos SET costo=? WHERE codigo=?")->execute([$nuevoCosto, $sku]);
-            echo json_encode(['status'=>'success','msg'=>"Entrada registrada: +".abs($qty)." de {$prod['nombre']}"]);
-
-        } elseif ($accion === 'ajuste') {
-            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $qty, "AJUSTE POS: $motivo", $costo, $usuario, $fecha);
-            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad + ? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
-            echo json_encode(['status'=>'success','msg'=>"Ajuste registrado: ".($qty>0?"+":"").$qty." de {$prod['nombre']}"]);
-
-        } elseif ($accion === 'conteo') {
-            $s = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-            $s->execute([$sku, $ALM]);
-            $stockActual = floatval($s->fetchColumn());
-            $delta = $qty - $stockActual;
-            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', $delta, "CONTEO FISICO POS: $stockActual → $qty", $costo, $usuario, $fecha);
-            $pdo->prepare("UPDATE stock_almacen SET cantidad=? WHERE id_producto=? AND id_almacen=?")->execute([$qty, $sku, $ALM]);
-            $signo = $delta >= 0 ? "+$delta" : "$delta";
-            echo json_encode(['status'=>'success','msg'=>"Conteo aplicado: $signo (era $stockActual, ahora $qty)"]);
-
-        } elseif ($accion === 'merma') {
+        // Crear tablas merma si hacen falta (solo una vez)
+        if ($accion === 'merma') {
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_detalle (id INT AUTO_INCREMENT PRIMARY KEY, id_merma INT, id_producto VARCHAR(50), cantidad DECIMAL(10,3), costo_al_momento DECIMAL(12,2), motivo_especifico TEXT) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-            $totalCosto = abs($qty) * $costo;
-            $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, id_sucursal, fecha_registro) VALUES (?,?,?,?,?)")->execute([$usuario, $motivo, $totalCosto, $SUC, $fecha]);
+            $totalCosto = 0;
+            foreach ($items as $it) {
+                $p = $pdo->prepare("SELECT costo FROM productos WHERE codigo=? AND id_empresa=?");
+                $p->execute([trim($it['sku']??''), $EMP]);
+                $totalCosto += abs(floatval($it['cantidad']??0)) * floatval($p->fetchColumn()?:0);
+            }
+            $pdo->prepare("INSERT INTO mermas_cabecera (usuario,motivo_general,total_costo_perdida,id_sucursal,fecha_registro) VALUES(?,?,?,?,?)")->execute([$usuario,$motivo,$totalCosto,$SUC,$fecha]);
             $idMerma = $pdo->lastInsertId();
-            $pdo->prepare("INSERT INTO mermas_detalle (id_merma, id_producto, cantidad, costo_al_momento, motivo_especifico) VALUES (?,?,?,?,?)")->execute([$idMerma, $sku, abs($qty), $costo, $motivo]);
-            $ke->registrarMovimiento($sku, $ALM, $SUC, 'MERMA', abs($qty), "MERMA #$idMerma POS", $costo, $usuario, $fecha);
-            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
-            echo json_encode(['status'=>'success','msg'=>"Merma #$idMerma registrada: -".abs($qty)." de {$prod['nombre']}"]);
+        }
 
-        } elseif ($accion === 'transferencia') {
+        if ($accion === 'transferencia') {
             $destino = trim($input['destino'] ?? '');
             if (!$destino) { echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']); exit; }
-            $ref = "TRANSFER→{$destino} POS: $motivo";
-            $ke->registrarMovimiento($sku, $ALM, $SUC, 'AJUSTE', -abs($qty), $ref, $costo, $usuario, $fecha);
-            $pdo->prepare("UPDATE stock_almacen SET cantidad = cantidad - ? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty), $sku, $ALM]);
-            // Registrar en sync_journal para que la sucursal destino lo reciba
-            try {
-                $pdo->exec("CREATE TABLE IF NOT EXISTS transfer_pendiente (id INT AUTO_INCREMENT PRIMARY KEY, sku VARCHAR(50), cantidad DECIMAL(10,3), costo DECIMAL(12,2), sucursal_origen INT, destino_nombre VARCHAR(100), usuario VARCHAR(100), motivo TEXT, estado VARCHAR(20) DEFAULT 'PENDIENTE', fecha DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-                $pdo->prepare("INSERT INTO transfer_pendiente (sku, cantidad, costo, sucursal_origen, destino_nombre, usuario, motivo) VALUES (?,?,?,?,?,?,?)")->execute([
-                    $sku, abs($qty), $costo, $SUC, $destino, $usuario, $motivo
-                ]);
-            } catch (Exception $e2) {}
-            echo json_encode(['status'=>'success','msg'=>"Transferencia registrada: -".abs($qty)." de {$prod['nombre']} → $destino"]);
-
-        } elseif ($accion === 'consultar') {
-            $s = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-            $s->execute([$sku, $ALM]);
-            $stockAct = floatval($s->fetchColumn() ?: 0);
-            $k = $pdo->prepare("SELECT tipo_movimiento, cantidad, referencia, fecha FROM kardex WHERE id_producto=? AND id_almacen=? ORDER BY fecha DESC LIMIT 8");
-            $k->execute([$sku, $ALM]);
-            $movimientos = $k->fetchAll(PDO::FETCH_ASSOC);
-            echo json_encode(['status'=>'success','stock'=>$stockAct,'producto'=>$prod['nombre'],'kardex'=>$movimientos]);
-
-        } else {
-            echo json_encode(['status'=>'error','msg'=>'Acción no reconocida']);
+            $pdo->exec("CREATE TABLE IF NOT EXISTS transfer_pendiente (id INT AUTO_INCREMENT PRIMARY KEY, sku VARCHAR(50), cantidad DECIMAL(10,3), costo DECIMAL(12,2), sucursal_origen INT, destino_nombre VARCHAR(100), usuario VARCHAR(100), motivo TEXT, estado VARCHAR(20) DEFAULT 'PENDIENTE', fecha DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
         }
+
+        foreach ($items as $item) {
+            $sku = trim($item['sku'] ?? '');
+            $qty = floatval($item['cantidad'] ?? 0);
+            if (!$sku || $qty <= 0) continue;
+
+            $pq = $pdo->prepare("SELECT codigo, nombre, costo FROM productos WHERE codigo=? AND id_empresa=?");
+            $pq->execute([$sku, $EMP]);
+            $prod = $pq->fetch(PDO::FETCH_ASSOC);
+            if (!$prod) { $results[] = "SKU no encontrado: $sku"; continue; }
+            $costo = floatval($prod['costo']);
+
+            if ($accion === 'entrada') {
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'ENTRADA',abs($qty),"ENTRADA POS: $motivo",$costo,$usuario,$fecha);
+                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad+? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
+                $results[] = "+".abs($qty)." ".$prod['nombre'];
+
+            } elseif ($accion === 'merma') {
+                $pdo->prepare("INSERT INTO mermas_detalle (id_merma,id_producto,cantidad,costo_al_momento,motivo_especifico) VALUES(?,?,?,?,?)")->execute([$idMerma,$sku,abs($qty),$costo,$motivo]);
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha);
+                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad-? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
+                $results[] = "-".abs($qty)." ".$prod['nombre'];
+
+            } elseif ($accion === 'ajuste') {
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$qty,"AJUSTE POS: $motivo",$costo,$usuario,$fecha);
+                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad+? WHERE id_producto=? AND id_almacen=?")->execute([$qty,$sku,$ALM]);
+                $results[] = ($qty>0?"+":"").$qty." ".$prod['nombre'];
+
+            } elseif ($accion === 'conteo') {
+                $sq = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+                $sq->execute([$sku,$ALM]);
+                $stockAnt = floatval($sq->fetchColumn()?:0);
+                $delta = $qty - $stockAnt;
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: $stockAnt→$qty",$costo,$usuario,$fecha);
+                $pdo->prepare("UPDATE stock_almacen SET cantidad=? WHERE id_producto=? AND id_almacen=?")->execute([$qty,$sku,$ALM]);
+                $results[] = $prod['nombre'].": ".($delta>=0?"+$delta":"$delta");
+
+            } elseif ($accion === 'transferencia') {
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSFER→$destino POS: $motivo",$costo,$usuario,$fecha);
+                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad-? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
+                $pdo->prepare("INSERT INTO transfer_pendiente (sku,cantidad,costo,sucursal_origen,destino_nombre,usuario,motivo,fecha) VALUES(?,?,?,?,?,?,?,?)")->execute([$sku,abs($qty),$costo,$SUC,$destino,$usuario,$motivo,$fecha]);
+                $results[] = "-".abs($qty)." ".$prod['nombre']." → $destino";
+            }
+
+            // Stock actualizado para caché JS
+            $sq2 = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
+            $sq2->execute([$sku,$ALM]);
+            $stocks_updated[] = ['sku'=>$sku, 'nuevo_stock'=>floatval($sq2->fetchColumn()?:0)];
+        }
+
+        $n = count($results);
+        $preview = implode(', ', array_slice($results,0,3)) . ($n>3 ? '…':'');
+        echo json_encode(['status'=>'success','msg'=>"$n items procesados: $preview",'stocks_updated'=>$stocks_updated]);
+
     } catch (Exception $e) {
         echo json_encode(['status'=>'error','msg'=>$e->getMessage()]);
     }
@@ -358,16 +381,70 @@ try {
         .cart-item.selected { background: #e8f0fe; border-left: 4px solid #0d6efd; }
         .cart-note { font-size: 0.75rem; color: #d63384; font-style: italic; display: block; }
         .discount-tag { font-size: 0.7rem; background: #dc3545; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 5px; }
-        .btn-ctrl { height: 45px; border: 1px solid #ced4da; border-radius: 8px; font-weight: bold; font-size: 1rem; display: flex; align-items: center; justify-content: center; background: white; }
-        .btn-pay { height: 55px; font-size: 1.4rem; width: 100%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .btn-ctrl {
+            height: 48px; border-radius: 10px; font-weight: 700; font-size: 0.95rem;
+            display: flex; align-items: center; justify-content: center; cursor: pointer;
+            background: linear-gradient(175deg, #ffffff 0%, #e9ecef 100%);
+            border: 1px solid #c0c8d0;
+            color: #333;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.12), inset 0 1px 0 rgba(255,255,255,0.9);
+            transition: transform 0.1s, box-shadow 0.1s, filter 0.1s;
+            letter-spacing: 0.02em;
+        }
+        .btn-ctrl:hover  { transform: translateY(-1px); filter: brightness(1.06); box-shadow: 0 4px 10px rgba(0,0,0,0.18), inset 0 1px 0 rgba(255,255,255,0.9); }
+        .btn-ctrl:active { transform: translateY(1px) scale(0.97); filter: brightness(0.92); box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
+        .btn-pay {
+            height: 58px; font-size: 1.35rem; width: 100%; border-radius: 12px; cursor: pointer;
+            background: linear-gradient(175deg, #4d96ff 0%, #0d6efd 55%, #0a54d4 100%);
+            border: 1px solid #0849a4;
+            color: white;
+            box-shadow: 0 4px 14px rgba(13,110,253,0.5), inset 0 1px 0 rgba(255,255,255,0.25);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .btn-pay:hover  { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(13,110,253,0.6), inset 0 1px 0 rgba(255,255,255,0.25); }
+        .btn-pay:active { transform: translateY(1px); box-shadow: 0 2px 6px rgba(13,110,253,0.4); }
         .keypad-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 8px; }
         .action-row { display: flex; gap: 6px; margin-bottom: 6px; }
-        .c-yellow { background-color: #ffc107; color: black; border-color: #ffc107; }
-        .c-green { background-color: #198754 !important; color: white !important; border-color: #198754 !important; }
-        .c-red { background-color: #dc3545 !important; color: white !important; border-color: #dc3545 !important; }
-        .c-grey { background-color: #6c757d; color: white; border-color: #6c757d; }
-        .c-blue { background-color: #0d6efd; color: white; border-color: #0d6efd; }
-        .c-purple { background-color: #6f42c1; color: white; border-color: #6f42c1; }
+        .c-yellow {
+            background: linear-gradient(175deg, #ffe066 0%, #ffc107 60%, #e0a800 100%) !important;
+            color: #212529 !important; border-color: #c79200 !important;
+            box-shadow: 0 2px 8px rgba(255,193,7,0.5), inset 0 1px 0 rgba(255,255,255,0.4) !important;
+        }
+        .c-green {
+            background: linear-gradient(175deg, #34c47a 0%, #198754 60%, #136b42 100%) !important;
+            color: white !important; border-color: #0e5233 !important;
+            box-shadow: 0 2px 8px rgba(25,135,84,0.5), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-red {
+            background: linear-gradient(175deg, #f06070 0%, #dc3545 60%, #b02a37 100%) !important;
+            color: white !important; border-color: #8f2230 !important;
+            box-shadow: 0 2px 8px rgba(220,53,69,0.5), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-grey {
+            background: linear-gradient(175deg, #909aa3 0%, #6c757d 60%, #545b62 100%) !important;
+            color: white !important; border-color: #424950 !important;
+            box-shadow: 0 2px 8px rgba(108,117,125,0.45), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-blue {
+            background: linear-gradient(175deg, #4d96ff 0%, #0d6efd 60%, #0a54d4 100%) !important;
+            color: white !important; border-color: #0849a4 !important;
+            box-shadow: 0 2px 8px rgba(13,110,253,0.5), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-purple {
+            background: linear-gradient(175deg, #9b6fe0 0%, #6f42c1 60%, #582fa0 100%) !important;
+            color: white !important; border-color: #472690 !important;
+            box-shadow: 0 2px 8px rgba(111,66,193,0.5), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-orange {
+            background: linear-gradient(175deg, #ff9f43 0%, #fd7e14 60%, #d96304 100%) !important;
+            color: white !important; border-color: #b85300 !important;
+            box-shadow: 0 2px 8px rgba(253,126,20,0.5), inset 0 1px 0 rgba(255,255,255,0.2) !important;
+        }
+        .c-teal {
+            background: linear-gradient(175deg, #3dd6f5 0%, #0dcaf0 60%, #0aa8ca 100%) !important;
+            color: #212529 !important; border-color: #0891ae !important;
+            box-shadow: 0 2px 8px rgba(13,202,240,0.45), inset 0 1px 0 rgba(255,255,255,0.3) !important;
+        }
         .category-bar { display: flex; overflow-x: auto; overflow-y: hidden; gap: 8px; margin-bottom: 8px; padding-bottom: 5px; scrollbar-width: none; height: 52px; align-items: center; flex-shrink: 0; }
         body.pos-bars-hidden .category-bar,
         body.pos-bars-hidden #favoritesBar { display: none !important; }
@@ -476,11 +553,19 @@ try {
         
         /* Panel de inventario */
         #inventarioPanel { display: none; }
+        .stock-inv { background: #6f42c1 !important; color: #fff !important; }  /* badge morado en modo inv para stock=0 */
         .inv-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 8px; }
-        .inv-btn { height: 68px; border: none; border-radius: 10px; font-weight: 700; font-size: 0.78rem;
-                   display: flex; flex-direction: column; align-items: center; justify-content: center;
-                   gap: 4px; cursor: pointer; transition: filter 0.15s, transform 0.1s; }
-        .inv-btn:active { transform: scale(0.95); filter: brightness(0.88); }
+        .inv-btn {
+            height: 68px; border-radius: 12px; font-weight: 700; font-size: 0.78rem;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            gap: 4px; cursor: pointer;
+            border: 1px solid rgba(0,0,0,0.2);
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.2);
+            transition: filter 0.15s, transform 0.12s, box-shadow 0.12s;
+            letter-spacing: 0.02em;
+        }
+        .inv-btn:hover  { filter: brightness(1.1); transform: translateY(-1px); box-shadow: 0 5px 14px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.2); }
+        .inv-btn:active { transform: scale(0.95) translateY(1px); filter: brightness(0.88); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
         .inv-btn i { font-size: 1.3rem; }
         #btnInventario.inv-active { background: #2c3e50 !important; color: #ffc107 !important;
                                     border-color: #ffc107 !important; }
@@ -586,6 +671,11 @@ try {
             </div>
         </div>
 
+        <!-- Banner visible solo en modo inventario -->
+        <div id="invModeBanner" style="display:none;background:#2c3e50;color:#ffc107;padding:7px 12px;font-weight:700;font-size:0.82rem;text-align:center;letter-spacing:0.04em;">
+            <i class="fas fa-boxes me-1"></i> MODO INVENTARIO — Agrega los productos con sus cantidades y usa los botones de abajo
+        </div>
+
         <div class="cart-list" id="cartContainer">
             <div class="text-center text-muted h-100 d-flex flex-column align-items-center justify-content-center">
                 <img src="00LOGO OFICIAL.jpg" style="width: 120px; margin-bottom: 15px; opacity: 0.8;" alt="PalWeb">
@@ -625,8 +715,8 @@ try {
                         <button class="btn-ctrl c-blue" onclick="addNote()"><i class="fas fa-pen"></i></button>
                         <button class="btn-ctrl c-orange" onclick="parkOrder()"><i class="fas fa-pause"></i></button>
                         <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
-                        <button class="btn-ctrl" style="background:#17a2b8;color:white;border-color:#17a2b8;" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
-                        <button id="btnSyncKeypad" class="btn-ctrl" style="background:#fd7e14;color:white;border-color:#fd7e14;opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
+                        <button class="btn-ctrl c-teal" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
+                        <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
                     </div>
                 </div>
                 <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
@@ -636,23 +726,28 @@ try {
 
             <!-- Panel de inventario -->
             <div id="inventarioPanel">
+                <div class="action-row mb-2">
+                    <button class="btn-ctrl c-yellow flex-grow-1" onclick="modifyQty(-1)" title="Restar cantidad"><i class="fas fa-minus"></i></button>
+                    <button class="btn-ctrl c-green flex-grow-1" onclick="modifyQty(1)" title="Sumar cantidad"><i class="fas fa-plus"></i></button>
+                    <button class="btn-ctrl c-red flex-grow-1" onclick="clearCart()" title="Vaciar carrito">Vaciar</button>
+                </div>
                 <div class="inv-grid">
-                    <button class="inv-btn" style="background:#198754;color:white;" onclick="openInvModal('entrada')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#34c47a 0%,#198754 60%,#136b42 100%);color:white;" onclick="openInvModal('entrada')">
                         <i class="fas fa-truck-loading"></i> Entrada
                     </button>
-                    <button class="inv-btn" style="background:#dc3545;color:white;" onclick="openInvModal('merma')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#f06070 0%,#dc3545 60%,#b02a37 100%);color:white;" onclick="openInvModal('merma')">
                         <i class="fas fa-trash-alt"></i> Merma
                     </button>
-                    <button class="inv-btn" style="background:#ffc107;color:#212529;" onclick="openInvModal('ajuste')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#ffe066 0%,#ffc107 60%,#e0a800 100%);color:#212529;" onclick="openInvModal('ajuste')">
                         <i class="fas fa-sliders-h"></i> Ajuste
                     </button>
-                    <button class="inv-btn" style="background:#0dcaf0;color:#212529;" onclick="openInvModal('conteo')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#3dd6f5 0%,#0dcaf0 60%,#0aa8ca 100%);color:#212529;" onclick="openInvModal('conteo')">
                         <i class="fas fa-barcode"></i> Conteo
                     </button>
-                    <button class="inv-btn" style="background:#0d6efd;color:white;" onclick="openInvModal('transferencia')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#4d96ff 0%,#0d6efd 60%,#0a54d4 100%);color:white;" onclick="openInvModal('transferencia')">
                         <i class="fas fa-exchange-alt"></i> Transferir
                     </button>
-                    <button class="inv-btn" style="background:#6c757d;color:white;" onclick="openInvModal('consultar')">
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#909aa3 0%,#6c757d 60%,#545b62 100%);color:white;" onclick="openInvModal('consultar')">
                         <i class="fas fa-search"></i> Consultar
                     </button>
                 </div>
@@ -682,7 +777,7 @@ try {
                 </button>
 
                 <span class="input-group-text bg-white border-0"><i class="fas fa-search"></i></span>
-                <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()">
+                <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()" autocomplete="off" autocorrect="off" spellcheck="false">
                 <button class="btn btn-light border-0" onclick="document.getElementById('searchInput').value='';filterProducts()">X</button>
                 <button id="btnHotkeyHelp" class="btn btn-light border-0" onclick="toggleHotkeyPanel()" title="Atajos de teclado">⌨</button>
             </div>
@@ -929,78 +1024,36 @@ try {
 
 <!-- Modal Inventario POS -->
 <div class="modal fade" id="invModal" tabindex="-1" data-bs-backdrop="static">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content border-0 shadow-lg">
             <div class="modal-header py-2">
                 <h6 class="modal-title fw-bold" id="invModalTitle"></h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-3">
-                <!-- Búsqueda de producto -->
-                <div class="mb-3">
-                    <label class="form-label small fw-bold">Producto (SKU o nombre)</label>
-                    <div class="input-group">
-                        <input type="text" id="invSkuInput" class="form-control"
-                               placeholder="Escanear o escribir..."
-                               onkeyup="invBuscarProducto(event)"
-                               autocomplete="off">
-                        <button class="btn btn-outline-secondary" onclick="invBuscarProducto(null)">
-                            <i class="fas fa-search"></i>
-                        </button>
+                <!-- Resumen del carrito -->
+                <div id="invCartSummary" class="mb-3" style="max-height:200px;overflow-y:auto;"></div>
+
+                <!-- Comparación conteo vs BD (solo conteo) -->
+                <div id="invConteoInfo" class="mb-3" style="display:none;max-height:200px;overflow-y:auto;"></div>
+
+                <!-- Fecha + destino transferencia -->
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-bold">Fecha del movimiento</label>
+                        <input type="date" id="invFechaInput" class="form-control">
                     </div>
-                    <div id="invProductInfo" class="mt-2"></div>
-                    <!-- Lista de sugerencias -->
-                    <div id="invSuggestions" class="list-group mt-1" style="max-height:160px;overflow-y:auto;display:none;"></div>
-                </div>
-
-                <!-- Signo para ajuste -->
-                <div id="invAjusteRow" class="mb-3" style="display:none;">
-                    <label class="form-label small fw-bold">Dirección del ajuste</label>
-                    <div class="d-flex gap-3">
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="ajusteSigno" id="signoPos" value="pos" checked>
-                            <label class="form-check-label text-success fw-bold" for="signoPos">+ Incremento</label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="ajusteSigno" id="signoNeg" value="neg">
-                            <label class="form-check-label text-danger fw-bold" for="signoNeg">− Reducción</label>
-                        </div>
+                    <div class="col-6" id="invDestinoCol" style="display:none;">
+                        <label class="form-label small fw-bold">Sucursal destino <span class="text-danger">*</span></label>
+                        <input type="text" id="invDestinoInput" class="form-control" placeholder="Nombre o ID de sucursal" autocomplete="off">
                     </div>
-                </div>
-
-                <!-- Sucursal destino (solo transferencia) -->
-                <div id="invTransferenciaRow" class="mb-3" style="display:none;">
-                    <label class="form-label small fw-bold">Sucursal destino <span class="text-danger">*</span></label>
-                    <input type="text" id="invDestinoInput" class="form-control"
-                           placeholder="Nombre o ID de la sucursal destino" autocomplete="off">
-                    <div class="form-text">Se registra salida aquí; la sucursal destino deberá confirmar la recepción.</div>
-                </div>
-
-                <!-- Cantidad -->
-                <div id="invQtyRow" class="mb-3">
-                    <label class="form-label small fw-bold" id="invQtyLabel">Cantidad</label>
-                    <input type="number" id="invQtyInput" class="form-control form-control-lg text-center fw-bold"
-                           min="0" step="0.001" placeholder="0">
-                </div>
-
-                <!-- Costo nuevo (solo entrada) -->
-                <div id="invCostoRow" class="mb-3" style="display:none;">
-                    <label class="form-label small fw-bold">Costo unitario (opcional)</label>
-                    <div class="input-group">
-                        <span class="input-group-text">$</span>
-                        <input type="number" id="invCostoInput" class="form-control" min="0" step="0.01" placeholder="Sin cambio">
-                    </div>
-                    <div class="form-text">Déjalo vacío para mantener el costo actual.</div>
                 </div>
 
                 <!-- Motivo -->
-                <div id="invMotivoRow" class="mb-3">
+                <div class="mb-1">
                     <label class="form-label small fw-bold">Motivo <span class="text-danger">*</span></label>
                     <input type="text" id="invMotivoInput" class="form-control" placeholder="Describe el motivo..." autocomplete="off">
                 </div>
-
-                <!-- Resultado consulta (solo consultar) -->
-                <div id="invConsultarInfo" style="display:none;"></div>
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
