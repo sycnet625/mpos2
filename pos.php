@@ -727,6 +727,19 @@ try {
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
 
+<script>
+// Stub temporal: evita ReferenceError si el usuario toca el PIN antes de que pos1.js cargue.
+// function typePin() en pos1.js sobreescribe window.typePin automáticamente al cargar.
+window._pinStub = '';
+window.typePin = function(v) {
+    if (v === 'C') window._pinStub = '';
+    else if (window._pinStub.length < 4) window._pinStub += String(v);
+    var d = document.getElementById('pinDisplay');
+    if (d) d.innerText = '\u2022'.repeat(window._pinStub.length);
+};
+window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
+</script>
+
 <div id="pinOverlay">
     <div class="pin-box">
         <h3 class="mb-2">Acceso POS</h3>
