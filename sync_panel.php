@@ -305,7 +305,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // FUNCIÓN AUXILIAR: Aplicar cambio en BD local
 // ============================================================================
 function aplicarCambioLocal($pdo, $tabla, $accion, $data) {
-    $tablasPermitidas = ['productos', 'ventas_cabecera', 'ventas_detalle', 'kardex', 'mermas_cabecera', 'clientes', 'compras_cabecera', 'compras_detalle'];
+    $tablasPermitidas = [
+        // POS core
+        'productos', 'stock_almacen',
+        'ventas_cabecera', 'ventas_detalle', 'ventas_pagos',
+        'kardex',
+        'mermas_cabecera', 'mermas_detalle',
+        'compras_cabecera', 'compras_detalle',
+        'transferencias_cabecera', 'transferencias_detalle',
+        // Catálogo
+        'categorias', 'producto_variantes',
+        'recetas_cabecera', 'recetas_detalle',
+        // Clientes y pedidos
+        'clientes', 'clientes_tienda',
+        'pedidos_cabecera', 'pedidos_detalle',
+        'facturas', 'facturas_detalle',
+        // Tienda online
+        'resenas_productos', 'restock_avisos', 'wishlist',
+    ];
     if (!in_array($tabla, $tablasPermitidas)) return;
 
     try {

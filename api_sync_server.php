@@ -102,7 +102,24 @@ try {
 // --- FUNCIÓN AUXILIAR: Convierte JSON a SQL ---
 function aplicarCambioEnBD($pdo, $tabla, $accion, $data) {
     // Lista blanca de tablas permitidas para seguridad
-    $tablasPermitidas = ['productos', 'ventas_cabecera', 'kardex', 'mermas_cabecera', 'clientes'];
+    $tablasPermitidas = [
+        // POS core
+        'productos', 'stock_almacen',
+        'ventas_cabecera', 'ventas_detalle', 'ventas_pagos',
+        'kardex',
+        'mermas_cabecera', 'mermas_detalle',
+        'compras_cabecera', 'compras_detalle',
+        'transferencias_cabecera', 'transferencias_detalle',
+        // Catálogo
+        'categorias', 'producto_variantes',
+        'recetas_cabecera', 'recetas_detalle',
+        // Clientes y pedidos
+        'clientes', 'clientes_tienda',
+        'pedidos_cabecera', 'pedidos_detalle',
+        'facturas', 'facturas_detalle',
+        // Tienda online
+        'resenas_productos', 'restock_avisos', 'wishlist',
+    ];
     if (!in_array($tabla, $tablasPermitidas)) return;
 
     if ($accion === 'INSERT') {
