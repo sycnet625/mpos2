@@ -620,6 +620,15 @@ foreach ($productos as $_p) {
     ];
 }
 
+// Endpoint: catálogo como JSON para refresh silencioso al reconectar
+if (isset($_GET['action']) && $_GET['action'] === 'products_json') {
+    ob_end_clean();
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    echo json_encode(['products' => $productsJs, 'ts' => time()], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 ob_end_flush();
 ?>
 <!DOCTYPE html>
@@ -1245,9 +1254,27 @@ ob_end_flush();
 
         /* Feature 1: restock aviso form */
         .aviso-form-wrap { background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; padding:12px; margin-top:8px; }
+
+        /* Modo offline: banner fijo en top */
+        .shop-offline-bar {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 10000;
+            background: #dc3545;
+            color: #fff;
+            text-align: center;
+            padding: 8px 16px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        body.shop-is-offline { padding-top: 36px; }
     </style>
 </head>
 <body>
+
+<div id="shopOfflineBanner" class="d-none shop-offline-bar">
+    <i class="fas fa-wifi-slash me-2"></i>Sin conexión &mdash; viendo catálogo guardado
+</div>
 
 <nav class="navbar-premium">
     <div class="container">
@@ -3893,6 +3920,33 @@ if ('serviceWorker' in navigator) {
         .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
         .catch(err => console.warn('[Shop PWA] SW error:', err));
 }
+
+// ── MODO OFFLINE / RECONEXIÓN ──────────────────────────────────────────────
+(function() {
+    const offlineBanner = document.getElementById('shopOfflineBanner');
+
+    function goOffline() {
+        if (offlineBanner) offlineBanner.classList.remove('d-none');
+        document.body.classList.add('shop-is-offline');
+        // Renovar timestamp del cache para que la búsqueda siga funcionando offline
+        try { localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString()); } catch(e) {}
+    }
+
+    function goOnline() {
+        if (offlineBanner) offlineBanner.classList.add('d-none');
+        document.body.classList.remove('shop-is-offline');
+        showToast(
+            '<i class="fas fa-wifi me-2"></i>Conexión restaurada. ' +
+            '<a href="javascript:location.reload()" class="text-white fw-bold text-decoration-underline">Actualizar catálogo</a>',
+            10000
+        );
+    }
+
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online',  goOnline);
+
+    if (!navigator.onLine) goOffline();
+})();
 
 // ── Push Notifications Tienda ─────────────────────────────────────────────
 const SHOP_PUSH_TIPO  = 'cliente';
