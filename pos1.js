@@ -659,9 +659,10 @@ function unlockPos() {
     const cashierName = document.getElementById('cashierName');
     if (overlay) overlay.style.display = 'none';
     if (cashierName) cashierName.innerText = currentCashier;
-    // Limpiar buscador por si el browser autollenó algo durante el PIN
+    // Limpiar buscador por si el browser autollenó algo durante el PIN y re-renderizar
     const si = document.getElementById('searchInput');
     if (si) { si.value = ''; si.blur(); }
+    renderProducts('all', '');
     checkCashStatusSilent();
 
     // Restaurar carrito guardado antes del auto-logout
