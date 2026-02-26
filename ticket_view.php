@@ -108,7 +108,17 @@ $canalMap = [
         @media print {
             .no-print { display: none; }
             body { padding: 0; width: 100%; }
-            body.fmt-a4 { overflow: visible !important; }
+            /* A4: ticket centrado, ancho de ticket térmico, no estirado */
+            body.fmt-a4 {
+                width: 100% !important;
+                display: flex !important;
+                justify-content: center !important;
+                overflow: visible !important;
+            }
+            body.fmt-a4 .ticket-paper {
+                width: 80mm !important;
+                max-width: 80mm !important;
+            }
             .total-section { background: white; }
             .canal-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
         }
