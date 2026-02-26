@@ -108,6 +108,7 @@ $canalMap = [
         @media print {
             .no-print { display: none; }
             body { padding: 0; width: 100%; }
+            body.fmt-a4 { overflow: visible !important; }
             .total-section { background: white; }
             .canal-badge { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
         }
@@ -172,9 +173,22 @@ $canalMap = [
 </head>
 <body<?php echo $viaQr ? ' class="qr-mode"' : ''; ?>>
 <div class="ticket-paper">
-    <div class="no-print text-center border-bottom mb-2">
-        <button onclick="window.print()" style="padding: 10px;">🖨️ IMPRIMIR</button>
-        <button onclick="window.close()" style="padding: 10px;">CERRAR</button>
+    <div class="no-print border-bottom mb-2" style="padding:8px 10px; background:#f8f9fa; text-align:center;">
+        <div style="font-size:10px; color:#888; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Formato de impresión</div>
+        <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
+            <button onclick="printWithFormat('58mm')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6c757d; border-radius:5px; background:#fff; font-family:monospace;">
+                🖨️ Térmica 58mm
+            </button>
+            <button onclick="printWithFormat('80mm')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #0d6efd; border-radius:5px; background:#0d6efd; color:#fff; font-weight:700; font-family:monospace;">
+                🖨️ Térmica 80mm
+            </button>
+            <button onclick="printWithFormat('a4')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #198754; border-radius:5px; background:#198754; color:#fff; font-family:monospace;">
+                📄 A4 Deskjet
+            </button>
+            <button onclick="window.close()" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #dee2e6; border-radius:5px; background:#fff; font-family:monospace;">
+                ✕ Cerrar
+            </button>
+        </div>
     </div>
 
     <div class="text-center">
@@ -403,5 +417,38 @@ $canalMap = [
     <?php endif; ?>
     <?php endif; ?>
 </div><!-- /ticket-paper -->
+
+<script>
+function printWithFormat(fmt) {
+    // Eliminar @page previo si existe
+    const old = document.getElementById('_pgStyle');
+    if (old) old.remove();
+    document.body.classList.remove('fmt-58', 'fmt-80', 'fmt-a4');
+    document.body.style.width = '';
+
+    const s = document.createElement('style');
+    s.id = '_pgStyle';
+
+    if (fmt === '58mm') {
+        document.body.classList.add('fmt-58');
+        document.body.style.width = '200px';
+        // 58mm - 4mm de márgenes = 54mm de área útil
+        s.textContent = '@page { size: 58mm auto; margin: 1mm 2mm; }';
+    } else if (fmt === 'a4') {
+        document.body.classList.add('fmt-a4');
+        // Márgenes explícitos: evita que el navegador recorte el último carácter
+        s.textContent = '@page { size: A4 portrait; margin: 15mm 20mm; }';
+    } else {
+        // 80mm (predeterminado)
+        document.body.classList.add('fmt-80');
+        document.body.style.width = '300px';
+        // 80mm - 4mm de márgenes = 76mm de área útil
+        s.textContent = '@page { size: 80mm auto; margin: 1mm 2mm; }';
+    }
+
+    document.head.appendChild(s);
+    window.print();
+}
+</script>
 </body>
 </html>
