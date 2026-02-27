@@ -834,8 +834,11 @@ if (isset($_GET['ajax'])) {
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
-                        <th class="ps-2 multi-print-col" style="display:none; width:30px;">
-                            <input type="checkbox" id="checkAll" style="cursor:pointer; width:15px; height:15px;" onchange="toggleAll(this)">
+                        <th class="ps-2 no-print" style="width:80px;">
+                            <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap;">
+                                <input type="checkbox" id="checkAll" style="cursor:pointer; width:14px; height:14px; flex-shrink:0;" onchange="toggleAll(this)">
+                                Sel. todo
+                            </label>
                         </th>
                         <th class="ps-3">ID</th>
                         <th>Cliente</th>
@@ -2126,6 +2129,9 @@ function applyMultiPrintCols() {
 }
 
 function toggleAll(el) {
+    // Activar modo multi-print automáticamente si no estaba activo
+    if (el.checked && !multiPrintMode) toggleMultiPrint();
+    if (!el.checked && multiPrintMode)  toggleMultiPrint();
     document.querySelectorAll('.ticket-chk').forEach(c => c.checked = el.checked);
     updateMultiCount();
 }
