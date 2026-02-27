@@ -24,6 +24,11 @@ $defaultConfig = [
     "tienda_nombre" => "MI TIENDA",
     "direccion" => "Dirección del Negocio",
     "telefono" => "000-0000",
+    "email" => "",
+    "website" => "",
+    "nit" => "",
+    "cuenta_bancaria" => "",
+    "banco" => "",
     "mensaje_final" => "¡Gracias por su compra!",
     "id_empresa" => 1,
     "id_sucursal" => 1,
@@ -97,10 +102,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         // Datos Básicos
         $newConfig = [
-            "tienda_nombre" => trim($_POST['tienda_nombre']),
-            "direccion" => trim($_POST['direccion']),
-            "telefono" => trim($_POST['telefono']),
-            "mensaje_final" => trim($_POST['mensaje_final']),
+            "tienda_nombre"   => trim($_POST['tienda_nombre']),
+            "direccion"       => trim($_POST['direccion']),
+            "telefono"        => trim($_POST['telefono']),
+            "email"           => trim($_POST['email']           ?? ''),
+            "website"         => trim($_POST['website']         ?? ''),
+            "nit"             => trim($_POST['nit']             ?? ''),
+            "cuenta_bancaria" => trim($_POST['cuenta_bancaria'] ?? ''),
+            "banco"           => trim($_POST['banco']           ?? ''),
+            "mensaje_final"   => trim($_POST['mensaje_final']),
             "id_empresa" => intval($_POST['id_empresa']),
             "id_sucursal" => intval($_POST['id_sucursal']),
             "id_almacen" => intval($_POST['id_almacen']),
@@ -340,6 +350,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div class="col-12">
                             <label class="form-label">Dirección</label>
                             <input type="text" name="direccion" class="form-control" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Email de contacto</label>
+                            <input type="email" name="email" class="form-control" placeholder="admin@empresa.com" value="<?php echo htmlspecialchars($currentConfig['email'] ?? ''); ?>">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Sitio Web</label>
+                            <input type="url" name="website" class="form-control" placeholder="https://www.empresa.com" value="<?php echo htmlspecialchars($currentConfig['website'] ?? ''); ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">NIT / RUC / Registro Fiscal</label>
+                            <input type="text" name="nit" class="form-control font-monospace" placeholder="00000000000" value="<?php echo htmlspecialchars($currentConfig['nit'] ?? ''); ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Cuenta Bancaria (facturas)</label>
+                            <input type="text" name="cuenta_bancaria" class="form-control font-monospace" placeholder="0000000000000000" value="<?php echo htmlspecialchars($currentConfig['cuenta_bancaria'] ?? ''); ?>">
+                            <div class="form-text">Número de cuenta para transferencias en facturas.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Banco (facturas)</label>
+                            <input type="text" name="banco" class="form-control" placeholder="Banco Metropolitano, suc. 304" value="<?php echo htmlspecialchars($currentConfig['banco'] ?? ''); ?>">
                         </div>
                     </div>
                 </div>
