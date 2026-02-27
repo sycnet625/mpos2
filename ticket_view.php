@@ -195,6 +195,9 @@ $canalMap = [
             <button onclick="printWithFormat('a4')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #198754; border-radius:5px; background:#198754; color:#fff; font-family:monospace;">
                 📄 A4 Deskjet
             </button>
+            <a href="ticket_to_invoice.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6f42c1; border-radius:5px; background:#6f42c1; color:#fff; font-family:monospace; text-decoration:none; display:inline-block;">
+                📋 Ver como Factura
+            </a>
             <button onclick="window.close()" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #dee2e6; border-radius:5px; background:#fff; font-family:monospace;">
                 ✕ Cerrar
             </button>
