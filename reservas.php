@@ -676,7 +676,7 @@ if (isset($_GET['ajax'])) {
         /* Lines table */
         #linesTable td,#linesTable th { padding:6px 10px; vertical-align:middle; }
         .modal-xl { max-width:960px; }
-        @media print { .no-print { display:none!important; } body { background:white; } }
+        @media print { .no-print, .multi-print-col { display:none!important; } body { background:white; } }
         .crm-badge-ok  { background:#dcfce7; color:#166534; border:1px solid #86efac; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
         .crm-badge-no  { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
         .crm-badge-no .btn-guardar-cliente { background:none; border:none; padding:0; font-size:.7rem; font-weight:700; color:#0d6efd; cursor:pointer; text-decoration:underline; }
