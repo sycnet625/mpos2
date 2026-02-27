@@ -565,7 +565,10 @@ $renderRows = function() use ($reservas) {
         ];
         [$cBg, $cIcon, $cLabel] = $canalMap[$canal] ?? $canalMap['Otro'];
 ?>
-<tr class="<?= $rowCls ?>">
+<tr class="<?= $rowCls ?>" data-id="<?= $r['id'] ?>">
+    <td class="ps-2 multi-print-col" style="display:none; vertical-align:middle;">
+        <input type="checkbox" class="ticket-chk" value="<?= $r['id'] ?>" style="cursor:pointer; width:15px; height:15px;">
+    </td>
     <td class="ps-3 small fw-bold text-muted">#<?= $r['id'] ?></td>
     <td>
         <div class="fw-bold text-dark"><?= htmlspecialchars($r['cliente_nombre']) ?></div>
@@ -734,6 +737,9 @@ if (isset($_GET['ajax'])) {
         <a href="dashboard.php"    class="btn btn-outline-light btn-sm"><i class="fas fa-home me-1"></i>Dashboard</a>
         <a href="guia_reservas.php" class="btn btn-outline-light btn-sm" target="_blank"><i class="fas fa-book-open me-1"></i>Guía</a>
         <button class="btn btn-outline-info btn-sm" onclick="printReport()"><i class="fas fa-print me-1"></i>Reporte Stock</button>
+        <button class="btn btn-outline-light btn-sm" id="btnMultiPrint" onclick="toggleMultiPrint()" title="Seleccionar e imprimir tickets en A4">
+            <i class="fas fa-th-large me-1"></i>Imprimir múltiple
+        </button>
         <button class="btn btn-outline-warning btn-sm" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
         <button class="btn btn-primary btn-sm fw-bold px-3" onclick="openForm(null)"><i class="fas fa-plus me-1"></i>Nueva Reserva</button>
     </div>
@@ -828,6 +834,9 @@ if (isset($_GET['ajax'])) {
             <table class="table table-hover align-middle mb-0">
                 <thead>
                     <tr>
+                        <th class="ps-2 multi-print-col" style="display:none; width:30px;">
+                            <input type="checkbox" id="checkAll" style="cursor:pointer; width:15px; height:15px;" onchange="toggleAll(this)">
+                        </th>
                         <th class="ps-3">ID</th>
                         <th>Cliente</th>
                         <th>Fecha Reserva</th>
@@ -1252,7 +1261,8 @@ async function reloadTable() {
     document.getElementById('tableBody').style.opacity = '.4';
     const res  = await fetch(url);
     const data = await res.json();
-    document.getElementById('tableBody').innerHTML = data.html || '<tr><td colspan="8" class="text-center py-5 text-muted">Sin resultados.</td></tr>';
+    document.getElementById('tableBody').innerHTML = data.html || '<tr><td colspan="10" class="text-center py-5 text-muted">Sin resultados.</td></tr>';
+    applyMultiPrintCols();
     document.getElementById('tableBody').style.opacity = '1';
     document.getElementById('totalCount').innerText = data.total;
 }
@@ -2089,6 +2099,74 @@ async function printReport() {
         showToast('Error al generar reporte: ' + e.message, 'danger');
     }
 }
+
+// ── IMPRESIÓN MÚLTIPLE DE TICKETS EN A4 ──────────────────────────────────────
+let multiPrintMode = false;
+
+function toggleMultiPrint() {
+    multiPrintMode = !multiPrintMode;
+    applyMultiPrintCols();
+    const bar = document.getElementById('multiPrintBar');
+    bar.style.display = multiPrintMode ? 'flex' : 'none';
+    const btn = document.getElementById('btnMultiPrint');
+    btn.classList.toggle('btn-outline-light',   !multiPrintMode);
+    btn.classList.toggle('btn-warning',          multiPrintMode);
+    btn.classList.toggle('fw-bold',              multiPrintMode);
+    if (!multiPrintMode) {
+        document.querySelectorAll('.ticket-chk').forEach(c => c.checked = false);
+        const ca = document.getElementById('checkAll');
+        if (ca) ca.checked = false;
+        updateMultiCount();
+    }
+}
+
+function applyMultiPrintCols() {
+    const show = multiPrintMode ? '' : 'none';
+    document.querySelectorAll('.multi-print-col').forEach(el => el.style.display = show);
+}
+
+function toggleAll(el) {
+    document.querySelectorAll('.ticket-chk').forEach(c => c.checked = el.checked);
+    updateMultiCount();
+}
+
+function updateMultiCount() {
+    const n = document.querySelectorAll('.ticket-chk:checked').length;
+    document.getElementById('multiPrintCount').textContent = n;
+    document.getElementById('btnImprimirMulti').disabled = n === 0;
+}
+
+function cancelMultiPrint() {
+    if (multiPrintMode) toggleMultiPrint();
+}
+
+function imprimirMulti() {
+    const ids = [...document.querySelectorAll('.ticket-chk:checked')].map(c => c.value);
+    if (ids.length === 0) { showToast('Selecciona al menos 1 ticket.', 'warning'); return; }
+    if (ids.length > 6)   { showToast('Máximo 6 tickets por página. Deselecciona algunos.', 'warning'); return; }
+    window.open('ticket_multi_print.php?ids=' + ids.join(','), '_blank', 'width=960,height=750');
+}
+
+// Delegación de eventos para checkboxes (persiste tras recargas AJAX)
+document.getElementById('tableBody').addEventListener('change', e => {
+    if (e.target.classList.contains('ticket-chk')) updateMultiCount();
+});
 </script>
+
+<!-- Barra flotante de impresión múltiple -->
+<div id="multiPrintBar" class="no-print" style="display:none; position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:9999; background:#0f172a; color:#fff; padding:12px 20px; border-radius:14px; box-shadow:0 6px 30px rgba(0,0,0,0.55); align-items:center; gap:12px; white-space:nowrap; font-size:13px;">
+    <i class="fas fa-layer-group text-warning me-1"></i>
+    <b id="multiPrintCount">0</b> ticket(s) seleccionado(s)
+    <small class="text-secondary">(máx. 6)</small>
+    <button id="btnImprimirMulti" onclick="imprimirMulti()" disabled
+            style="padding:7px 16px; background:#f59e0b; color:#000; border:none; border-radius:8px; font-weight:700; cursor:pointer; font-size:13px;">
+        🖨️ Imprimir en A4
+    </button>
+    <button onclick="cancelMultiPrint()"
+            style="padding:7px 12px; background:#334155; color:#fff; border:none; border-radius:8px; cursor:pointer; font-size:12px;">
+        ✕ Cancelar
+    </button>
+</div>
+
 </body>
 </html>
