@@ -6,7 +6,7 @@ require_once 'db.php';
 require_once 'config_loader.php';
 
 $idsRaw = $_GET['ids'] ?? '';
-$ids    = array_values(array_slice(array_unique(array_filter(array_map('intval', explode(',', $idsRaw)))), 0, 6));
+$ids    = array_values(array_slice(array_unique(array_filter(array_map('intval', explode(',', $idsRaw)), fn($v) => $v > 0)), 0, 6));
 
 if (empty($ids)) die('Sin IDs válidos.');
 
