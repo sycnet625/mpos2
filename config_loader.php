@@ -4,7 +4,17 @@
 // Uso: require_once 'config_loader.php'; (provee $config global)
 
 if (!isset($config)) {
-    $configFile = __DIR__ . '/pos.cfg';
+    $configCandidates = [
+        __DIR__ . '/pos.cfg',
+        dirname(__DIR__) . '/pos.cfg',
+    ];
+    $configFile = $configCandidates[0];
+    foreach ($configCandidates as $candidate) {
+        if (file_exists($candidate)) {
+            $configFile = $candidate;
+            break;
+        }
+    }
     $config = [
         "tienda_nombre" => "MI TIENDA",
         "direccion" => "",

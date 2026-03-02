@@ -16,8 +16,18 @@ error_reporting(E_ALL);
 // CONEXIÓN BD (Para obtener categorías disponibles)
 require_once 'db.php';
 
-// ARCHIVO DE CONFIGURACIÓN
-$configFile = __DIR__ . '/pos.cfg';
+// ARCHIVO DE CONFIGURACIÓN (fallback entre /var/www/marinero y /var/www)
+$configCandidates = [
+    __DIR__ . '/pos.cfg',
+    dirname(__DIR__) . '/pos.cfg',
+];
+$configFile = $configCandidates[0];
+foreach ($configCandidates as $candidate) {
+    if (file_exists($candidate)) {
+        $configFile = $candidate;
+        break;
+    }
+}
 
 // VALORES POR DEFECTO
 $defaultConfig = [
@@ -233,6 +243,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Guardar JSON — preservar campos del cfg que no están en el form (ej: vapid_*, sync_api_key)
         $saveConfig = array_merge($currentConfig, $newConfig);
+        // Si el archivo seleccionado no es escribible, intentar fallback escribible.
+        if (!is_writable($configFile)) {
+            foreach ($configCandidates as $candidate) {
+                if ((file_exists($candidate) && is_writable($candidate)) || (!file_exists($candidate) && is_writable(dirname($candidate)))) {
+                    $configFile = $candidate;
+                    break;
+                }
+            }
+        }
+
         if (file_put_contents($configFile, json_encode($saveConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) !== false) {
             $msg = "Configuración guardada exitosamente.";
             $msgType = "success";
