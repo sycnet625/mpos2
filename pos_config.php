@@ -16,18 +16,8 @@ error_reporting(E_ALL);
 // CONEXIÓN BD (Para obtener categorías disponibles)
 require_once 'db.php';
 
-// ARCHIVO DE CONFIGURACIÓN (fallback entre /var/www/marinero y /var/www)
-$configCandidates = [
-    __DIR__ . '/pos.cfg',
-    dirname(__DIR__) . '/pos.cfg',
-];
-$configFile = $configCandidates[0];
-foreach ($configCandidates as $candidate) {
-    if (file_exists($candidate)) {
-        $configFile = $candidate;
-        break;
-    }
-}
+// ARCHIVO DE CONFIGURACIÓN (estricto por sucursal/carpeta actual)
+$configFile = __DIR__ . '/pos.cfg';
 
 // VALORES POR DEFECTO
 $defaultConfig = [
@@ -107,9 +97,24 @@ try {
 $msg = "";
 $msgType = "";
 
+if (!file_exists($configFile)) {
+    $msg = "Error de configuración: no existe " . basename($configFile) . " en esta carpeta.";
+    $msgType = "danger";
+} elseif (!is_writable($configFile)) {
+    $msg = "Error de permisos: " . basename($configFile) . " no es escribible.";
+    $msgType = "danger";
+}
+
 // 3. PROCESAR GUARDADO
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
+        if (!file_exists($configFile)) {
+            throw new Exception("No existe el archivo local pos.cfg en " . __DIR__ . ".");
+        }
+        if (!is_writable($configFile)) {
+            throw new Exception("El archivo local pos.cfg no es escribible en " . __DIR__ . ".");
+        }
+
         // Datos Básicos
         $newConfig = [
             "tienda_nombre"   => trim($_POST['tienda_nombre']),
@@ -243,16 +248,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Guardar JSON — preservar campos del cfg que no están en el form (ej: vapid_*, sync_api_key)
         $saveConfig = array_merge($currentConfig, $newConfig);
-        // Si el archivo seleccionado no es escribible, intentar fallback escribible.
-        if (!is_writable($configFile)) {
-            foreach ($configCandidates as $candidate) {
-                if ((file_exists($candidate) && is_writable($candidate)) || (!file_exists($candidate) && is_writable(dirname($candidate)))) {
-                    $configFile = $candidate;
-                    break;
-                }
-            }
-        }
-
         if (file_put_contents($configFile, json_encode($saveConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) !== false) {
             $msg = "Configuración guardada exitosamente.";
             $msgType = "success";
