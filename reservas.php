@@ -2,9 +2,13 @@
 // ARCHIVO: reservas.php v3.0 — CRUD Completo de Reservas
 ini_set('display_errors', 0);
 session_start();
-require_once 'db.php';
-require_once 'config_loader.php';
-require_once 'push_notify.php';
+require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/config_loader.php';
+$pushNotifyFile = __DIR__ . '/push_notify.php';
+if (!file_exists($pushNotifyFile)) {
+    $pushNotifyFile = dirname(__DIR__) . '/push_notify.php';
+}
+require_once $pushNotifyFile;
 
 $sucursalID = intval($config['id_sucursal']);
 $idAlmacen  = intval($config['id_almacen']);

@@ -1,8 +1,12 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/chat_api.php
 header('Content-Type: application/json');
-require_once 'db.php';
-require_once 'push_notify.php';
+require_once __DIR__ . '/db.php';
+$pushNotifyFile = __DIR__ . '/push_notify.php';
+if (!file_exists($pushNotifyFile)) {
+    $pushNotifyFile = dirname(__DIR__) . '/push_notify.php';
+}
+require_once $pushNotifyFile;
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
@@ -77,4 +81,3 @@ try {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
 ?>
-

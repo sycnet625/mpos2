@@ -9,9 +9,57 @@
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
 
-require_once 'vendor/autoload.php';
-require_once 'db.php';
-require_once 'config_loader.php';
+$autoloadCandidates = [
+    __DIR__ . '/vendor/autoload.php',
+    __DIR__ . '/marinero/vendor/autoload.php',
+];
+$dbCandidates = [
+    __DIR__ . '/db.php',
+    __DIR__ . '/marinero/db.php',
+];
+$configCandidates = [
+    __DIR__ . '/config_loader.php',
+    __DIR__ . '/marinero/config_loader.php',
+];
+
+$autoloadFile = null;
+foreach ($autoloadCandidates as $candidate) {
+    if (file_exists($candidate)) {
+        $autoloadFile = $candidate;
+        break;
+    }
+}
+if ($autoloadFile === null) {
+    http_response_code(500);
+    die('Error: no se encontró vendor/autoload.php');
+}
+require_once $autoloadFile;
+
+$dbFile = null;
+foreach ($dbCandidates as $candidate) {
+    if (file_exists($candidate)) {
+        $dbFile = $candidate;
+        break;
+    }
+}
+if ($dbFile === null) {
+    http_response_code(500);
+    die('Error: no se encontró db.php');
+}
+require_once $dbFile;
+
+$configFile = null;
+foreach ($configCandidates as $candidate) {
+    if (file_exists($candidate)) {
+        $configFile = $candidate;
+        break;
+    }
+}
+if ($configFile === null) {
+    http_response_code(500);
+    die('Error: no se encontró config_loader.php');
+}
+require_once $configFile;
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
