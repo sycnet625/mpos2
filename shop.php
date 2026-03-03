@@ -2040,7 +2040,7 @@ ob_end_flush();
                         <form onsubmit="loginClient(); return false;">
                             <div class="mb-3">
                                 <label class="small fw-bold text-muted" for="logTel" data-i18n="auth.phone">Teléfono</label>
-                                <input type="text" id="logTel" class="form-control bg-light border-0 p-3" placeholder="Tu número..." required data-i18n-attr="placeholder:auth.phone_ph">
+                                <input type="text" id="logTel" class="form-control bg-light border-0 p-3" placeholder="Tu número..." required autocomplete="username" data-i18n-attr="placeholder:auth.phone_ph">
                             </div>
                             <div class="mb-4">
                                 <label class="small fw-bold text-muted" for="logPass" data-i18n="auth.password">Contraseña</label>
@@ -4234,4 +4234,3 @@ function restoreAbandonedCart(banner) {
 
 </body>
 </html>
-
