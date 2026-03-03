@@ -8,64 +8,157 @@ require_once 'db.php';
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
-$localPath = '/var/www/assets/product_images/'; 
+$localPath = __DIR__ . '/assets/product_images/';
+
+if (!is_dir($localPath)) {
+    @mkdir($localPath, 0775, true);
+}
+
+function jsonOut(array $data): void {
+    header('Content-Type: application/json');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function safeProductId(string $id): string {
+    return preg_replace('/[^A-Za-z0-9_-]/', '', $id) ?? '';
+}
+
+function downloadImageToPath(string $url, string $destPath): bool {
+    if (!preg_match('#^https?://#i', $url)) return false;
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 5,
+        CURLOPT_TIMEOUT => 15,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36',
+        CURLOPT_HTTPHEADER => [
+            'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+            'Referer: https://www.google.com/',
+        ],
+    ]);
+    $imgData = curl_exec($ch);
+    $httpCode = intval(curl_getinfo($ch, CURLINFO_HTTP_CODE));
+    $contentType = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+    curl_close($ch);
+
+    if ($imgData === false || $imgData === '' || $httpCode < 200 || $httpCode >= 300) return false;
+    if (stripos($contentType, 'image/') === false && @getimagesizefromstring($imgData) === false) return false;
+
+    // Normalizar a JPEG para mantener compatibilidad con el ecosistema actual (*.jpg).
+    if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+        $im = @imagecreatefromstring($imgData);
+        if ($im !== false) {
+            $ok = @imagejpeg($im, $destPath, 88);
+            imagedestroy($im);
+            return $ok;
+        }
+    }
+
+    return @file_put_contents($destPath, $imgData) !== false;
+}
+
+function getGoogleCandidates(string $query): array {
+    $q = urlencode($query);
+    $url = "https://www.google.com/search?q={$q}&tbm=isch&hl=es";
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 12,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36',
+        CURLOPT_HTTPHEADER => [
+            'Accept-Language: es-ES,es;q=0.9,en;q=0.8',
+        ],
+    ]);
+    $html = curl_exec($ch);
+    curl_close($ch);
+
+    if (!$html) return [];
+
+    $candidates = [];
+
+    // 1) imgurl=... (enlaces reales de imagen)
+    if (preg_match_all('/imgurl=([^&"]+)/i', $html, $m1)) {
+        foreach ($m1[1] as $enc) {
+            $u = urldecode($enc);
+            if (preg_match('#^https?://#i', $u)) $candidates[] = $u;
+        }
+    }
+
+    // 2) URLs directas de imagen embebidas
+    if (preg_match_all('#https?://[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|gif)(?:\\?[^"\'\\s<>]*)?#i', $html, $m2)) {
+        foreach ($m2[0] as $u) $candidates[] = $u;
+    }
+
+    // 3) thumbnails de googleusercontent/gstatic como último recurso
+    if (preg_match_all('/https:\/\/encrypted-tbn0\.gstatic\.com\/images\?q=tbn:[^"\']+/i', $html, $m3)) {
+        foreach ($m3[0] as $u) $candidates[] = $u;
+    }
+
+    $out = [];
+    $seen = [];
+    foreach ($candidates as $u) {
+        $lu = strtolower($u);
+        if (strpos($lu, 'gstatic.com/gb/images') !== false) continue;
+        if (strpos($lu, '/favicon') !== false) continue;
+        if (strpos($lu, '/logo') !== false) continue;
+        if (strpos($lu, 'sprite') !== false) continue;
+        if (strpos($lu, 'googlelogo') !== false) continue;
+        if (!isset($seen[$u])) {
+            $seen[$u] = true;
+            $out[] = $u;
+        }
+        if (count($out) >= 25) break;
+    }
+    return $out;
+}
 
 // =========================================================
 //  BACKEND: PROCESAR SOLICITUDES (AJAX)
 // =========================================================
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
     $input = json_decode(file_get_contents('php://input'), true);
+    $id = safeProductId((string)($input['id'] ?? ''));
+    if ($id === '') jsonOut(['status' => 'error', 'msg' => 'ID de producto inválido']);
+    $destino = $localPath . $id . '.jpg';
 
     // OPCIÓN A: SCRAPING AUTOMÁTICO DE GOOGLE (GBV=1)
     if (isset($input['action']) && $input['action'] === 'scrape_google') {
-        $nombre = urlencode($input['query']);
-        // Usamos &gbv=1 (Google Basic Version) porque es HTML puro fácil de leer para PHP
-        $url = "https://www.google.com/search?q=$nombre&tbm=isch&gbv=1";
+        $query = trim((string)($input['query'] ?? ''));
+        if ($query === '') jsonOut(['status' => 'error', 'msg' => 'Consulta vacía']);
 
-        // Simular navegador real
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-        $html = curl_exec($ch);
-        curl_close($ch);
-
-        // Buscar la primera imagen válida en el HTML
-        // Google Basic pone las imágenes dentro de etiquetas que suelen tener /images?q=tbn:
-        preg_match_all('/src="(https:\/\/encrypted-tbn0\.gstatic\.com\/images\?q=tbn:[^"]+)"/', $html, $matches);
-
-        if (isset($matches[1][0])) {
-            $imgUrl = $matches[1][0]; // Primera coincidencia
-            
-            // Descargar imagen
-            $imgData = file_get_contents($imgUrl);
-            if ($imgData) {
-                file_put_contents($localPath . $input['id'] . '.jpg', $imgData);
-                echo json_encode(['status' => 'success', 'msg' => 'Imagen capturada de Google']);
-            } else {
-                echo json_encode(['status' => 'error', 'msg' => 'No se pudo descargar la imagen fuente']);
+        $candidatas = getGoogleCandidates($query);
+        foreach ($candidatas as $imgUrl) {
+            if (downloadImageToPath($imgUrl, $destino)) {
+                jsonOut(['status' => 'success', 'msg' => 'Imagen capturada automáticamente', 'source' => $imgUrl]);
             }
-        } else {
-            echo json_encode(['status' => 'error', 'msg' => 'Google no mostró imágenes accesibles (Bloqueo o Captcha)']);
         }
-        exit;
+        jsonOut(['status' => 'error', 'msg' => 'No se pudo descargar una imagen válida desde Google']);
     }
 
     // OPCIÓN B: GUARDADO MANUAL (PEGAR URL)
     if (isset($input['action']) && $input['action'] === 'save_url') {
-        $url = $input['url'];
-        $imgData = @file_get_contents($url);
-        if ($imgData) {
-            file_put_contents($localPath . $input['id'] . '.jpg', $imgData);
-            echo json_encode(['status' => 'success']);
+        $url = trim((string)($input['url'] ?? ''));
+        if ($url === '') jsonOut(['status' => 'error', 'msg' => 'URL vacía']);
+
+        if (downloadImageToPath($url, $destino)) {
+            jsonOut(['status' => 'success']);
         } else {
-            echo json_encode(['status' => 'error', 'msg' => 'URL inválida o protegida']);
+            jsonOut(['status' => 'error', 'msg' => 'URL inválida, protegida o no es imagen']);
         }
-        exit;
     }
+
+    jsonOut(['status' => 'error', 'msg' => 'Acción no soportada']);
 }
 
 // =========================================================
@@ -111,7 +204,12 @@ foreach ($todos as $p) {
             <h3 class="fw-bold text-primary"><i class="fas fa-camera-retro"></i> Cazador de Imágenes</h3>
             <p class="text-muted mb-0">Hay <strong><?php echo count($sinImagen); ?></strong> productos sin foto. ¡A trabajar!</p>
         </div>
-        <a href="shop.php" class="btn btn-outline-secondary">Ir a la Tienda</a>
+        <div class="d-flex gap-2">
+            <button id="btn-auto-all" class="btn btn-primary" onclick="autoLlenarTodo()">
+                <i class="fas fa-bolt"></i> Auto llenar todo
+            </button>
+            <a href="shop.php" class="btn btn-outline-secondary">Ir a la Tienda</a>
+        </div>
     </div>
 
     <div id="listaProductos">
@@ -134,7 +232,7 @@ foreach ($todos as $p) {
 
                 <div class="actions" id="btns-<?php echo $p['codigo']; ?>">
                     
-                    <button class="btn btn-primary" onclick="autoCaptura('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre'] . ' ' . $p['categoria']); ?>')" title="Intentar descarga automática de Google">
+                    <button class="btn btn-primary btn-auto" data-id="<?php echo $p['codigo']; ?>" data-query="<?php echo htmlspecialchars($p['nombre'] . ' ' . $p['categoria'], ENT_QUOTES, 'UTF-8'); ?>" onclick="autoCaptura('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre'] . ' ' . $p['categoria']); ?>')" title="Intentar descarga automática de Google">
                         <i class="fas fa-magic"></i> Auto
                     </button>
 
@@ -187,6 +285,27 @@ foreach ($todos as $p) {
         }
     }
 
+    async function autoLlenarTodo() {
+        const btn = document.getElementById('btn-auto-all');
+        if (!btn) return;
+        btn.disabled = true;
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+
+        const botones = Array.from(document.querySelectorAll('.btn-auto'));
+        for (const b of botones) {
+            if (b.disabled) continue;
+            const id = b.getAttribute('data-id');
+            const query = b.getAttribute('data-query') || '';
+            if (!id || !query) continue;
+            await autoCaptura(id, query);
+            await new Promise(r => setTimeout(r, 350));
+        }
+
+        btn.innerHTML = original;
+        btn.disabled = false;
+    }
+
     // 2. ABRIR GOOGLE Y MOSTRAR CAMPO MANUAL
     function abrirGoogle(id, query) {
         // Abrir pestaña nueva con búsqueda de imágenes
@@ -228,7 +347,7 @@ foreach ($todos as $p) {
         const btns = document.getElementById(`btns-${id}`);
         
         badge.className = 'status-badge ok';
-        badge.innerHTML = '<img src="../product_images/'+id+'.jpg?t='+new Date().getTime()+'" style="width:100%; height:100%; object-fit:cover; border-radius:8px;">';
+        badge.innerHTML = '<img src="assets/product_images/'+id+'.jpg?t='+new Date().getTime()+'" style="width:100%; height:100%; object-fit:cover; border-radius:8px;">';
         
         btns.innerHTML = '<span class="text-success fw-bold"><i class="fas fa-check"></i> Guardado</span>';
         document.getElementById(`manual-${id}`).style.display = 'none';
@@ -242,5 +361,3 @@ foreach ($todos as $p) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
-
