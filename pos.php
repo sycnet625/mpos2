@@ -97,7 +97,7 @@ if (isset($_GET['load_products'])) {
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
         // Procesar para incluir colores e imágenes
-        $localPath = '/var/www/assets/product_images/';
+        $localPath = __DIR__ . '/assets/product_images/';
         foreach ($prods as &$p) {
             $b = $localPath . $p['codigo'];
             $p['has_image'] = false; $p['img_version'] = 0;
@@ -328,7 +328,7 @@ try {
 }
 
 // Procesamiento visual
-$localPath = '/var/www/assets/product_images/';
+$localPath = __DIR__ . '/assets/product_images/';
 foreach ($prods as &$p) {
     $b = $localPath . $p['codigo'];
     $p['has_image'] = false; $p['img_version'] = 0;
@@ -1367,4 +1367,3 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
 </body>
 </html>
-

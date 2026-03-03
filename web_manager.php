@@ -18,7 +18,7 @@ require_once 'db.php';
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
-$localPath = '/var/www/assets/product_images/'; 
+$localPath = __DIR__ . '/assets/product_images/';
 
 // 2. PROCESAR PETICIONES AJAX (GUARDADO AUTOMÁTICO)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -28,9 +28,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // Si es subida de imagen (Form Data)
     if (isset($_FILES['new_photo'])) {
         try {
-            $code = $_POST['prod_code'];
+            $code = trim((string)($_POST['prod_code'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) throw new Exception("Código inválido");
             $ext = strtolower(pathinfo($_FILES['new_photo']['name'], PATHINFO_EXTENSION));
             if (!in_array($ext, ['jpg','jpeg','png'])) throw new Exception("Formato inválido");
+            if (!is_dir($localPath) && !@mkdir($localPath, 0775, true)) throw new Exception("No se pudo crear carpeta de imágenes");
+            if (!is_writable($localPath)) throw new Exception("Carpeta de imágenes sin permisos de escritura");
             
             $src = ($ext=='png') ? imagecreatefrompng($_FILES['new_photo']['tmp_name']) : imagecreatefromjpeg($_FILES['new_photo']['tmp_name']);
             // Redimensionar a 800x800 max
@@ -41,7 +44,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
                 imagedestroy($src); $src = $dst;
             }
-            imagejpeg($src, $localPath . $code . '.jpg', 85);
+            // Limpiar variantes anteriores para evitar desincronía de formatos
+            $base = $localPath . $code;
+            foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $oldExt) {
+                if (file_exists($base . $oldExt)) @unlink($base . $oldExt);
+            }
+
+            imagejpeg($src, $base . '.jpg', 85);
+            if (function_exists('imagewebp')) imagewebp($src, $base . '.webp', 82);
+            if (function_exists('imageavif')) imageavif($src, $base . '.avif', 60, 6);
             imagedestroy($src);
             echo json_encode(['status'=>'success']);
         } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
@@ -211,7 +222,10 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                 </thead>
                 <tbody>
                     <?php foreach ($products as $p): 
-                        $hasImg = file_exists($localPath . $p['codigo'] . '.jpg');
+                        $hasImg = false;
+                        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $imgExt) {
+                            if (file_exists($localPath . $p['codigo'] . $imgExt)) { $hasImg = true; break; }
+                        }
                         $imgUrl = $hasImg ? "image.php?code=" . $p['codigo'] : "assets/img/no-image-50.png";
                         $sucs = explode(',', $p['sucursales_web'] ?? '');
                         $desc = $p['descripcion'] ?? '';
