@@ -96,6 +96,9 @@ const INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos de inactividad
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Iniciando POS...');
+    clearSearchAndRefreshProductList(false);
+    // Algunos navegadores autocompletan luego del DOMContentLoaded.
+    setTimeout(() => clearSearchAndRefreshProductList(false), 120);
     
     setTimeout(() => {
         if (typeof window.initPOSOffline === 'function') {
@@ -517,6 +520,17 @@ function processBarcode(c) {
     } 
 }
 
+function clearSearchAndRefreshProductList(focusInput = false) {
+    const si = document.getElementById('searchInput');
+    if (si) {
+        si.value = '';
+        si.setAttribute('autocomplete', 'off');
+        if (focusInput) si.focus();
+        else si.blur();
+    }
+    renderProducts('all', '');
+}
+
 function typePin(v) { 
     Synth.click(); 
     if(v === 'C') enteredPin = ""; 
@@ -659,10 +673,8 @@ function unlockPos() {
     const cashierName = document.getElementById('cashierName');
     if (overlay) overlay.style.display = 'none';
     if (cashierName) cashierName.innerText = currentCashier;
-    // Limpiar buscador por si el browser autollenó algo durante el PIN y re-renderizar
-    const si = document.getElementById('searchInput');
-    if (si) { si.value = ''; si.blur(); }
-    renderProducts('all', '');
+    // Limpiar filtro residual (ej. "admin") y recargar lista completa.
+    clearSearchAndRefreshProductList(false);
     checkCashStatusSilent();
 
     // Restaurar carrito guardado antes del auto-logout
@@ -1736,6 +1748,7 @@ async function forceDownloadProducts() {
                     const pinOverlay = document.getElementById('pinOverlay');
                     if (cashierName) cashierName.innerText = currentCashier;
                     if (pinOverlay) pinOverlay.style.display = 'none';
+                    clearSearchAndRefreshProductList(false);
                     applyRoleRestrictions();
                     startInactivityTimer();
                     checkCashStatusSilent();
