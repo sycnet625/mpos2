@@ -224,7 +224,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } elseif ($accion === 'merma') {
                 $pdo->prepare("INSERT INTO mermas_detalle (id_merma,id_producto,cantidad,costo_al_momento,motivo_especifico) VALUES(?,?,?,?,?)")->execute([$idMerma,$sku,abs($qty),$costo,$motivo]);
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha);
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',-abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha);
                 $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad-? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
                 $results[] = "-".abs($qty)." ".$prod['nombre'];
 
