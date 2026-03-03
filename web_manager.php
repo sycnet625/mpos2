@@ -212,7 +212,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                 <tbody>
                     <?php foreach ($products as $p): 
                         $hasImg = file_exists($localPath . $p['codigo'] . '.jpg');
-                        $imgUrl = $hasImg ? "image.php?code=" . $p['codigo'] : "https://via.placeholder.com/50?text=IMG";
+                        $imgUrl = $hasImg ? "image.php?code=" . $p['codigo'] : "assets/img/no-image-50.png";
                         $sucs = explode(',', $p['sucursales_web'] ?? '');
                         $desc = $p['descripcion'] ?? '';
                         $color = $p['color'] ?? '';
@@ -516,4 +516,3 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

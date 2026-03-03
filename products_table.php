@@ -35,7 +35,7 @@ function renderProductRows($rows, $localPath) {
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'https://via.placeholder.com/50?text=IMG'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
+        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
         <td class="small font-monospace"><?php echo $p['codigo']; ?></td>
         <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;">
             <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
@@ -1101,4 +1101,3 @@ async function reloadCategorySelects() {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
