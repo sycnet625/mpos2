@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 6.0 - Assets locales + offline real
+// Versión 7.0 - Assets locales + offline real
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v6';
+const CACHE_NAME = 'palweb-pos-v7';
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
@@ -27,7 +27,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v6 (Online First)...');
+    console.log('[SW-POS] Instalando Service Worker v7 (Online First)...');
 
     event.waitUntil(
         caches.open(CACHE_NAME)
@@ -49,7 +49,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v6...');
+    console.log('[SW-POS] Activando Service Worker v7...');
     
     event.waitUntil(
         caches.keys()
@@ -98,6 +98,23 @@ self.addEventListener('fetch', (event) => {
 // ==========================================
 async function onlineFirst(request) {
     const url = new URL(request.url);
+    const LOCAL_NO_IMAGE = (self.registration && self.registration.scope ? self.registration.scope : './') + 'assets/img/no-image-50.png';
+
+    // Sustituye placeholders externos por imagen local para evitar ruido offline.
+    if (url.hostname === 'via.placeholder.com') {
+        const localReq = new Request(LOCAL_NO_IMAGE, { credentials: 'same-origin' });
+        const localCached = await caches.match(localReq) || await caches.match(LOCAL_NO_IMAGE);
+        if (localCached) return localCached;
+        try {
+            const localResp = await fetch(localReq);
+            if (localResp && localResp.ok) {
+                const cache = await caches.open(CACHE_NAME);
+                cache.put(localReq, localResp.clone());
+                return localResp;
+            }
+        } catch (e) {}
+        return new Response('', { status: 204 });
+    }
     
     try {
         // Siempre intentar el servidor primero
@@ -181,11 +198,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v6-online-first' });
+        event.ports[0].postMessage({ version: 'v7-online-first' });
     }
 });
 
-console.log('[SW-POS] Service Worker v6 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v7 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS
@@ -246,4 +263,3 @@ self.addEventListener('notificationclick', event => {
         })
     );
 });
-
