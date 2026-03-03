@@ -8,7 +8,7 @@
 // Pega aquí tu clave de Pexels:
 define('PEXELS_API_KEY', 'RIF7J3NM9hhMei93oSqqlg7JPeC9qfuIiGF2eR8jDPWMPyLOxM8UnLM4'); 
 
-$localImgPath = '/var/www/assets/product_images/';
+$localImgPath = __DIR__ . '/assets/product_images/';
 
 set_time_limit(0);
 ini_set('display_errors', 1);
@@ -20,6 +20,13 @@ $EMP_ID = intval($config['id_empresa']);
 
 // DB
 try { require_once 'db.php'; } catch (Exception $e) { die("Error DB"); }
+
+if (!is_dir($localImgPath)) {
+    @mkdir($localImgPath, 0775, true);
+}
+if (!is_dir($localImgPath) || !is_writable($localImgPath)) {
+    die("Error: la carpeta de imágenes no existe o no es escribible: $localImgPath");
+}
 
 ?>
 <!DOCTYPE html>
@@ -89,9 +96,12 @@ foreach ($productos as $p) {
             // Descargar
             $imgData = @file_get_contents($imgUrl);
             if ($imgData) {
-                file_put_contents($archivoDestino, $imgData);
-                echo "<span style='color:#2ecc71'>✅ DESCARGADA</span>";
-                $contador++;
+                if (@file_put_contents($archivoDestino, $imgData) !== false) {
+                    echo "<span style='color:#2ecc71'>✅ DESCARGADA</span>";
+                    $contador++;
+                } else {
+                    echo "<span style='color:#e74c3c'>❌ Sin permisos para guardar en destino</span>";
+                }
             } else {
                 echo "<span style='color:#e74c3c'>❌ Error guardando</span>";
             }
@@ -126,10 +136,9 @@ function usarPlaceholder($nombre, $path) {
     $bg = substr($hash, 0, 6);
     $url = "https://placehold.co/600x600/$bg/FFF.jpg?text=" . urlencode($nombre);
     $data = @file_get_contents($url);
-    if($data) file_put_contents($path, $data);
+    if ($data) @file_put_contents($path, $data);
 }
 ?>
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
