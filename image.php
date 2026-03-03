@@ -11,7 +11,13 @@ if (empty($code)) {
     exit;
 }
 
-$base      = '/var/www/assets/product_images/' . $code;
+$safeCode = trim((string)$code);
+if (!preg_match('/^[A-Za-z0-9_.-]+$/', $safeCode)) {
+    http_response_code(400);
+    exit;
+}
+
+$base      = __DIR__ . '/assets/product_images/' . $safeCode;
 $accept    = $_SERVER['HTTP_ACCEPT'] ?? '';
 $supAvif   = str_contains($accept, 'image/avif');
 $supWebp   = str_contains($accept, 'image/webp');

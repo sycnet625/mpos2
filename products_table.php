@@ -12,7 +12,7 @@ require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
-$localPath = '/var/www/assets/product_images/'; 
+$localPath = __DIR__ . '/assets/product_images/';
 
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)
@@ -130,7 +130,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // SUBIDA DE IMAGEN — guarda en .jpg, .webp y .avif
     if (isset($_FILES['new_photo'])) {
         try {
-            $code = $_POST['prod_code'] ?? '';
+            $code = trim((string)($_POST['prod_code'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) {
+                throw new Exception("Código de producto inválido.");
+            }
             if (!$code) throw new Exception("Código ausente.");
             $file = $_FILES['new_photo'];
             if ($file['error'] !== UPLOAD_ERR_OK) throw new Exception("Error subida.");
@@ -156,7 +159,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
             imagedestroy($src);
 
-            if (!is_dir($localPath)) @mkdir($localPath, 0777, true);
+            if (!is_dir($localPath) && !@mkdir($localPath, 0775, true)) {
+                throw new Exception("No se pudo crear la carpeta de imágenes.");
+            }
+            if (!is_writable($localPath)) {
+                throw new Exception("La carpeta de imágenes no tiene permisos de escritura.");
+            }
 
             $base = $localPath . $code;
 
