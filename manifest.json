@@ -1,0 +1,25 @@
+{
+  "id": "/pos",
+  "name": "PalWeb POS Magnolia",
+  "short_name": "PalWebPOS1",
+  "start_url": "/pos.php",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "lang": "es",
+  "background_color": "#2c3e90",
+  "theme_color": "#2c3e90",
+  "description": "Punto de Venta PalWeb magnolia",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

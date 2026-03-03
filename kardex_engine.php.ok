@@ -1,0 +1,72 @@
+<?php
+// ARCHIVO: /var/www/palweb/api/kardex_engine.php
+// Este archivo NO debe imprimir nada (ni espacios en blanco al final)
+
+class KardexEngine {
+    private $pdo;
+
+    public function __construct($pdo) {
+        $this->pdo = $pdo;
+    }
+
+    /**
+     * Registra un movimiento y actualiza el stock maestro de forma atómica.
+     * SOPORTE MULTISUCURSAL Y MULTIALMACÉN CON FECHA CONTABLE.
+     * 
+     * @param string $sku Código del producto
+     * @param int $almacenId ID del almacén
+     * @param int $sucursalId ID de la sucursal
+     * @param string $tipo Tipo: VENTA, ENTRADA, SALIDA, AJUSTE, DEVOLUCION
+     * @param float $cantidad Cantidad (Positiva entra, Negativa sale/venta)
+     * @param string $referencia Texto de referencia (ID Venta, etc)
+     * @param float $costo Costo unitario al momento del movimiento
+     * @param string $usuario Nombre del usuario o sistema
+     * @param string $fechaContable Fecha contable para el registro (YYYY-MM-DD o YYYY-MM-DD HH:MM:SS)
+     */
+    public function registrarMovimiento($sku, $almacenId, $sucursalId, $tipo, $cantidad, $referencia, $costo = 0, $usuario = 'Sistema', $fechaContable = null) {
+        if ($cantidad == 0) return false; // Ignorar movimientos cero
+
+        // Si no se proporciona fecha contable, usar la fecha/hora actual
+        if ($fechaContable === null) {
+            $fechaContable = date('Y-m-d H:i:s');
+        } else {
+            // Si solo viene la fecha (YYYY-MM-DD), agregar la hora actual
+            if (strlen($fechaContable) === 10) {
+                $fechaContable .= ' ' . date('H:i:s');
+            }
+        }
+
+        // 1. Bloquear fila para lectura segura (Evita condiciones de carrera)
+        // Nota: Solo funciona si estamos dentro de una transacción ($pdo->beginTransaction())
+        $stmt = $this->pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? FOR UPDATE");
+        $stmt->execute([$sku, $almacenId]);
+        $stockActual = floatval($stmt->fetchColumn() ?: 0);
+
+        // 2. Calcular Nuevo Saldo
+        $nuevoSaldo = $stockActual + $cantidad;
+
+        // Validar stock negativo solo en salidas estrictas (Opcional, según tu regla de negocio)
+        // if ($nuevoSaldo < 0 && $cantidad < 0) throw new Exception("Stock insuficiente ($stockActual) para realizar salida de $cantidad");
+
+        // 3. Insertar en Kardex Histórico con FECHA CONTABLE
+        // CRÍTICO: Usamos el parámetro $fechaContable en lugar de NOW()
+        $sqlKardex = "INSERT INTO kardex (id_producto, id_almacen, tipo_movimiento, cantidad, saldo_anterior, saldo_actual, referencia, costo_unitario, usuario, fecha) 
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $stmtK = $this->pdo->prepare($sqlKardex);
+        $stmtK->execute([$sku, $almacenId, $tipo, $cantidad, $stockActual, $nuevoSaldo, $referencia, $costo, $usuario, $fechaContable]);
+
+        // 4. Actualizar Stock Maestro (Tabla rápida para consultas)
+        // Usamos ON DUPLICATE KEY UPDATE para manejar productos nuevos en este almacén.
+        $sqlStock = "INSERT INTO stock_almacen (id_almacen, id_producto, cantidad, id_sucursal) 
+                     VALUES (?, ?, ?, ?) 
+                     ON DUPLICATE KEY UPDATE cantidad = ?";
+        
+        $stmtS = $this->pdo->prepare($sqlStock);
+        // El orden de params es: id_almacen, id_producto, cantidad (nuevoSaldo), id_sucursal, cantidad (update)
+        $stmtS->execute([$almacenId, $sku, $nuevoSaldo, $sucursalId, $nuevoSaldo]);
+
+        return true;
+    }
+}
+?>
+

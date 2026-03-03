@@ -1,0 +1,50 @@
+[2026-01-22 18:33:19] REQ [POST] /products/upload_full - Emp: 1
+[2026-01-22 18:33:29] REQ [GET] /products?version=0&limit=100&warehouse=1 - Emp: 1
+[2026-01-22 21:05:09] REQ [GET] /sync/full?empresa=1&sucursal=1 - Emp: 1
+[2026-01-22 21:08:24] REQ [GET] /sync/full?empresa=1&sucursal=1 - Emp: 1
+[2026-01-22 21:12:55] REQ [GET] /sync/full?empresa=1&sucursal=1 - Emp: 1
+[2026-01-22 21:13:48] REQ [POST] /products/upload_full - Emp: 1
+[2026-01-22 21:13:48] ERROR FULL UPLOAD: SQLSTATE[22007]: Invalid datetime format: 1292 Incorrect date value: '15/1/2026' for column `palweb_central`.`productos`.`fecha_vencimiento` at row 1
+[2026-01-22 21:18:33] REQ [GET] /sync/full?empresa=1&sucursal=1 - Emp: 1
+[2026-01-22 21:18:51] REQ [POST] /products/upload_full - Emp: 1
+[2026-01-22 21:26:00] REQ [GET] /sync/full?empresa=1&sucursal=1 - Emp: 1
+[2026-01-22 21:26:15] REQ [POST] /products/upload_full - Emp: 1
+[2026-01-22 21:26:21] REQ [GET] /products?version=1769099149 - Emp: 1
+[2026-01-22 21:37:25] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:41:28] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:48:03] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:48:20] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:48:31] REQ [POST] /products/upload_full
+[2026-01-22 21:48:37] REQ [GET] /products?version=1769117175
+[2026-01-22 21:48:43] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:56:37] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:56:45] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:56:51] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:57:42] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 21:57:55] REQ [POST] /products/upload_full
+[2026-01-22 21:57:58] REQ [GET] /products?version=1769118511
+[2026-01-22 21:58:02] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 22:00:06] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 22:00:18] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 22:24:11] REQ [GET] /
+[2026-01-22 23:29:34] REQ [GET] /sync/full?empresa=1&sucursal=1
+[2026-01-22 23:40:13] REQ [GET] /sync/full?empresa=1
+[2026-01-22 23:40:23] REQ [GET] /products?version=1769119075
+[2026-01-22 23:40:28] REQ [POST] /products/upload_full
+[2026-01-22 23:48:44] REQ [POST] /sync/full
+[2026-01-22 23:48:44] REQ [GET] /sync/full?empresa=1
+[2026-01-22 23:54:29] REQ [POST] /sync/full
+[2026-01-22 23:54:29] REQ [GET] /sync/full?empresa=1
+[2026-01-22 23:57:33] REQ [GET] /sync/full?empresa=1
+[2026-01-23 00:09:18] REQ [POST] /sync/full
+[2026-01-23 00:09:18] REQ [GET] /sync/full?empresa=1
+[2026-01-23 00:09:35] REQ [POST] /products/upload_full
+[2026-01-23 00:11:24] REQ [POST] /sync/full
+[2026-01-23 00:11:24] REQ [GET] /sync/full?empresa=1
+[2026-01-22 19:44:00] REQ [GET] /sync/full?empresa=1
+[2026-01-22 19:50:43] REQ [POST] /sync/full
+[2026-01-22 19:50:43] REQ [GET] /sync/full?empresa=1
+[2026-01-22 19:51:20] REQ [POST] /sync/full
+[2026-01-22 19:51:20] REQ [GET] /sync/full?empresa=1
+[2026-01-22 19:51:25] REQ [POST] /products/upload_full
+[2026-01-22 19:51:33] REQ [GET] /sync/full?empresa=1

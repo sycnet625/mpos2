@@ -1,0 +1,171 @@
+/* ARCHIVO: /var/www/palweb/api/themes.css */
+
+/* --- 1. MODO CLARO (DEFAULT) --- */
+:root {
+    --bg-body: #f1f5f9;
+    --bg-card: #ffffff;
+    --text-main: #1e293b;
+    --text-muted: #64748b;
+    --border-color: #e2e8f0;
+    --primary-color: #3b82f6; /* Azul estándar */
+    --navbar-bg: #0f172a;
+    --navbar-text: #ffffff;
+    --input-bg: #ffffff;
+    --font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+/* --- 2. MODO OSCURO (Nativo) --- */
+[data-theme="dark"] {
+    --bg-body: #0f172a;
+    --bg-card: #1e293b;
+    --text-main: #e2e8f0;
+    --text-muted: #94a3b8;
+    --border-color: #334155;
+    --primary-color: #60a5fa;
+    --navbar-bg: #020617;
+    --navbar-text: #f8fafc;
+    --input-bg: #334155;
+}
+
+/* --- 3. AZUL (Ocean) --- */
+[data-theme="blue"] {
+    --bg-body: #e0f2fe;
+    --bg-card: #ffffff;
+    --text-main: #0c4a6e;
+    --text-muted: #577399;
+    --border-color: #bae6fd;
+    --primary-color: #0284c7;
+    --navbar-bg: #075985;
+    --navbar-text: #ffffff;
+    --input-bg: #f0f9ff;
+}
+
+/* --- 4. MODERN (Violeta/Limpio) --- */
+[data-theme="modern"] {
+    --bg-body: #f3f4f6;
+    --bg-card: #ffffff;
+    --text-main: #374151;
+    --text-muted: #9ca3af;
+    --border-color: #e5e7eb;
+    --primary-color: #8b5cf6; /* Violeta */
+    --navbar-bg: #4c1d95;
+    --navbar-text: #ffffff;
+    --input-bg: #ffffff;
+    --font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* --- 5. SCADA (Industrial/Naranja) --- */
+[data-theme="scada"] {
+    --bg-body: #262626;
+    --bg-card: #404040;
+    --text-main: #d4d4d4;
+    --text-muted: #a3a3a3;
+    --border-color: #525252;
+    --primary-color: #f97316; /* Naranja Mecánico */
+    --navbar-bg: #171717;
+    --navbar-text: #fbbf24;
+    --input-bg: #525252;
+}
+
+/* --- 6. FLATLY (Turquesa/Plano) --- */
+[data-theme="flatly"] {
+    --bg-body: #ecf0f1;
+    --bg-card: #ffffff;
+    --text-main: #2c3e50;
+    --text-muted: #95a5a6;
+    --border-color: #bdc3c7;
+    --primary-color: #18bc9c; /* Turquesa */
+    --navbar-bg: #2c3e50;
+    --navbar-text: #ffffff;
+    --input-bg: #ffffff;
+}
+
+/* --- 7. DARKLY (Oscuro Elegante) --- */
+[data-theme="darkly"] {
+    --bg-body: #222222;
+    --bg-card: #303030;
+    --text-main: #ffffff;
+    --text-muted: #bbbbbb;
+    --border-color: #444444;
+    --primary-color: #375a7f; /* Azul Acero */
+    --navbar-bg: #375a7f;
+    --navbar-text: #ffffff;
+    --input-bg: #444444;
+}
+
+/* --- 8. CYBORG (Negro/Azul Eléctrico) --- */
+[data-theme="cyborg"] {
+    --bg-body: #060606;
+    --bg-card: #1a1a1a;
+    --text-main: #ffffff;
+    --text-muted: #888888;
+    --border-color: #2a2a2a;
+    --primary-color: #2a9fd6; /* Azul Eléctrico */
+    --navbar-bg: #000000;
+    --navbar-text: #2a9fd6;
+    --input-bg: #222222;
+    --font-family: 'Courier New', Courier, monospace; /* Toque retro */
+}
+
+/* APLICACIÓN GLOBAL */
+body {
+    background-color: var(--bg-body) !important;
+    color: var(--text-main) !important;
+    font-family: var(--font-family) !important;
+    transition: background-color 0.3s, color 0.3s;
+}
+
+.card, .card-custom, .filter-section, .modal-content, .bg-white {
+    background-color: var(--bg-card) !important;
+    color: var(--text-main) !important;
+    border-color: var(--border-color) !important;
+}
+
+.table { color: var(--text-main) !important; --bs-table-color: var(--text-main) !important; --bs-table-bg: transparent !important; }
+.table thead th, .table-light { background-color: var(--navbar-bg) !important; color: var(--navbar-text) !important; border-color: var(--border-color) !important; }
+.table td, .table th { border-color: var(--border-color) !important; }
+
+.form-control, .form-select, .input-group-text {
+    background-color: var(--input-bg) !important;
+    border-color: var(--border-color) !important;
+    color: var(--text-main) !important;
+}
+
+.navbar-custom {
+    background: var(--navbar-bg) !important;
+    color: var(--navbar-text) !important;
+    border-bottom: 2px solid var(--primary-color) !important;
+}
+
+.text-muted { color: var(--text-muted) !important; }
+.text-dark { color: var(--text-main) !important; }
+
+/* ... (MANTÉN TUS OTROS TEMAS ARRIBA) ... */
+
+/* --- BIZLAND (Business Pro) --- */
+[data-theme="bizland"] {
+    --bg-body: #f6f9fe;       /* Fondo azul grisáceo muy suave característico */
+    --bg-card: #ffffff;
+    --text-main: #444444;     /* Gris oscuro profesional */
+    --text-muted: #888888;
+    --border-color: #e1e6f1;
+    --primary-color: #106eea; /* Azul BizLand */
+    --navbar-bg: #ffffff;     /* Header blanco limpio */
+    --navbar-text: #2c4964;   /* Texto azul oscuro */
+    --input-bg: #ffffff;
+    --font-family: 'Open Sans', system-ui, sans-serif;
+}
+
+/* Ajustes específicos para que BizLand se vea bien (Sombra en navbar blanca) */
+[data-theme="bizland"] .navbar-custom {
+    box-shadow: 0px 2px 15px rgba(0, 0, 0, 0.08) !important;
+    border-bottom: 3px solid var(--primary-color) !important;
+}
+[data-theme="bizland"] .card-custom {
+    box-shadow: 0px 0px 30px rgba(1, 41, 112, 0.08) !important;
+    border: none !important;
+}
+[data-theme="bizland"] .btn-primary {
+    background-color: #106eea !important;
+    border-color: #106eea !important;
+}

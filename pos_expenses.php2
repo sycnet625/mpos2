@@ -1,0 +1,285 @@
+<?php
+// ARCHIVO: /var/www/palweb/api/pos_expenses.php
+// VERSIÓN: GESTOR DE GASTOS CON SUCURSAL Y CRUD COMPLETO
+
+session_start();
+// if (!isset($_SESSION['admin_logged_in'])) header('Location: login.php'); 
+require_once 'db.php';
+
+// --- CONFIGURACIÓN Y SUCURSAL ---
+date_default_timezone_set('America/Havana');
+require_once 'config_loader.php';
+$SUC_ID = intval($config['id_sucursal']); // ID SUCURSAL ACTUAL
+
+$mesActual = date('m');
+$anioActual = date('Y');
+$diasEnMes = date('t');
+$primerDiaSemana = date('w', strtotime("$anioActual-$mesActual-01"));
+
+// --- API ACTIONS (CRUD) ---
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    $input = json_decode(file_get_contents('php://input'), true);
+    $action = $_GET['action'] ?? '';
+
+    try {
+        // 1. CREAR GASTO (AHORA CON SUCURSAL)
+        if ($action === 'create') {
+            $stmt = $pdo->prepare("INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_usuario, notas, id_sucursal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $input['fecha'], $input['concepto'], $input['monto'], 
+                $input['categoria'], $input['tipo'], 
+                $_SESSION['user_id'] ?? 'Admin', $input['notas'] ?? '',
+                $SUC_ID // <-- GUARDANDO SUCURSAL
+            ]);
+            echo json_encode(['status' => 'success', 'msg' => 'Gasto registrado']);
+        }
+
+        // 2. ACTUALIZAR GASTO
+        elseif ($action === 'update') {
+            // Validamos que pertenezca a la sucursal por seguridad
+            $stmt = $pdo->prepare("UPDATE gastos_historial SET fecha=?, concepto=?, monto=?, categoria=?, tipo=?, notas=? WHERE id=? AND id_sucursal=?");
+            $stmt->execute([
+                $input['fecha'], $input['concepto'], $input['monto'], 
+                $input['categoria'], $input['tipo'], $input['notas'], 
+                $input['id'], $SUC_ID
+            ]);
+            echo json_encode(['status' => 'success', 'msg' => 'Gasto actualizado']);
+        }
+
+        // 3. ELIMINAR GASTO
+        elseif ($action === 'delete') {
+            $stmt = $pdo->prepare("DELETE FROM gastos_historial WHERE id=? AND id_sucursal=?");
+            $stmt->execute([$input['id'], $SUC_ID]);
+            echo json_encode(['status' => 'success', 'msg' => 'Gasto eliminado']);
+        }
+        exit;
+
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        exit;
+    }
+}
+
+// --- CONSULTAS DE DATOS (FILTRADAS POR SUCURSAL) ---
+
+// 1. Total del Mes
+$sqlTotal = "SELECT SUM(monto) FROM gastos_historial WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_sucursal = $SUC_ID";
+$totalMes = $pdo->query($sqlTotal)->fetchColumn() ?: 0;
+
+// 2. Datos para el Calendario
+$sqlCal = "SELECT DAY(fecha) as dia, SUM(monto) as total, COUNT(*) as items 
+           FROM gastos_historial 
+           WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_sucursal = $SUC_ID
+           GROUP BY DAY(fecha)";
+$rawCal = $pdo->query($sqlCal)->fetchAll(PDO::FETCH_ASSOC);
+$calendarData = [];
+foreach($rawCal as $r) $calendarData[$r['dia']] = $r;
+
+// 3. Listado Completo
+$sqlList = "SELECT * FROM gastos_historial WHERE id_sucursal = $SUC_ID ORDER BY fecha DESC LIMIT 100";
+$gastos = $pdo->query($sqlList)->fetchAll(PDO::FETCH_ASSOC);
+
+// 4. Plantillas (Estáticas por ahora)
+$plantillas = [
+    ['concepto'=>'Alquiler Local', 'monto'=>20000, 'cat'=>'RENTA'],
+    ['concepto'=>'Electricidad', 'monto'=>5000, 'cat'=>'SERVICIOS'],
+    ['concepto'=>'Salarios Quincena', 'monto'=>15000, 'cat'=>'NOMINA'],
+    ['concepto'=>'Internet', 'monto'=>3500, 'cat'=>'SERVICIOS']
+];
+?>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Control de Gastos (Sucursal <?php echo $SUC_ID; ?>)</title>
+    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/all.min.css">
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+        .calendar-header { font-weight: bold; text-align: center; background: #e9ecef; padding: 5px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; }
+        .calendar-day { background: white; border: 1px solid #dee2e6; border-radius: 6px; min-height: 80px; padding: 5px; position: relative; transition: 0.2s; }
+        .calendar-day:hover { box-shadow: 0 4px 8px rgba(0,0,0,0.1); transform: translateY(-2px); }
+        .day-num { font-weight: bold; color: #495057; font-size: 0.9rem; margin-bottom: 5px; display: block;}
+        .day-total { display: block; background: #ffebeb; color: #dc3545; font-size: 0.75rem; padding: 2px 4px; border-radius: 4px; text-align: center; font-weight: bold; }
+        .day-items { font-size: 0.7rem; color: #6c757d; text-align: center; display: block; margin-top: 2px; }
+        .empty-cell { background: transparent; border: none; }
+        .kpi-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .badge-variable { background-color: #ffc107; color: #000; }
+        .badge-fijo { background-color: #0d6efd; color: #fff; }
+    </style>
+    <script src="assets/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+
+
+
+<div class="container-fluid px-4 py-4">
+    
+    <div class="row g-3 mb-4">
+        <div class="col-md-5">
+            <h3 class="fw-bold text-dark"><i class="fas fa-wallet me-2"></i> Control de Gastos</h3>
+            <p class="text-muted mb-0">Gestión de gastos operativos. <span class="badge bg-primary">Sucursal #<?php echo $SUC_ID; ?></span></p>
+        </div>
+        <div class="col-md-3">
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-outline-primary btn-sm" onclick="showCopyPreviousMonthModal()"><i class="fas fa-copy me-1"></i> Copiar Mes Ant.</button>
+                <button class="btn btn-warning btn-sm" onclick="showDailyExpensesModal()"><i class="fas fa-calendar-day me-1"></i> Gastos Día</button>
+                <button class="btn btn-outline-secondary btn-sm" onclick="showTemplatesModal()"><i class="fas fa-cog me-1"></i> Plantillas</button>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card kpi-card bg-danger text-white">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div><small class="text-uppercase opacity-75 fw-bold">Total Gastado (<?php echo date('M'); ?>)</small><h2 class="m-0 fw-bold">$<?php echo number_format($totalMes, 2); ?></h2></div>
+                    <i class="fas fa-chart-line fa-3x opacity-25"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-0 mb-4 rounded-4">
+                <div class="card-header bg-white border-bottom-0 pt-3"><h5 class="fw-bold m-0 text-primary"><i class="fas fa-plus-circle me-2"></i> Registrar Gasto</h5></div>
+                <div class="card-body">
+                    <form id="formExpense" onsubmit="saveExpense(event)">
+                        <input type="hidden" name="id" id="inputId"> <div class="row g-2">
+                            <div class="col-6"><label class="small fw-bold">Fecha</label><input type="date" name="fecha" id="inputFecha" class="form-control" value="<?php echo date('Y-m-d'); ?>" required></div>
+                            <div class="col-6"><label class="small fw-bold">Tipo</label><select name="tipo" id="inputTipo" class="form-select fw-bold text-secondary"><option value="VARIABLE">⚡ Variable</option><option value="FIJO">🔒 Fijo</option></select></div>
+                            <div class="col-12"><label class="small fw-bold">Concepto</label><input type="text" name="concepto" id="inputConcepto" class="form-control" placeholder="Ej: Compra de hielo" required></div>
+                            <div class="col-6"><label class="small fw-bold">Monto</label><div class="input-group"><span class="input-group-text">$</span><input type="number" step="0.01" name="monto" id="inputMonto" class="form-control fw-bold" required></div></div>
+                            <div class="col-6"><label class="small fw-bold">Categoría</label><select name="categoria" id="inputCat" class="form-select"><option value="GENERAL">General</option><option value="INSUMOS">Insumos</option><option value="SERVICIOS">Servicios</option><option value="NOMINA">Nómina</option><option value="MANTENIMIENTO">Mantenimiento</option><option value="RENTA">Renta</option></select></div>
+                            <div class="col-12 mt-3"><button type="submit" class="btn btn-success w-100 fw-bold shadow-sm" id="btnSave"><i class="fas fa-save me-2"></i> GUARDAR GASTO</button><button type="button" class="btn btn-secondary w-100 mt-2 d-none" id="btnCancel" onclick="resetForm()">Cancelar Edición</button></div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <div class="card shadow-sm border-0 mb-4"><div class="card-header bg-light"><small class="fw-bold text-muted">PLANTILLAS RÁPIDAS</small></div><div class="card-body p-2"><div class="d-flex flex-wrap gap-2"><?php foreach($plantillas as $p): ?><button class="btn btn-outline-secondary btn-sm" onclick="fillTemplate('<?php echo $p['concepto']; ?>', <?php echo $p['monto']; ?>, '<?php echo $p['cat']; ?>')"><i class="fas fa-copy me-1"></i> <?php echo $p['concepto']; ?></button><?php endforeach; ?></div></div></div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card shadow-sm border-0 mb-4">
+                <div class="card-header bg-white d-flex justify-content-between align-items-center"><h5 class="fw-bold m-0"><i class="far fa-calendar-alt me-2"></i> Calendario <?php echo date('M Y'); ?></h5><span class="badge bg-light text-dark border">Vista Diaria</span></div>
+                <div class="card-body p-3"><div class="calendar-grid"><div class="calendar-header text-danger">Dom</div><div class="calendar-header">Lun</div><div class="calendar-header">Mar</div><div class="calendar-header">Mie</div><div class="calendar-header">Jue</div><div class="calendar-header">Vie</div><div class="calendar-header">Sab</div><?php for($i=0; $i<$primerDiaSemana; $i++): ?><div class="empty-cell"></div><?php endfor; ?><?php for($dia=1; $dia<=$diasEnMes; $dia++): $info = $calendarData[$dia] ?? ['total'=>0, 'items'=>0]; $hasData = $info['total'] > 0; $bgClass = $hasData ? 'border-danger' : ''; ?><div class="calendar-day <?php echo $bgClass; ?>"><span class="day-num"><?php echo $dia; ?></span><?php if($hasData): ?><span class="day-total">-$<?php echo number_format($info['total']); ?></span><span class="day-items"><?php echo $info['items']; ?> movs.</span><?php endif; ?></div><?php endfor; ?></div></div>
+            </div>
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-white"><h5 class="fw-bold m-0"><i class="fas fa-list me-2"></i> Historial Reciente</h5></div>
+                <div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light small"><tr><th>Fecha</th><th>Concepto</th><th>Categ.</th><th>Tipo</th><th class="text-end">Monto</th><th class="text-end">Acciones</th></tr></thead><tbody><?php foreach($gastos as $g): ?><tr id="row-<?php echo $g['id']; ?>"><td><?php echo date('d/m', strtotime($g['fecha'])); ?></td><td class="fw-bold text-dark"><?php echo htmlspecialchars($g['concepto']); ?></td><td><span class="badge bg-light text-dark border"><?php echo $g['categoria']; ?></span></td><td><?php if($g['tipo']=='FIJO'): ?><span class="badge badge-fijo" style="font-size:0.65rem">FIJO</span><?php else: ?><span class="badge badge-variable" style="font-size:0.65rem">VAR</span><?php endif; ?></td><td class="text-end fw-bold text-danger">-$<?php echo number_format($g['monto'], 2); ?></td><td class="text-end"><button class="btn btn-sm btn-link text-primary p-0 me-2" onclick='editExpense(<?php echo json_encode($g); ?>)'><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-link text-secondary p-0" onclick="deleteExpense(<?php echo $g['id']; ?>)"><i class="fas fa-trash"></i></button></td></tr><?php endforeach; ?></tbody></table></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+async function saveExpense(e) { e.preventDefault(); const id = document.getElementById('inputId').value; const action = id ? 'update' : 'create'; const formData = new FormData(document.getElementById('formExpense')); const data = Object.fromEntries(formData.entries()); if(id) data.id = id; if(!confirm(id ? '¿Guardar cambios?' : '¿Registrar este gasto?')) return; try { const res = await fetch(`?action=${action}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }); const json = await res.json(); if(json.status === 'success') { alert(json.msg); location.reload(); } else { alert('Error: ' + json.msg); } } catch(err) { alert('Error de conexión'); } }
+async function deleteExpense(id) { if(!confirm('¿Estás seguro de ELIMINAR este gasto?')) return; try { const res = await fetch('?action=delete', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({id: id}) }); const json = await res.json(); if(json.status === 'success') { document.getElementById(`row-${id}`).remove(); } else { alert('Error: ' + json.msg); } } catch(err) { alert('Error de conexión'); } }
+function editExpense(gasto) { document.getElementById('inputId').value = gasto.id; document.getElementById('inputFecha').value = gasto.fecha.split(' ')[0]; document.getElementById('inputConcepto').value = gasto.concepto; document.getElementById('inputMonto').value = gasto.monto; document.getElementById('inputCat').value = gasto.categoria; document.getElementById('inputTipo').value = gasto.tipo; document.getElementById('btnSave').innerHTML = '<i class="fas fa-sync me-2"></i> ACTUALIZAR'; document.getElementById('btnSave').classList.replace('btn-success', 'btn-primary'); document.getElementById('btnCancel').classList.remove('d-none'); document.getElementById('formExpense').scrollIntoView({behavior: 'smooth'}); }
+function resetForm() { document.getElementById('formExpense').reset(); document.getElementById('inputId').value = ''; document.getElementById('btnSave').innerHTML = '<i class="fas fa-save me-2"></i> GUARDAR GASTO'; document.getElementById('btnSave').classList.replace('btn-primary', 'btn-success'); document.getElementById('btnCancel').classList.add('d-none'); }
+function fillTemplate(concepto, monto, cat) { resetForm(); document.getElementById('inputConcepto').value = concepto; document.getElementById('inputMonto').value = monto; document.getElementById('inputCat').value = cat; document.getElementById('inputTipo').value = 'FIJO'; }
+
+// --- Modal: Gastos del Día ---
+function showDailyExpensesModal() {
+    const fecha = document.getElementById('inputFecha').value || '<?php echo date("Y-m-d"); ?>';
+    const gastos = <?php echo json_encode($gastos); ?>;
+    const delDia = gastos.filter(g => g.fecha && g.fecha.startsWith(fecha));
+    let total = 0;
+    let html = '<table class="table table-sm table-striped mb-0"><thead><tr><th>Concepto</th><th>Categ.</th><th class="text-end">Monto</th></tr></thead><tbody>';
+    if(delDia.length === 0) {
+        html += '<tr><td colspan="3" class="text-center text-muted py-3">Sin gastos para ' + fecha + '</td></tr>';
+    } else {
+        delDia.forEach(g => {
+            total += parseFloat(g.monto);
+            html += `<tr><td>${g.concepto}</td><td><span class="badge bg-light text-dark border">${g.categoria}</span></td><td class="text-end fw-bold text-danger">-$${parseFloat(g.monto).toFixed(2)}</td></tr>`;
+        });
+    }
+    html += `</tbody><tfoot><tr class="table-danger"><td colspan="2" class="fw-bold">TOTAL DEL DÍA</td><td class="text-end fw-bold">-$${total.toFixed(2)}</td></tr></tfoot></table>`;
+    showGenericModal('Gastos del ' + fecha, html);
+}
+
+// --- Modal: Plantillas ---
+function showTemplatesModal() {
+    const plantillas = <?php echo json_encode($plantillas); ?>;
+    let html = '<div class="list-group">';
+    plantillas.forEach(p => {
+        html += `<button class="list-group-item list-group-item-action d-flex justify-content-between align-items-center" onclick="fillTemplate('${p.concepto}', ${p.monto}, '${p.cat}'); bootstrap.Modal.getInstance(document.getElementById('genericModal')).hide();">
+            <div><i class="fas fa-file-alt me-2 text-muted"></i><strong>${p.concepto}</strong> <span class="badge bg-light text-dark border ms-2">${p.cat}</span></div>
+            <span class="fw-bold text-success">$${parseFloat(p.monto).toFixed(2)}</span>
+        </button>`;
+    });
+    html += '</div><p class="text-muted small mt-2 mb-0"><i class="fas fa-info-circle me-1"></i>Haz clic en una plantilla para rellenar el formulario.</p>';
+    showGenericModal('Plantillas Rápidas', html);
+}
+
+// --- Modal: Copiar Mes Anterior ---
+function showCopyPreviousMonthModal() {
+    const mesActual = <?php echo intval($mesActual); ?>;
+    const anioActual = <?php echo intval($anioActual); ?>;
+    let mesAnt = mesActual - 1, anioAnt = anioActual;
+    if(mesAnt === 0) { mesAnt = 12; anioAnt--; }
+    const meses = ['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+    let html = `<p>Esto copiará todos los gastos <strong>FIJOS</strong> de <strong>${meses[mesAnt]} ${anioAnt}</strong> al mes actual (<strong>${meses[mesActual]} ${anioActual}</strong>).</p>
+    <p class="text-muted small"><i class="fas fa-info-circle me-1"></i>Solo se copian gastos de tipo FIJO. Las fechas se ajustan al mes actual.</p>
+    <button class="btn btn-primary w-100 fw-bold" onclick="executeCopyPreviousMonth(${mesAnt}, ${anioAnt})"><i class="fas fa-copy me-2"></i>Copiar Gastos Fijos</button>`;
+    showGenericModal('Copiar Mes Anterior', html);
+}
+
+async function executeCopyPreviousMonth(mesAnt, anioAnt) {
+    const gastos = <?php echo json_encode($gastos); ?>;
+    const fijos = gastos.filter(g => g.tipo === 'FIJO' && g.fecha);
+    // Filtrar solo los del mes anterior
+    const delMesAnt = fijos.filter(g => {
+        const d = new Date(g.fecha);
+        return (d.getMonth()+1) === mesAnt && d.getFullYear() === anioAnt;
+    });
+    if(delMesAnt.length === 0) {
+        alert('No se encontraron gastos fijos en el mes anterior.');
+        return;
+    }
+    if(!confirm(`Se copiarán ${delMesAnt.length} gastos fijos. ¿Continuar?`)) return;
+    let ok = 0;
+    for(const g of delMesAnt) {
+        const fechaOrig = new Date(g.fecha);
+        let dia = fechaOrig.getDate();
+        const mesActual = <?php echo intval($mesActual); ?>;
+        const anioActual = <?php echo intval($anioActual); ?>;
+        const maxDia = new Date(anioActual, mesActual, 0).getDate();
+        if(dia > maxDia) dia = maxDia;
+        const nuevaFecha = `${anioActual}-${String(mesActual).padStart(2,'0')}-${String(dia).padStart(2,'0')}`;
+        try {
+            const res = await fetch('?action=create', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
+                fecha: nuevaFecha, concepto: g.concepto, monto: g.monto, categoria: g.categoria, tipo: 'FIJO', notas: 'Copiado de ' + g.fecha
+            })});
+            const json = await res.json();
+            if(json.status === 'success') ok++;
+        } catch(e) {}
+    }
+    alert(`${ok} gastos copiados exitosamente.`);
+    location.reload();
+}
+
+// --- Modal Genérico Reutilizable ---
+function showGenericModal(title, bodyHtml) {
+    let modal = document.getElementById('genericModal');
+    if(!modal) {
+        modal = document.createElement('div');
+        modal.id = 'genericModal';
+        modal.className = 'modal fade';
+        modal.tabIndex = -1;
+        modal.innerHTML = `<div class="modal-dialog modal-dialog-centered"><div class="modal-content shadow">
+            <div class="modal-header py-2"><h6 class="modal-title fw-bold" id="genericModalTitle"></h6><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body" id="genericModalBody"></div>
+        </div></div>`;
+        document.body.appendChild(modal);
+    }
+    document.getElementById('genericModalTitle').innerText = title;
+    document.getElementById('genericModalBody').innerHTML = bodyHtml;
+    new bootstrap.Modal(modal).show();
+}
+</script>
+<?php include_once 'menu_master.php'; ?>
+</body>
+</html>
+
