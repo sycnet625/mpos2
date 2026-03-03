@@ -185,6 +185,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $stocks_updated = [];
 
     try {
+        if (!$pdo->inTransaction()) $pdo->beginTransaction();
         // Crear tablas merma si hacen falta (solo una vez)
         if ($accion === 'merma') {
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -254,11 +255,13 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $stocks_updated[] = ['sku'=>$sku, 'nuevo_stock'=>floatval($sq2->fetchColumn()?:0)];
         }
 
+        if ($pdo->inTransaction()) $pdo->commit();
         $n = count($results);
         $preview = implode(', ', array_slice($results,0,3)) . ($n>3 ? '…':'');
         echo json_encode(['status'=>'success','msg'=>"$n items procesados: $preview",'stocks_updated'=>$stocks_updated]);
 
     } catch (Exception $e) {
+        if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
         echo json_encode(['status'=>'error','msg'=>$e->getMessage()]);
     }
     exit;
