@@ -14,6 +14,22 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $localPath = __DIR__ . '/assets/product_images/';
 
+function ptable_image_meta(string $code): array {
+    $safe = trim($code);
+    if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) return [false, 0];
+    $bases = [
+        __DIR__ . '/assets/product_images/' . $safe,
+        dirname(__DIR__) . '/assets/product_images/' . $safe,
+    ];
+    foreach ($bases as $base) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+            $f = $base . $ext;
+            if (file_exists($f)) return [true, (int)filemtime($f)];
+        }
+    }
+    return [false, 0];
+}
+
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)
 // ---------------------------------------------------------
@@ -23,11 +39,8 @@ function renderProductRows($rows, $localPath) {
         <tr><td colspan="11" class="text-center py-5 text-muted">No se encontraron productos.</td></tr>
     <?php else: 
         foreach($rows as $p):
-            $imgBase  = $localPath . $p['codigo'];
-            $hasImg   = false; $imgV = '';
-            foreach (['.avif','.webp','.jpg'] as $_e) {
-                if (file_exists($imgBase.$_e)) { $hasImg = true; $imgV = '&v='.filemtime($imgBase.$_e); break; }
-            }
+            [$hasImg, $mtime] = ptable_image_meta((string)$p['codigo']);
+            $imgV = $mtime ? '&v=' . $mtime : '';
             $stock = floatval($p['stock_total']);
             $isActive = intval($p['activo'] ?? 1);
             $rowClass = $isActive ? '' : 'row-inactive';
@@ -435,6 +448,9 @@ if ($isAjax) {
     </div>
     <div>
         <a href="inventory_report.php" class="btn btn-info btn-sm px-3 fw-bold me-2 text-white"><i class="fas fa-chart-pie me-1"></i> Informe</a>
+        <button onclick="forceImageCacheReset()" class="btn btn-outline-light btn-sm px-3 fw-bold me-2" title="Limpia caché de imágenes y recarga miniaturas">
+            <i class="fas fa-broom me-1"></i> Limpiar caché imágenes
+        </button>
         <button onclick="printInventoryCount()" class="btn btn-warning btn-sm px-3 fw-bold me-2 text-dark"><i class="fas fa-clipboard-list me-1"></i> Conteo</button>
         <button onclick="printTable()" class="btn btn-light btn-sm px-3 fw-bold me-2"><i class="fas fa-print me-1"></i> Lista</button>
         <a href="dashboard.php" class="btn btn-primary btn-sm px-3 fw-bold"><i class="fas fa-home"></i></a>
@@ -1072,6 +1088,46 @@ async function printInventoryCount() {
 }
 function printTable() {
     window.print();
+}
+
+async function forceImageCacheReset() {
+    if (!confirm('Se limpiará la caché local de imágenes y se recargará la tabla. ¿Continuar?')) return;
+    let deleted = 0;
+    try {
+        if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            for (const cacheName of cacheNames) {
+                const cache = await caches.open(cacheName);
+                const requests = await cache.keys();
+                for (const req of requests) {
+                    const u = req.url || '';
+                    if (
+                        u.includes('/image.php?') ||
+                        u.includes('/assets/product_images/') ||
+                        u.includes('via.placeholder.com/50?text=IMG')
+                    ) {
+                        if (await cache.delete(req)) deleted++;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('No se pudo limpiar Cache Storage', e);
+    }
+
+    const bust = Date.now();
+    try {
+        document.querySelectorAll('img.prod-img-table').forEach(img => {
+            const code = img.dataset.code || '';
+            if (!code) return;
+            img.src = `image.php?code=${encodeURIComponent(code)}&t=${bust}`;
+        });
+    } catch (e) {
+        console.warn('No se pudieron refrescar miniaturas', e);
+    }
+
+    await loadData(currentPage);
+    alert(`Caché de imágenes limpiada. Elementos eliminados: ${deleted}`);
 }
 
 // Inicializar

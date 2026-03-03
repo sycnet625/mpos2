@@ -15,6 +15,24 @@ header("X-XSS-Protection: 1; mode=block");
 ini_set('display_errors', 1);
 require_once 'db.php';
 
+function pos_image_meta(string $code): array {
+    $safe = trim($code);
+    if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) {
+        return [false, 0];
+    }
+    $bases = [
+        __DIR__ . '/assets/product_images/' . $safe,
+        dirname(__DIR__) . '/assets/product_images/' . $safe,
+    ];
+    foreach ($bases as $base) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+            $f = $base . $ext;
+            if (file_exists($f)) return [true, (int)filemtime($f)];
+        }
+    }
+    return [false, 0];
+}
+
 // ---------------------------------------------------------
 // API INTERNA: GESTIÓN DE CLIENTES (NUEVO)
 // ---------------------------------------------------------
@@ -97,13 +115,8 @@ if (isset($_GET['load_products'])) {
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
         // Procesar para incluir colores e imágenes
-        $localPath = __DIR__ . '/assets/product_images/';
         foreach ($prods as &$p) {
-            $b = $localPath . $p['codigo'];
-            $p['has_image'] = false; $p['img_version'] = 0;
-            foreach (['.avif','.webp','.jpg'] as $_e) {
-                if (file_exists($b.$_e)) { $p['has_image'] = true; $p['img_version'] = filemtime($b.$_e); break; }
-            }
+            [$p['has_image'], $p['img_version']] = pos_image_meta((string)$p['codigo']);
             $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
             $p['stock'] = floatval($p['stock']);
         }
@@ -331,13 +344,8 @@ try {
 }
 
 // Procesamiento visual
-$localPath = __DIR__ . '/assets/product_images/';
 foreach ($prods as &$p) {
-    $b = $localPath . $p['codigo'];
-    $p['has_image'] = false; $p['img_version'] = 0;
-    foreach (['.avif','.webp','.jpg'] as $_e) {
-        if (file_exists($b.$_e)) { $p['has_image'] = true; $p['img_version'] = filemtime($b.$_e); break; }
-    }
+    [$p['has_image'], $p['img_version']] = pos_image_meta((string)$p['codigo']);
     $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
     $p['stock'] = floatval($p['stock']);
 } unset($p);

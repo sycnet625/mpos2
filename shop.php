@@ -59,6 +59,22 @@ $metodosShop   = array_values(array_filter(
 $tipoCambioUSD = floatval($config['tipo_cambio_usd'] ?? 385);
 $tipoCambioMLC = floatval($config['tipo_cambio_mlc'] ?? 310);
 
+function shop_image_meta(string $code): array {
+    $safe = trim($code);
+    if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) return [false, 0];
+    $bases = [
+        __DIR__ . '/assets/product_images/' . $safe,
+        dirname(__DIR__) . '/assets/product_images/' . $safe,
+    ];
+    foreach ($bases as $base) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+            $f = $base . $ext;
+            if (file_exists($f)) return [true, (int)filemtime($f)];
+        }
+    }
+    return [false, 0];
+}
+
 try {
     require_once 'db.php';
     date_default_timezone_set('America/Havana');
@@ -236,8 +252,7 @@ if (isset($_GET['ajax_search'])) {
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
-            $b = __DIR__ . '/assets/product_images/' . $r['codigo'];
-            $r['hasImg'] = file_exists($b.'.avif') || file_exists($b.'.webp') || file_exists($b.'.jpg') || file_exists($b.'.jpeg');
+            [$r['hasImg'], $imgV] = shop_image_meta((string)$r['codigo']);
             $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
             $r['bg'] = "#" . substr(md5($r['nombre']), 0, 6);
             $r['initials'] = mb_strtoupper(mb_substr($r['nombre'], 0, 2));
@@ -596,11 +611,8 @@ if (isset($_GET['action_variants'])) {
 // ── Build compact product list for client-side JS cache (Feature 11) ──
 $productsJs = [];
 foreach ($productos as $_p) {
-    $_b = $localImgPath . $_p['codigo'];
-    $_hasImg = false; $_pImgUrl = null;
-    foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
-        if (file_exists($_b.$_e)) { $_hasImg = true; $_pImgUrl = 'image.php?code='.urlencode($_p['codigo']); break; }
-    }
+    [$_hasImg, $_imgV] = shop_image_meta((string)$_p['codigo']);
+    $_pImgUrl = $_hasImg ? 'image.php?code=' . urlencode($_p['codigo']) : null;
     $productsJs[] = [
         'codigo'       => $_p['codigo'],
         'nombre'       => $_p['nombre'],
@@ -1452,22 +1464,13 @@ ob_end_flush();
         <?php endif; ?>
         
         <?php foreach($productos as $p):
-            $b = $localImgPath . $p['codigo'];
-            $hasImg = false; $imgV = '';
-            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
-                if (file_exists($b.$_e)) { $hasImg = true; $imgV = '&v='.filemtime($b.$_e); break; }
-            }
+            [$hasImg, $mtimeMain] = shop_image_meta((string)$p['codigo']);
+            $imgV = $mtimeMain ? '&v=' . $mtimeMain : '';
             $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
-            $b1 = $localImgPath . $p['codigo'] . '_extra1';
-            $hasExtra1 = false; $imgV1 = '';
-            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
-                if (file_exists($b1.$_e)) { $hasExtra1 = true; $imgV1 = '&v='.filemtime($b1.$_e); break; }
-            }
-            $b2 = $localImgPath . $p['codigo'] . '_extra2';
-            $hasExtra2 = false; $imgV2 = '';
-            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
-                if (file_exists($b2.$_e)) { $hasExtra2 = true; $imgV2 = '&v='.filemtime($b2.$_e); break; }
-            }
+            [$hasExtra1, $mtime1] = shop_image_meta((string)$p['codigo'] . '_extra1');
+            $imgV1 = $mtime1 ? '&v=' . $mtime1 : '';
+            [$hasExtra2, $mtime2] = shop_image_meta((string)$p['codigo'] . '_extra2');
+            $imgV2 = $mtime2 ? '&v=' . $mtime2 : '';
             $stock = floatval($p['stock_total'] ?? 0);
             $hasStock = $stock > 0;
             $esReservable = intval($p['es_reservable'] ?? 0) === 1;

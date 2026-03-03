@@ -17,7 +17,10 @@ if (!preg_match('/^[A-Za-z0-9_.-]+$/', $safeCode)) {
     exit;
 }
 
-$base      = __DIR__ . '/assets/product_images/' . $safeCode;
+$bases     = [
+    __DIR__ . '/assets/product_images/' . $safeCode,
+    dirname(__DIR__) . '/assets/product_images/' . $safeCode,
+];
 $accept    = $_SERVER['HTTP_ACCEPT'] ?? '';
 $supAvif   = str_contains($accept, 'image/avif');
 $supWebp   = str_contains($accept, 'image/webp');
@@ -29,20 +32,27 @@ if     ($fmt === 'avif')              { $supAvif = true;  $supWebp = false; }
 elseif ($fmt === 'webp')              { $supAvif = false; $supWebp = true;  }
 elseif ($fmt === 'jpg' || $fmt === 'jpeg') { $supAvif = false; $supWebp = false; }
 
-// ── Selección de formato óptimo ───────────────────────────────────────────────
-if ($supAvif && file_exists($base . '.avif')) {
-    $path      = $base . '.avif';
-    $mime      = 'image/avif';
-} elseif ($supWebp && file_exists($base . '.webp')) {
-    $path      = $base . '.webp';
-    $mime      = 'image/webp';
-} elseif (file_exists($base . '.jpg')) {
-    $path      = $base . '.jpg';
-    $mime      = 'image/jpeg';
-} elseif (file_exists($base . '.jpeg')) {
-    $path      = $base . '.jpeg';
-    $mime      = 'image/jpeg';
-} else {
+// ── Selección de formato óptimo (busca en sucursal y raíz compartida) ───────
+$path = null;
+$mime = null;
+$tryExts = [];
+if ($supAvif) $tryExts[] = ['.avif', 'image/avif'];
+if ($supWebp) $tryExts[] = ['.webp', 'image/webp'];
+$tryExts[] = ['.jpg', 'image/jpeg'];
+$tryExts[] = ['.jpeg', 'image/jpeg'];
+
+foreach ($bases as $base) {
+    foreach ($tryExts as [$ext, $extMime]) {
+        $candidate = $base . $ext;
+        if (file_exists($candidate)) {
+            $path = $candidate;
+            $mime = $extMime;
+            break 2;
+        }
+    }
+}
+
+if ($path === null) {
     // Sin imagen: devolver placeholder SVG
     header('Content-Type: image/svg+xml');
     header('Cache-Control: public, max-age=3600');
@@ -56,6 +66,27 @@ if ($supAvif && file_exists($base . '.avif')) {
 </svg>
 SVG;
     exit;
+}
+
+function sendConditionalCacheHeaders(string $path, string $mime): bool {
+    $mtime = filemtime($path) ?: time();
+    $size = filesize($path) ?: 0;
+    $etag = '"' . sha1($path . '|' . $mtime . '|' . $size . '|' . $mime) . '"';
+    $lastMod = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
+
+    header('Content-Type: ' . $mime);
+    header('Cache-Control: public, max-age=300, stale-while-revalidate=86400');
+    header('Vary: Accept');
+    header('ETag: ' . $etag);
+    header('Last-Modified: ' . $lastMod);
+
+    $ifNoneMatch = trim((string)($_SERVER['HTTP_IF_NONE_MATCH'] ?? ''));
+    $ifModifiedSince = trim((string)($_SERVER['HTTP_IF_MODIFIED_SINCE'] ?? ''));
+    if ($ifNoneMatch === $etag || $ifModifiedSince === $lastMod) {
+        http_response_code(304);
+        return true;
+    }
+    return false;
 }
 
 // ── Thumbnail (redimensionado a 200 px de ancho) ──────────────────────────────
@@ -74,9 +105,11 @@ if ($thumb) {
     $thumb_img = imagecreatetruecolor($newW, $newH);
     imagecopyresampled($thumb_img, $image, 0, 0, 0, 0, $newW, $newH, $w, $h);
 
-    header('Content-Type: ' . $mime);
-    header('Cache-Control: public, max-age=31536000, immutable');
-    header('Vary: Accept');
+    if (sendConditionalCacheHeaders($path, $mime)) {
+        imagedestroy($thumb_img);
+        imagedestroy($image);
+        exit;
+    }
 
     match($mime) {
         'image/avif' => imageavif($thumb_img, null, 60, 6),
@@ -90,8 +123,8 @@ if ($thumb) {
 }
 
 // ── Servir archivo completo ───────────────────────────────────────────────────
-header('Content-Type: ' . $mime);
-header('Cache-Control: public, max-age=31536000, immutable');
-header('Vary: Accept');
+if (sendConditionalCacheHeaders($path, $mime)) {
+    exit;
+}
 header('Content-Length: ' . filesize($path));
 readfile($path);

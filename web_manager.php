@@ -20,6 +20,21 @@ require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 $localPath = __DIR__ . '/assets/product_images/';
 
+function webmgr_has_image(string $code): bool {
+    $safe = trim($code);
+    if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) return false;
+    $bases = [
+        __DIR__ . '/assets/product_images/' . $safe,
+        dirname(__DIR__) . '/assets/product_images/' . $safe,
+    ];
+    foreach ($bases as $base) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+            if (file_exists($base . $ext)) return true;
+        }
+    }
+    return false;
+}
+
 // 2. PROCESAR PETICIONES AJAX (GUARDADO AUTOMÁTICO)
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -222,10 +237,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                 </thead>
                 <tbody>
                     <?php foreach ($products as $p): 
-                        $hasImg = false;
-                        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $imgExt) {
-                            if (file_exists($localPath . $p['codigo'] . $imgExt)) { $hasImg = true; break; }
-                        }
+                        $hasImg = webmgr_has_image((string)$p['codigo']);
                         $imgUrl = $hasImg ? "image.php?code=" . $p['codigo'] : "assets/img/no-image-50.png";
                         $sucs = explode(',', $p['sucursales_web'] ?? '');
                         $desc = $p['descripcion'] ?? '';
