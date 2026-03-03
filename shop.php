@@ -3903,7 +3903,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </footer>
 
 <!-- ── Campana de notificaciones push (tienda) ── -->
-<div id="shopPushBell" style="position:fixed;bottom:80px;right:16px;z-index:9800;display:none;">
+<div id="shopPushBell" style="position:fixed;bottom:116px;right:16px;z-index:9800;display:none;">
     <button id="shopBellBtn" onclick="handleShopBellClick()"
             style="width:46px;height:46px;border-radius:50%;border:none;font-size:1.1rem;
                    box-shadow:0 3px 12px rgba(0,0,0,.25);cursor:pointer;transition:.2s;
