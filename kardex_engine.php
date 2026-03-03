@@ -62,7 +62,11 @@ class KardexEngine {
         try {
             if (!$pdo instanceof PDO) throw new Exception("Primer parámetro debe ser una instancia de PDO");
             if (!$fecha) $fecha = date('Y-m-d H:i:s');
-            if (!$pdo->inTransaction()) $pdo->beginTransaction();
+            $startedTx = false;
+            if (!$pdo->inTransaction()) {
+                $pdo->beginTransaction();
+                $startedTx = true;
+            }
 
             $stmtSuc = $pdo->prepare("SELECT id_sucursal FROM almacenes WHERE id = ? LIMIT 1");
             $stmtSuc->execute([$almacen_id]);
@@ -93,9 +97,13 @@ class KardexEngine {
             $stmtUpdateStock = $pdo->prepare("INSERT INTO stock_almacen (id_almacen, id_producto, cantidad, id_sucursal, ultima_actualizacion) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad = ?, ultima_actualizacion = ?");
             $stmtUpdateStock->execute([$almacen_id, $producto_id, $nuevo_saldo, $sucursal_id, $fecha, $nuevo_saldo, $fecha]);
 
+            if ($startedTx) $pdo->commit();
             return true;
         } catch (Exception $e) {
             error_log("Kardex Error: " . $e->getMessage());
+            if (isset($startedTx) && $startedTx && $pdo instanceof PDO && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e; 
         }
     }
