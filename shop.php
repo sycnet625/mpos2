@@ -236,8 +236,8 @@ if (isset($_GET['ajax_search'])) {
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
-            $b = '/var/www/assets/product_images/' . $r['codigo'];
-            $r['hasImg'] = file_exists($b.'.avif') || file_exists($b.'.webp') || file_exists($b.'.jpg');
+            $b = __DIR__ . '/assets/product_images/' . $r['codigo'];
+            $r['hasImg'] = file_exists($b.'.avif') || file_exists($b.'.webp') || file_exists($b.'.jpg') || file_exists($b.'.jpeg');
             $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
             $r['bg'] = "#" . substr(md5($r['nombre']), 0, 6);
             $r['initials'] = mb_strtoupper(mb_substr($r['nombre'], 0, 2));
@@ -256,7 +256,7 @@ if (isset($_GET['ajax_search'])) {
 // =========================================================
 $catFilter = trim($_GET['cat'] ?? '');
 $sort = $_GET['sort'] ?? 'categoria_asc';
-$localImgPath = '/var/www/assets/product_images/';
+$localImgPath = __DIR__ . '/assets/product_images/';
 
 try {
     $catSql = "SELECT DISTINCT categoria FROM productos 
@@ -598,7 +598,7 @@ $productsJs = [];
 foreach ($productos as $_p) {
     $_b = $localImgPath . $_p['codigo'];
     $_hasImg = false; $_pImgUrl = null;
-    foreach (['.avif','.webp','.jpg'] as $_e) {
+    foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
         if (file_exists($_b.$_e)) { $_hasImg = true; $_pImgUrl = 'image.php?code='.urlencode($_p['codigo']); break; }
     }
     $productsJs[] = [
@@ -1454,18 +1454,18 @@ ob_end_flush();
         <?php foreach($productos as $p):
             $b = $localImgPath . $p['codigo'];
             $hasImg = false; $imgV = '';
-            foreach (['.avif','.webp','.jpg'] as $_e) {
+            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
                 if (file_exists($b.$_e)) { $hasImg = true; $imgV = '&v='.filemtime($b.$_e); break; }
             }
             $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
             $b1 = $localImgPath . $p['codigo'] . '_extra1';
             $hasExtra1 = false; $imgV1 = '';
-            foreach (['.avif','.webp','.jpg'] as $_e) {
+            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
                 if (file_exists($b1.$_e)) { $hasExtra1 = true; $imgV1 = '&v='.filemtime($b1.$_e); break; }
             }
             $b2 = $localImgPath . $p['codigo'] . '_extra2';
             $hasExtra2 = false; $imgV2 = '';
-            foreach (['.avif','.webp','.jpg'] as $_e) {
+            foreach (['.avif','.webp','.jpg','.jpeg'] as $_e) {
                 if (file_exists($b2.$_e)) { $hasExtra2 = true; $imgV2 = '&v='.filemtime($b2.$_e); break; }
             }
             $stock = floatval($p['stock_total'] ?? 0);
