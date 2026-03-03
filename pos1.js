@@ -1978,7 +1978,7 @@ window.invConfirmar = async function() {
         if (d.status === 'success') {
             showToast(d.msg, 'success');
             bootstrap.Modal.getInstance(document.getElementById('invModal')).hide();
-            // Actualizar caché local de stock
+            // Actualizar stock local inmediato para feedback visual instantáneo.
             if (d.stocks_updated) {
                 d.stocks_updated.forEach(s => {
                     const p = productsDB.find(x => x.codigo == s.sku);
@@ -1988,6 +1988,9 @@ window.invConfirmar = async function() {
             cart = [];
             renderCart();
             renderProducts();
+            updateStockBadges();
+            // Refrescar catálogo completo desde servidor para dejar lista/stock 100% sincronizados.
+            await refreshProducts();
         } else {
             showToast(d.msg || 'Error', 'error');
         }
