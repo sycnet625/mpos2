@@ -14,6 +14,13 @@ if (!is_dir($localPath)) {
     @mkdir($localPath, 0775, true);
 }
 
+function hasAnyImageVariant(string $basePath): bool {
+    foreach (['.avif', '.webp', '.jpg'] as $ext) {
+        if (file_exists($basePath . $ext)) return true;
+    }
+    return false;
+}
+
 function jsonOut(array $data): void {
     header('Content-Type: application/json');
     echo json_encode($data, JSON_UNESCAPED_UNICODE);
@@ -24,7 +31,21 @@ function safeProductId(string $id): string {
     return preg_replace('/[^A-Za-z0-9_-]/', '', $id) ?? '';
 }
 
-function downloadImageToPath(string $url, string $destPath): bool {
+function saveImageVariantsFromBinary(string $imgData, string $basePath): bool {
+    if (!function_exists('imagecreatefromstring')) return false;
+    $im = @imagecreatefromstring($imgData);
+    if ($im === false) return false;
+
+    $okJpg = @imagejpeg($im, $basePath . '.jpg', 88);
+    $okWebp = function_exists('imagewebp') ? @imagewebp($im, $basePath . '.webp', 82) : false;
+    $okAvif = function_exists('imageavif') ? @imageavif($im, $basePath . '.avif', 58, 6) : false;
+    imagedestroy($im);
+
+    // Requerir al menos JPG y uno de los formatos modernos.
+    return $okJpg && ($okWebp || $okAvif);
+}
+
+function downloadImageToBasePath(string $url, string $basePath): bool {
     if (!preg_match('#^https?://#i', $url)) return false;
 
     $ch = curl_init($url);
@@ -50,17 +71,7 @@ function downloadImageToPath(string $url, string $destPath): bool {
     if ($imgData === false || $imgData === '' || $httpCode < 200 || $httpCode >= 300) return false;
     if (stripos($contentType, 'image/') === false && @getimagesizefromstring($imgData) === false) return false;
 
-    // Normalizar a JPEG para mantener compatibilidad con el ecosistema actual (*.jpg).
-    if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
-        $im = @imagecreatefromstring($imgData);
-        if ($im !== false) {
-            $ok = @imagejpeg($im, $destPath, 88);
-            imagedestroy($im);
-            return $ok;
-        }
-    }
-
-    return @file_put_contents($destPath, $imgData) !== false;
+    return saveImageVariantsFromBinary($imgData, $basePath);
 }
 
 function getGoogleCandidates(string $query): array {
@@ -130,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
     $id = safeProductId((string)($input['id'] ?? ''));
     if ($id === '') jsonOut(['status' => 'error', 'msg' => 'ID de producto inválido']);
-    $destino = $localPath . $id . '.jpg';
+    $destinoBase = $localPath . $id;
 
     // OPCIÓN A: SCRAPING AUTOMÁTICO DE GOOGLE (GBV=1)
     if (isset($input['action']) && $input['action'] === 'scrape_google') {
@@ -139,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $candidatas = getGoogleCandidates($query);
         foreach ($candidatas as $imgUrl) {
-            if (downloadImageToPath($imgUrl, $destino)) {
+            if (downloadImageToBasePath($imgUrl, $destinoBase)) {
                 jsonOut(['status' => 'success', 'msg' => 'Imagen capturada automáticamente', 'source' => $imgUrl]);
             }
         }
@@ -151,7 +162,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $url = trim((string)($input['url'] ?? ''));
         if ($url === '') jsonOut(['status' => 'error', 'msg' => 'URL vacía']);
 
-        if (downloadImageToPath($url, $destino)) {
+        if (downloadImageToBasePath($url, $destinoBase)) {
             jsonOut(['status' => 'success']);
         } else {
             jsonOut(['status' => 'error', 'msg' => 'URL inválida, protegida o no es imagen']);
@@ -172,7 +183,7 @@ $todos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Filtramos en PHP los que NO tienen imagen
 $sinImagen = [];
 foreach ($todos as $p) {
-    if (!file_exists($localPath . $p['codigo'] . '.jpg')) {
+    if (!hasAnyImageVariant($localPath . $p['codigo'])) {
         $sinImagen[] = $p;
     }
 }

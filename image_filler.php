@@ -56,16 +56,34 @@ $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $contador = 0;
 
+function hasAnyVariant(string $base): bool {
+    foreach (['.avif', '.webp', '.jpg'] as $ext) {
+        if (file_exists($base . $ext)) return true;
+    }
+    return false;
+}
+
+function saveVariantsFromBinary(string $imgData, string $base): bool {
+    if (!function_exists('imagecreatefromstring')) return false;
+    $im = @imagecreatefromstring($imgData);
+    if ($im === false) return false;
+    $okJ = @imagejpeg($im, $base . '.jpg', 86);
+    $okW = function_exists('imagewebp') ? @imagewebp($im, $base . '.webp', 82) : false;
+    $okA = function_exists('imageavif') ? @imageavif($im, $base . '.avif', 58, 6) : false;
+    imagedestroy($im);
+    return $okJ && ($okW || $okA);
+}
+
 foreach ($productos as $p) {
     $codigo = $p['codigo'];
     $nombre = $p['nombre'];
     // Limpiamos el nombre para buscar mejor (quitamos numeros o marcas raras)
     $queryBusqueda = limpiarNombre($nombre . " " . $p['categoria']); 
     
-    $archivoDestino = $localImgPath . $codigo . '.jpg';
+    $baseDestino = $localImgPath . $codigo;
 
     // Si ya existe, saltar
-    if (file_exists($archivoDestino) && filesize($archivoDestino) > 0) {
+    if (hasAnyVariant($baseDestino)) {
         // echo "<div class='log'>📦 $nombre: Ya tiene foto</div>";
         continue;
     }
@@ -96,7 +114,7 @@ foreach ($productos as $p) {
             // Descargar
             $imgData = @file_get_contents($imgUrl);
             if ($imgData) {
-                if (@file_put_contents($archivoDestino, $imgData) !== false) {
+                if (saveVariantsFromBinary($imgData, $baseDestino)) {
                     echo "<span style='color:#2ecc71'>✅ DESCARGADA</span>";
                     $contador++;
                 } else {
@@ -108,7 +126,7 @@ foreach ($productos as $p) {
         } else {
             echo "<span style='color:#f1c40f'>⚠️ Sin resultados en Pexels</span>";
             // FALLBACK: Si Pexels no tiene, usamos el generador de color
-            usarPlaceholder($nombre, $archivoDestino);
+            usarPlaceholder($nombre, $baseDestino);
             echo " <small>(Usando genérico)</small>";
         }
     } else {
@@ -131,12 +149,12 @@ function limpiarNombre($str) {
     return trim($str);
 }
 
-function usarPlaceholder($nombre, $path) {
+function usarPlaceholder($nombre, $basePath) {
     $hash = md5($nombre);
     $bg = substr($hash, 0, 6);
     $url = "https://placehold.co/600x600/$bg/FFF.jpg?text=" . urlencode($nombre);
     $data = @file_get_contents($url);
-    if ($data) @file_put_contents($path, $data);
+    if ($data) saveVariantsFromBinary($data, $basePath);
 }
 ?>
 <?php include_once 'menu_master.php'; ?>
