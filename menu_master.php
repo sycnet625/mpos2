@@ -18,9 +18,10 @@ $menuCategories = [
     ],
     "🛒 POS & Venta" => [
         ["icon" => "fa-desktop", "name" => "Terminal POS", "url" => "pos.php"],
+        ["icon" => "fa-clock", "name" => "Reloj LCD", "url" => "clock.php"],
         ["icon" => "fa-store", "name" => "Tienda Online", "url" => "shop.php"],
         ["icon" => "fa-calendar-check", "name" => "Reservas", "url" => "reservas.php"],
-        ["icon" => "fa-utensils", "name" => "Pantalla Cocina", "url" => "cocina.php"],
+        ["icon" => "fa-utensils", "name" => "Pantalla Cocina", "url" => "kds.php"],
         ["icon" => "fa-user-plus", "name" => "Clientes CRM", "url" => "crm_clients.php"],
         
         
@@ -527,7 +528,7 @@ window.sendAdminMsg = async function() {
      PUSH NOTIFICATIONS — Botón campana + lógica de subscripción
      PUSH_TIPO se define en la página que incluye este archivo:
        define('PUSH_TIPO', 'operador');  ← en páginas de admin (default)
-       define('PUSH_TIPO', 'cocina');    ← en cocina.php
+       define('PUSH_TIPO', 'cocina');    ← en kds.php
      ═══════════════════════════════════════════════════════════════════════ -->
 <div id="pushBellWrap" style="position:fixed;bottom:68px;right:20px;z-index:9998;display:none;">
     <button id="pushBellBtn"
