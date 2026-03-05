@@ -19,7 +19,7 @@
       --time-size: clamp(4rem, 16vw, 13rem);
       --meta-size: clamp(0.95rem, 2.2vw, 1.7rem);
       --letter-spacing: 0.14em;
-      --panel-bg: rgba(0, 0, 0, 0.88);
+      --panel-bg: rgba(0, 0, 0, 0.90);
       --panel-border: #174117;
     }
 
@@ -30,7 +30,9 @@
       color: var(--clock-text);
       font-family: var(--font-main);
       overflow: hidden;
+      transition: filter 0.25s ease;
     }
+    body.night-dim { filter: brightness(0.38) saturate(0.85); }
 
     .wrap {
       min-height: 100dvh;
@@ -43,7 +45,7 @@
     }
 
     .clock-card {
-      width: min(1400px, 100%);
+      width: min(1450px, 100%);
       text-align: center;
       background: var(--clock-bg);
       border: 1px solid var(--clock-border);
@@ -51,6 +53,7 @@
       box-shadow: inset 0 2px 7px rgba(0, 0, 0, 0.7), 0 12px 30px rgba(0, 0, 0, 0.45);
       padding: clamp(16px, 3vw, 36px);
       user-select: none;
+      position: relative;
     }
 
     #clockLine {
@@ -93,6 +96,15 @@
       min-height: 1.2em;
     }
 
+    #alarmLine {
+      margin-top: clamp(6px, 1vw, 12px);
+      min-height: 1.4em;
+      font-size: calc(var(--meta-size) * 0.72);
+      color: #ffd36a;
+      letter-spacing: 0.02em;
+      opacity: 0.95;
+    }
+
     #customizeBtn {
       position: fixed;
       top: 12px;
@@ -112,7 +124,7 @@
       position: fixed;
       top: 0;
       right: 0;
-      width: min(430px, 95vw);
+      width: min(470px, 96vw);
       height: 100dvh;
       background: var(--panel-bg);
       border-left: 1px solid var(--panel-border);
@@ -129,7 +141,7 @@
     .row label { font-size: 0.9rem; }
     .row input[type="color"] { width: 48px; height: 34px; padding: 0; border: none; background: transparent; }
     .row input[type="range"] { width: 180px; max-width: 52vw; }
-    .row select, .row button {
+    .row input[type="time"], .row select, .row button {
       font-family: inherit;
       background: #0f2a0f;
       color: #d5ffd5;
@@ -140,12 +152,46 @@
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
     .hint { font-size: 0.8rem; opacity: 0.86; margin-bottom: 10px; }
     .title { margin: 0 0 8px 0; font-size: 1.05rem; }
+    .section {
+      margin: 12px 0;
+      padding: 10px;
+      border: 1px solid #245024;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.22);
+    }
+    .section h3 {
+      margin: 0 0 8px 0;
+      font-size: 0.92rem;
+      color: #aaf7c4;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .days {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .days label {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      font-size: 0.74rem;
+      border: 1px solid #2f7b2f;
+      border-radius: 7px;
+      padding: 4px 2px;
+      background: #0d210d;
+    }
+    .days input { width: 13px; height: 13px; }
 
     @media (max-width: 700px) {
       #clockLine { letter-spacing: 0.08em; }
       #customizeBtn { font-size: 0.84rem; padding: 7px 10px; }
       .row { grid-template-columns: 1fr; }
       .row input[type="range"] { width: 100%; }
+      .days label { font-size: 0.7rem; }
     }
   </style>
 </head>
@@ -154,41 +200,100 @@
 
   <aside id="panel" aria-label="Panel de personalizacion">
     <h2 class="title">Personalizacion</h2>
-    <div class="hint">Ajusta colores, tipografia, tamanos y sonido. Se guarda en este navegador.</div>
+    <div class="hint">Ajusta colores, tipografia, tamanos, modo nocturno y alarmas. Se guarda en este navegador.</div>
 
-    <div class="row"><label for="bgColor">Fondo general</label><input id="bgColor" type="color" value="#000000"></div>
-    <div class="row"><label for="clockBg">Fondo reloj</label><input id="clockBg" type="color" value="#0a100a"></div>
-    <div class="row"><label for="clockBorder">Borde reloj</label><input id="clockBorder" type="color" value="#143314"></div>
-    <div class="row"><label for="clockText">Color hora</label><input id="clockText" type="color" value="#00e676"></div>
-    <div class="row"><label for="dateColor">Color fecha</label><input id="dateColor" type="color" value="#87d4a5"></div>
-    <div class="row"><label for="weatherColor">Color clima</label><input id="weatherColor" type="color" value="#b7f3ce"></div>
+    <div class="section">
+      <h3>Apariencia</h3>
+      <div class="row"><label for="bgColor">Fondo general</label><input id="bgColor" type="color" value="#000000"></div>
+      <div class="row"><label for="clockBg">Fondo reloj</label><input id="clockBg" type="color" value="#0a100a"></div>
+      <div class="row"><label for="clockBorder">Borde reloj</label><input id="clockBorder" type="color" value="#143314"></div>
+      <div class="row"><label for="clockText">Color hora</label><input id="clockText" type="color" value="#00e676"></div>
+      <div class="row"><label for="dateColor">Color fecha</label><input id="dateColor" type="color" value="#87d4a5"></div>
+      <div class="row"><label for="weatherColor">Color clima</label><input id="weatherColor" type="color" value="#b7f3ce"></div>
 
-    <div class="row"><label for="fontFamily">Tipografia</label>
-      <select id="fontFamily">
-        <option value="Courier New, Lucida Console, monospace">LCD Clasico</option>
-        <option value="Consolas, Monaco, monospace">Consolas</option>
-        <option value="monospace">Monospace</option>
-      </select>
+      <div class="row"><label for="fontFamily">Tipografia</label>
+        <select id="fontFamily">
+          <option value="Courier New, Lucida Console, monospace">LCD Clasico</option>
+          <option value="Consolas, Monaco, monospace">Consolas</option>
+          <option value="monospace">Monospace</option>
+        </select>
+      </div>
+
+      <div class="row"><label for="timeSize">Tamano hora</label><input id="timeSize" type="range" min="3" max="18" step="0.1" value="13"></div>
+      <div class="row"><label for="metaSize">Tamano fecha/clima</label><input id="metaSize" type="range" min="0.8" max="3.2" step="0.05" value="1.7"></div>
+      <div class="row"><label for="spacing">Espaciado letras</label><input id="spacing" type="range" min="0.02" max="0.30" step="0.01" value="0.14"></div>
     </div>
 
-    <div class="row"><label for="timeSize">Tamano hora</label><input id="timeSize" type="range" min="3" max="18" step="0.1" value="13"></div>
-    <div class="row"><label for="metaSize">Tamano fecha/clima</label><input id="metaSize" type="range" min="0.8" max="3.2" step="0.05" value="1.7"></div>
-    <div class="row"><label for="spacing">Espaciado letras</label><input id="spacing" type="range" min="0.02" max="0.30" step="0.01" value="0.14"></div>
+    <div class="section">
+      <h3>Reloj y Sonido</h3>
+      <div class="row">
+        <label for="ampmToggle">Formato AM/PM</label>
+        <select id="ampmToggle">
+          <option value="1">Mostrar AM/PM</option>
+          <option value="0">Ocultar (24h)</option>
+        </select>
+      </div>
 
-    <div class="row">
-      <label for="ampmToggle">Formato AM/PM</label>
-      <select id="ampmToggle">
-        <option value="1">Mostrar AM/PM</option>
-        <option value="0">Ocultar (24h)</option>
-      </select>
+      <div class="row">
+        <label for="soundToggle">Sonido horario</label>
+        <select id="soundToggle">
+          <option value="1">Activado</option>
+          <option value="0">Silenciado</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="nightMode">Modo nocturno (22:00-06:00)</label>
+        <select id="nightMode">
+          <option value="0">Desactivado</option>
+          <option value="1">Activado</option>
+        </select>
+      </div>
     </div>
 
-    <div class="row">
-      <label for="soundToggle">Sonido horario</label>
-      <select id="soundToggle">
-        <option value="1">Activado</option>
-        <option value="0">Silenciado</option>
-      </select>
+    <div class="section">
+      <h3>Alarmas de Turno</h3>
+      <div class="hint">Cada alarma suena 1 minuto y se apaga sola. Se puede silenciar tocando cualquier parte de la pantalla.</div>
+
+      <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:4px;">
+        <div class="row">
+          <label for="alarm1Enabled">Alarma 1</label>
+          <select id="alarm1Enabled">
+            <option value="1">Activada</option>
+            <option value="0">Desactivada</option>
+          </select>
+        </div>
+        <div class="row"><label for="alarm1Time">Hora</label><input id="alarm1Time" type="time" value="07:00"></div>
+        <div class="days" id="alarm1DaysWrap">
+          <label><input type="checkbox" data-alarm="1" value="1">L</label>
+          <label><input type="checkbox" data-alarm="1" value="2">M</label>
+          <label><input type="checkbox" data-alarm="1" value="3">X</label>
+          <label><input type="checkbox" data-alarm="1" value="4">J</label>
+          <label><input type="checkbox" data-alarm="1" value="5">V</label>
+          <label><input type="checkbox" data-alarm="1" value="6">S</label>
+          <label><input type="checkbox" data-alarm="1" value="0">D</label>
+        </div>
+      </div>
+
+      <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:8px;">
+        <div class="row">
+          <label for="alarm2Enabled">Alarma 2</label>
+          <select id="alarm2Enabled">
+            <option value="1">Activada</option>
+            <option value="0">Desactivada</option>
+          </select>
+        </div>
+        <div class="row"><label for="alarm2Time">Hora</label><input id="alarm2Time" type="time" value="20:00"></div>
+        <div class="days" id="alarm2DaysWrap">
+          <label><input type="checkbox" data-alarm="2" value="1">L</label>
+          <label><input type="checkbox" data-alarm="2" value="2">M</label>
+          <label><input type="checkbox" data-alarm="2" value="3">X</label>
+          <label><input type="checkbox" data-alarm="2" value="4">J</label>
+          <label><input type="checkbox" data-alarm="2" value="5">V</label>
+          <label><input type="checkbox" data-alarm="2" value="6">S</label>
+          <label><input type="checkbox" data-alarm="2" value="0">D</label>
+        </div>
+      </div>
     </div>
 
     <div class="split">
@@ -204,11 +309,13 @@
       </div>
       <div id="dateLine">--</div>
       <div id="weatherLine">Clima La Habana: cargando...</div>
+      <div id="alarmLine"></div>
     </section>
   </main>
 
   <script>
-    const STORAGE_KEY = "clock_lcd_settings_v1";
+    const STORAGE_KEY = "clock_lcd_settings_v2";
+    const DEFAULT_DAYS = "1,2,3,4,5,6,0";
     const DEFAULTS = {
       bg: "#000000",
       clockBg: "#0a100a",
@@ -221,14 +328,27 @@
       metaSize: "1.7",
       spacing: "0.14",
       ampm: "1",
-      sound: "1"
+      sound: "1",
+      nightMode: "0",
+      alarm1Enabled: "1",
+      alarm1Time: "07:00",
+      alarm1Days: DEFAULT_DAYS,
+      alarm2Enabled: "1",
+      alarm2Time: "20:00",
+      alarm2Days: DEFAULT_DAYS
     };
 
     const $ = (s) => document.querySelector(s);
     const panel = $("#panel");
     const customizeBtn = $("#customizeBtn");
+    const alarmLine = $("#alarmLine");
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    let alarmInterval = null;
+    let alarmTimeout = null;
+    let alarmActiveId = "";
+    const lastAlarmMinuteKey = { "1": "", "2": "" };
+
     const Synth = {
       playTone: (freq, type, duration, vol = 0.1) => {
         try {
@@ -251,8 +371,28 @@
       },
       onHalf: () => {
         Synth.playTone(880, "sine", 0.45, 0.16);
+      },
+      alarmPulse: () => {
+        Synth.playTone(1319, "sine", 0.20, 0.22);
+        setTimeout(() => Synth.playTone(988, "square", 0.20, 0.20), 240);
+        setTimeout(() => Synth.playTone(1319, "sine", 0.22, 0.22), 500);
       }
     };
+
+    function getCheckedDays(alarmId) {
+      const vals = [];
+      document.querySelectorAll(`input[data-alarm="${alarmId}"]`).forEach((cb) => {
+        if (cb.checked) vals.push(cb.value);
+      });
+      return vals.join(",");
+    }
+
+    function setCheckedDays(alarmId, csv) {
+      const set = new Set(String(csv || "").split(",").filter(Boolean));
+      document.querySelectorAll(`input[data-alarm="${alarmId}"]`).forEach((cb) => {
+        cb.checked = set.has(cb.value);
+      });
+    }
 
     function saveSettings() {
       const s = {
@@ -267,7 +407,14 @@
         metaSize: $("#metaSize").value,
         spacing: $("#spacing").value,
         ampm: $("#ampmToggle").value,
-        sound: $("#soundToggle").value
+        sound: $("#soundToggle").value,
+        nightMode: $("#nightMode").value,
+        alarm1Enabled: $("#alarm1Enabled").value,
+        alarm1Time: $("#alarm1Time").value,
+        alarm1Days: getCheckedDays("1") || DEFAULT_DAYS,
+        alarm2Enabled: $("#alarm2Enabled").value,
+        alarm2Time: $("#alarm2Time").value,
+        alarm2Days: getCheckedDays("2") || DEFAULT_DAYS
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
       applySettings(s);
@@ -289,6 +436,13 @@
       $("#spacing").value = s.spacing;
       $("#ampmToggle").value = s.ampm;
       $("#soundToggle").value = s.sound;
+      $("#nightMode").value = s.nightMode;
+      $("#alarm1Enabled").value = s.alarm1Enabled;
+      $("#alarm1Time").value = s.alarm1Time;
+      $("#alarm2Enabled").value = s.alarm2Enabled;
+      $("#alarm2Time").value = s.alarm2Time;
+      setCheckedDays("1", s.alarm1Days || DEFAULT_DAYS);
+      setCheckedDays("2", s.alarm2Days || DEFAULT_DAYS);
       applySettings(s);
     }
 
@@ -329,25 +483,10 @@
 
     function weatherCodeText(code) {
       const map = {
-        0: "Despejado",
-        1: "Mayormente despejado",
-        2: "Parcialmente nublado",
-        3: "Nublado",
-        45: "Niebla",
-        48: "Niebla escarchada",
-        51: "Llovizna ligera",
-        53: "Llovizna moderada",
-        55: "Llovizna intensa",
-        61: "Lluvia ligera",
-        63: "Lluvia moderada",
-        65: "Lluvia fuerte",
-        71: "Nieve ligera",
-        73: "Nieve moderada",
-        75: "Nieve fuerte",
-        80: "Chubascos ligeros",
-        81: "Chubascos moderados",
-        82: "Chubascos fuertes",
-        95: "Tormenta"
+        0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
+        45: "Niebla", 48: "Niebla escarchada", 51: "Llovizna ligera", 53: "Llovizna moderada", 55: "Llovizna intensa",
+        61: "Lluvia ligera", 63: "Lluvia moderada", 65: "Lluvia fuerte", 71: "Nieve ligera", 73: "Nieve moderada", 75: "Nieve fuerte",
+        80: "Chubascos ligeros", 81: "Chubascos moderados", 82: "Chubascos fuertes", 95: "Tormenta"
       };
       return map[Number(code)] || "Condicion variable";
     }
@@ -373,6 +512,72 @@
       }
     }
 
+    function isNightModeActive(now) {
+      if ($("#nightMode").value !== "1") return false;
+      const h = now.getHours();
+      return (h >= 22 || h < 6);
+    }
+
+    function canPlaySound(now) {
+      if ($("#soundToggle").value !== "1") return false;
+      if (isNightModeActive(now)) return false;
+      return true;
+    }
+
+    function applyNightVisual(now) {
+      document.body.classList.toggle("night-dim", isNightModeActive(now));
+    }
+
+    function stopAlarm(reason = "manual") {
+      if (!alarmInterval && !alarmTimeout) return;
+      if (alarmInterval) clearInterval(alarmInterval);
+      if (alarmTimeout) clearTimeout(alarmTimeout);
+      alarmInterval = null;
+      alarmTimeout = null;
+      alarmActiveId = "";
+      alarmLine.textContent = reason === "auto" ? "Alarma detenida automaticamente." : "Alarma silenciada.";
+      setTimeout(() => { if (!alarmActiveId) alarmLine.textContent = ""; }, 1500);
+    }
+
+    function startAlarm(alarmId) {
+      if (alarmActiveId) stopAlarm("replace");
+      alarmActiveId = alarmId;
+      alarmLine.textContent = `Alarma de turno ${alarmId} activa. Toca la pantalla para silenciar.`;
+
+      if (!canPlaySound(new Date())) {
+        alarmLine.textContent = "Alarma detectada, pero sonido desactivado (modo nocturno o silencio).";
+        alarmTimeout = setTimeout(() => stopAlarm("auto"), 60000);
+        return;
+      }
+
+      Synth.alarmPulse();
+      alarmInterval = setInterval(() => {
+        if (!canPlaySound(new Date())) return;
+        Synth.alarmPulse();
+      }, 900);
+      alarmTimeout = setTimeout(() => stopAlarm("auto"), 60000);
+    }
+
+    function alarmMatch(alarmId, now) {
+      const enabled = $(`#alarm${alarmId}Enabled`).value === "1";
+      if (!enabled) return false;
+
+      const time = $(`#alarm${alarmId}Time`).value || "";
+      if (!/^\d{2}:\d{2}$/.test(time)) return false;
+
+      const currentHM = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      if (time !== currentHM) return false;
+
+      const daysCsv = getCheckedDays(String(alarmId)) || DEFAULT_DAYS;
+      const daySet = new Set(daysCsv.split(",").filter(Boolean));
+      if (!daySet.has(String(now.getDay()))) return false;
+
+      const key = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}-${String(now.getDate()).padStart(2,"0")}-${currentHM}`;
+      if (lastAlarmMinuteKey[String(alarmId)] === key) return false;
+      lastAlarmMinuteKey[String(alarmId)] = key;
+      return true;
+    }
+
     function startClock() {
       let lastBeepMinute = -1;
       const line = $("#clockLine");
@@ -383,6 +588,8 @@
 
       function tick() {
         const now = new Date();
+        applyNightVisual(now);
+
         const hours24 = now.getHours();
         const useAmpm = $("#ampmToggle").value === "1";
         const h = useAmpm ? (hours24 % 12 || 12) : hours24;
@@ -399,7 +606,11 @@
         const totalMin = hours24 * 60 + now.getMinutes();
         if (now.getSeconds() === 0 && totalMin !== lastBeepMinute) {
           lastBeepMinute = totalMin;
-          if ($("#soundToggle").value === "1") {
+
+          if (alarmMatch(1, now)) startAlarm("1");
+          if (alarmMatch(2, now)) startAlarm("2");
+
+          if (canPlaySound(now)) {
             if (now.getMinutes() === 0) {
               Synth.onHour();
             } else if (now.getMinutes() === 30) {
@@ -411,6 +622,17 @@
 
       tick();
       setInterval(tick, 1000);
+    }
+
+    function bindAlarmDismiss() {
+      const stopIfActive = () => {
+        if (alarmActiveId) stopAlarm("manual");
+      };
+      document.addEventListener("pointerdown", stopIfActive);
+      document.addEventListener("touchstart", stopIfActive, { passive: true });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" || e.key === "Enter" || e.key === " ") stopIfActive();
+      });
     }
 
     customizeBtn.addEventListener("click", () => {
@@ -429,6 +651,7 @@
 
     $("#resetBtn").addEventListener("click", () => {
       localStorage.removeItem(STORAGE_KEY);
+      stopAlarm("reset");
       loadSettings();
     });
 
@@ -441,6 +664,7 @@
     });
 
     loadSettings();
+    bindAlarmDismiss();
     startClock();
     loadHavanaWeather();
     setInterval(loadHavanaWeather, 30 * 60 * 1000);
