@@ -1,4 +1,7 @@
 node_modules/
 .wwebjs_auth/
 .wwebjs_cache/
+.wwebjs_auth.bak_*/
+.wwebjs_cache.bak_*/
+status.json
 .env
