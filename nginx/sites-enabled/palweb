@@ -1,0 +1,116 @@
+# BLOQUE 1: Redirigir HTTP (80) a HTTPS (443)
+server {
+    if ($host = www.palweb.net) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = palweb.mooo.com) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name palweb.mooo.com www.palweb.net; # O tu IP pública
+    return 301 https://$host$request_uri;
+
+
+
+
+}
+
+# BLOQUE 2: Servidor Seguro (443)
+server {
+    listen 443 ssl http2;
+    server_name palweb.mooo.com www.palweb.net; # O tu IP pública
+
+    root /var/www;
+    index index.php index.html index.htm;
+
+    # --- CERTIFICADOS SSL (Autofirmados) ---
+    ssl_certificate /etc/letsencrypt/live/palweb.mooo.com/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/palweb.mooo.com/privkey.pem; # managed by Certbot
+    
+    # --- PROTOCOLOS SEGUROS ---
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+
+    # Logs
+    access_log /var/log/nginx/palweb_access.log;
+    error_log /var/log/nginx/palweb_error.log;
+
+    # ====== Legacy API (marinero) ======
+    location /palweb/api/ {
+        try_files $uri $uri/ /palweb/api/index.php?$args;
+    }
+
+    # ====== Vue SPA + Laravel API ======
+
+    # PWA Service Worker (no cache for instant updates)
+    location = /sw.js {
+        root /var/www/palweb-api/public;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Service-Worker-Allowed "/";
+    }
+
+    # Vite build assets (static, cached)
+    location ^~ /build/ {
+        root /var/www/palweb-api/public;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        access_log off;
+    }
+
+    # Laravel API endpoints
+    location ^~ /api/ {
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/palweb-api/public/index.php;
+        include fastcgi_params;
+    }
+
+    # Sanctum CSRF
+    location ^~ /sanctum/ {
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/palweb-api/public/index.php;
+        include fastcgi_params;
+    }
+
+    # Vue SPA routes (login, pos, dashboard, admin, tienda)
+    location ~ ^/(login|pos|dashboard|admin|tienda)(/.*)?$ {
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME /var/www/palweb-api/public/index.php;
+        include fastcgi_params;
+    }
+
+    # ====== Seguridad: bloquear archivos sensibles ======
+    location ~ \.(cfg|env|sql|log|bak|save)$ {
+        deny all;
+        return 404;
+    }
+
+    # ====== Autenticación con rate limiting ======
+    # Primero, para que coincida antes del catch-all ~ \.php$
+    location ~ /marinero/(login|pin_auth)\.php$ {
+        limit_req zone=auth_login burst=5 nodelay;
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    # ====== Legacy PHP ======
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    # Seguridad
+    location ~ /\. {
+        deny all;
+    }
+
+
+
+}

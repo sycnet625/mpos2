@@ -3,7 +3,7 @@
 // Prioridad: AVIF > WebP > JPEG original.
 // Requiere haber ejecutado tools_image_converter.php previamente.
 
-$code = $_GET['code'] ?? '';
+$code = $_GET['code'] ?? ($_GET['id'] ?? '');
 $thumb = isset($_GET['thumb']);
 
 if (empty($code)) {

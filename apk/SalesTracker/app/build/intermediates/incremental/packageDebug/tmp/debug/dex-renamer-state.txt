@@ -1,0 +1,16 @@
+#Sun Mar 08 21:29:35 CET 2026
+path.4=classes3.dex
+path.3=classes2.dex
+path.2=2/classes.dex
+path.1=0/classes.dex
+path.0=classes.dex
+base.4=/var/www/apk/SalesTracker/app/build/intermediates/dex/debug/mergeExtDexDebug/classes3.dex
+base.3=/var/www/apk/SalesTracker/app/build/intermediates/dex/debug/mergeExtDexDebug/classes2.dex
+base.2=/var/www/apk/SalesTracker/app/build/intermediates/dex/debug/mergeProjectDexDebug/2/classes.dex
+base.1=/var/www/apk/SalesTracker/app/build/intermediates/dex/debug/mergeProjectDexDebug/0/classes.dex
+base.0=/var/www/apk/SalesTracker/app/build/intermediates/dex/debug/mergeExtDexDebug/classes.dex
+renamed.3=classes4.dex
+renamed.2=classes3.dex
+renamed.1=classes2.dex
+renamed.0=classes.dex
+renamed.4=classes5.dex

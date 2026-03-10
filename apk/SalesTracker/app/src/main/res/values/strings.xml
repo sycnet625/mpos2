@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Water Controler</string>
+    <string name="permissions_needed">Esta app requiere permisos para leer llamadas y SMS.</string>
+    <string name="enable_notification_access">Activa acceso a notificaciones para capturar texto de WhatsApp.</string>
+</resources>

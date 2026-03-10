@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:ns1="http://schemas.android.com/tools">
+    <color name="black">#111111</color>
+    <color name="blue_500">#1565C0</color>
+    <color name="blue_700">#0D47A1</color>
+    <color name="white">#FFFFFF</color>
+    <string name="app_name">Water Controler</string>
+    <string name="enable_notification_access">Activa acceso a notificaciones para capturar texto de WhatsApp.</string>
+    <string name="permissions_needed">Esta app requiere permisos para leer llamadas y SMS.</string>
+    <style name="Theme.SalesTracker" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/blue_500</item>
+        <item name="colorPrimaryVariant">@color/blue_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="android:statusBarColor" ns1:targetApi="l">@color/blue_700</item>
+    </style>
+</resources>

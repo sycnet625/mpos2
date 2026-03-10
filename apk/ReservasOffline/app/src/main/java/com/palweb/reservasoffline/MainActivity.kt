@@ -40,6 +40,8 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -72,6 +74,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -132,6 +135,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     var showHelp by remember { mutableStateOf(false) }
     var resolveConflictUuid by remember { mutableStateOf<String?>(null) }
     var showStatusDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val mainScroll = rememberScrollState()
 
     Scaffold(
         topBar = {
@@ -185,7 +189,11 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 .background(MaterialTheme.colorScheme.background)
                 .padding(12.dp)
         ) {
-            Column {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(mainScroll)
+            ) {
                 AnimatedVisibility(
                     visible = true,
                     enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
@@ -339,8 +347,8 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                     } else if (currentTab == "SYNC") {
                         SyncHistoryScreen(vm = vm)
                     } else {
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(reservations, key = { it.localUuid }) { r ->
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            reservations.forEach { r ->
                                 ReservationCard(
                                     reservation = r,
                                     onEdit = {
@@ -356,6 +364,69 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                         }
                     }
                 }
+                Spacer(Modifier.height(92.dp))
+            }
+
+            AnimatedVisibility(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 4.dp),
+                visible = mainScroll.value > 0,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xCC0F172A))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.KeyboardArrowUp, contentDescription = null, tint = Color.White)
+                        Text("Mas arriba", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 80.dp),
+                visible = mainScroll.maxValue > mainScroll.value,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xCC0F172A))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Mas abajo", color = Color.White, style = MaterialTheme.typography.labelSmall)
+                        Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = Color.White)
+                    }
+                }
+            }
+
+            AnimatedVisibility(
+                modifier = Modifier.align(Alignment.BottomCenter),
+                visible = mainScroll.maxValue > mainScroll.value,
+                enter = fadeIn(),
+                exit = fadeOut(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(36.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(Color.Transparent, Color(0x220F172A))
+                            )
+                        )
+                )
             }
 
             AnimatedVisibility(
@@ -434,8 +505,8 @@ private fun SyncHistoryScreen(vm: MainViewModel) {
                 Text("Exportar CSV")
             }
         }
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(history, key = { it.id }) { h ->
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            history.forEach { h ->
                 Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                     Column(Modifier.fillMaxWidth().padding(10.dp)) {
                         Text(
@@ -733,36 +804,34 @@ private fun ConflictFieldToggle(label: String, useServer: Boolean, onChange: (Bo
 @Composable
 private fun CalendarLikeView(reservations: List<ReservationEntity>, onOpen: (String) -> Unit) {
     val byDay = reservations.groupBy { epochToText(it.fechaReservaEpoch).substring(0, 10) }
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         byDay.toSortedMap().forEach { (date, list) ->
-            item(date) {
-                Card(shape = RoundedCornerShape(16.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
-                        Text(date, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(6.dp))
-                        list.forEach { r ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onOpen(r.localUuid) }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(8.dp)
-                                        .background(
-                                            when (r.estadoReserva) {
-                                                "ENTREGADO" -> Color(0xFF22C55E)
-                                                "CANCELADO" -> Color(0xFF94A3B8)
-                                                else -> if (r.fechaReservaEpoch < System.currentTimeMillis()) Color(0xFFEF4444) else Color(0xFF3B82F6)
-                                            },
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text("${r.clientName} - $${"%.2f".format(r.total)} (${r.estadoReserva})")
-                            }
+            Card(shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    Text(date, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.height(6.dp))
+                    list.forEach { r ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onOpen(r.localUuid) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .background(
+                                        when (r.estadoReserva) {
+                                            "ENTREGADO" -> Color(0xFF22C55E)
+                                            "CANCELADO" -> Color(0xFF94A3B8)
+                                            else -> if (r.fechaReservaEpoch < System.currentTimeMillis()) Color(0xFFEF4444) else Color(0xFF3B82F6)
+                                        },
+                                        RoundedCornerShape(10.dp)
+                                    )
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("${r.clientName} - $${"%.2f".format(r.total)} (${r.estadoReserva})")
                         }
                     }
                 }

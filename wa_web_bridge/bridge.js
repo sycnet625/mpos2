@@ -127,31 +127,69 @@ function localDateInfo(date = new Date()) {
   };
 }
 
+function normalizeProductImageUrl(rawUrl, productId = '') {
+  let mediaUrl = String(rawUrl || '').trim();
+  if (mediaUrl === '') return '';
+  mediaUrl = mediaUrl.replace('image.php?id=', 'image.php?code=');
+  if (/image\.php(?:\?|$)/i.test(mediaUrl) && !/[?&]code=/i.test(mediaUrl) && productId) {
+    const sep = mediaUrl.includes('?') ? '&' : '?';
+    mediaUrl = `${mediaUrl}${sep}code=${encodeURIComponent(String(productId))}`;
+  }
+  if (!/^https?:\/\//i.test(mediaUrl) && API_ORIGIN) {
+    mediaUrl = mediaUrl.startsWith('/') ? `${API_ORIGIN}${mediaUrl}` : `${API_ORIGIN}/${mediaUrl}`;
+  }
+  return mediaUrl;
+}
+
 async function sendProductCards(targetId, text, products) {
+  let sentCount = 0;
   const intro = String(text || '').trim();
-  if (intro) await client.sendMessage(targetId, intro);
+  if (intro) {
+    await client.sendMessage(targetId, intro);
+    sentCount += 1;
+  }
 
   for (const p of (products || [])) {
     const name = String(p?.name || p?.id || 'Producto');
+    const sku = String(p?.id || '').trim();
     const price = Number(p?.price || 0);
     const caption = `${name}\nPrecio: $${price.toFixed(2)}`;
     const imageUrl = String(p?.image || '').trim();
     if (imageUrl) {
       try {
-        let mediaUrl = imageUrl;
-        if (!/^https?:\/\//i.test(mediaUrl) && API_ORIGIN) {
-          mediaUrl = mediaUrl.startsWith('/') ? `${API_ORIGIN}${mediaUrl}` : `${API_ORIGIN}/${mediaUrl}`;
-        }
-        const media = await MessageMedia.fromUrl(mediaUrl, { unsafeMime: true });
+        const mediaUrl = normalizeProductImageUrl(imageUrl, sku);
+        const res = await fetch(mediaUrl, {
+          method: 'GET',
+          redirect: 'follow',
+          headers: { 'User-Agent': 'Mozilla/5.0 (PalWebBot/1.0)' }
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const contentType = String(res.headers.get('content-type') || '').split(';')[0].trim();
+        if (!contentType.startsWith('image/')) throw new Error(`MIME inválido: ${contentType}`);
+        const bytes = await res.arrayBuffer();
+        const b64 = Buffer.from(bytes).toString('base64');
+        if (!b64) throw new Error('imagen vacía');
+        const fileName = `${(sku || 'producto').replace(/[^a-zA-Z0-9._-]/g, '_')}.jpg`;
+        const media = new MessageMedia(contentType, b64, fileName);
         await client.sendMessage(targetId, media, { caption });
+        sentCount += 1;
         continue;
-      } catch (_) {
-        await client.sendMessage(targetId, `${caption}\n${imageUrl}`);
+      } catch (err) {
+        const fallbackUrl = normalizeProductImageUrl(imageUrl, sku);
+        if (fallbackUrl) {
+          await client.sendMessage(targetId, `${caption}\n${fallbackUrl}`);
+          sentCount += 1;
+        } else {
+          await client.sendMessage(targetId, caption);
+          sentCount += 1;
+        }
         continue;
       }
     }
     await client.sendMessage(targetId, caption);
+    sentCount += 1;
   }
+  return sentCount;
 }
 
 async function processPromoQueueTick() {
@@ -211,7 +249,10 @@ async function processPromoQueueTick() {
 
     const target = targets[idx] || {};
     const targetId = String(target.id || '').trim();
+    const targetName = String(target.name || targetId).trim();
     if (!targetId) {
+      job.log = Array.isArray(job.log) ? job.log : [];
+      job.log.push({ at: new Date().toISOString(), target_id: '', target_name: '', ok: false, messages_sent: 0, error: 'target_id vacío' });
       job.current_index = idx + 1;
       job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
       changed = true;
@@ -219,9 +260,16 @@ async function processPromoQueueTick() {
     }
 
     try {
-      await sendProductCards(targetId, job.text || '', products);
+      const sentCount = await sendProductCards(targetId, job.text || '', products);
       job.log = Array.isArray(job.log) ? job.log : [];
-      job.log.push({ at: new Date().toISOString(), target_id: targetId, ok: true });
+      job.log.push({
+        at: new Date().toISOString(),
+        target_id: targetId,
+        target_name: targetName,
+        ok: true,
+        messages_sent: sentCount,
+        error: ''
+      });
       job.current_index = idx + 1;
       if (job.current_index >= targets.length) {
         job.status = 'done';
@@ -233,7 +281,14 @@ async function processPromoQueueTick() {
       changed = true;
     } catch (err) {
       job.log = Array.isArray(job.log) ? job.log : [];
-      job.log.push({ at: new Date().toISOString(), target_id: targetId, ok: false, error: String(err.message || err) });
+      job.log.push({
+        at: new Date().toISOString(),
+        target_id: targetId,
+        target_name: targetName,
+        ok: false,
+        messages_sent: 0,
+        error: String(err.message || err)
+      });
       job.status = 'error';
       job.error = String(err.message || err);
       changed = true;
@@ -262,6 +317,15 @@ async function processIncoming(message) {
 
   let text = String(message.body || '').trim();
   const msgType = String(message.type || 'text');
+  const ignoredTypes = new Set([
+    'e2e_notification',
+    'notification_template',
+    'protocol',
+    'ciphertext',
+    'gp2',
+    'revoked'
+  ]);
+  if (ignoredTypes.has(msgType)) return;
   if (!text) {
     if (msgType === 'image') text = '[imagen]';
     else if (msgType === 'video') text = '[video]';
@@ -270,11 +334,19 @@ async function processIncoming(message) {
     else if (msgType === 'sticker') text = '[sticker]';
     else text = `[${msgType}]`;
   }
+  if (/^\[(e2e_notification|notification_template|protocol|ciphertext|gp2|revoked)\]$/i.test(text)) return;
 
   const wa_user_id = normalizeWaUserId(message.from);
   if (!wa_user_id) return;
 
-  const wa_name = message._data?.notifyName || message._data?.pushname || message.author || 'Cliente';
+  let wa_name = String(message._data?.notifyName || message._data?.pushname || '').trim();
+  if (!wa_name || wa_name.toLowerCase() === 'unknown') {
+    try {
+      const contact = await message.getContact();
+      wa_name = String(contact?.pushname || contact?.name || contact?.shortName || '').trim();
+    } catch (_) {}
+  }
+  if (!wa_name) wa_name = 'Cliente';
   setBridgeState('message_in', { last_from: String(message.from || ''), last_text_preview: text.slice(0, 80) });
   console.log(`[bridge] inbound from=${String(message.from || '')} type=${msgType} text="${text.slice(0, 80)}"`);
 
@@ -368,7 +440,7 @@ client.on('message', async (message) => {
   try {
     if (message.fromMe) return;
     const from = String(message.from || '');
-    if (!(from.endsWith('@c.us') || from.endsWith('@lid') || from.endsWith('@g.us'))) return;
+    if (!(from.endsWith('@c.us') || from.endsWith('@lid'))) return;
     await processIncoming(message);
   } catch (err) {
     console.error('[bridge] Error procesando mensaje:', err);

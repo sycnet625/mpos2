@@ -1,0 +1,8 @@
+R_DEF: Internal format may change without notice
+local
+color blue_950
+color indigo_500
+color slate_50
+string app_name
+style Theme.ReservasOffline
+xml file_paths

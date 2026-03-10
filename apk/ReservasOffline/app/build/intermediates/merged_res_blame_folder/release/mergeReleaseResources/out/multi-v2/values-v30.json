@@ -1,0 +1,19 @@
+{
+    "logs": [
+        {
+            "outputFile": "com.palweb.reservasoffline.app-mergeReleaseResources-55:/values-v30/values-v30.xml",
+            "map": [
+                {
+                    "source": "/tmp/.gradle/caches/transforms-4/bf5d19cbfb435439f424c9fa525cbc97/transformed/material3-release/res/values-v30/values-v30.xml",
+                    "from": {
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "55",
+                        "endColumns": "72",
+                        "endOffsets": "123"
+                    }
+                }
+            ]
+        }
+    ]
+}

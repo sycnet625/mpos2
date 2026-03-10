@@ -1,0 +1,6 @@
+[
+    {
+        "merged": "com.palweb.reservasoffline.app-release-57:/xml_file_paths.xml.flat",
+        "source": "com.palweb.reservasoffline.app-main-58:/xml/file_paths.xml"
+    }
+]

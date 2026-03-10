@@ -534,7 +534,8 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
-    'promo_chats','promo_products','promo_create','promo_list','promo_templates','promo_template_save','promo_template_delete',
+    'promo_chats','promo_products','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
+    'promo_templates','promo_template_save','promo_template_delete',
     'bridge_restart','bridge_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();
@@ -591,7 +592,10 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='stats') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_messages') {
-    $rows = $pdo->query("SELECT wa_user_id,direction,msg_type,message_text,created_at FROM pos_bot_messages ORDER BY id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $pdo->query("SELECT m.wa_user_id,m.direction,m.msg_type,m.message_text,m.created_at,COALESCE(s.wa_name,'') AS wa_name
+        FROM pos_bot_messages m
+        LEFT JOIN pos_bot_sessions s ON s.wa_user_id = m.wa_user_id
+        ORDER BY m.id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['status'=>'success','rows'=>$rows]); exit;
 }
 
@@ -740,7 +744,7 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
     $base = bot_public_base_url();
     foreach ($rows as $r) {
         $sku = (string)$r['codigo'];
-        $img = $base . "/image.php?id=" . rawurlencode($sku);
+        $img = $base . "/image.php?code=" . rawurlencode($sku);
         $out[] = [
             'id' => $sku,
             'name' => (string)$r['nombre'],
@@ -829,6 +833,140 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
     echo json_encode(['status' => 'success', 'rows' => $jobs]); exit;
 }
 
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_detail') {
+    $jobId = substr(trim((string)($_GET['id'] ?? '')), 0, 120);
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    foreach ($jobs as $job) {
+        if ((string)($job['id'] ?? '') !== $jobId) continue;
+        echo json_encode(['status' => 'success', 'row' => $job]); exit;
+    }
+    echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $found = false;
+    $now = time();
+    foreach ($jobs as &$job) {
+        if ((string)($job['id'] ?? '') !== $jobId) continue;
+        $found = true;
+        $wasDone = (($job['status'] ?? '') === 'done');
+        $reachedEnd = ((int)($job['current_index'] ?? 0) >= count((array)($job['targets'] ?? [])));
+        $job['status'] = 'queued';
+        $job['next_run_at'] = $now;
+        $job['forced_at'] = date('c', $now);
+        $job['last_schedule_key'] = '';
+        if ($wasDone || $reachedEnd) {
+            $job['current_index'] = 0;
+        }
+        if (!is_array($job['log'] ?? null)) $job['log'] = [];
+        $job['log'][] = [
+            'at' => date('c', $now),
+            'type' => 'forced_start',
+            'ok' => true,
+            'target_id' => '',
+            'target_name' => '',
+            'messages_sent' => 0,
+            'error' => ''
+        ];
+        break;
+    }
+    unset($job);
+    if (!$found) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
+    if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => $jobs])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo forzar la campaña']); exit;
+    }
+    echo json_encode(['status'=>'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_update') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $found = false;
+
+    foreach ($jobs as &$job) {
+        if ((string)($job['id'] ?? '') !== $jobId) continue;
+        $found = true;
+
+        if (array_key_exists('name', $in)) {
+            $job['name'] = substr(trim((string)$in['name']), 0, 120);
+        }
+        if (array_key_exists('campaign_group', $in)) {
+            $job['campaign_group'] = substr(trim((string)$in['campaign_group']), 0, 80);
+            if ($job['campaign_group'] === '') $job['campaign_group'] = 'General';
+        }
+        if (array_key_exists('schedule_enabled', $in)) {
+            $job['schedule_enabled'] = !empty($in['schedule_enabled']) ? 1 : 0;
+        }
+        if (array_key_exists('schedule_time', $in)) {
+            $tm = substr(trim((string)$in['schedule_time']), 0, 5);
+            if ($tm !== '' && !preg_match('/^\d{2}:\d{2}$/', $tm)) {
+                echo json_encode(['status'=>'error','msg'=>'Hora inválida (HH:MM)']); exit;
+            }
+            $job['schedule_time'] = $tm;
+        }
+        if (array_key_exists('schedule_days', $in)) {
+            $daysIn = is_array($in['schedule_days']) ? $in['schedule_days'] : [];
+            $days = [];
+            foreach ($daysIn as $d) {
+                $n = (int)$d;
+                if ($n >= 0 && $n <= 6) $days[$n] = $n;
+            }
+            $days = array_values($days);
+            sort($days);
+            $job['schedule_days'] = $days;
+        }
+        if (array_key_exists('status', $in)) {
+            $status = strtolower(trim((string)$in['status']));
+            if (in_array($status, ['scheduled','queued','running','paused','done','error'], true)) {
+                $job['status'] = $status;
+            }
+        }
+
+        if (!array_key_exists('next_run_at', $job) || !is_numeric($job['next_run_at'])) {
+            $job['next_run_at'] = time() + 20;
+        }
+        if ((int)($job['schedule_enabled'] ?? 0) === 1 && ($job['status'] ?? '') === 'done') {
+            $job['status'] = 'scheduled';
+            $job['current_index'] = 0;
+            $job['next_run_at'] = time() + 20;
+        }
+        break;
+    }
+    unset($job);
+
+    if (!$found) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
+    if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => $jobs])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo actualizar campaña']); exit;
+    }
+    echo json_encode(['status'=>'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_delete') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $before = count($jobs);
+    $jobs = array_values(array_filter($jobs, static fn($j) => (string)($j['id'] ?? '') !== $jobId));
+    if ($before === count($jobs)) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
+    if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => $jobs])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo eliminar campaña']); exit;
+    }
+    echo json_encode(['status'=>'success']); exit;
+}
+
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $text = trim((string)($in['text'] ?? ''));
@@ -872,7 +1010,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
             'id' => $pid,
             'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
             'price' => (float)($p['price'] ?? 0),
-            'image' => trim((string)($p['image'] ?? ('image.php?id=' . rawurlencode($pid))))
+            'image' => trim((string)($p['image'] ?? ('image.php?code=' . rawurlencode($pid))))
         ];
     }
 
@@ -960,6 +1098,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='web_incoming') {
     }
     $name = trim((string)($in['wa_name'] ?? 'Cliente'));
     $text = trim((string)($in['text'] ?? ''));
+    $ignoredPayloads = ['[e2e_notification]','[notification_template]','[protocol]','[ciphertext]','[gp2]','[revoked]'];
+    if (in_array(strtolower($text), array_map('strtolower', $ignoredPayloads), true)) {
+        echo json_encode(['status'=>'ok','msg'=>'technical payload ignored','responses'=>[]]); exit;
+    }
     if ($text === '') {
         echo json_encode(['status'=>'ok','msg'=>'empty text ignored','responses'=>[]]); exit;
     }

@@ -29,6 +29,15 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Mensajes hoy</div><div id="s2" class="stat">0</div></div></div>
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Pedidos hoy</div><div id="s3" class="stat">0</div></div></div>
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Ventas hoy</div><div id="s4" class="stat">$0.00</div></div></div>
+    <div class="col-12">
+      <div class="card p-3">
+        <div class="d-flex align-items-center gap-2">
+          <span class="small text-muted">Estado WhatsApp Web</span>
+          <span id="waLedDot" style="width:12px;height:12px;border-radius:50%;display:inline-block;background:#64748b;box-shadow:0 0 0 4px rgba(100,116,139,.2)"></span>
+          <span id="waLedText" class="fw-semibold" style="color:#334155">Sin datos</span>
+        </div>
+      </div>
+    </div>
   </div>
 
   <ul class="nav nav-tabs mb-3" id="botTabs" role="tablist">
@@ -37,6 +46,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tab-promo-btn" data-bs-toggle="tab" data-bs-target="#tab-promo" type="button" role="tab">Promoción</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-programacion-btn" data-bs-toggle="tab" data-bs-target="#tab-programacion" type="button" role="tab">Programación</button>
     </li>
   </ul>
 
@@ -69,8 +81,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
             </div>
             <div class="col-md-6"><label class="form-label">Nombre negocio</label><input id="business_name" class="form-control" maxlength="120"></div>
             <div id="row_verify_token" class="col-md-6"><label class="form-label">Verify token</label><input id="verify_token" class="form-control" maxlength="120"></div>
-            <div id="row_phone_id" class="col-md-6"><label class="form-label">Phone Number ID</label><input id="wa_phone_number_id" class="form-control"></div>
-            <div id="row_access_token" class="col-md-6"><label class="form-label">Access Token</label><input id="wa_access_token" type="password" class="form-control" placeholder="vacío = conservar"></div>
+            <div id="row_phone_id" class="col-md-6"><label class="form-label">Phone Number ID</label><input id="wa_phone_number_id" autocomplete="username" class="form-control"></div>
+            <div id="row_access_token" class="col-md-6"><label class="form-label">Access Token</label><input id="wa_access_token" type="password" autocomplete="current-password" class="form-control" placeholder="vacío = conservar"></div>
             <div class="col-12"><label class="form-label">Mensaje bienvenida</label><textarea id="welcome_message" rows="2" class="form-control"></textarea></div>
             <div class="col-12"><label class="form-label">Intro menú</label><textarea id="menu_intro" rows="3" class="form-control"></textarea></div>
             <div class="col-12"><label class="form-label">No match</label><textarea id="no_match_message" rows="2" class="form-control"></textarea></div>
@@ -91,7 +103,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     </div>
 
     <div class="col-lg-6">
-      <div class="card mb-3"><div class="card-header bg-white fw-bold">Mensajes</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>WA</th><th>Dir</th><th>Texto</th></tr></thead><tbody id="tm"><tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
+      <div class="card mb-3"><div class="card-header bg-white fw-bold">Mensajes</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Teléfono/WA</th><th>Nombre</th><th>Dir</th><th>Texto</th></tr></thead><tbody id="tm"><tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
       <div class="card"><div class="card-header bg-white fw-bold">Pedidos BOT</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Pedido</th><th>Cliente</th><th>Total</th></tr></thead><tbody id="to"><tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
     </div>
   </div>
@@ -216,6 +228,38 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
       </div>
     </div>
   </div>
+
+  <div class="tab-pane fade" id="tab-programacion" role="tabpanel">
+    <div class="row g-3">
+      <div class="col-lg-5">
+        <div class="card">
+          <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+            <span>Plantillas guardadas</span>
+            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoTemplates()"><i class="fas fa-sync"></i></button>
+          </div>
+          <div class="card-body p-0">
+            <div class="table-responsive" style="max-height:380px">
+              <table class="table table-sm mb-0">
+                <thead class="table-light"><tr><th>Plantilla</th><th>Productos</th><th>Actualizada</th></tr></thead>
+                <tbody id="promoTemplateRows"><tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-7">
+        <div class="card">
+          <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+            <span>Campañas programadas por grupo</span>
+            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoList()"><i class="fas fa-sync"></i></button>
+          </div>
+          <div class="card-body" id="promoProgramGroups">
+            <div class="text-muted small">Sin campañas programadas.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
   </div>
 </div>
 
@@ -252,17 +296,51 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
   </div>
 </div>
 
+<div class="modal fade" id="campaignLogsModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title mb-0"><i class="fas fa-list-check"></i> Logs de campaña</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="campaignLogsSummary" class="small mb-2 text-muted">Cargando...</div>
+        <div class="table-responsive">
+          <table class="table table-sm mb-0">
+            <thead class="table-light">
+              <tr><th>Fecha</th><th>Destino</th><th>Mensajes</th><th>Resultado</th><th>Error</th></tr>
+            </thead>
+            <tbody id="campaignLogsRows"><tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="refreshCampaignLogs()"><i class="fas fa-sync"></i> Refrescar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API='pos_bot_api.php';
 let lastBridgeState=null;
 let promoChats=[];
 let promoProducts=[];
 let promoTemplates=[];
+let promoCampaigns=[];
+let activeCampaignLogId='';
 let promoSearchTimer=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const a=(t,m)=>{const e=document.getElementById('alertBox');e.innerHTML=`<div class="alert alert-${t} py-2">${esc(m)}</div>`;setTimeout(()=>e.innerHTML='',3500)};
-async function g(u){const r=await fetch(u,{credentials:'same-origin'});return r.json()}
-async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return r.json()}
+async function parseApiResponse(r){
+  const txt=await r.text();
+  try{return JSON.parse(txt);}catch(_){
+    if((txt||'').includes('<!DOCTYPE html') || (txt||'').includes('<html')) return {status:'error',msg:'Sesión expirada o respuesta inválida del servidor'};
+    return {status:'error',msg:'Respuesta no JSON del servidor'};
+  }
+}
+async function g(u){const r=await fetch(u,{credentials:'same-origin'});return parseApiResponse(r)}
+async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return parseApiResponse(r)}
 
 function applyModeUI(){
   const isMeta = wa_mode.value === 'meta_api';
@@ -276,26 +354,37 @@ function applyModeUI(){
 async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();}
 async function saveCfg(ev){ev.preventDefault();const d=await p(API+'?action=save_config',{enabled:enabled.checked?1:0,wa_mode:wa_mode.value,verify_token:verify_token.value.trim(),wa_phone_number_id:wa_phone_number_id.value.trim(),wa_access_token:wa_access_token.value.trim(),business_name:business_name.value.trim(),welcome_message:welcome_message.value.trim(),menu_intro:menu_intro.value.trim(),no_match_message:no_match_message.value.trim()});if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
 async function loadStats(){const d=await g(API+'?action=stats');if(d.status!=='success')return;s1.textContent=d.stats.sessions||0;s2.textContent=d.stats.msgs_today||0;s3.textContent=d.stats.orders_today||0;s4.textContent='$'+Number(d.stats.sales_today||0).toFixed(2)}
-async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
+async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td class="small">${esc(r.wa_name||'-')}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
 async function loadBridgeStatus(){
   const s = document.getElementById('waWebStatus');
+  const ledDot = document.getElementById('waLedDot');
+  const ledText = document.getElementById('waLedText');
   const d = await g(API+'?action=bridge_status');
-  if(d.status!=='success' || !d.bridge){s.textContent='Estado: sin datos del bridge';return;}
+  if(d.status!=='success' || !d.bridge){s.textContent='Estado: sin datos del bridge';if(ledDot){ledDot.style.background='#64748b';ledDot.style.boxShadow='0 0 0 4px rgba(100,116,139,.2)';}if(ledText){ledText.textContent='Sin datos';ledText.style.color='#334155';}return;}
   lastBridgeState=d.bridge;
   const st = String(d.bridge.state||'unknown');
   const map = {
-    starting: 'iniciando servicio...',
-    qr_required: 'esperando escaneo QR en servicio.',
-    authenticated: 'sesion autenticada, cargando...',
-    ready: 'conectado y listo para vender.',
-    message_in: 'conectado, recibiendo mensajes.',
-    disconnected: 'desconectado. revisa servicio.',
-    auth_failure: 'fallo de autenticacion. vuelve a vincular.',
-    stopped: 'servicio detenido.',
-    unknown: 'sin estado disponible.'
+    starting: {txt:'iniciando servicio...', color:'#64748b'},
+    qr_required: {txt:'esperando escaneo QR en servicio.', color:'#dc2626'},
+    authenticated: {txt:'sesión autenticada, cargando...', color:'#f59e0b'},
+    ready: {txt:'conectado y listo para vender.', color:'#16a34a'},
+    message_in: {txt:'conectado, recibiendo mensajes.', color:'#16a34a'},
+    disconnected: {txt:'desconectado. revisa servicio.', color:'#7c3aed'},
+    auth_failure: {txt:'fallo de autenticación. vuelve a vincular.', color:'#7c3aed'},
+    stopped: {txt:'servicio detenido.', color:'#334155'},
+    unknown: {txt:'sin estado disponible.', color:'#8b5cf6'}
   };
-  s.textContent = 'Estado real: ' + (map[st] || st);
+  const cfg = map[st] || {txt:st,color:'#8b5cf6'};
+  s.textContent = 'Estado real: ' + cfg.txt;
+  if(ledDot){
+    ledDot.style.background = cfg.color;
+    ledDot.style.boxShadow = `0 0 0 4px ${cfg.color}33`;
+  }
+  if(ledText){
+    ledText.textContent = cfg.txt;
+    ledText.style.color = cfg.color;
+  }
 }
 async function showBridgeQr(){
   if(!lastBridgeState){
@@ -370,6 +459,7 @@ async function loadPromoTemplates(){
   if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar plantillas');return;}
   promoTemplates=Array.isArray(d.rows)?d.rows:[];
   renderPromoTemplates();
+  renderProgrammingTab();
 }
 async function savePromoTemplate(){
   const name=(promoTemplateName.value||'').trim();
@@ -413,6 +503,11 @@ function daysToText(days){
   const arr=(Array.isArray(days)?days:[]).map(x=>parseInt(x,10)).filter(x=>map[x]!==undefined);
   return arr.length?arr.map(x=>map[x]).join(','):'-';
 }
+function targetsToText(targets){
+  const arr=Array.isArray(targets)?targets:[];
+  if(!arr.length) return '-';
+  return arr.map(t=>String(t.name||t.id||'')).filter(Boolean).join(' | ');
+}
 function selectAllPromoChats(v){
   document.querySelectorAll('.promo-chat').forEach(x=>x.checked=!!v);
 }
@@ -446,47 +541,181 @@ async function searchPromoProducts(q){
   </button>`).join('');
 }
 async function createPromoCampaign(){
-  const text=(promoText.value||'').trim();
-  const campaignName=(promoCampaignName.value||'').trim();
-  const campaignGroup=(promoCampaignGroup.value||'').trim()||'General';
-  const scheduleTime=(promoScheduleTime.value||'').trim();
-  const scheduleDays=selectedPromoDays();
-  const minSec=Math.max(60,parseInt(promoMinSec.value||'60',10)||60);
-  const maxSec=Math.max(minSec,parseInt(promoMaxSec.value||'120',10)||120);
-  const targets=[...document.querySelectorAll('.promo-chat:checked')].map(ch=>promoChats[parseInt(ch.dataset.idx,10)]).filter(Boolean);
-  if(!text){a('danger','Escribe el texto de promoción');return;}
-  if(!targets.length){a('danger','Selecciona al menos un grupo/chat');return;}
-  if(!promoProducts.length){a('danger','Selecciona al menos un producto');return;}
-  if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;}
-  if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;}
-  const d=await p(API+'?action=promo_create',{
-    campaign_name:campaignName,
-    campaign_group:campaignGroup,
-    template_id:(promoTemplateSelect.value||'').trim(),
-    text,
-    targets,
-    products:promoProducts,
-    min_seconds:minSec,
-    max_seconds:maxSec,
-    schedule_enabled:1,
-    schedule_time:scheduleTime,
-    schedule_days:scheduleDays
-  });
-  if(d.status==='success'){a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
+  try{
+    const text=(promoText.value||'').trim();
+    const campaignName=(promoCampaignName.value||'').trim();
+    const campaignGroup=(promoCampaignGroup.value||'').trim()||'General';
+    const scheduleTime=(promoScheduleTime.value||'').trim();
+    const scheduleDays=selectedPromoDays();
+    const minSec=Math.max(60,parseInt(promoMinSec.value||'60',10)||60);
+    const maxSec=Math.max(minSec,parseInt(promoMaxSec.value||'120',10)||120);
+    const targets=[...document.querySelectorAll('.promo-chat:checked')].map(ch=>promoChats[parseInt(ch.dataset.idx,10)]).filter(Boolean);
+    if(!text){a('danger','Escribe el texto de promoción');return;}
+    if(!targets.length){a('danger','Selecciona al menos un grupo/chat');return;}
+    if(!promoProducts.length){a('danger','Selecciona al menos un producto');return;}
+    if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;}
+    if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;}
+    const d=await p(API+'?action=promo_create',{
+      campaign_name:campaignName,
+      campaign_group:campaignGroup,
+      template_id:(promoTemplateSelect.value||'').trim(),
+      text,
+      targets,
+      products:promoProducts,
+      min_seconds:minSec,
+      max_seconds:maxSec,
+      schedule_enabled:1,
+      schedule_time:scheduleTime,
+      schedule_days:scheduleDays
+    });
+    if(d.status==='success'){a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
+  }catch(e){
+    a('danger','No se pudo programar la campaña: '+(e?.message||'error inesperado'));
+  }
 }
 async function loadPromoList(){
   const d=await g(API+'?action=promo_list');
   const tb=document.getElementById('promoRows');
   if(!tb) return;
-  if(d.status!=='success' || !(d.rows||[]).length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';return;}
-  tb.innerHTML=d.rows.map(r=>`<tr>
+  if(d.status!=='success'){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';promoCampaigns=[];renderProgrammingTab();return;}
+  promoCampaigns=Array.isArray(d.rows)?d.rows:[];
+  if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';renderProgrammingTab();return;}
+  tb.innerHTML=promoCampaigns.map(r=>`<tr>
     <td class="small">${esc(r.created_at||'')}</td>
     <td class="small">${esc(r.name||r.id||'')}</td>
     <td class="small">${esc(r.campaign_group||'General')}</td>
-    <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})</td>
+    <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td>
     <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-warning text-dark')}">${esc(r.status||'')}</span></td>
     <td class="small">${Number(r.current_index||0)}/${(r.targets||[]).length}</td>
   </tr>`).join('');
+  renderProgrammingTab();
+}
+async function deleteScheduledCampaign(id){
+  const row=promoCampaigns.find(x=>String(x.id)===String(id));
+  if(!row){a('danger','Campaña no encontrada');return;}
+  if(!confirm(`¿Eliminar campaña "${row.name||row.id}"?`)) return;
+  const d=await p(API+'?action=promo_delete',{id});
+  if(d.status==='success'){a('success','Campaña eliminada');loadPromoList();} else a('danger',d.msg||'No se pudo eliminar');
+}
+async function forceCampaignNow(id){
+  const row=promoCampaigns.find(x=>String(x.id)===String(id));
+  if(!row){a('danger','Campaña no encontrada');return;}
+  if(!confirm(`¿Lanzar ahora la campaña "${row.name||row.id}"?`)) return;
+  const d=await p(API+'?action=promo_force_now',{id});
+  if(d.status==='success'){a('success','Campaña enviada a cola para ejecutar ahora');loadPromoList();} else a('danger',d.msg||'No se pudo forzar');
+}
+async function editScheduledCampaign(id){
+  const row=promoCampaigns.find(x=>String(x.id)===String(id));
+  if(!row){a('danger','Campaña no encontrada');return;}
+  const name=prompt('Nombre de campaña:',row.name||'');
+  if(name===null) return;
+  const group=prompt('Grupo de campaña:',row.campaign_group||'General');
+  if(group===null) return;
+  const time=prompt('Hora (HH:MM):',row.schedule_time||'09:00');
+  if(time===null) return;
+  const daysCurrent=Array.isArray(row.schedule_days)?row.schedule_days.join(','):'1,2,3,4,5';
+  const daysRaw=prompt('Días (0..6 separados por coma). 0=Dom,1=Lun,...,6=Sab',daysCurrent);
+  if(daysRaw===null) return;
+  const days=String(daysRaw).split(',').map(x=>parseInt(String(x).trim(),10)).filter(x=>!Number.isNaN(x) && x>=0 && x<=6);
+  if(!days.length){a('danger','Debes indicar al menos un día válido (0..6)');return;}
+
+  const d=await p(API+'?action=promo_update',{
+    id,
+    name:String(name).trim(),
+    campaign_group:String(group).trim()||'General',
+    schedule_enabled:1,
+    schedule_time:String(time).trim(),
+    schedule_days:days,
+    status:'scheduled'
+  });
+  if(d.status==='success'){a('success','Campaña actualizada');loadPromoList();} else a('danger',d.msg||'No se pudo actualizar');
+}
+function renderCampaignLogsModal(job){
+  const summary=document.getElementById('campaignLogsSummary');
+  const rowsEl=document.getElementById('campaignLogsRows');
+  const logs=Array.isArray(job.log)?job.log:[];
+  const ok=logs.filter(x=>x && x.ok===true).length;
+  const fail=logs.filter(x=>x && x.ok===false).length;
+  const sent=logs.reduce((acc,x)=>acc + Number((x&&x.messages_sent)||0),0);
+  const targets=(Array.isArray(job.targets)?job.targets:[]).map(t=>String(t.name||t.id||'')).join(' | ');
+  summary.textContent=`Campaña: ${job.name||job.id||'-'} | Grupo: ${job.campaign_group||'General'} | Estado: ${job.status||'-'} | Mensajes enviados: ${sent} | OK: ${ok} | Fallos: ${fail} | Destinos: ${targets||'-'}`;
+  if(!logs.length){
+    rowsEl.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin logs aún</td></tr>';
+    return;
+  }
+  rowsEl.innerHTML=logs.slice().reverse().map(l=>`<tr>
+    <td class="small">${esc(l.at||'-')}</td>
+    <td class="small">${esc(l.target_name||l.target_id||'-')}</td>
+    <td class="small">${Number(l.messages_sent||0)}</td>
+    <td>${l.ok===true?'<span class="badge bg-success">OK</span>':'<span class="badge bg-danger">Fallo</span>'}</td>
+    <td class="small text-danger">${esc(l.error||'')}</td>
+  </tr>`).join('');
+}
+async function refreshCampaignLogs(){
+  if(!activeCampaignLogId) return;
+  const d=await g(API+'?action=promo_detail&id='+encodeURIComponent(activeCampaignLogId));
+  if(d.status!=='success' || !d.row){a('danger',d.msg||'No se pudieron cargar logs');return;}
+  renderCampaignLogsModal(d.row);
+}
+async function openCampaignLogs(id){
+  activeCampaignLogId=String(id||'');
+  await refreshCampaignLogs();
+  const m=new bootstrap.Modal(document.getElementById('campaignLogsModal'));
+  m.show();
+}
+function renderProgrammingTab(){
+  const tplRows=document.getElementById('promoTemplateRows');
+  if(tplRows){
+    if(!promoTemplates.length){
+      tplRows.innerHTML='<tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr>';
+    }else{
+      tplRows.innerHTML=promoTemplates.map(t=>`<tr>
+        <td class="small fw-semibold">${esc(t.name||t.id||'-')}</td>
+        <td class="small">${Array.isArray(t.products)?t.products.length:0}</td>
+        <td class="small">${esc(t.updated_at||'-')}</td>
+      </tr>`).join('');
+    }
+  }
+
+  const wrap=document.getElementById('promoProgramGroups');
+  if(!wrap) return;
+  const scheduled=promoCampaigns.filter(r=>Number(r.schedule_enabled||0)===1);
+  if(!scheduled.length){
+    wrap.innerHTML='<div class="text-muted small">Sin campañas programadas.</div>';
+    return;
+  }
+  const groups={};
+  for(const r of scheduled){
+    const g=String(r.campaign_group||'General');
+    if(!groups[g]) groups[g]=[];
+    groups[g].push(r);
+  }
+  wrap.innerHTML=Object.keys(groups).sort().map(g=>`<div class="border rounded p-2 mb-2">
+    <div class="fw-semibold mb-1">${esc(g)}</div>
+    <div class="table-responsive">
+      <table class="table table-sm mb-0">
+        <thead class="table-light"><tr><th>Campaña</th><th>Hora</th><th>Días</th><th>Estado</th><th>Destinos</th><th>Chats/Grupos</th><th>Acciones</th></tr></thead>
+        <tbody>
+          ${groups[g].map(r=>`<tr>
+            <td class="small">${esc(r.name||r.id||'-')}</td>
+            <td class="small">${esc(r.schedule_time||'-')}</td>
+            <td class="small">${esc(daysToText(r.schedule_days||[]))}</td>
+            <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-secondary')))}">${esc(r.status||'-')}</span></td>
+            <td class="small">${Array.isArray(r.targets)?r.targets.length:0}</td>
+            <td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td>
+            <td class="small">
+              <div class="d-flex gap-1">
+                <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
+                <button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button>
+                <button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>
+                <button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button>
+              </div>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  </div>`).join('');
 }
 async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates()])}catch(e){a('danger',e.message||'error')}}
 function openWhatsAppWeb(){

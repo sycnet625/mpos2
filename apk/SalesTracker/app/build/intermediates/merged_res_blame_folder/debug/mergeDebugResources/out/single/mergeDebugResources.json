@@ -1,0 +1,22 @@
+[
+    {
+        "merged": "com.example.salestracker.app-debug-68:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.example.salestracker.app-main-70:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.example.salestracker.app-debug-68:/xml_file_paths.xml.flat",
+        "source": "com.example.salestracker.app-main-70:/xml/file_paths.xml"
+    },
+    {
+        "merged": "com.example.salestracker.app-debug-68:/drawable_ic_notification_drop.xml.flat",
+        "source": "com.example.salestracker.app-main-70:/drawable/ic_notification_drop.xml"
+    },
+    {
+        "merged": "com.example.salestracker.app-debug-68:/layout_activity_main.xml.flat",
+        "source": "com.example.salestracker.app-main-70:/layout/activity_main.xml"
+    },
+    {
+        "merged": "com.example.salestracker.app-debug-68:/layout_item_log.xml.flat",
+        "source": "com.example.salestracker.app-main-70:/layout/item_log.xml"
+    }
+]
