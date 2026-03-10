@@ -9,6 +9,7 @@ $BOT_OUTBOX = [];
 $BOT_BRIDGE_STATUS_FILE = __DIR__ . '/wa_web_bridge/status.json';
 $BOT_BRIDGE_CHATS_FILE = '/tmp/palweb_wa_chats.json';
 $BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
+$BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
 
 function bot_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
@@ -47,6 +48,35 @@ function bot_write_json_file(string $file, array $data): bool {
     $ok = @file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
     if ($ok === false) return false;
     return @rename($tmp, $file);
+}
+
+function bot_public_base_url(): string {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+    $scheme = $https ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
+    if ($host === '') $host = trim((string)($_SERVER['SERVER_NAME'] ?? 'localhost'));
+    return $scheme . '://' . $host;
+}
+
+function bot_sanitize_shell_output(string $text): string {
+    $lines = preg_split('/\R+/', trim($text)) ?: [];
+    $clean = [];
+    foreach ($lines as $line) {
+        $l = trim($line);
+        if ($l === '') continue;
+        if (stripos($l, 'sudo: a password is required') !== false) continue;
+        if (stripos($l, 'sudo: no tty present') !== false) continue;
+        if (stripos($l, 'a terminal is required to read the password') !== false) continue;
+        $clean[] = $l;
+    }
+    return trim(implode("\n", $clean));
+}
+
+function bot_is_bridge_process_running(): bool {
+    $out = [];
+    $code = 1;
+    @exec('pgrep -f "wa_web_bridge/bridge.js" 2>/dev/null', $out, $code);
+    return $code === 0 && !empty($out);
 }
 
 function bot_ensure_tables(PDO $pdo): void {
@@ -504,7 +534,8 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
-    'promo_chats','promo_products','promo_create','promo_list','bridge_restart','bridge_logs'
+    'promo_chats','promo_products','promo_create','promo_list','promo_templates','promo_template_save','promo_template_delete',
+    'bridge_restart','bridge_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();
 
@@ -572,12 +603,35 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_orders') {
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_status') {
     $statusFile = $BOT_BRIDGE_STATUS_FILE;
     if (!is_file($statusFile)) {
-        echo json_encode(['status'=>'success','bridge'=>['state'=>'unknown','msg'=>'Sin estado del bridge']]); exit;
+        $running = bot_is_bridge_process_running();
+        echo json_encode([
+            'status'=>'success',
+            'bridge'=>[
+                'state'=>$running ? 'starting' : 'stopped',
+                'msg'=>$running ? 'Bridge ejecutándose sin status.json aún' : 'Bridge detenido o sin status.json'
+            ]
+        ]);
+        exit;
     }
     $raw = @file_get_contents($statusFile);
     $bridge = json_decode((string)$raw, true);
     if (!is_array($bridge)) {
-        echo json_encode(['status'=>'success','bridge'=>['state'=>'unknown','msg'=>'Estado inválido']]); exit;
+        $running = bot_is_bridge_process_running();
+        echo json_encode([
+            'status'=>'success',
+            'bridge'=>[
+                'state'=>$running ? 'starting' : 'unknown',
+                'msg'=>'Estado invalido en status.json'
+            ]
+        ]);
+        exit;
+    }
+    $updatedAt = strtotime((string)($bridge['updated_at'] ?? '')) ?: 0;
+    $ageSec = $updatedAt > 0 ? (time() - $updatedAt) : PHP_INT_MAX;
+    if ($ageSec > 45) {
+        $bridge['state'] = 'disconnected';
+        $bridge['msg'] = 'Estado del bridge desactualizado';
+        $bridge['stale_seconds'] = $ageSec;
     }
     echo json_encode(['status'=>'success','bridge'=>$bridge]); exit;
 }
@@ -593,17 +647,18 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
         $out = [];
         $code = 1;
         @exec($cmd, $out, $code);
-        $lastOut = trim(implode("\n", $out));
+        $lastOut = bot_sanitize_shell_output(implode("\n", $out));
         if ($code === 0) {
             $ok = true;
             break;
         }
     }
     if (!$ok) {
+        $detail = $lastOut !== '' ? $lastOut : 'Permisos insuficientes para systemctl desde PHP.';
         echo json_encode([
             'status' => 'error',
             'msg' => 'No se pudo reiniciar el bridge desde PHP. Revisa permisos de systemctl/sudo.',
-            'detail' => $lastOut
+            'detail' => $detail
         ]);
         exit;
     }
@@ -621,19 +676,22 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
     $cmds = [
-        'journalctl -u palweb-wa-bridge.service -n 120 --no-pager 2>&1',
-        'sudo -n journalctl -u palweb-wa-bridge.service -n 120 --no-pager 2>&1'
+        'journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1',
+        'sudo -n journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1'
     ];
     $logText = '';
     foreach ($cmds as $cmd) {
         $out = [];
         $code = 1;
         @exec($cmd, $out, $code);
-        $txt = trim(implode("\n", $out));
+        $txt = bot_sanitize_shell_output(implode("\n", $out));
         if ($txt !== '') {
             $logText = $txt;
             if ($code === 0) break;
         }
+    }
+    if ($logText === '') {
+        $logText = 'Sin logs disponibles (o sin permisos de journal para el usuario web).';
     }
     $statusRaw = @file_get_contents($BOT_BRIDGE_STATUS_FILE);
     $status = json_decode((string)$statusRaw, true);
@@ -679,9 +737,10 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
     $st->execute([(int)$config['id_empresa'], $like, $like]);
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     $out = [];
+    $base = bot_public_base_url();
     foreach ($rows as $r) {
         $sku = (string)$r['codigo'];
-        $img = "image.php?id=" . rawurlencode($sku);
+        $img = $base . "/image.php?id=" . rawurlencode($sku);
         $out[] = [
             'id' => $sku,
             'name' => (string)$r['nombre'],
@@ -690,6 +749,78 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
         ];
     }
     echo json_encode(['status'=>'success','rows'=>$out]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_templates') {
+    $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    usort($rows, static fn($a, $b) => strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? '')));
+    echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $name = substr(trim((string)($in['name'] ?? '')), 0, 120);
+    $text = trim((string)($in['text'] ?? ''));
+    $products = is_array($in['products'] ?? null) ? $in['products'] : [];
+    $templateId = substr(trim((string)($in['id'] ?? '')), 0, 80);
+    if ($name === '') { echo json_encode(['status' => 'error', 'msg' => 'Nombre de plantilla obligatorio']); exit; }
+    if ($text === '' && count($products) === 0) { echo json_encode(['status' => 'error', 'msg' => 'Plantilla vacía']); exit; }
+
+    $cleanProducts = [];
+    foreach ($products as $p) {
+        $pid = substr(trim((string)($p['id'] ?? '')), 0, 80);
+        if ($pid === '') continue;
+        $cleanProducts[] = [
+            'id' => $pid,
+            'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
+            'price' => (float)($p['price'] ?? 0),
+            'image' => trim((string)($p['image'] ?? ''))
+        ];
+    }
+
+    $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    $nowIso = date('c');
+    if ($templateId === '') $templateId = 'tpl_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
+
+    $updated = false;
+    foreach ($rows as &$row) {
+        if ((string)($row['id'] ?? '') !== $templateId) continue;
+        $row['name'] = $name;
+        $row['text'] = $text;
+        $row['products'] = $cleanProducts;
+        $row['updated_at'] = $nowIso;
+        $updated = true;
+        break;
+    }
+    unset($row);
+    if (!$updated) {
+        $rows[] = [
+            'id' => $templateId,
+            'name' => $name,
+            'text' => $text,
+            'products' => $cleanProducts,
+            'updated_at' => $nowIso,
+            'created_by' => $_SESSION['admin_name'] ?? 'admin'
+        ];
+    }
+    if (!bot_write_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => $rows])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar plantilla']); exit;
+    }
+    echo json_encode(['status' => 'success', 'id' => $templateId]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $templateId = substr(trim((string)($in['id'] ?? '')), 0, 80);
+    if ($templateId === '') { echo json_encode(['status' => 'error', 'msg' => 'id requerido']); exit; }
+    $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
+    $rows = array_values(array_filter((array)($data['rows'] ?? []), static fn($r) => (string)($r['id'] ?? '') !== $templateId));
+    if (!bot_write_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => $rows])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo borrar plantilla']); exit;
+    }
+    echo json_encode(['status' => 'success']); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
@@ -705,6 +836,23 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $products = is_array($in['products'] ?? null) ? $in['products'] : [];
     $minSec = max(60, min(180, (int)($in['min_seconds'] ?? 60)));
     $maxSec = max($minSec, min(300, (int)($in['max_seconds'] ?? 120)));
+    $campaignName = substr(trim((string)($in['campaign_name'] ?? '')), 0, 120);
+    $campaignGroup = substr(trim((string)($in['campaign_group'] ?? 'General')), 0, 80);
+    $scheduleTime = substr(trim((string)($in['schedule_time'] ?? '')), 0, 5);
+    $scheduleDays = is_array($in['schedule_days'] ?? null) ? $in['schedule_days'] : [];
+    $templateId = substr(trim((string)($in['template_id'] ?? '')), 0, 80);
+    $scheduleEnabled = !empty($in['schedule_enabled']) ? 1 : 0;
+
+    if ($templateId !== '' && ($text === '' || count($products) === 0)) {
+        $tplData = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
+        foreach (($tplData['rows'] ?? []) as $tpl) {
+            if ((string)($tpl['id'] ?? '') !== $templateId) continue;
+            if ($text === '') $text = trim((string)($tpl['text'] ?? ''));
+            if (count($products) === 0 && is_array($tpl['products'] ?? null)) $products = $tpl['products'];
+            if ($campaignName === '') $campaignName = substr(trim((string)($tpl['name'] ?? '')), 0, 120);
+            break;
+        }
+    }
 
     $cleanTargetsMap = [];
     foreach ($targets as $t) {
@@ -732,20 +880,46 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     if (count($targetsFinal) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un grupo/chat']); exit; }
     if (count($cleanProducts) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un producto']); exit; }
 
+    $daysFinal = [];
+    foreach ($scheduleDays as $d) {
+        $n = (int)$d;
+        if ($n >= 0 && $n <= 6) $daysFinal[$n] = $n;
+    }
+    $daysFinal = array_values($daysFinal);
+    sort($daysFinal);
+    if ($scheduleEnabled) {
+        if (!preg_match('/^\d{2}:\d{2}$/', $scheduleTime)) {
+            echo json_encode(['status'=>'error','msg'=>'Hora inválida (HH:MM)']); exit;
+        }
+        if (count($daysFinal) === 0) {
+            echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un día']); exit;
+        }
+    } else {
+        $scheduleTime = '';
+        $daysFinal = [];
+    }
+
     $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
     $jobId = 'promo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
     $now = time();
     $queue['jobs'][] = [
         'id' => $jobId,
-        'status' => 'queued',
+        'status' => $scheduleEnabled ? 'scheduled' : 'queued',
         'created_at' => date('c', $now),
         'created_by' => $_SESSION['admin_name'] ?? 'admin',
+        'name' => $campaignName !== '' ? $campaignName : ('Campaña ' . date('d/m H:i')),
+        'campaign_group' => $campaignGroup !== '' ? $campaignGroup : 'General',
+        'template_id' => $templateId,
         'text' => $text,
         'targets' => $targetsFinal,
         'products' => $cleanProducts,
         'min_seconds' => $minSec,
         'max_seconds' => $maxSec,
-        'next_run_at' => $now,
+        'schedule_enabled' => $scheduleEnabled,
+        'schedule_time' => $scheduleTime,
+        'schedule_days' => $daysFinal,
+        'last_schedule_key' => '',
+        'next_run_at' => $scheduleEnabled ? ($now + 30) : $now,
         'current_index' => 0,
         'log' => []
     ];

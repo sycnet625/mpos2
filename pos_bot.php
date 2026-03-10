@@ -122,9 +122,39 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
         <div class="card mb-3">
           <div class="card-header bg-white fw-bold">Nueva campaña</div>
           <div class="card-body">
+            <div class="row g-2 mb-2">
+              <div class="col-md-8">
+                <label class="form-label">Plantilla</label>
+                <select id="promoTemplateSelect" class="form-select"></select>
+              </div>
+              <div class="col-md-4 d-flex align-items-end gap-2">
+                <button class="btn btn-outline-primary w-100" type="button" onclick="applyPromoTemplate()"><i class="fas fa-file-import"></i> Cargar</button>
+                <button class="btn btn-outline-danger" type="button" onclick="deletePromoTemplate()"><i class="fas fa-trash"></i></button>
+              </div>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-md-8">
+                <label class="form-label">Nombre plantilla (texto + productos)</label>
+                <input id="promoTemplateName" class="form-control" placeholder="Ej: Oferta desayuno">
+              </div>
+              <div class="col-md-4 d-flex align-items-end">
+                <button class="btn btn-outline-success w-100" type="button" onclick="savePromoTemplate()"><i class="fas fa-save"></i> Guardar plantilla</button>
+              </div>
+            </div>
+
             <div class="mb-2">
               <label class="form-label">Texto de promoción</label>
               <textarea id="promoText" class="form-control" rows="3" placeholder="Ej: Oferta especial solo hoy..."></textarea>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-md-6">
+                <label class="form-label">Nombre campaña</label>
+                <input id="promoCampaignName" class="form-control" placeholder="Ej: Viernes Oferta">
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Grupo de campaña</label>
+                <input id="promoCampaignGroup" class="form-control" placeholder="Ej: Mayoristas">
+              </div>
             </div>
             <div class="row g-2 mb-2">
               <div class="col-md-6">
@@ -139,6 +169,24 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               <div class="col-md-3">
                 <label class="form-label">Máx (seg)</label>
                 <input id="promoMaxSec" type="number" class="form-control" min="60" max="300" value="120">
+              </div>
+            </div>
+            <div class="row g-2 mb-2">
+              <div class="col-md-4">
+                <label class="form-label">Hora de lanzamiento</label>
+                <input id="promoScheduleTime" type="time" class="form-control" value="09:00">
+              </div>
+              <div class="col-md-8">
+                <label class="form-label d-block">Días de la semana</label>
+                <div class="d-flex flex-wrap gap-2">
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="1" checked> <span class="form-check-label">L</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="2" checked> <span class="form-check-label">M</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="3" checked> <span class="form-check-label">X</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="4" checked> <span class="form-check-label">J</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="5" checked> <span class="form-check-label">V</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="6"> <span class="form-check-label">S</span></label>
+                  <label class="form-check form-check-inline m-0"><input class="form-check-input promo-day" type="checkbox" value="0"> <span class="form-check-label">D</span></label>
+                </div>
               </div>
             </div>
             <div class="small text-muted mb-2">El bridge publica en cada destino con un intervalo aleatorio entre min y max. Ej: 1:20, 1:57, 1:08.</div>
@@ -159,8 +207,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
           <div class="card-body p-0">
             <div class="table-responsive" style="max-height:260px">
               <table class="table table-sm mb-0">
-                <thead class="table-light"><tr><th>Fecha</th><th>ID</th><th>Estado</th><th>Progreso</th></tr></thead>
-                <tbody id="promoRows"><tr><td colspan="4" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
+                <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th></tr></thead>
+                <tbody id="promoRows"><tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -209,6 +257,7 @@ const API='pos_bot_api.php';
 let lastBridgeState=null;
 let promoChats=[];
 let promoProducts=[];
+let promoTemplates=[];
 let promoSearchTimer=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const a=(t,m)=>{const e=document.getElementById('alertBox');e.innerHTML=`<div class="alert alert-${t} py-2">${esc(m)}</div>`;setTimeout(()=>e.innerHTML='',3500)};
@@ -273,7 +322,8 @@ async function restartBridge(){
     setTimeout(()=>loadBridgeStatus(),1200);
     return;
   }
-  a('danger',d.msg||'No se pudo reiniciar bridge');
+  const detail = d.detail ? ' Detalle: '+String(d.detail) : '';
+  a('danger',(d.msg||'No se pudo reiniciar bridge') + detail);
 }
 async function loadBridgeLogs(){
   const d=await g(API+'?action=bridge_logs');
@@ -306,6 +356,62 @@ async function loadPromoChats(){
   if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar chats');return;}
   promoChats=Array.isArray(d.rows)?d.rows:[];
   renderPromoChats();
+}
+function renderPromoTemplates(){
+  const s=document.getElementById('promoTemplateSelect');
+  if(!s) return;
+  const opts=['<option value="">(Sin plantilla)</option>'].concat(
+    promoTemplates.map(t=>`<option value="${esc(t.id)}">${esc(t.name||t.id)}</option>`)
+  );
+  s.innerHTML=opts.join('');
+}
+async function loadPromoTemplates(){
+  const d=await g(API+'?action=promo_templates');
+  if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar plantillas');return;}
+  promoTemplates=Array.isArray(d.rows)?d.rows:[];
+  renderPromoTemplates();
+}
+async function savePromoTemplate(){
+  const name=(promoTemplateName.value||'').trim();
+  const text=(promoText.value||'').trim();
+  if(!name){a('danger','Pon nombre a la plantilla');return;}
+  if(!text && !promoProducts.length){a('danger','La plantilla no puede estar vacía');return;}
+  const currentId=(promoTemplateSelect.value||'').trim();
+  const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts});
+  if(d.status==='success'){
+    a('success','Plantilla guardada');
+    await loadPromoTemplates();
+    promoTemplateSelect.value=d.id||'';
+  } else a('danger',d.msg||'No se pudo guardar plantilla');
+}
+function applyPromoTemplate(){
+  const id=(promoTemplateSelect.value||'').trim();
+  if(!id){a('danger','Selecciona una plantilla');return;}
+  const t=promoTemplates.find(x=>String(x.id)===id);
+  if(!t){a('danger','Plantilla no encontrada');return;}
+  promoTemplateName.value=t.name||'';
+  promoText.value=t.text||'';
+  promoProducts=Array.isArray(t.products)?t.products:[];
+  renderPromoProducts();
+  a('info','Plantilla cargada');
+}
+async function deletePromoTemplate(){
+  const id=(promoTemplateSelect.value||'').trim();
+  if(!id){a('danger','Selecciona una plantilla');return;}
+  const d=await p(API+'?action=promo_template_delete',{id});
+  if(d.status==='success'){
+    a('success','Plantilla eliminada');
+    await loadPromoTemplates();
+    promoTemplateName.value='';
+  } else a('danger',d.msg||'No se pudo eliminar plantilla');
+}
+function selectedPromoDays(){
+  return [...document.querySelectorAll('.promo-day:checked')].map(x=>parseInt(x.value,10)).filter(x=>!Number.isNaN(x));
+}
+function daysToText(days){
+  const map={0:'D',1:'L',2:'M',3:'X',4:'J',5:'V',6:'S'};
+  const arr=(Array.isArray(days)?days:[]).map(x=>parseInt(x,10)).filter(x=>map[x]!==undefined);
+  return arr.length?arr.map(x=>map[x]).join(','):'-';
 }
 function selectAllPromoChats(v){
   document.querySelectorAll('.promo-chat').forEach(x=>x.checked=!!v);
@@ -341,28 +447,48 @@ async function searchPromoProducts(q){
 }
 async function createPromoCampaign(){
   const text=(promoText.value||'').trim();
+  const campaignName=(promoCampaignName.value||'').trim();
+  const campaignGroup=(promoCampaignGroup.value||'').trim()||'General';
+  const scheduleTime=(promoScheduleTime.value||'').trim();
+  const scheduleDays=selectedPromoDays();
   const minSec=Math.max(60,parseInt(promoMinSec.value||'60',10)||60);
   const maxSec=Math.max(minSec,parseInt(promoMaxSec.value||'120',10)||120);
   const targets=[...document.querySelectorAll('.promo-chat:checked')].map(ch=>promoChats[parseInt(ch.dataset.idx,10)]).filter(Boolean);
   if(!text){a('danger','Escribe el texto de promoción');return;}
   if(!targets.length){a('danger','Selecciona al menos un grupo/chat');return;}
   if(!promoProducts.length){a('danger','Selecciona al menos un producto');return;}
-  const d=await p(API+'?action=promo_create',{text,targets,products:promoProducts,min_seconds:minSec,max_seconds:maxSec});
+  if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;}
+  if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;}
+  const d=await p(API+'?action=promo_create',{
+    campaign_name:campaignName,
+    campaign_group:campaignGroup,
+    template_id:(promoTemplateSelect.value||'').trim(),
+    text,
+    targets,
+    products:promoProducts,
+    min_seconds:minSec,
+    max_seconds:maxSec,
+    schedule_enabled:1,
+    schedule_time:scheduleTime,
+    schedule_days:scheduleDays
+  });
   if(d.status==='success'){a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
 }
 async function loadPromoList(){
   const d=await g(API+'?action=promo_list');
   const tb=document.getElementById('promoRows');
   if(!tb) return;
-  if(d.status!=='success' || !(d.rows||[]).length){tb.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin campañas</td></tr>';return;}
+  if(d.status!=='success' || !(d.rows||[]).length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';return;}
   tb.innerHTML=d.rows.map(r=>`<tr>
     <td class="small">${esc(r.created_at||'')}</td>
-    <td class="small">${esc(r.id||'')}</td>
+    <td class="small">${esc(r.name||r.id||'')}</td>
+    <td class="small">${esc(r.campaign_group||'General')}</td>
+    <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})</td>
     <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-warning text-dark')}">${esc(r.status||'')}</span></td>
     <td class="small">${Number(r.current_index||0)}/${(r.targets||[]).length}</td>
   </tr>`).join('');
 }
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadBridgeStatus(),loadPromoList()])}catch(e){a('danger',e.message||'error')}}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates()])}catch(e){a('danger',e.message||'error')}}
 function openWhatsAppWeb(){
   const w = window.open('https://web.whatsapp.com/','_blank','noopener,noreferrer');
   const s = document.getElementById('waWebStatus');
@@ -381,8 +507,7 @@ document.getElementById('promoSearch').addEventListener('input',ev=>{
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);
 });
 loadAll();
-loadPromoChats();
-setInterval(()=>{loadStats();loadMsgs();loadOrders();loadBridgeStatus();loadPromoList()},12000);
+setInterval(()=>{loadStats();loadMsgs();loadOrders();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates()},12000);
 </script>
 <script src="assets/js/qrcode.min.js"></script>
 <script src="assets/js/bootstrap.bundle.min.js"></script>
