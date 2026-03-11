@@ -443,6 +443,17 @@ async function processIncoming(message) {
 
   const responses = Array.isArray(data.responses) ? data.responses : [];
   for (const out of responses) {
+    const type = String(out?.type || 'text').trim().toLowerCase();
+    if (type === 'image') {
+      const url = String(out?.url || '').trim();
+      const caption = String(out?.caption || out?.text || '').trim();
+      if (!url) {
+        if (caption) await client.sendMessage(message.from, caption);
+        continue;
+      }
+      await sendMediaUrl(message.from, url, caption, 'bot_reply');
+      continue;
+    }
     const outText = String(out?.text || '').trim();
     if (!outText) continue;
     await client.sendMessage(message.from, outText);

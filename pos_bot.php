@@ -83,6 +83,24 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               </select>
             </div>
             <div class="col-md-6"><label class="form-label">Nombre negocio</label><input id="business_name" class="form-control" maxlength="120"></div>
+            <div class="col-md-6">
+              <label class="form-label">Tono del bot</label>
+              <select id="bot_tone" class="form-select">
+                <option value="premium">Premium</option>
+                <option value="popular_cubano">Popular cubano</option>
+                <option value="formal_comercial">Formal comercial</option>
+                <option value="muy_cercano">Muy cercano</option>
+              </select>
+            </div>
+            <div class="col-12">
+              <div class="border rounded p-3" style="background:#f8fafc">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <div class="fw-semibold">Vista previa del tono</div>
+                  <span class="small text-muted">Ejemplo de respuesta al cliente</span>
+                </div>
+                <div id="botTonePreview" class="small" style="white-space:pre-wrap;line-height:1.55;color:#0f172a">Cargando vista previa...</div>
+              </div>
+            </div>
             <div id="row_verify_token" class="col-md-6"><label class="form-label">Verify token</label><input id="verify_token" class="form-control" maxlength="120"></div>
             <div id="row_phone_id" class="col-md-6"><label class="form-label">Phone Number ID</label><input id="wa_phone_number_id" autocomplete="username" class="form-control"></div>
             <div id="row_access_token" class="col-md-6"><label class="form-label">Access Token</label><input id="wa_access_token" type="password" autocomplete="current-password" class="form-control" placeholder="vacío = conservar"></div>
@@ -406,6 +424,19 @@ async function parseApiResponse(r){
 async function g(u){const r=await fetch(u,{credentials:'same-origin'});return parseApiResponse(r)}
 async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return parseApiResponse(r)}
 async function uploadPromoBanner(file){const fd=new FormData();fd.append('image',file);const r=await fetch(API+'?action=promo_upload_image',{method:'POST',credentials:'same-origin',body:fd});return parseApiResponse(r)}
+function renderBotTonePreview(){
+  const box=document.getElementById('botTonePreview');
+  if(!box) return;
+  const name=(tname?.value||'Daniel').trim()||'Daniel';
+  const site='www.palweb.net';
+  const previews={
+    premium:`Hola ${name}, es un placer atenderte.\nPuedo ayudarte a realizar tu pedido con rapidez o mostrarte el catálogo.\nTambién puedes consultar el catálogo y comprar automáticamente en ${site}.`,
+    popular_cubano:`Hola ${name}, qué bolá, aquí te atiendo rapidito.\nTú dime lo que quieres y yo te lo voy armando sin lío.\nOye, en ${site} también puedes mirar el catálogo y comprar automático.`,
+    formal_comercial:`Buenas ${name}, gracias por contactarnos.\nCon gusto gestiono su pedido o le muestro el menú disponible.\nPuede consultar el catálogo y comprar automáticamente en ${site}.`,
+    muy_cercano:`Buenas ${name}, dime qué te apetece y te ayudo enseguida.\nEscríbeme como hablas normalmente y yo te voy guiando.\nTambién puedes ver el catálogo y comprar automático en ${site}.`
+  };
+  box.textContent=previews[bot_tone?.value||'muy_cercano']||previews.muy_cercano;
+}
 
 function applyModeUI(){
   const isMeta = wa_mode.value === 'meta_api';
@@ -416,8 +447,8 @@ function applyModeUI(){
   wa_phone_number_id.disabled = !isMeta;
   wa_access_token.disabled = !isMeta;
 }
-async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();}
-async function saveCfg(ev){ev.preventDefault();const d=await p(API+'?action=save_config',{enabled:enabled.checked?1:0,wa_mode:wa_mode.value,verify_token:verify_token.value.trim(),wa_phone_number_id:wa_phone_number_id.value.trim(),wa_access_token:wa_access_token.value.trim(),business_name:business_name.value.trim(),welcome_message:welcome_message.value.trim(),menu_intro:menu_intro.value.trim(),no_match_message:no_match_message.value.trim()});if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
+async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');bot_tone.value=(c.bot_tone||'muy_cercano');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();renderBotTonePreview();}
+async function saveCfg(ev){ev.preventDefault();const d=await p(API+'?action=save_config',{enabled:enabled.checked?1:0,wa_mode:wa_mode.value,bot_tone:bot_tone.value,verify_token:verify_token.value.trim(),wa_phone_number_id:wa_phone_number_id.value.trim(),wa_access_token:wa_access_token.value.trim(),business_name:business_name.value.trim(),welcome_message:welcome_message.value.trim(),menu_intro:menu_intro.value.trim(),no_match_message:no_match_message.value.trim()});if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
 async function loadStats(){const d=await g(API+'?action=stats');if(d.status!=='success')return;s1.textContent=d.stats.sessions||0;s2.textContent=d.stats.msgs_today||0;s3.textContent=d.stats.orders_today||0;s4.textContent='$'+Number(d.stats.sales_today||0).toFixed(2)}
 async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td class="small">${esc(r.wa_name||'-')}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
@@ -916,6 +947,8 @@ function openWhatsAppWeb(){
 
 document.getElementById('f').addEventListener('submit',saveCfg);
 wa_mode.addEventListener('change',applyModeUI);
+bot_tone.addEventListener('change',renderBotTonePreview);
+tname.addEventListener('input',renderBotTonePreview);
 document.getElementById('promoSearch').addEventListener('input',ev=>{
   if(promoSearchTimer) clearTimeout(promoSearchTimer);
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);

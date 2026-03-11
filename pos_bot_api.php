@@ -141,6 +141,7 @@ function bot_ensure_tables(PDO $pdo): void {
         id TINYINT PRIMARY KEY DEFAULT 1,
         enabled TINYINT(1) NOT NULL DEFAULT 0,
         wa_mode ENUM('web','meta_api') NOT NULL DEFAULT 'web',
+        bot_tone ENUM('premium','popular_cubano','formal_comercial','muy_cercano') NOT NULL DEFAULT 'muy_cercano',
         verify_token VARCHAR(120) DEFAULT NULL,
         wa_phone_number_id VARCHAR(80) DEFAULT NULL,
         wa_access_token TEXT DEFAULT NULL,
@@ -187,7 +188,11 @@ function bot_ensure_tables(PDO $pdo): void {
     if (!bot_has_column($pdo, 'pos_bot_config', 'wa_mode')) {
         $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN wa_mode ENUM('web','meta_api') NOT NULL DEFAULT 'web' AFTER enabled");
     }
+    if (!bot_has_column($pdo, 'pos_bot_config', 'bot_tone')) {
+        $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN bot_tone ENUM('premium','popular_cubano','formal_comercial','muy_cercano') NOT NULL DEFAULT 'muy_cercano' AFTER wa_mode");
+    }
     $pdo->exec("UPDATE pos_bot_config SET wa_mode='web' WHERE wa_mode IS NULL OR wa_mode=''");
+    $pdo->exec("UPDATE pos_bot_config SET bot_tone='muy_cercano' WHERE bot_tone IS NULL OR bot_tone=''");
 }
 
 function bot_cfg(PDO $pdo): array {
@@ -200,10 +205,16 @@ function bot_log(PDO $pdo, string $wa, string $dir, string $txt, string $type='t
     $st->execute([$wa,$dir,$type,$txt]);
 }
 
-function bot_send(PDO $pdo, array $cfg, string $wa, string $text): void {
+function bot_queue_response(PDO $pdo, string $wa, string $type, array $payload): void {
     global $BOT_OUTBOX;
-    $BOT_OUTBOX[] = ['wa_user_id' => $wa, 'text' => $text];
-    bot_log($pdo, $wa, 'out', $text);
+    $row = ['wa_user_id' => $wa, 'type' => $type] + $payload;
+    $BOT_OUTBOX[] = $row;
+    $logText = trim((string)($payload['text'] ?? $payload['caption'] ?? $payload['url'] ?? ''));
+    if ($logText !== '') bot_log($pdo, $wa, 'out', $logText, $type);
+}
+
+function bot_send(PDO $pdo, array $cfg, string $wa, string $text): void {
+    bot_queue_response($pdo, $wa, 'text', ['text' => $text]);
     // Modo local (si no hay token/phoneId). Integración Meta opcional.
 }
 
@@ -214,27 +225,53 @@ function bot_take_outbox(): array {
     return $out;
 }
 
+function bot_send_image(PDO $pdo, string $wa, string $url, string $caption=''): void {
+    $url = trim($url);
+    if ($url === '') return;
+    bot_queue_response($pdo, $wa, 'image', ['url' => $url, 'caption' => trim($caption)]);
+}
+
+function bot_default_cart(string $name=''): array {
+    return [
+        'items' => [],
+        'item_notes' => [],
+        'customer_name' => $name,
+        'customer_address' => '',
+        'awaiting_field' => '',
+        'pending_choice' => null,
+        'last_order' => null,
+        'greet_count' => 0
+    ];
+}
+
+function bot_merge_cart_shape(array $cart, string $name=''): array {
+    $base = bot_default_cart($name);
+    $cart = array_merge($base, $cart);
+    if (!is_array($cart['items'] ?? null)) $cart['items'] = [];
+    if (!is_array($cart['item_notes'] ?? null)) $cart['item_notes'] = [];
+    if (!is_array($cart['last_order'] ?? null)) $cart['last_order'] = $base['last_order'];
+    if (!is_array($cart['pending_choice'] ?? null)) $cart['pending_choice'] = null;
+    if (($cart['customer_name'] ?? '') === '' && $name !== '') $cart['customer_name'] = $name;
+    return $cart;
+}
+
 function bot_get_cart(PDO $pdo, string $wa, string $name=''): array {
     $st = $pdo->prepare("SELECT cart_json FROM pos_bot_sessions WHERE wa_user_id=? LIMIT 1");
     $st->execute([$wa]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!$row) {
-        $cart = ['items' => [], 'customer_name' => $name, 'customer_address' => '', 'awaiting_field' => 'name'];
+        $cart = bot_default_cart($name);
         $ins = $pdo->prepare("INSERT INTO pos_bot_sessions (wa_user_id,wa_name,cart_json) VALUES (?,?,?)");
         $ins->execute([$wa,$name,json_encode($cart, JSON_UNESCAPED_UNICODE)]);
         return $cart;
     }
     $cart = json_decode((string)$row['cart_json'], true);
-    if (!is_array($cart) || !isset($cart['items']) || !is_array($cart['items'])) {
-        return ['items' => [], 'customer_name' => $name, 'customer_address' => '', 'awaiting_field' => 'name'];
-    }
-    if (!array_key_exists('customer_name', $cart)) $cart['customer_name'] = $name;
-    if (!array_key_exists('customer_address', $cart)) $cart['customer_address'] = '';
-    if (!array_key_exists('awaiting_field', $cart)) $cart['awaiting_field'] = '';
-    return $cart;
+    if (!is_array($cart)) $cart = [];
+    return bot_merge_cart_shape($cart, $name);
 }
 
 function bot_save_cart(PDO $pdo, string $wa, string $name, array $cart): void {
+    $cart = bot_merge_cart_shape($cart, $name);
     $st = $pdo->prepare("UPDATE pos_bot_sessions SET wa_name=?, cart_json=?, last_seen=NOW() WHERE wa_user_id=?");
     $st->execute([$name, json_encode($cart, JSON_UNESCAPED_UNICODE), $wa]);
 }
@@ -264,6 +301,7 @@ function bot_clean_value(string $text): string {
 function bot_extract_name(string $text): string {
     $raw = trim($text);
     if ($raw === '') return '';
+    if (preg_match('/^\[[a-z0-9_]+\]$/iu', $raw)) return '';
     $patterns = [
         '/^(mi nombre es|soy|me llamo)\s+/iu',
         '/^(nombre)\s*[:\-]?\s*/iu',
@@ -271,6 +309,7 @@ function bot_extract_name(string $text): string {
     foreach ($patterns as $p) $raw = preg_replace($p, '', $raw) ?? $raw;
     $val = bot_clean_value($raw);
     if ($val === '' || mb_strlen($val) < 2) return '';
+    if (in_array(bot_norm($val), ['confirmar','menu','carrito','cancelar','pedido'], true)) return '';
     return mb_substr($val, 0, 120);
 }
 
@@ -284,6 +323,10 @@ function bot_extract_address(string $text): string {
     foreach ($patterns as $p) $raw = preg_replace($p, '', $raw) ?? $raw;
     $val = bot_clean_value($raw);
     if ($val === '' || mb_strlen($val) < 6) return '';
+    if (in_array(bot_norm($val), ['confirmar','menu','carrito','cancelar','pedido'], true)) return '';
+    $normVal = bot_norm($val);
+    $hasAddressHint = preg_match('/\d/', $val) || preg_match('/\b(calle|callejon|avenida|ave|av|reparto|edificio|apto|apartamento|casa|km|kilometro|barrio|entre|esquina|carretera|pasaje|zona)\b/u', $normVal);
+    if (!$hasAddressHint) return '';
     return mb_substr($val, 0, 220);
 }
 
@@ -296,62 +339,143 @@ function bot_intent_has(string $norm, array $needles): bool {
 
 function bot_extract_qty(string $normText): int {
     if (preg_match('/\b(\d{1,2})\b/', $normText, $m)) return max(1, min(99, (int)$m[1]));
+    $map = [
+        'un'=>1,'uno'=>1,'una'=>1,
+        'dos'=>2,'tres'=>3,'cuatro'=>4,'cinco'=>5,'seis'=>6,'siete'=>7,'ocho'=>8,'nueve'=>9,'diez'=>10,
+        'par'=>2
+    ];
+    foreach ($map as $word => $qty) {
+        if (preg_match('/\b' . preg_quote($word, '/') . '\b/u', $normText)) return $qty;
+    }
     return 1;
 }
 
-function bot_find_product_by_text(array $menu, string $normText): ?array {
-    $best = null;
-    $bestScore = 0;
-    $tokens = array_values(array_filter(explode(' ', $normText), static fn($x) => mb_strlen($x) >= 2));
+function bot_strip_filler_words(string $normText): string {
+    $patterns = [
+        '/\b(agregar|anadir|añadir|sumar|quiero|dame|deseo|mandame|manda|ponme|pon|me das|favor|por favor|necesito|para mi|para)\b/u',
+        '/\b(un|una|unos|unas)\b/u'
+    ];
+    $clean = $normText;
+    foreach ($patterns as $p) $clean = preg_replace($p, ' ', $clean) ?? $clean;
+    $clean = preg_replace('/\s+/', ' ', trim($clean)) ?? '';
+    return $clean;
+}
+
+function bot_extract_item_note(string $normText): array {
+    $notes = [];
+    $clean = $normText;
+    $patterns = [
+        '/\bsin\s+([a-z0-9 ]{2,40})/u' => 'Sin %s',
+        '/\bcon\s+extra\s+([a-z0-9 ]{2,40})/u' => 'Con extra %s',
+        '/\bextra\s+([a-z0-9 ]{2,40})/u' => 'Extra %s',
+        '/\bbien\s+([a-z0-9 ]{2,30})/u' => 'Bien %s',
+        '/\bpoco\s+([a-z0-9 ]{2,30})/u' => 'Poco %s',
+        '/\bsin\s+([a-z0-9 ]{2,25})\s+y\s+sin\s+([a-z0-9 ]{2,25})/u' => 'Sin %s y sin %s'
+    ];
+    foreach ($patterns as $regex => $fmt) {
+        if (preg_match_all($regex, $clean, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $m) {
+                $parts = [];
+                for ($i = 1; $i < count($m); $i++) {
+                    $parts[] = trim((string)$m[$i]);
+                }
+                $notes[] = vsprintf($fmt, $parts);
+            }
+            $clean = preg_replace($regex, ' ', $clean) ?? $clean;
+        }
+    }
+    $clean = preg_replace('/\s+/', ' ', trim($clean)) ?? '';
+    return ['text' => $clean, 'note' => trim(implode('; ', array_unique(array_filter($notes))))];
+}
+
+function bot_similarity_score(string $a, string $b): int {
+    $a = trim($a);
+    $b = trim($b);
+    if ($a === '' || $b === '') return 0;
+    if ($a === $b) return 1000;
+    if (str_contains($a, $b) || str_contains($b, $a)) return 850;
+    $aCompact = str_replace(' ', '', $a);
+    $bCompact = str_replace(' ', '', $b);
+    $maxLen = max(strlen($aCompact), strlen($bCompact));
+    $lev = levenshtein($aCompact, $bCompact);
+    $levScore = $maxLen > 0 ? (int)round((1 - min($lev, $maxLen) / $maxLen) * 100) : 0;
+    $aTokens = array_values(array_filter(explode(' ', $a), static fn($x) => mb_strlen($x) >= 2));
+    $bTokens = array_values(array_filter(explode(' ', $b), static fn($x) => mb_strlen($x) >= 2));
+    $common = count(array_intersect($aTokens, $bTokens));
+    $ratio = $common > 0 ? $common / max(1, count($bTokens)) : 0;
+    return max($levScore, (int)round($ratio * 100) + ($common * 10));
+}
+
+function bot_find_product_candidates(array $menu, string $normText): array {
+    $normText = bot_strip_filler_words($normText);
+    $scored = [];
     foreach ($menu as $p) {
         $sku = (string)($p['codigo'] ?? '');
         $name = (string)($p['nombre'] ?? '');
         $skuNorm = bot_norm($sku);
         $nameNorm = bot_norm($name);
-        if ($skuNorm !== '' && preg_match('/\b'.preg_quote($skuNorm, '/').'\b/', $normText)) {
-            return $p;
+        $score = 0;
+        if ($skuNorm !== '' && preg_match('/\b' . preg_quote($skuNorm, '/') . '\b/u', $normText)) {
+            $score = 1100;
+        } else {
+            $score = max(bot_similarity_score($normText, $nameNorm), bot_similarity_score($normText, $skuNorm));
         }
-        $nameTokens = array_values(array_filter(explode(' ', $nameNorm), static fn($x) => mb_strlen($x) >= 3));
-        if (!$nameTokens) continue;
-        $common = 0;
-        foreach ($nameTokens as $tk) {
-            if (in_array($tk, $tokens, true)) $common++;
-        }
-        if ($common === 0) continue;
-        $ratio = $common / max(1, count($nameTokens));
-        $score = (int)round($ratio * 100) + $common;
-        if ($ratio >= 0.5 && $score > $bestScore) {
-            $best = $p;
-            $bestScore = $score;
-        }
+        if ($score < 45) continue;
+        $scored[] = ['product' => $p, 'score' => $score];
     }
-    return $best;
+    usort($scored, static fn($a, $b) => ($b['score'] <=> $a['score']) ?: strcasecmp((string)$a['product']['nombre'], (string)$b['product']['nombre']));
+    return array_slice($scored, 0, 4);
 }
 
-function bot_parse_add_items(array $menu, string $text): array {
+function bot_parse_add_request(array $menu, string $text): array {
     $norm = bot_norm($text);
-    if ($norm === '') return [];
-    $segments = preg_split('/\s*(?:,| y | e |;|\+)\s*/u', $norm) ?: [$norm];
-    $out = [];
+    if ($norm === '') return ['items' => [], 'ambiguous' => [], 'unknown' => []];
+    $segments = preg_split('/\s*(?:,| y | e |;|\+| mas )\s*/u', $norm) ?: [$norm];
+    $items = [];
+    $ambiguous = [];
+    $unknown = [];
     foreach ($segments as $seg) {
         $seg = trim($seg);
         if ($seg === '') continue;
-        $p = bot_find_product_by_text($menu, $seg);
-        if (!$p) continue;
         $qty = bot_extract_qty($seg);
-        $sku = (string)$p['codigo'];
-        $out[$sku] = ($out[$sku] ?? 0) + $qty;
-    }
-    if (!$out) {
-        $single = bot_find_product_by_text($menu, $norm);
-        if ($single) {
-            $qty = bot_extract_qty($norm);
-            $out[(string)$single['codigo']] = $qty;
+        $noteInfo = bot_extract_item_note($seg);
+        $lookup = bot_strip_filler_words($noteInfo['text']);
+        $lookup = preg_replace('/\b(\d{1,2}|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|par)\b/u', ' ', $lookup) ?? $lookup;
+        $lookup = preg_replace('/\s+/', ' ', trim($lookup)) ?? '';
+        $candidates = bot_find_product_candidates($menu, $lookup);
+        if (!$candidates) {
+            $unknown[] = $seg;
+            continue;
         }
+        $best = $candidates[0];
+        $second = $candidates[1] ?? null;
+        $isAmbiguous = $second && ($best['score'] - $second['score'] <= 10) && $best['score'] < 900;
+        if ($isAmbiguous) {
+            $ambiguous[] = [
+                'text' => $seg,
+                'qty' => $qty,
+                'note' => $noteInfo['note'],
+                'options' => array_map(static fn($row) => [
+                    'sku' => (string)$row['product']['codigo'],
+                    'name' => (string)$row['product']['nombre']
+                ], array_slice($candidates, 0, 3))
+            ];
+            continue;
+        }
+        $sku = (string)$best['product']['codigo'];
+        $items[] = [
+            'sku' => $sku,
+            'qty' => $qty,
+            'name' => (string)$best['product']['nombre'],
+            'note' => $noteInfo['note']
+        ];
     }
-    $items = [];
-    foreach ($out as $sku => $qty) $items[] = ['sku' => $sku, 'qty' => $qty];
-    return $items;
+    return ['items' => $items, 'ambiguous' => $ambiguous, 'unknown' => $unknown];
+}
+
+function bot_find_product_by_text(array $menu, string $normText): ?array {
+    $candidates = bot_find_product_candidates($menu, bot_norm($normText));
+    return $candidates[0]['product'] ?? null;
 }
 
 function bot_parse_remove_item(array $menu, string $text): ?string {
@@ -369,11 +493,231 @@ function bot_menu(PDO $pdo, int $emp, int $suc): array {
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function bot_pick(array $options, string $seed=''): string {
+    if (!$options) return '';
+    $idx = abs(crc32($seed !== '' ? $seed : (string)microtime(true))) % count($options);
+    return (string)$options[$idx];
+}
+
+function bot_site_url(array $appCfg): string {
+    $url = trim((string)($appCfg['website'] ?? ''));
+    if ($url === '') $url = 'https://www.palweb.net';
+    if (!preg_match('~^https?://~i', $url)) $url = 'https://' . ltrim($url, '/');
+    return $url;
+}
+
+function bot_site_promo(array $cfg, array $appCfg, string $seed=''): string {
+    $site = preg_replace('~^https?://~i', '', bot_site_url($appCfg));
+    $tone = bot_tone_variants($cfg);
+    return sprintf(bot_pick($tone['site'], $seed), $site);
+}
+
+function bot_business_logo_url(array $appCfg): string {
+    $logo = trim((string)($appCfg['ticket_logo'] ?? ''));
+    if ($logo === '') return '';
+    if (preg_match('~^https?://~i', $logo)) return $logo;
+    $base = bot_public_base_url();
+    return $logo[0] === '/' ? ($base . $logo) : ($base . '/' . ltrim($logo, '/'));
+}
+
+function bot_tone(array $cfg): string {
+    $tone = trim((string)($cfg['bot_tone'] ?? 'muy_cercano'));
+    return in_array($tone, ['premium','popular_cubano','formal_comercial','muy_cercano'], true) ? $tone : 'muy_cercano';
+}
+
+function bot_tone_variants(array $cfg): array {
+    switch (bot_tone($cfg)) {
+        case 'premium':
+            return [
+                'greetings' => [
+                    'Hola %s, es un placer atenderte.',
+                    'Bienvenido %s, estoy a tu disposición para ayudarte con tu compra.',
+                    'Hola %s, con gusto te ayudo a realizar tu pedido.'
+                ],
+                'followup' => [
+                    'Puedo mostrarte el catálogo, ayudarte a repetir tu última compra o tomar tu pedido paso a paso.',
+                    'Si lo deseas, te enseño el menú o preparo tu pedido de forma rápida.',
+                    'Cuéntame qué necesitas y me encargo de guiarte.'
+                ],
+                'site' => [
+                    'También puedes consultar el catálogo y comprar automáticamente en %s.',
+                    'Si prefieres una experiencia directa, en %s puedes comprar automáticamente.',
+                    'Recuerda que en %s puedes revisar productos y comprar de forma automática.'
+                ]
+            ];
+        case 'popular_cubano':
+            return [
+                'greetings' => [
+                    'Hola %s, qué bolá, aquí te atiendo rapidito.',
+                    'Asere %s, dime qué te hace falta y te ayudo enseguida.',
+                    'Hola %s, tranquilo, que yo te armo el pedido.'
+                ],
+                'followup' => [
+                    'Si quieres, te saco el menú, te repito lo de siempre o te monto el pedido al momento.',
+                    'Escríbeme como hablas normal y yo te resuelvo.',
+                    'Tú dime lo que quieres comer o comprar y yo lo voy armando.'
+                ],
+                'site' => [
+                    'Oye, en %s también puedes mirar el catálogo y comprar automático.',
+                    'Si quieres ir más rápido, entra en %s y haces la compra automática.',
+                    'Acuérdate que por %s puedes comprar automático sin esperar.'
+                ]
+            ];
+        case 'formal_comercial':
+            return [
+                'greetings' => [
+                    'Buenas %s, gracias por contactarnos.',
+                    'Estimado %s, estamos listos para atender su solicitud.',
+                    'Hola %s, con gusto gestiono su pedido.'
+                ],
+                'followup' => [
+                    'Puedo mostrarle el catálogo, registrar su pedido o ayudarle a repetir una compra anterior.',
+                    'Indíqueme los productos que desea y con gusto los organizo.',
+                    'Si lo prefiere, le muestro el menú disponible.'
+                ],
+                'site' => [
+                    'Puede consultar el catálogo y comprar automáticamente en %s.',
+                    'Para una compra más directa, utilice %s.',
+                    'Le recordamos que en %s puede comprar de forma automática.'
+                ]
+            ];
+        default:
+            return [
+                'greetings' => [
+                    'Hola %s, qué bueno tenerte por aquí.',
+                    'Hola %s, aquí estoy para ayudarte con tu pedido.',
+                    'Buenas %s, dime qué te apetece y te ayudo enseguida.'
+                ],
+                'followup' => [
+                    'Puedo mostrarte el catálogo, repetir tu pedido anterior o ayudarte paso a paso.',
+                    'Escríbeme como hablas normalmente y yo te ayudo.',
+                    'Si quieres, te enseño el menú o vamos armando el pedido juntos.'
+                ],
+                'site' => [
+                    'También puedes ver el catálogo y comprar automático en %s.',
+                    'Si prefieres comprar más rápido, entra en %s y haz tu pedido automático.',
+                    'Recuerda que en %s puedes ver productos y comprar automáticamente.'
+                ]
+            ];
+    }
+}
+
+function bot_customer_display_name(array $cart, string $fallback='Cliente'): string {
+    $name = trim((string)($cart['customer_name'] ?? ''));
+    if ($name === '') $name = trim($fallback);
+    if ($name === '') $name = 'Cliente';
+    $parts = preg_split('/\s+/', $name) ?: [$name];
+    return ucfirst(mb_strtolower((string)$parts[0], 'UTF-8'));
+}
+
+function bot_send_catalog_showcase(PDO $pdo, string $wa, array $appCfg, array $menu, string $intro=''): void {
+    $logo = bot_business_logo_url($appCfg);
+    if ($logo !== '') {
+        bot_send_image($pdo, $wa, $logo, $intro);
+        $intro = '';
+    }
+    $count = 0;
+    foreach ($menu as $p) {
+        $sku = trim((string)($p['codigo'] ?? ''));
+        if ($sku === '') continue;
+        $caption = "{$p['nombre']}\nPrecio: $" . number_format((float)$p['precio'], 2);
+        if ($count === 0 && $intro !== '') $caption = $intro . "\n\n" . $caption;
+        bot_send_image($pdo, $wa, bot_public_product_image($sku), $caption);
+        $count++;
+        if ($count >= 3) break;
+    }
+    if ($count === 0 && $intro !== '') {
+        bot_send($pdo, [], $wa, $intro);
+    }
+}
+
+function bot_greeting_text(array $cfg, array $appCfg, array $cart, string $fallbackName='Cliente'): string {
+    $name = bot_customer_display_name($cart, $fallbackName);
+    $business = trim((string)($cfg['business_name'] ?? ($appCfg['tienda_nombre'] ?? 'PalWeb POS')));
+    $tone = bot_tone_variants($cfg);
+    $greet = sprintf(bot_pick($tone['greetings'], $name . date('YmdH')), $name);
+    $extra = ((int)($cart['greet_count'] ?? 0) > 0)
+        ? bot_pick($tone['followup'], $name . 'repeat')
+        : "Estás hablando con {$business}. Puedes pedir escribiendo natural, por ejemplo: \"quiero 2 pizzas y 1 refresco\".";
+    return $greet . "\n" . $extra . "\n" . bot_site_promo($cfg, $appCfg, $name . 'promo');
+}
+
+function bot_format_item_line(array $product, int $qty, string $note=''): string {
+    $line = "- {$product['nombre']} ({$product['codigo']}) x{$qty}";
+    if ($note !== '') $line .= " [{$note}]";
+    $line .= " = $" . number_format(((float)$product['precio']) * $qty, 2);
+    return $line;
+}
+
+function bot_suggest_item(array $menu, array $cart): ?array {
+    $existing = array_keys((array)($cart['items'] ?? []));
+    $preferredWords = ['refresco','bebida','jugo','agua','postre','cafe','café'];
+    foreach ($menu as $p) {
+        $sku = (string)$p['codigo'];
+        if (in_array($sku, $existing, true)) continue;
+        $nameNorm = bot_norm((string)$p['nombre']);
+        foreach ($preferredWords as $word) {
+            if (str_contains($nameNorm, bot_norm($word))) return $p;
+        }
+    }
+    foreach ($menu as $p) {
+        if (!in_array((string)$p['codigo'], $existing, true)) return $p;
+    }
+    return null;
+}
+
+function bot_repeat_last_order(array &$cart): array {
+    $last = is_array($cart['last_order'] ?? null) ? $cart['last_order'] : [];
+    $items = is_array($last['items'] ?? null) ? $last['items'] : [];
+    if (!$items) return [];
+    foreach ($items as $sku => $qty) {
+        $cart['items'][$sku] = ($cart['items'][$sku] ?? 0) + max(1, (int)$qty);
+    }
+    foreach ((array)($last['item_notes'] ?? []) as $sku => $note) {
+        if (trim((string)$note) !== '') $cart['item_notes'][$sku] = trim((string)$note);
+    }
+    return $items;
+}
+
+function bot_faq_answer(string $norm, array $cfg, array $appCfg): ?string {
+    $answers = [];
+    if (bot_intent_has($norm, ['horario','abren','abierto','cierran','hora'])) {
+        $answers[] = "Puedo ayudarte a tomar el pedido ahora mismo por este chat.";
+        $answers[] = "Si quieres confirmar disponibilidad inmediata, pideme el menu o dime lo que necesitas.";
+    }
+    if (bot_intent_has($norm, ['direccion','dirección','donde estan','ubicacion','ubicación','local'])) {
+        $dir = trim((string)($appCfg['direccion'] ?? ''));
+        $answers[] = $dir !== '' ? "Nuestra direccion es: {$dir}." : "La direccion del negocio no esta configurada todavia en el sistema.";
+    }
+    if (bot_intent_has($norm, ['telefono','teléfono','llamar','contacto'])) {
+        $tel = trim((string)($appCfg['telefono'] ?? ''));
+        $answers[] = $tel !== '' ? "Puedes llamarnos o escribirnos al {$tel}." : "El telefono del negocio no esta configurado aun.";
+    }
+    if (bot_intent_has($norm, ['correo','email'])) {
+        $email = trim((string)($appCfg['email'] ?? ''));
+        if ($email !== '') $answers[] = "Nuestro correo es {$email}.";
+    }
+    if (bot_intent_has($norm, ['web','sitio','pagina','pagina web','catalogo','catálogo online'])) {
+        $answers[] = "Puedes ver el catalogo y comprar automaticamente en " . bot_site_url($appCfg) . ".";
+    }
+    if (bot_intent_has($norm, ['pago','pagos','transferencia','efectivo','tarjeta'])) {
+        $answers[] = "Aceptamos pagos segun la configuracion del negocio y tambien puedes revisar las opciones al comprar en " . bot_site_url($appCfg) . ".";
+    }
+    if (bot_intent_has($norm, ['envio','envío','domicilio','delivery','entrega'])) {
+        $tarifa = (float)($appCfg['mensajeria_tarifa_km'] ?? 0);
+        $answers[] = $tarifa > 0 ? "Hacemos entregas a domicilio. La tarifa base configurada es {$tarifa} por km." : "Podemos gestionar entrega a domicilio. Si quieres, comparte tu direccion y te guiamos.";
+    }
+    if (!$answers) return null;
+    $answers[] = bot_site_promo($cfg, $appCfg, $norm . 'faq');
+    return implode("\n", array_unique($answers));
+}
+
 function bot_cart_text(PDO $pdo, array $cart): array {
     $items = $cart['items'] ?? [];
-    if (!$items) return ['text' => 'Carrito vacio.', 'total' => 0];
-    $lines = ['Tu carrito:'];
+    if (!$items) return ['text' => 'Tu carrito esta vacio por ahora.', 'total' => 0];
+    $lines = ['Asi va tu pedido:'];
     $tot = 0.0;
+    $notes = (array)($cart['item_notes'] ?? []);
     foreach ($items as $sku => $qty) {
         $st = $pdo->prepare("SELECT nombre,precio FROM productos WHERE codigo=? LIMIT 1");
         $st->execute([$sku]);
@@ -381,12 +725,16 @@ function bot_cart_text(PDO $pdo, array $cart): array {
         if (!$p) continue;
         $sub = (float)$p['precio'] * (float)$qty;
         $tot += $sub;
-        $lines[] = "- {$p['nombre']} ({$sku}) x{$qty} = $" . number_format($sub,2);
+        $note = trim((string)($notes[$sku] ?? ''));
+        $line = "- {$p['nombre']} ({$sku}) x{$qty}";
+        if ($note !== '') $line .= " [{$note}]";
+        $line .= " = $" . number_format($sub,2);
+        $lines[] = $line;
     }
     $lines[] = "TOTAL: $" . number_format($tot,2);
     if (!empty($cart['customer_name'])) $lines[] = "Nombre: " . $cart['customer_name'];
     if (!empty($cart['customer_address'])) $lines[] = "Direccion: " . $cart['customer_address'];
-    $lines[] = "Escribe CONFIRMAR para crear el pedido.";
+    $lines[] = "Si lo ves bien, escribe CONFIRMAR y lo cierro por ti.";
     return ['text' => implode("\n", $lines), 'total' => $tot];
 }
 
@@ -397,6 +745,7 @@ function bot_create_order(PDO $pdo, array $appCfg, string $wa, string $name, str
     $pdo->beginTransaction();
     try {
         $total = 0.0; $valid = [];
+        $itemNotes = (array)($cart['item_notes'] ?? []);
         foreach ($items as $sku => $qty) {
             $st = $pdo->prepare("SELECT codigo,nombre,precio FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
             $st->execute([$sku, (int)$appCfg['id_empresa']]);
@@ -404,11 +753,23 @@ function bot_create_order(PDO $pdo, array $appCfg, string $wa, string $name, str
             if (!$p) continue;
             $q = max(1, (int)$qty);
             $total += (float)$p['precio'] * $q;
-            $valid[] = ['sku'=>$p['codigo'], 'qty'=>$q, 'price'=>(float)$p['precio']];
+            $valid[] = [
+                'sku'=>$p['codigo'],
+                'name'=>(string)$p['nombre'],
+                'qty'=>$q,
+                'price'=>(float)$p['precio'],
+                'note'=>trim((string)($itemNotes[(string)$p['codigo']] ?? ''))
+            ];
         }
         if (!$valid) throw new Exception('Sin productos validos');
 
-        $notes = "WHATSAPP_BOT\nwa_user={$wa}\nwa_name={$name}\nwa_address={$address}";
+        $orderLines = ["WHATSAPP_BOT","wa_user={$wa}","wa_name={$name}","wa_address={$address}"];
+        foreach ($valid as $it) {
+            $line = "item={$it['sku']} x{$it['qty']}";
+            if ($it['note'] !== '') $line .= " note={$it['note']}";
+            $orderLines[] = $line;
+        }
+        $notes = implode("\n", $orderLines);
         $h = $pdo->prepare("INSERT INTO pedidos_cabecera
             (cliente_nombre,cliente_telefono,total,estado,fecha,id_empresa,id_sucursal,notas)
             VALUES (?,?,?,'pendiente',NOW(),?,?,?)");
@@ -420,11 +781,94 @@ function bot_create_order(PDO $pdo, array $appCfg, string $wa, string $name, str
 
         $pdo->prepare("INSERT INTO pos_bot_orders (id_pedido,wa_user_id,total) VALUES (?,?,?)")->execute([$idp,$wa,$total]);
         $pdo->commit();
-        return ['ok'=>true, 'id_pedido'=>$idp, 'total'=>$total];
+        return [
+            'ok'=>true,
+            'id_pedido'=>$idp,
+            'total'=>$total,
+            'order_snapshot'=>[
+                'items' => $items,
+                'item_notes' => $itemNotes,
+                'customer_name' => $name,
+                'customer_address' => $address,
+                'created_at' => date('c'),
+                'id_pedido' => $idp
+            ]
+        ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         return ['ok'=>false, 'msg'=>$e->getMessage()];
     }
+}
+
+function bot_add_items_to_cart(array &$cart, array $items): array {
+    $added = [];
+    foreach ($items as $it) {
+        $sku = (string)($it['sku'] ?? '');
+        $qty = max(1, (int)($it['qty'] ?? 1));
+        $name = (string)($it['name'] ?? $sku);
+        $note = trim((string)($it['note'] ?? ''));
+        if ($sku === '') continue;
+        $cart['items'][$sku] = ($cart['items'][$sku] ?? 0) + $qty;
+        if ($note !== '') $cart['item_notes'][$sku] = $note;
+        $added[] = ['sku' => $sku, 'qty' => $qty, 'name' => $name, 'note' => $note];
+    }
+    return $added;
+}
+
+function bot_pending_choice_prompt(array $pending): string {
+    $options = is_array($pending['options'] ?? null) ? $pending['options'] : [];
+    if (!$options) return 'Necesito que me digas mejor cual producto quieres.';
+    $lines = ["Quiero asegurarme de entenderte bien. ¿Cual de estos productos quieres?"];
+    foreach ($options as $i => $op) {
+        $lines[] = ($i + 1) . ". {$op['name']} ({$op['sku']})";
+    }
+    $lines[] = 'Respóndeme con el número o el nombre exacto.';
+    return implode("\n", $lines);
+}
+
+function bot_try_resolve_pending_choice(array $menu, array &$cart, string $msg): ?array {
+    $pending = is_array($cart['pending_choice'] ?? null) ? $cart['pending_choice'] : null;
+    if (!$pending) return null;
+    $norm = bot_norm($msg);
+    if (bot_intent_has($norm, ['cancelar','ninguno','olvida','dejalo'])) {
+        $cart['pending_choice'] = null;
+        return ['status' => 'cancelled'];
+    }
+    $options = is_array($pending['options'] ?? null) ? $pending['options'] : [];
+    if (!$options) {
+        $cart['pending_choice'] = null;
+        return ['status' => 'cancelled'];
+    }
+    $pick = null;
+    if (preg_match('/^\s*([1-3])\s*$/', $msg, $m)) {
+        $idx = max(0, ((int)$m[1]) - 1);
+        $pick = $options[$idx] ?? null;
+    }
+    if (!$pick) {
+        foreach ($options as $op) {
+            $skuNorm = bot_norm((string)$op['sku']);
+            $nameNorm = bot_norm((string)$op['name']);
+            if ($skuNorm !== '' && str_contains($norm, $skuNorm)) { $pick = $op; break; }
+            if ($nameNorm !== '' && (str_contains($norm, $nameNorm) || bot_similarity_score($norm, $nameNorm) >= 70)) { $pick = $op; break; }
+        }
+    }
+    if (!$pick) return ['status' => 'retry'];
+    $product = null;
+    foreach ($menu as $p) {
+        if ((string)($p['codigo'] ?? '') === (string)$pick['sku']) { $product = $p; break; }
+    }
+    if (!$product) {
+        $cart['pending_choice'] = null;
+        return ['status' => 'cancelled'];
+    }
+    $added = bot_add_items_to_cart($cart, [[
+        'sku' => (string)$product['codigo'],
+        'qty' => max(1, (int)($pending['qty'] ?? 1)),
+        'name' => (string)$product['nombre'],
+        'note' => trim((string)($pending['note'] ?? ''))
+    ]]);
+    $cart['pending_choice'] = null;
+    return ['status' => 'resolved', 'added' => $added];
 }
 
 function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string $name, string $text): void {
@@ -434,17 +878,45 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
     $cart = bot_get_cart($pdo, $wa, $name);
     $menu = bot_menu($pdo, (int)$appCfg['id_empresa'], (int)$appCfg['id_sucursal']);
     if (($cart['customer_name'] ?? '') === '' && $name !== '') $cart['customer_name'] = $name;
-
-    $isGreeting = bot_intent_has($norm, ['hola','buenas','start','iniciar']);
-    $isMenuReq = bot_intent_has($norm, ['menu','menú','catalogo','carta','productos']);
-    $isCartReq = bot_intent_has($norm, ['carrito','mi pedido','resumen']);
-    $isCancel = bot_intent_has($norm, ['cancelar','vaciar carrito','borrar carrito']);
-    $isConfirm = bot_intent_has($norm, ['confirmar','ordenar','pedir','finalizar','checkout']);
-    $isAdd = bot_intent_has($norm, ['agregar','añadir','anadir','sumar','quiero','dame','deseo','me das','ponme','mandame']);
+    $isGreeting = bot_intent_has($norm, ['hola','buenas','buen dia','buenas tardes','buenas noches','start','iniciar','hello','saludos']);
+    $isMenuReq = bot_intent_has($norm, ['menu','menú','catalogo','catálogo','carta','productos','que tienes','que venden','muestrame']);
+    $isCartReq = bot_intent_has($norm, ['carrito','mi pedido','resumen','que llevo']);
+    $isCancel = bot_intent_has($norm, ['cancelar','vaciar carrito','borrar carrito','anular pedido']);
+    $isConfirm = bot_intent_has($norm, ['confirmar','ordenar','pedir','finalizar','checkout','cerrar pedido']);
+    $isAdd = bot_intent_has($norm, ['agregar','añadir','anadir','sumar','quiero','dame','deseo','me das','ponme','mandame','preparame','me pones']);
     $isRemove = bot_intent_has($norm, ['quitar','eliminar','sacar','remover']);
-
+    $isRepeat = bot_intent_has($norm, ['lo mismo','lo de siempre','repite el ultimo','repite mi ultimo','igual que la vez pasada','igual que siempre']);
     $looksLikeName = bot_intent_has($norm, ['mi nombre es','soy','me llamo','nombre']);
     $looksLikeAddress = bot_intent_has($norm, ['direccion','dirección','mi direccion es','vivo en','entrega en','dir']);
+
+    $faq = ((string)($cart['awaiting_field'] ?? '') === '') ? bot_faq_answer($norm, $cfg, $appCfg) : null;
+    if ($faq && !$isAdd && !$isConfirm && !$isCartReq) {
+        bot_send($pdo, $cfg, $wa, $faq);
+        return;
+    }
+
+    $pendingResolved = bot_try_resolve_pending_choice($menu, $cart, $msg);
+    if ($pendingResolved) {
+        if (($pendingResolved['status'] ?? '') === 'resolved') {
+            bot_save_cart($pdo, $wa, $name, $cart);
+            $addedLines = array_map(static function ($it) {
+                $line = "{$it['name']} x{$it['qty']}";
+                if (($it['note'] ?? '') !== '') $line .= " [{$it['note']}]";
+                return $line;
+            }, $pendingResolved['added'] ?? []);
+            bot_send($pdo, $cfg, $wa, "Perfecto, ya lo entendí.\nAgregué:\n- " . implode("\n- ", $addedLines) . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'resolved'));
+            return;
+        }
+        if (($pendingResolved['status'] ?? '') === 'retry') {
+            bot_send($pdo, $cfg, $wa, bot_pending_choice_prompt($cart['pending_choice'] ?? []));
+            return;
+        }
+        if (($pendingResolved['status'] ?? '') === 'cancelled') {
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, 'Perfecto, descarto esa selección. Si quieres, dime el producto otra vez con otras palabras.');
+            return;
+        }
+    }
 
     if (($cart['awaiting_field'] ?? '') === 'name' && !$isMenuReq && !$isCartReq && !$isCancel) {
         $candidateName = bot_extract_name($msg);
@@ -452,10 +924,10 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             $cart['customer_name'] = $candidateName;
             $cart['awaiting_field'] = 'address';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Gracias, {$candidateName}. Ahora comparte la direccion de entrega.");
+            bot_send($pdo, $cfg, $wa, "Gracias, {$candidateName}. Ahora comparteme la direccion de entrega.\n" . bot_site_promo($cfg, $appCfg, $wa . 'name'));
             return;
         }
-        bot_send($pdo, $cfg, $wa, "Para continuar necesito tu nombre. Ejemplo: Mi nombre es Juan Perez.");
+        bot_send($pdo, $cfg, $wa, 'Para continuar necesito tu nombre completo. Ejemplo: Mi nombre es Juan Perez.');
         return;
     }
 
@@ -465,10 +937,10 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             $cart['customer_address'] = $candidateAddress;
             $cart['awaiting_field'] = '';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Perfecto. Direccion guardada: {$candidateAddress}. Cuando quieras, escribe CONFIRMAR.");
+            bot_send($pdo, $cfg, $wa, "Perfecto. Ya guardé tu direccion: {$candidateAddress}.\nCuando quieras, escribe CONFIRMAR y cierro el pedido.");
             return;
         }
-        bot_send($pdo, $cfg, $wa, "Necesito una direccion valida para entrega. Ejemplo: Direccion: Calle 10 #45 entre A y B.");
+        bot_send($pdo, $cfg, $wa, 'Necesito una direccion valida para entrega. Ejemplo: Direccion: Calle 10 #45 entre A y B.');
         return;
     }
 
@@ -478,7 +950,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             $cart['customer_name'] = $candidateName;
             if (($cart['awaiting_field'] ?? '') === 'name') $cart['awaiting_field'] = '';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Nombre guardado: {$candidateName}.");
+            bot_send($pdo, $cfg, $wa, "Perfecto, {$candidateName}. Ya guardé tu nombre.");
             return;
         }
     }
@@ -494,42 +966,73 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         }
     }
 
-    if ($isGreeting || $isMenuReq) {
-        $hello = str_replace(['{{name}}','{{business}}'], [$name ?: 'Cliente', $cfg['business_name'] ?? 'PalWeb POS'], (string)($cfg['welcome_message'] ?? ''));
-        $lines = [$hello, '', (string)($cfg['menu_intro'] ?? 'Menu:')];
+    if (
+        $isGreeting ||
+        (
+            ($cart['greet_count'] ?? 0) === 0 &&
+            empty($cart['items']) &&
+            trim((string)($cart['customer_address'] ?? '')) === '' &&
+            !$isAdd && !$isConfirm && !$isCartReq
+        )
+    ) {
+        $cart['greet_count'] = ((int)($cart['greet_count'] ?? 0)) + 1;
+        bot_save_cart($pdo, $wa, $name, $cart);
+        $greetingText = bot_greeting_text($cfg, $appCfg, $cart, $name);
+        bot_send($pdo, $cfg, $wa, $greetingText);
+        $logo = bot_business_logo_url($appCfg);
+        if ($logo !== '') bot_send_image($pdo, $wa, $logo, "Compra fácil por chat o en " . bot_site_url($appCfg));
+        return;
+    }
+
+    if ($isMenuReq) {
+        $lines = [bot_greeting_text($cfg, $appCfg, $cart, $name), '', (string)($cfg['menu_intro'] ?? 'Menu:')];
         foreach ($menu as $p) $lines[] = "{$p['codigo']} - {$p['nombre']} - $" . number_format((float)$p['precio'],2);
-        $lines[] = "";
-        $lines[] = "Puedes escribir natural: \"quiero 2 pizzas y 1 refresco\".";
-        $lines[] = "Comandos: AGREGAR CODIGO CANTIDAD | QUITAR CODIGO | CARRITO | CONFIRMAR";
+        $lines[] = '';
+        $lines[] = 'Puedes pedirme algo natural, por ejemplo: "quiero 2 croquetas y 1 refresco sin hielo".';
+        $lines[] = 'Tambien puedo repetir tu ultimo pedido si me dices: "lo de siempre".';
+        $lines[] = bot_site_promo($cfg, $appCfg, $wa . 'menu');
         bot_send($pdo, $cfg, $wa, implode("\n", $lines));
+        bot_send_catalog_showcase($pdo, $wa, $appCfg, $menu, 'Aquí tienes una vista rápida del catálogo.');
+        return;
+    }
+
+    if ($isRepeat) {
+        $repeated = bot_repeat_last_order($cart);
+        if ($repeated) {
+            bot_save_cart($pdo, $wa, $name, $cart);
+            $summary = bot_cart_text($pdo, $cart);
+            bot_send($pdo, $cfg, $wa, "Te repetí el ultimo pedido que tenías guardado.\n\n" . $summary['text'] . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'repeat'));
+        } else {
+            bot_send($pdo, $cfg, $wa, "Todavia no tengo un pedido anterior guardado para repetir. Si quieres, te muestro el menu o puedes pedirme algo natural.");
+        }
         return;
     }
 
     if ($isAdd || str_starts_with(mb_strtoupper($msg), 'AGREGAR ')) {
-        $items = bot_parse_add_items($menu, $msg);
-        if (!$items && preg_match('/^AGREGAR\s+(\S+)(?:\s+(\d{1,2}))?$/iu', $msg, $m)) {
-            $items = [['sku' => (string)$m[1], 'qty' => isset($m[2]) ? max(1, (int)$m[2]) : 1]];
-        }
-        if (!$items) {
-            bot_send($pdo,$cfg,$wa,'No pude identificar productos. Ejemplo: "quiero 2 empanadas y 1 refresco" o AGREGAR CODIGO 2.');
+        $parsed = bot_parse_add_request($menu, $msg);
+        if (!empty($parsed['ambiguous'])) {
+            $cart['pending_choice'] = $parsed['ambiguous'][0];
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, bot_pending_choice_prompt($cart['pending_choice']));
             return;
         }
-        $catalogBySku = [];
-        foreach ($menu as $p) $catalogBySku[(string)$p['codigo']] = $p;
-        $added = [];
-        foreach ($items as $it) {
-            $sku = (string)($it['sku'] ?? '');
-            $qty = max(1, (int)($it['qty'] ?? 1));
-            if ($sku === '' || !isset($catalogBySku[$sku])) continue;
-            $cart['items'][$sku] = ($cart['items'][$sku] ?? 0) + $qty;
-            $added[] = "{$catalogBySku[$sku]['nombre']} x{$qty}";
-        }
-        if (!$added) {
-            bot_send($pdo,$cfg,$wa,'No encontre esos productos en el menu web. Escribe MENU para ver codigos.');
+        if (empty($parsed['items'])) {
+            $extra = !empty($parsed['unknown']) ? ("\nNo reconocí bien: " . implode(', ', $parsed['unknown']) . '.') : '';
+            bot_send($pdo, $cfg, $wa, 'No logré identificar bien los productos.' . $extra . "\nPrueba algo como: \"quiero 2 empanadas y 1 refresco\" o pideme el menu.");
             return;
         }
+        $added = bot_add_items_to_cart($cart, $parsed['items']);
         bot_save_cart($pdo, $wa, $name, $cart);
-        bot_send($pdo,$cfg,$wa,"Agregado al carrito:\n- " . implode("\n- ", $added) . "\nEscribe CARRITO para revisar.");
+        $lines = ['Perfecto, ya te lo agregué:'];
+        foreach ($added as $it) {
+            $line = "- {$it['name']} x{$it['qty']}";
+            if ($it['note'] !== '') $line .= " [{$it['note']}]";
+            $lines[] = $line;
+        }
+        $suggest = bot_suggest_item($menu, $cart);
+        if ($suggest) $lines[] = "Sugerencia: ¿quieres añadir {$suggest['nombre']} por $" . number_format((float)$suggest['precio'],2) . '?';
+        $lines[] = bot_site_promo($cfg, $appCfg, $wa . 'add');
+        bot_send($pdo, $cfg, $wa, implode("\n", $lines));
         return;
     }
 
@@ -537,52 +1040,72 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         $sku = bot_parse_remove_item($menu, $msg);
         if (!$sku && preg_match('/^QUITAR\s+(\S+)/iu', $msg, $m)) $sku = (string)$m[1];
         if ($sku !== null && $sku !== '' && isset($cart['items'][$sku])) {
-            unset($cart['items'][$sku]);
+            unset($cart['items'][$sku], $cart['item_notes'][$sku]);
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo,$cfg,$wa,"Producto {$sku} eliminado del carrito.");
+            bot_send($pdo, $cfg, $wa, "Listo, quité {$sku} de tu carrito.");
         } else {
-            bot_send($pdo,$cfg,$wa,'Ese producto no esta en tu carrito.');
+            bot_send($pdo, $cfg, $wa, 'Ese producto no lo tengo ahora mismo en tu carrito. Si quieres, te muestro el resumen.');
         }
         return;
     }
 
-    if ($isCartReq || mb_strtoupper($msg) === 'CARRITO') { bot_send($pdo,$cfg,$wa, bot_cart_text($pdo,$cart)['text']); return; }
+    if ($isCartReq || mb_strtoupper($msg) === 'CARRITO') {
+        $summary = bot_cart_text($pdo, $cart);
+        bot_send($pdo, $cfg, $wa, $summary['text'] . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'cart'));
+        return;
+    }
+
     if ($isCancel || mb_strtoupper($msg) === 'CANCELAR') {
-        $cart=['items'=>[], 'customer_name'=>($cart['customer_name'] ?? $name), 'customer_address'=>'', 'awaiting_field'=>''];
-        bot_save_cart($pdo,$wa,$name,$cart);
-        bot_send($pdo,$cfg,$wa,'Carrito cancelado.');
+        $lastOrder = $cart['last_order'] ?? null;
+        $greetCount = (int)($cart['greet_count'] ?? 0);
+        $cart = bot_default_cart((string)($cart['customer_name'] ?? $name));
+        if (($name !== '') && ($cart['customer_name'] ?? '') === '') $cart['customer_name'] = $name;
+        $cart['last_order'] = is_array($lastOrder) ? $lastOrder : null;
+        $cart['greet_count'] = $greetCount;
+        bot_save_cart($pdo, $wa, $name, $cart);
+        bot_send($pdo, $cfg, $wa, 'Listo, dejé el carrito vacío. Cuando quieras, empezamos de nuevo.');
         return;
     }
 
     if ($isConfirm || in_array(mb_strtoupper($msg), ['CONFIRMAR','ORDENAR','PEDIR'], true)) {
         if (empty($cart['items'])) {
-            bot_send($pdo,$cfg,$wa,'Tu carrito esta vacio. Escribe MENU para comenzar.');
+            bot_send($pdo, $cfg, $wa, 'Tu carrito está vacío. Pídeme el menu o escríbeme lo que deseas comprar.');
             return;
         }
         if (trim((string)($cart['customer_name'] ?? '')) === '') {
             $cart['awaiting_field'] = 'name';
-            bot_save_cart($pdo,$wa,$name,$cart);
-            bot_send($pdo,$cfg,$wa,'Antes de confirmar, dime tu nombre completo.');
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, 'Antes de confirmar, necesito tu nombre completo.');
             return;
         }
         if (trim((string)($cart['customer_address'] ?? '')) === '') {
             $cart['awaiting_field'] = 'address';
-            bot_save_cart($pdo,$wa,$name,$cart);
-            bot_send($pdo,$cfg,$wa,'Ahora necesito la direccion de entrega.');
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, 'Ya casi. Ahora necesito la direccion de entrega.');
             return;
         }
+        $summary = bot_cart_text($pdo, $cart);
         $res = bot_create_order($pdo, $appCfg, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cart);
         if ($res['ok']) {
-            $cartAfter = ['items'=>[], 'customer_name'=>(string)$cart['customer_name'], 'customer_address'=>(string)$cart['customer_address'], 'awaiting_field'=>''];
+            $cartAfter = bot_default_cart((string)$cart['customer_name']);
+            $cartAfter['customer_address'] = (string)$cart['customer_address'];
+            $cartAfter['greet_count'] = (int)($cart['greet_count'] ?? 0);
+            $cartAfter['last_order'] = is_array($res['order_snapshot'] ?? null) ? $res['order_snapshot'] : null;
             bot_save_cart($pdo, $wa, $name, $cartAfter);
-            bot_send($pdo,$cfg,$wa,"Pedido creado #{$res['id_pedido']}. Total: $" . number_format((float)$res['total'],2));
+            $summaryText = preg_replace('/\nSi lo ves bien, escribe CONFIRMAR y lo cierro por ti\.\s*$/u', '', $summary['text']) ?? $summary['text'];
+            bot_send($pdo, $cfg, $wa, "Perfecto, {$cart['customer_name']}. Ya quedó creado tu pedido #{$res['id_pedido']} por $" . number_format((float)$res['total'],2) . ".\n\nResumen final:\n" . $summaryText . "\n\n" . bot_site_promo($cfg, $appCfg, $wa . 'confirm'));
         } else {
-            bot_send($pdo,$cfg,$wa,"No pude crear el pedido: {$res['msg']}");
+            bot_send($pdo, $cfg, $wa, "No pude crear el pedido: {$res['msg']}");
         }
         return;
     }
 
-    bot_send($pdo, $cfg, $wa, "No te entendi del todo. Puedes escribir:\n- MENU\n- quiero 2 croquetas y 1 refresco\n- quitar croquetas\n- carrito\n- confirmar");
+    bot_send(
+        $pdo,
+        $cfg,
+        $wa,
+        "No te entendí del todo, pero te ayudo.\nPuedes escribirme cosas como:\n- quiero 2 croquetas y 1 refresco sin hielo\n- quita la pizza\n- carrito\n- confirmar\n- lo de siempre\n\n" . bot_site_promo($cfg, $appCfg, $wa . 'fallback')
+    );
 }
 
 bot_ensure_tables($pdo);
@@ -610,6 +1133,7 @@ if ($action === 'webhook_verify' || ($_SERVER['REQUEST_METHOD']==='GET' && (isse
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='get_config') {
     $safe = $cfg;
     $safe['wa_mode'] = in_array((string)($safe['wa_mode'] ?? ''), ['web','meta_api'], true) ? $safe['wa_mode'] : 'web';
+    $safe['bot_tone'] = in_array((string)($safe['bot_tone'] ?? ''), ['premium','popular_cubano','formal_comercial','muy_cercano'], true) ? $safe['bot_tone'] : 'muy_cercano';
     if (!empty($safe['wa_access_token'])) $safe['wa_access_token'] = '************';
     echo json_encode(['status'=>'success','config'=>$safe]); exit;
 }
@@ -623,10 +1147,13 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='save_config') {
     if ($waMode === 'web') {
         $token = '';
     }
-    $st = $pdo->prepare("UPDATE pos_bot_config SET enabled=?,wa_mode=?,verify_token=?,wa_phone_number_id=?,wa_access_token=?,business_name=?,welcome_message=?,menu_intro=?,no_match_message=? WHERE id=1");
+    $botTone = (string)($in['bot_tone'] ?? $cfg['bot_tone'] ?? 'muy_cercano');
+    if (!in_array($botTone, ['premium','popular_cubano','formal_comercial','muy_cercano'], true)) $botTone = 'muy_cercano';
+    $st = $pdo->prepare("UPDATE pos_bot_config SET enabled=?,wa_mode=?,bot_tone=?,verify_token=?,wa_phone_number_id=?,wa_access_token=?,business_name=?,welcome_message=?,menu_intro=?,no_match_message=? WHERE id=1");
     $st->execute([
         !empty($in['enabled']) ? 1 : 0,
         $waMode,
+        $botTone,
         substr(trim((string)($in['verify_token'] ?? $cfg['verify_token'] ?? 'palweb_bot_verify')),0,120),
         $waMode === 'web' ? '' : substr(trim((string)($in['wa_phone_number_id'] ?? $cfg['wa_phone_number_id'] ?? '')),0,80),
         $token,
