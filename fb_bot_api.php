@@ -204,6 +204,7 @@ function fb_clone_campaign(array $job): array {
         'name' => mb_substr(($name !== '' ? $name : 'Campaña') . ' (Copia)', 0, 120),
         'campaign_group' => substr(trim((string)($job['campaign_group'] ?? 'General')), 0, 80) ?: 'General',
         'publish_mode' => fb_normalize_publish_mode($job['publish_mode'] ?? 'both'),
+        'preview_html' => (string)($job['preview_html'] ?? ''),
         'template_id' => substr(trim((string)($job['template_id'] ?? '')), 0, 80),
         'text' => trim((string)($job['text'] ?? '')),
         'banner_images' => array_values(is_array($job['banner_images'] ?? null) ? $job['banner_images'] : []),
@@ -649,6 +650,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_template_save') 
     $id = substr(trim((string)($in['id'] ?? '')), 0, 80);
     $name = substr(trim((string)($in['name'] ?? '')), 0, 120);
     $text = trim((string)($in['text'] ?? ''));
+    $publishMode = fb_normalize_publish_mode($in['publish_mode'] ?? 'both');
     $products = is_array($in['products'] ?? null) ? $in['products'] : [];
     $bannerImages = is_array($in['banner_images'] ?? null) ? $in['banner_images'] : [];
     if ($name === '') { echo json_encode(['status' => 'error', 'msg' => 'Nombre requerido']); exit; }
@@ -662,6 +664,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_template_save') 
         if ((string)($row['id'] ?? '') !== $id) continue;
         $row['name'] = $name;
         $row['text'] = $text;
+        $row['publish_mode'] = $publishMode;
         $row['products'] = $products;
         $row['banner_images'] = $bannerImages;
         $row['updated_at'] = $now;
@@ -669,7 +672,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_template_save') 
         break;
     }
     unset($row);
-    if (!$saved) $rows[] = ['id' => $id, 'name' => $name, 'text' => $text, 'products' => $products, 'banner_images' => $bannerImages, 'updated_at' => $now];
+    if (!$saved) $rows[] = ['id' => $id, 'name' => $name, 'text' => $text, 'publish_mode' => $publishMode, 'products' => $products, 'banner_images' => $bannerImages, 'updated_at' => $now];
     if (!fb_write_json_file($FB_TEMPLATES_FILE, ['rows' => $rows])) { echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar plantilla']); exit; }
     echo json_encode(['status' => 'success', 'id' => $id]); exit;
 }
@@ -751,6 +754,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_update') {
         if (array_key_exists('name', $in)) $job['name'] = substr(trim((string)$in['name']), 0, 120);
         if (array_key_exists('campaign_group', $in)) $job['campaign_group'] = substr(trim((string)$in['campaign_group']), 0, 80) ?: 'General';
         if (array_key_exists('publish_mode', $in)) $job['publish_mode'] = fb_normalize_publish_mode($in['publish_mode']);
+        if (array_key_exists('preview_html', $in)) $job['preview_html'] = substr(trim((string)$in['preview_html']), 0, 120000);
         if (array_key_exists('schedule_enabled', $in)) $job['schedule_enabled'] = !empty($in['schedule_enabled']) ? 1 : 0;
         if (array_key_exists('schedule_time', $in)) $job['schedule_time'] = substr(trim((string)$in['schedule_time']), 0, 5);
         if (array_key_exists('schedule_days', $in)) {
@@ -806,6 +810,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
     $campaignName = substr(trim((string)($in['campaign_name'] ?? '')), 0, 120);
     $campaignGroup = substr(trim((string)($in['campaign_group'] ?? 'General')), 0, 80);
     $publishMode = fb_normalize_publish_mode($in['publish_mode'] ?? 'both');
+    $previewHtml = trim((string)($in['preview_html'] ?? ''));
     $scheduleTime = substr(trim((string)($in['schedule_time'] ?? '')), 0, 5);
     $scheduleDays = is_array($in['schedule_days'] ?? null) ? $in['schedule_days'] : [];
     $templateId = substr(trim((string)($in['template_id'] ?? '')), 0, 80);
@@ -816,6 +821,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         foreach ((array)($tplData['rows'] ?? []) as $tpl) {
             if ((string)($tpl['id'] ?? '') !== $templateId) continue;
             if ($text === '') $text = trim((string)($tpl['text'] ?? ''));
+            if (empty($in['publish_mode'])) $publishMode = fb_normalize_publish_mode($tpl['publish_mode'] ?? 'both');
             if (!$products && is_array($tpl['products'] ?? null)) $products = $tpl['products'];
             if (!$bannerImages && is_array($tpl['banner_images'] ?? null)) $bannerImages = $tpl['banner_images'];
             if ($campaignName === '') $campaignName = substr(trim((string)($tpl['name'] ?? '')), 0, 120);
@@ -870,6 +876,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         'name' => $campaignName !== '' ? $campaignName : ('Campaña ' . date('d/m H:i')),
         'campaign_group' => $campaignGroup !== '' ? $campaignGroup : 'General',
         'publish_mode' => $publishMode,
+        'preview_html' => substr($previewHtml, 0, 120000),
         'template_id' => $templateId,
         'text' => $text,
         'banner_images' => $cleanBannerImages,
