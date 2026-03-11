@@ -1,0 +1,19 @@
+[Unit]
+Description=PalWeb Facebook Publisher Worker
+After=network.target mariadb.service mysql.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www
+Environment=FB_BOT_WORKER_INTERVAL=15
+ExecStart=/usr/bin/php /var/www/fb_bot_worker.php
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,7 @@ $menuCategories = [
     // --- NUEVO: CHAT DE SOPORTE ---
     "💬 Atención al Cliente" => [
         ["icon" => "fa-comments", "name" => "Chat en Vivo", "url" => "#", "onclick" => "openAdminChat()", "id" => "pwChatLink"],
+        ["icon" => "fa-facebook", "name" => "Facebook BOT", "url" => "fb_bot.php"],
         ["icon" => "fa-sync", "name" => "SYNC GUI", "url" => "sync_panel.php"],
 
     ],
@@ -477,7 +478,6 @@ window.sendAdminMsg = async function() {
     });
 })();
 </script>
-
 
 
 
