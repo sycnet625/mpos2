@@ -21,6 +21,33 @@
       font-display: swap;
     }
 
+    @font-face {
+      font-family: "DSEGModern";
+      src:
+        url("assets/fonts/dseg7-modern-400.woff2") format("woff2"),
+        local("DSEG7 Modern"),
+        local("DSEG7Modern-Regular");
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "DSEGMini";
+      src:
+        url("assets/fonts/dseg14-classic-mini-400.woff2") format("woff2"),
+        local("DSEG14 Classic Mini"),
+        local("DSEG14ClassicMini-Regular");
+      font-display: swap;
+    }
+
+    @font-face {
+      font-family: "DSEGModernMini";
+      src:
+        url("assets/fonts/dseg7-modern-mini-400.woff2") format("woff2"),
+        local("DSEG7 Modern Mini"),
+        local("DSEG7ModernMini-Regular");
+      font-display: swap;
+    }
+
     :root {
       --bg: #000000;
       --clock-bg: #0a100a;
@@ -464,6 +491,9 @@
           <option value="Courier New, Lucida Console, monospace">LCD Clasico</option>
           <option value="Consolas, Monaco, monospace">Consolas</option>
           <option value="DSEGDisplay, 'DSEG7 Classic', 'DSEG14 Classic', monospace">DSEG 7/14 segmentos</option>
+          <option value="DSEGModern, 'DSEG7 Modern', monospace">DSEG Modern</option>
+          <option value="DSEGMini, 'DSEG14 Classic Mini', monospace">DSEG Mini</option>
+          <option value="DSEGModernMini, 'DSEG7 Modern Mini', monospace">DSEG Modern Mini</option>
           <option value="'Roboto', Arial, sans-serif">Roboto</option>
           <option value="'Orbitron', 'Roboto', sans-serif">Orbitron</option>
           <option value="'Audiowide', 'Roboto', sans-serif">Audiowide</option>
@@ -712,7 +742,16 @@
     function applySettings(s) {
       const root = document.documentElement;
       const selectedFont = String(s.fontFamily || "");
-      const isDseg = selectedFont.includes("DSEGDisplay") || selectedFont.includes("DSEG7 Classic") || selectedFont.includes("DSEG14 Classic");
+      const isDseg =
+        selectedFont.includes("DSEGDisplay") ||
+        selectedFont.includes("DSEGModern") ||
+        selectedFont.includes("DSEGMini") ||
+        selectedFont.includes("DSEGModernMini") ||
+        selectedFont.includes("DSEG7 Classic") ||
+        selectedFont.includes("DSEG14 Classic") ||
+        selectedFont.includes("DSEG7 Modern") ||
+        selectedFont.includes("DSEG14 Classic Mini") ||
+        selectedFont.includes("DSEG7 Modern Mini");
       root.style.setProperty("--bg", s.bg);
       root.style.setProperty("--clock-bg", s.clockBg);
       root.style.setProperty("--clock-border", s.clockBorder);
