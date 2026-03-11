@@ -3,9 +3,10 @@
 const path = require('path');
 const fs = require('fs');
 const qrcode = require('qrcode-terminal');
-const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
 const API_URL = process.env.POS_BOT_API_URL || 'http://127.0.0.1/marinero/pos_bot_api.php?action=web_incoming';
+const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || API_URL.replace('action=web_incoming', 'action=bridge_scan_jobs');
 const API_ORIGIN = (() => {
   try { return new URL(API_URL).origin; } catch (_) { return ''; }
 })();
@@ -15,6 +16,7 @@ const AUTH_PATH = process.env.WA_AUTH_PATH || path.join(__dirname, '.wwebjs_auth
 const STATUS_FILE = process.env.WA_STATUS_FILE || path.join(__dirname, 'status.json');
 const CHATS_FILE = process.env.WA_CHATS_FILE || '/tmp/palweb_wa_chats.json';
 const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || '/tmp/palweb_wa_promo_queue.json';
+const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || '/tmp/palweb_wa_outbox_queue.json';
 const PROMO_TIMEZONE = process.env.WA_PROMO_TIMEZONE || 'America/Havana';
 
 const client = new Client({
@@ -49,6 +51,15 @@ function normalizeWaUserId(rawFrom) {
   const digits = base.replace(/\D+/g, '');
   if (digits) return digits;
   return base.replace(/[^a-zA-Z0-9._-]/g, '').slice(0, 40);
+}
+
+function normalizeTargetId(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  if (value.includes('@')) return value;
+  const digits = value.replace(/\D+/g, '');
+  if (digits) return `${digits}@c.us`;
+  return value;
 }
 
 function writeStatus(state, extra = {}) {
@@ -191,6 +202,29 @@ async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner')
     return 1;
   } catch (err) {
     const fallback = caption ? `${caption}\n${mediaUrl}` : mediaUrl;
+    await client.sendMessage(targetId, fallback);
+    return 1;
+  }
+}
+
+async function sendButtonsMessage(targetId, body, buttons, title = '', footer = '') {
+  const labelButtons = Array.isArray(buttons) ? buttons.map((b) => String(b || '').trim()).filter(Boolean).slice(0, 3) : [];
+  const textBody = String(body || '').trim();
+  if (!labelButtons.length) {
+    if (textBody) {
+      await client.sendMessage(targetId, textBody);
+      return 1;
+    }
+    return 0;
+  }
+  try {
+    const payload = new Buttons(textBody || 'Selecciona una opción', labelButtons.map((txt) => ({ body: txt })), String(title || '').trim(), String(footer || '').trim());
+    await client.sendMessage(targetId, payload);
+    return 1;
+  } catch (err) {
+    const fallback = [textBody || 'Opciones rápidas:']
+      .concat(labelButtons.map((txt, idx) => `${idx + 1}. ${txt}`))
+      .join('\n');
     await client.sendMessage(targetId, fallback);
     return 1;
   }
@@ -367,6 +401,56 @@ async function processPromoQueueTick() {
   }
 }
 
+async function processOutboundQueueTick() {
+  const queue = readJsonFile(OUTBOX_QUEUE_FILE, { jobs: [] });
+  const jobs = Array.isArray(queue.jobs) ? queue.jobs : [];
+  let changed = false;
+  for (const job of jobs) {
+    if (String(job.status || 'queued') !== 'queued') continue;
+    const targetId = normalizeTargetId(job.target_id || job.wa_user_id || '');
+    if (!targetId) {
+      job.status = 'error';
+      job.error = 'target_id vacío';
+      changed = true;
+      continue;
+    }
+    try {
+      const type = String(job.type || 'text').toLowerCase();
+      if (type === 'image') {
+        await sendMediaUrl(targetId, String(job.url || '').trim(), String(job.caption || job.text || '').trim(), 'bot_reply');
+      } else if (type === 'buttons') {
+        await sendButtonsMessage(targetId, String(job.text || '').trim(), Array.isArray(job.buttons) ? job.buttons : [], String(job.title || '').trim(), String(job.footer || '').trim());
+      } else {
+        const text = String(job.text || '').trim();
+        if (text) await client.sendMessage(targetId, text);
+      }
+      job.status = 'sent';
+      job.sent_at = new Date().toISOString();
+      changed = true;
+    } catch (err) {
+      job.status = 'error';
+      job.error = String(err.message || err);
+      changed = true;
+    }
+  }
+  if (changed) {
+    const kept = jobs.filter((job) => !['sent'].includes(String(job.status || '')));
+    writeJsonFile(OUTBOX_QUEUE_FILE, { jobs: kept });
+  }
+}
+
+async function scanDueJobs() {
+  try {
+    await fetch(API_JOBS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verify_token: VERIFY_TOKEN })
+    });
+  } catch (err) {
+    console.error('[bridge] No se pudo escanear jobs del bot:', err.message);
+  }
+}
+
 async function processIncoming(message) {
   const messageId = String(message?.id?._serialized || message?.id?.id || '');
   if (messageId) {
@@ -394,7 +478,9 @@ async function processIncoming(message) {
   ]);
   if (ignoredTypes.has(msgType)) return;
   if (!text) {
-    if (msgType === 'image') text = '[imagen]';
+    if (msgType === 'buttons_response') text = String(message.selectedButtonId || '').trim();
+    else if (msgType === 'list_response') text = String(message.selectedRowId || '').trim();
+    else if (msgType === 'image') text = '[imagen]';
     else if (msgType === 'video') text = '[video]';
     else if (msgType === 'audio' || msgType === 'ptt') text = '[audio]';
     else if (msgType === 'document') text = '[documento]';
@@ -454,6 +540,10 @@ async function processIncoming(message) {
       await sendMediaUrl(message.from, url, caption, 'bot_reply');
       continue;
     }
+    if (type === 'buttons') {
+      await sendButtonsMessage(message.from, String(out?.text || '').trim(), Array.isArray(out?.buttons) ? out.buttons : [], String(out?.title || '').trim(), String(out?.footer || '').trim());
+      continue;
+    }
     const outText = String(out?.text || '').trim();
     if (!outText) continue;
     await client.sendMessage(message.from, outText);
@@ -474,6 +564,8 @@ client.on('ready', () => {
     refreshChatsCache();
     setInterval(refreshChatsCache, 120000);
     setInterval(() => { processPromoQueueTick().catch(() => {}); }, 5000);
+    setInterval(() => { processOutboundQueueTick().catch(() => {}); }, 3000);
+    setInterval(() => { scanDueJobs().catch(() => {}); }, 60000);
     setInterval(() => {
       const connected = !!client.info;
       if (connected) {
