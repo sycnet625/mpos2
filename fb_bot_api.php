@@ -193,10 +193,74 @@ function fb_my_page_payload(PDO $pdo, array $config): array {
     return ['products' => $products, 'reservables' => $reservables, 'outro_text' => implode("\n", $lines)];
 }
 
+function fb_normalize_campaign_products($products): array {
+    $cleanProducts = [];
+    foreach ((array)$products as $p) {
+        $pid = substr(trim((string)($p['id'] ?? '')), 0, 80);
+        if ($pid === '') continue;
+        $cleanProducts[] = [
+            'id' => $pid,
+            'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
+            'price' => (float)($p['price'] ?? 0),
+            'image' => trim((string)($p['image'] ?? fb_public_product_image($pid)))
+        ];
+    }
+    return $cleanProducts;
+}
+
+function fb_normalize_campaign_banners($bannerImages): array {
+    $cleanBannerImages = [];
+    foreach ((array)$bannerImages as $img) {
+        $url = trim((string)($img['url'] ?? $img));
+        if ($url === '') continue;
+        $cleanBannerImages[] = [
+            'url' => substr($url, 0, 500),
+            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
+        ];
+        if (count($cleanBannerImages) >= 3) break;
+    }
+    return $cleanBannerImages;
+}
+
+function fb_campaign_snapshot(array $job): array {
+    $days = array_values(array_map('intval', is_array($job['schedule_days'] ?? null) ? $job['schedule_days'] : []));
+    sort($days);
+    return [
+        'name' => substr(trim((string)($job['name'] ?? '')), 0, 120),
+        'campaign_group' => substr(trim((string)($job['campaign_group'] ?? 'General')), 0, 80) ?: 'General',
+        'publish_mode' => fb_normalize_publish_mode($job['publish_mode'] ?? 'both'),
+        'text' => trim((string)($job['text'] ?? '')),
+        'outro_text' => trim((string)($job['outro_text'] ?? '')),
+        'template_id' => substr(trim((string)($job['template_id'] ?? '')), 0, 80),
+        'preview_html' => substr(trim((string)($job['preview_html'] ?? '')), 0, 120000),
+        'products' => fb_normalize_campaign_products($job['products'] ?? []),
+        'banner_images' => fb_normalize_campaign_banners($job['banner_images'] ?? []),
+        'schedule_enabled' => !empty($job['schedule_enabled']) ? 1 : 0,
+        'schedule_time' => substr(trim((string)($job['schedule_time'] ?? '')), 0, 5),
+        'schedule_days' => $days,
+        'status' => substr(trim((string)($job['status'] ?? 'scheduled')), 0, 20),
+    ];
+}
+
+function fb_campaign_add_version(array &$job, string $type, ?array $before, string $note = ''): void {
+    if (!is_array($job['versions'] ?? null)) $job['versions'] = [];
+    $job['versions'][] = [
+        'at' => date('c'),
+        'type' => substr(trim($type), 0, 40),
+        'note' => substr(trim($note), 0, 220),
+        'actor' => substr(trim((string)($_SESSION['admin_name'] ?? 'admin')), 0, 120),
+        'before' => $before,
+        'after' => fb_campaign_snapshot($job),
+    ];
+    if (count($job['versions']) > 25) {
+        $job['versions'] = array_slice($job['versions'], -25);
+    }
+}
+
 function fb_clone_campaign(array $job): array {
     $now = time();
     $name = trim((string)($job['name'] ?? 'Campaña'));
-    return [
+    $clone = [
         'id' => 'fbpromo_' . date('Ymd_His', $now) . '_' . bin2hex(random_bytes(3)),
         'status' => !empty($job['schedule_enabled']) ? 'scheduled' : 'queued',
         'created_at' => date('c', $now),
@@ -217,8 +281,11 @@ function fb_clone_campaign(array $job): array {
         'last_schedule_key' => '',
         'next_run_at' => !empty($job['schedule_enabled']) ? ($now + 30) : $now,
         'current_index' => 0,
-        'log' => []
+        'log' => [],
+        'versions' => []
     ];
+    fb_campaign_add_version($clone, 'clone', fb_campaign_snapshot($job), 'Clonada desde ' . ($job['id'] ?? 'campaña'));
+    return $clone;
 }
 
 function fb_log_post(PDO $pdo, string $platform, string $campaignId, string $pageId, string $pageName, string $fbPostId, string $message, string $status='success', string $error=''): void {
@@ -542,7 +609,7 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_posts','promo_products','promo_my_page_payload','promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
-    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','test_post','worker_logs','manual_groups'
+    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','promo_import','test_post','worker_logs','manual_groups'
 ];
 if (in_array($action, $adminActions, true)) fb_require_admin_session();
 
@@ -747,13 +814,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_update') {
     $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
     $queue = fb_read_json_file($FB_QUEUE_FILE, ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $cfgLive = fb_cfg($pdo);
     $found = false;
     foreach ($jobs as &$job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
         $found = true;
+        $before = fb_campaign_snapshot($job);
         if (array_key_exists('name', $in)) $job['name'] = substr(trim((string)$in['name']), 0, 120);
         if (array_key_exists('campaign_group', $in)) $job['campaign_group'] = substr(trim((string)$in['campaign_group']), 0, 80) ?: 'General';
         if (array_key_exists('publish_mode', $in)) $job['publish_mode'] = fb_normalize_publish_mode($in['publish_mode']);
+        if (array_key_exists('template_id', $in)) $job['template_id'] = substr(trim((string)$in['template_id']), 0, 80);
+        if (array_key_exists('text', $in)) $job['text'] = trim((string)$in['text']);
+        if (array_key_exists('outro_text', $in)) $job['outro_text'] = trim((string)$in['outro_text']);
+        if (array_key_exists('products', $in)) $job['products'] = fb_normalize_campaign_products($in['products']);
+        if (array_key_exists('banner_images', $in)) $job['banner_images'] = fb_normalize_campaign_banners($in['banner_images']);
         if (array_key_exists('preview_html', $in)) $job['preview_html'] = substr(trim((string)$in['preview_html']), 0, 120000);
         if (array_key_exists('schedule_enabled', $in)) $job['schedule_enabled'] = !empty($in['schedule_enabled']) ? 1 : 0;
         if (array_key_exists('schedule_time', $in)) $job['schedule_time'] = substr(trim((string)$in['schedule_time']), 0, 5);
@@ -767,12 +841,123 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_update') {
             $status = strtolower(trim((string)$in['status']));
             if (in_array($status, ['scheduled','queued','running','done','error'], true)) $job['status'] = $status;
         }
+        if (trim((string)($job['text'] ?? '')) === '' && trim((string)($job['outro_text'] ?? '')) === '' && empty($job['products']) && empty($job['banner_images'])) {
+            echo json_encode(['status' => 'error', 'msg' => 'La campaña no puede quedar vacía']); exit;
+        }
+        if (!empty($job['schedule_enabled']) && !preg_match('/^\d{2}:\d{2}$/', (string)($job['schedule_time'] ?? ''))) {
+            echo json_encode(['status' => 'error', 'msg' => 'Hora inválida']); exit;
+        }
+        $job['targets'] = in_array($job['publish_mode'] ?? 'both', ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [];
+        if (empty($job['schedule_enabled'])) {
+            $job['schedule_time'] = '';
+            $job['schedule_days'] = [];
+            if (($job['status'] ?? '') === 'scheduled') $job['status'] = 'queued';
+        } elseif (($job['status'] ?? '') === 'done') {
+            $job['status'] = 'scheduled';
+        }
+        if (fb_campaign_snapshot($job) !== $before) {
+            fb_campaign_add_version($job, 'update', $before, 'Edición desde el panel');
+        }
         break;
     }
     unset($job);
     if (!$found) { echo json_encode(['status' => 'error', 'msg' => 'Campaña no encontrada']); exit; }
     if (!fb_write_json_file($FB_QUEUE_FILE, ['jobs' => $jobs])) { echo json_encode(['status' => 'error', 'msg' => 'No se pudo actualizar']); exit; }
     echo json_encode(['status' => 'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_import') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $type = trim((string)($in['type'] ?? ''));
+    $rows = is_array($in['rows'] ?? null) ? $in['rows'] : [];
+    if (!$rows) { echo json_encode(['status' => 'error', 'msg' => 'No hay filas para importar']); exit; }
+
+    if ($type === 'templates') {
+        $data = fb_read_json_file($FB_TEMPLATES_FILE, ['rows' => []]);
+        $stored = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+        $indexed = [];
+        foreach ($stored as $row) {
+            $rowId = (string)($row['id'] ?? '');
+            if ($rowId !== '') $indexed[$rowId] = $row;
+        }
+        $imported = 0;
+        foreach ($rows as $row) {
+            $name = substr(trim((string)($row['name'] ?? '')), 0, 120);
+            if ($name === '') continue;
+            $id = substr(trim((string)($row['id'] ?? '')), 0, 80);
+            if ($id === '') $id = 'tpl_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
+            $indexed[$id] = [
+                'id' => $id,
+                'name' => $name,
+                'text' => trim((string)($row['text'] ?? '')),
+                'publish_mode' => fb_normalize_publish_mode($row['publish_mode'] ?? 'both'),
+                'products' => fb_normalize_campaign_products($row['products'] ?? []),
+                'banner_images' => fb_normalize_campaign_banners($row['banner_images'] ?? []),
+                'updated_at' => date('c'),
+            ];
+            $imported++;
+        }
+        if ($imported < 1) { echo json_encode(['status' => 'error', 'msg' => 'No hubo plantillas válidas para importar']); exit; }
+        if (!fb_write_json_file($FB_TEMPLATES_FILE, ['rows' => array_values($indexed)])) {
+            echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar importación']); exit;
+        }
+        echo json_encode(['status' => 'success', 'imported' => $imported]); exit;
+    }
+
+    if ($type === 'campaigns') {
+        $queue = fb_read_json_file($FB_QUEUE_FILE, ['jobs' => []]);
+        $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+        $cfgLive = fb_cfg($pdo);
+        $imported = 0;
+        foreach ($rows as $row) {
+            $scheduleEnabled = !empty($row['schedule_enabled']) ? 1 : 0;
+            $daysFinal = [];
+            foreach ((array)($row['schedule_days'] ?? []) as $d) {
+                $n = (int)$d;
+                if ($n >= 0 && $n <= 6) $daysFinal[$n] = $n;
+            }
+            $daysFinal = array_values($daysFinal);
+            sort($daysFinal);
+            $publishMode = fb_normalize_publish_mode($row['publish_mode'] ?? 'both');
+            $job = [
+                'id' => 'fbpromo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)),
+                'status' => $scheduleEnabled ? 'scheduled' : 'queued',
+                'created_at' => date('c'),
+                'created_by' => $_SESSION['admin_name'] ?? 'admin',
+                'name' => substr(trim((string)($row['name'] ?? 'Campaña importada')), 0, 120),
+                'campaign_group' => substr(trim((string)($row['campaign_group'] ?? 'General')), 0, 80) ?: 'General',
+                'publish_mode' => $publishMode,
+                'preview_html' => substr(trim((string)($row['preview_html'] ?? '')), 0, 120000),
+                'template_id' => substr(trim((string)($row['template_id'] ?? '')), 0, 80),
+                'text' => trim((string)($row['text'] ?? '')),
+                'banner_images' => fb_normalize_campaign_banners($row['banner_images'] ?? []),
+                'outro_text' => trim((string)($row['outro_text'] ?? '')),
+                'targets' => in_array($publishMode, ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [],
+                'products' => fb_normalize_campaign_products($row['products'] ?? []),
+                'schedule_enabled' => $scheduleEnabled,
+                'schedule_time' => substr(trim((string)($row['schedule_time'] ?? '09:00')), 0, 5),
+                'schedule_days' => $daysFinal,
+                'last_schedule_key' => '',
+                'next_run_at' => !empty($scheduleEnabled) ? (time() + 30) : time(),
+                'current_index' => 0,
+                'log' => [],
+                'versions' => [],
+            ];
+            if ($job['name'] === '' || ($job['text'] === '' && $job['outro_text'] === '' && !$job['banner_images'] && !$job['products'])) {
+                continue;
+            }
+            fb_campaign_add_version($job, 'import', null, 'Importada desde JSON');
+            $jobs[] = $job;
+            $imported++;
+        }
+        if ($imported < 1) { echo json_encode(['status' => 'error', 'msg' => 'No hubo campañas válidas para importar']); exit; }
+        if (!fb_write_json_file($FB_QUEUE_FILE, ['jobs' => $jobs])) {
+            echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar campañas importadas']); exit;
+        }
+        echo json_encode(['status' => 'success', 'imported' => $imported]); exit;
+    }
+
+    echo json_encode(['status' => 'error', 'msg' => 'Tipo de importación inválido']); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_delete') {
@@ -829,24 +1014,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         }
     }
 
-    $cleanProducts = [];
-    foreach ($products as $p) {
-        $pid = substr(trim((string)($p['id'] ?? '')), 0, 80);
-        if ($pid === '') continue;
-        $cleanProducts[] = [
-            'id' => $pid,
-            'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
-            'price' => (float)($p['price'] ?? 0),
-            'image' => trim((string)($p['image'] ?? fb_public_product_image($pid)))
-        ];
-    }
-    $cleanBannerImages = [];
-    foreach ($bannerImages as $img) {
-        $url = trim((string)($img['url'] ?? $img));
-        if ($url === '') continue;
-        $cleanBannerImages[] = ['url' => substr($url, 0, 500), 'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)];
-        if (count($cleanBannerImages) >= 3) break;
-    }
+    $cleanProducts = fb_normalize_campaign_products($products);
+    $cleanBannerImages = fb_normalize_campaign_banners($bannerImages);
     if ($text === '' && $outroText === '' && !$cleanProducts && !$cleanBannerImages) { echo json_encode(['status' => 'error', 'msg' => 'La campaña está vacía']); exit; }
     $cfgLive = fb_cfg($pdo);
     $targets = in_array($publishMode, ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [];
@@ -868,7 +1037,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
     $queue = fb_read_json_file($FB_QUEUE_FILE, ['jobs' => []]);
     $jobId = 'fbpromo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
     $now = time();
-    $queue['jobs'][] = [
+    $job = [
         'id' => $jobId,
         'status' => $scheduleEnabled ? 'scheduled' : 'queued',
         'created_at' => date('c', $now),
@@ -889,8 +1058,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         'last_schedule_key' => '',
         'next_run_at' => $scheduleEnabled ? ($now + 30) : $now,
         'current_index' => 0,
-        'log' => []
+        'log' => [],
+        'versions' => []
     ];
+    fb_campaign_add_version($job, 'create', null, 'Campaña creada');
+    $queue['jobs'][] = $job;
     if (!fb_write_json_file($FB_QUEUE_FILE, $queue)) { echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar campaña']); exit; }
     fb_worker_log('Campaña creada ' . $jobId . ' modo=' . $publishMode . ' nombre=' . ($campaignName !== '' ? $campaignName : 'Campaña'));
     if (!$scheduleEnabled) fb_process_queue($pdo, fb_cfg($pdo));
