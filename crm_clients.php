@@ -5,6 +5,19 @@
 require_once 'db.php';
 session_start();
 
+$crmHasPreferencias = false;
+try {
+    $stPref = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clientes' AND COLUMN_NAME = 'preferencias'");
+    $stPref->execute();
+    $crmHasPreferencias = (int)$stPref->fetchColumn() > 0;
+    if (!$crmHasPreferencias) {
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN preferencias TEXT NULL");
+        $crmHasPreferencias = true;
+    }
+} catch (Throwable $e) {
+    $crmHasPreferencias = false;
+}
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
@@ -28,6 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $categoria = $_POST['categoria'];
             $origen = $_POST['origen'];
             $notas = $_POST['notas'];
+            $preferencias = $_POST['preferencias'] ?? '';
             
             // CAMPOS NUEVOS MENSAJERÍA
             $es_mensajero = isset($_POST['es_mensajero']) ? 1 : 0;
@@ -36,14 +50,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($id) {
                 // UPDATE
-                $sql = "UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, nit_ci=?, fecha_nacimiento=?, categoria=?, origen=?, notas=?, es_mensajero=?, vehiculo=?, matricula=? WHERE id=?";
+                $sql = $crmHasPreferencias
+                    ? "UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, nit_ci=?, fecha_nacimiento=?, categoria=?, origen=?, notas=?, preferencias=?, es_mensajero=?, vehiculo=?, matricula=? WHERE id=?"
+                    : "UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, nit_ci=?, fecha_nacimiento=?, categoria=?, origen=?, notas=?, es_mensajero=?, vehiculo=?, matricula=? WHERE id=?";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$nombre, $telefono, $email, $direccion, $nit, $nacimiento, $categoria, $origen, $notas, $es_mensajero, $vehiculo, $matricula, $id]);
+                $params = [$nombre, $telefono, $email, $direccion, $nit, $nacimiento, $categoria, $origen, $notas];
+                if ($crmHasPreferencias) $params[] = $preferencias;
+                $params = array_merge($params, [$es_mensajero, $vehiculo, $matricula, $id]);
+                $stmt->execute($params);
             } else {
                 // INSERT
-                $sql = "INSERT INTO clientes (nombre, telefono, email, direccion, nit_ci, fecha_nacimiento, categoria, origen, notas, es_mensajero, vehiculo, matricula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = $crmHasPreferencias
+                    ? "INSERT INTO clientes (nombre, telefono, email, direccion, nit_ci, fecha_nacimiento, categoria, origen, notas, preferencias, es_mensajero, vehiculo, matricula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                    : "INSERT INTO clientes (nombre, telefono, email, direccion, nit_ci, fecha_nacimiento, categoria, origen, notas, es_mensajero, vehiculo, matricula) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$nombre, $telefono, $email, $direccion, $nit, $nacimiento, $categoria, $origen, $notas, $es_mensajero, $vehiculo, $matricula]);
+                $params = [$nombre, $telefono, $email, $direccion, $nit, $nacimiento, $categoria, $origen, $notas];
+                if ($crmHasPreferencias) $params[] = $preferencias;
+                $params = array_merge($params, [$es_mensajero, $vehiculo, $matricula]);
+                $stmt->execute($params);
             }
             header("Location: crm_clients.php?msg=saved");
             exit;
@@ -232,6 +256,9 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
                             <td>
                                 <div><i class="fas fa-phone me-1 text-muted"></i> <?php echo $c['telefono'] ?: '-'; ?></div>
                                 <div class="small text-muted"><?php echo $c['direccion'] ?: 'Sin dirección'; ?></div>
+                                <?php if (!empty($c['preferencias'])): ?>
+                                    <div class="small mt-1 text-info"><i class="fas fa-star me-1"></i> <?php echo nl2br(htmlspecialchars(mb_strimwidth($c['preferencias'], 0, 120, '...'))); ?></div>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <span class="badge <?php echo $bgClass; ?> rounded-pill"><?php echo $c['categoria']; ?></span>
@@ -355,6 +382,10 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
                             <label class="form-label fw-bold">Notas Internas</label>
                             <textarea name="notas" id="inpNotas" class="form-control" rows="2" placeholder="Preferencias, alergias, horarios de entrega..."></textarea>
                         </div>
+                        <div class="col-12">
+                            <label class="form-label fw-bold">Preferencias del Cliente</label>
+                            <textarea name="preferencias" id="inpPreferencias" class="form-control" rows="3" placeholder="Productos favoritos, restricciones, historial de gustos..."></textarea>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -393,6 +424,7 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
         document.getElementById('inpCat').value = "Regular";
         document.getElementById('inpOrigen').value = "Local";
         document.getElementById('inpNotas').value = "";
+        document.getElementById('inpPreferencias').value = "";
         
         document.getElementById('inpMensajero').checked = false;
         document.getElementById('inpVehiculo').value = "";
@@ -414,6 +446,7 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
         document.getElementById('inpCat').value = data.categoria;
         document.getElementById('inpOrigen').value = data.origen;
         document.getElementById('inpNotas').value = data.notas;
+        document.getElementById('inpPreferencias').value = data.preferencias || "";
         
         document.getElementById('inpMensajero').checked = (data.es_mensajero == 1);
         document.getElementById('inpVehiculo').value = data.vehiculo || "";
@@ -435,4 +468,3 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
