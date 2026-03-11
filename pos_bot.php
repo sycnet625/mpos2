@@ -187,6 +187,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               <div class="col-md-4">
                 <label class="form-label">Hora de lanzamiento</label>
                 <input id="promoScheduleTime" type="time" class="form-control" value="09:00">
+                <div class="form-text">Zona horaria fija: America/Havana (Cuba).</div>
               </div>
               <div class="col-md-8">
                 <label class="form-label d-block">Días de la semana</label>
@@ -213,7 +214,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
         <div class="card">
           <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
-            <span>Campañas recientes</span>
+            <span>Campañas recientes <small class="text-muted">(horario Cuba)</small></span>
             <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoList()"><i class="fas fa-sync"></i></button>
           </div>
           <div class="card-body p-0">
@@ -611,7 +612,7 @@ async function editScheduledCampaign(id){
   if(name===null) return;
   const group=prompt('Grupo de campaña:',row.campaign_group||'General');
   if(group===null) return;
-  const time=prompt('Hora (HH:MM):',row.schedule_time||'09:00');
+  const time=prompt('Hora (HH:MM) zona Cuba (America/Havana):',row.schedule_time||'09:00');
   if(time===null) return;
   const daysCurrent=Array.isArray(row.schedule_days)?row.schedule_days.join(','):'1,2,3,4,5';
   const daysRaw=prompt('Días (0..6 separados por coma). 0=Dom,1=Lun,...,6=Sab',daysCurrent);

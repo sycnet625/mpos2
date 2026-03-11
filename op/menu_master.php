@@ -57,6 +57,7 @@ $menuCategories = [
     "⚙️ Administración" => [
         ["icon" => "fa-cogs", "name" => "Configuración", "url" => "pos_config.php"],
         ["icon" => "fa-tools", "name" => "Mantenimiento BD", "url" => "pos_admin.php"],
+        ["icon" => "fa-server", "name" => "Migración Espejo", "url" => "admin_migracion.php"],
         ["icon" => "fa-heartbeat", "name" => "Estado Salud", "url" => "pos_health.php"],
         ["icon" => "fa-sign-out-alt", "name" => "Cerrar Sesión", "url" => "logout.php"],
     ],
@@ -476,7 +477,6 @@ window.sendAdminMsg = async function() {
     });
 })();
 </script>
-
 
 
 

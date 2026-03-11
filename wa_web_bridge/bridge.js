@@ -15,6 +15,7 @@ const AUTH_PATH = process.env.WA_AUTH_PATH || path.join(__dirname, '.wwebjs_auth
 const STATUS_FILE = process.env.WA_STATUS_FILE || path.join(__dirname, 'status.json');
 const CHATS_FILE = process.env.WA_CHATS_FILE || '/tmp/palweb_wa_chats.json';
 const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || '/tmp/palweb_wa_promo_queue.json';
+const PROMO_TIMEZONE = process.env.WA_PROMO_TIMEZONE || 'America/Havana';
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: SESSION_NAME, dataPath: AUTH_PATH }),
@@ -53,6 +54,7 @@ function normalizeWaUserId(rawFrom) {
 function writeStatus(state, extra = {}) {
   const payload = {
     state,
+    promo_timezone: PROMO_TIMEZONE,
     updated_at: new Date().toISOString(),
     ...extra
   };
@@ -115,16 +117,32 @@ function randomInt(min, max) {
 }
 
 function localDateInfo(date = new Date()) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  return {
-    day: date.getDay(),
-    hm: `${hh}:${mm}`,
-    key: `${y}-${m}-${d}_${hh}:${mm}`
-  };
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: PROMO_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }).formatToParts(date);
+
+  const map = {};
+  for (const p of parts) {
+    if (p && p.type && p.type !== 'literal') map[p.type] = p.value;
+  }
+
+  const weekdayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  const weekday = String(map.weekday || 'Sun').slice(0, 3);
+  const day = weekdayMap[weekday] ?? 0;
+  const y = String(map.year || '');
+  const m = String(map.month || '').padStart(2, '0');
+  const d = String(map.day || '').padStart(2, '0');
+  const hh = String(map.hour || '').padStart(2, '0');
+  const mm = String(map.minute || '').padStart(2, '0');
+
+  return { day, hm: `${hh}:${mm}`, key: `${y}-${m}-${d}_${hh}:${mm}` };
 }
 
 function normalizeProductImageUrl(rawUrl, productId = '') {
