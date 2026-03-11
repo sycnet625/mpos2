@@ -9,6 +9,8 @@ require_once __DIR__ . '/config_loader.php';
 
 $FB_QUEUE_FILE = '/tmp/palweb_fb_queue.json';
 $FB_TEMPLATES_FILE = '/tmp/palweb_fb_templates.json';
+$FB_WORKER_LOG_FILE = '/tmp/palweb_fb_worker.log';
+$FB_MANUAL_GROUPS_FILE = '/tmp/palweb_fb_manual_groups.json';
 
 function fb_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
@@ -38,6 +40,23 @@ function fb_write_json_file(string $file, array $data): bool {
     $ok = @file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
     if ($ok === false) return false;
     return @rename($tmp, $file);
+}
+
+function fb_worker_log(string $message): void {
+    $file = $GLOBALS['FB_WORKER_LOG_FILE'] ?? '/tmp/palweb_fb_worker.log';
+    @file_put_contents($file, '[' . date('c') . '] ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+
+function fb_tail_file(string $file, int $maxLines = 300): string {
+    if (!is_file($file)) return '';
+    $raw = @file($file, FILE_IGNORE_NEW_LINES);
+    if (!is_array($raw)) return '';
+    return implode(PHP_EOL, array_slice($raw, -max(1, $maxLines)));
+}
+
+function fb_normalize_publish_mode($mode): string {
+    $mode = strtolower(trim((string)$mode));
+    return in_array($mode, ['facebook','instagram','both'], true) ? $mode : 'both';
 }
 
 function fb_public_base_url(): string {
@@ -184,6 +203,7 @@ function fb_clone_campaign(array $job): array {
         'created_by' => $_SESSION['admin_name'] ?? 'admin',
         'name' => mb_substr(($name !== '' ? $name : 'Campaña') . ' (Copia)', 0, 120),
         'campaign_group' => substr(trim((string)($job['campaign_group'] ?? 'General')), 0, 80) ?: 'General',
+        'publish_mode' => fb_normalize_publish_mode($job['publish_mode'] ?? 'both'),
         'template_id' => substr(trim((string)($job['template_id'] ?? '')), 0, 80),
         'text' => trim((string)($job['text'] ?? '')),
         'banner_images' => array_values(is_array($job['banner_images'] ?? null) ? $job['banner_images'] : []),
@@ -441,10 +461,20 @@ function fb_process_queue(PDO $pdo, array $cfg): array {
         if ((int)($job['next_run_at'] ?? 0) > $info['ts']) continue;
         if (empty($cfg['enabled'])) break;
 
+        $publishMode = fb_normalize_publish_mode($job['publish_mode'] ?? 'both');
         $targets = is_array($job['targets'] ?? null) ? $job['targets'] : fb_clean_targets($cfg);
-        if (!$targets) {
+        if (in_array($publishMode, ['facebook','both'], true) && !$targets) {
             $job['status'] = 'error';
             $job['log'][] = ['at' => date('c'), 'type' => 'publish', 'ok' => false, 'target_id' => '', 'target_name' => '', 'messages_sent' => 0, 'error' => 'No hay página configurada'];
+            fb_worker_log('Campaña ' . ($job['id'] ?? '-') . ' falló: no hay página configurada');
+            $changed = true;
+            $processed++;
+            continue;
+        }
+        if ($publishMode === 'instagram' && !empty($cfg['enable_instagram']) && trim((string)($cfg['ig_user_id'] ?? '')) === '') {
+            $job['status'] = 'error';
+            $job['log'][] = ['at' => date('c'), 'type' => 'publish', 'ok' => false, 'target_id' => '', 'target_name' => '', 'messages_sent' => 0, 'error' => 'No hay Instagram User ID configurado'];
+            fb_worker_log('Campaña ' . ($job['id'] ?? '-') . ' falló: no hay Instagram User ID configurado');
             $changed = true;
             $processed++;
             continue;
@@ -454,9 +484,16 @@ function fb_process_queue(PDO $pdo, array $cfg): array {
         $changed = true;
         $allOk = true;
         $sent = 0;
-        foreach ($targets as $target) {
-            $resFb = fb_publish_campaign($pdo, $cfg, $job, $target);
-            $resIg = fb_publish_instagram($pdo, $cfg, $job);
+        $effectiveTargets = $targets ?: [['id' => (string)($cfg['ig_user_id'] ?? 'instagram'), 'name' => (string)($cfg['ig_username'] ?? 'Instagram')]];
+        foreach ($effectiveTargets as $target) {
+            $resFb = ['ok' => true, 'skipped' => true, 'messages_sent' => 0];
+            $resIg = ['ok' => true, 'skipped' => true, 'messages_sent' => 0];
+            if (in_array($publishMode, ['facebook','both'], true)) {
+                $resFb = fb_publish_campaign($pdo, $cfg, $job, $target);
+            }
+            if (in_array($publishMode, ['instagram','both'], true)) {
+                $resIg = fb_publish_instagram($pdo, $cfg, $job);
+            }
             $okFb = !empty($resFb['ok']);
             $okIg = !empty($resIg['ok']);
             $ok = $okFb && $okIg;
@@ -474,10 +511,11 @@ function fb_process_queue(PDO $pdo, array $cfg): array {
                 'messages_sent' => (int)($resFb['messages_sent'] ?? 0) + (int)($resIg['messages_sent'] ?? 0),
                 'error' => $ok ? '' : implode(' | ', $errorParts),
                 'facebook_post_id' => (string)($resFb['post_id'] ?? ''),
-                'instagram_post_id' => empty($resIg['skipped']) ? (string)($resIg['post_id'] ?? '') : ''
+                'instagram_post_id' => empty($resIg['skipped']) ? (string)($resIg['post_id'] ?? '') : '',
+                'publish_mode' => $publishMode
             ];
         }
-        $job['current_index'] = count($targets);
+        $job['current_index'] = count($effectiveTargets);
         if (!empty($job['schedule_enabled'])) {
             $job['status'] = $allOk ? 'scheduled' : 'error';
             $job['last_schedule_key'] = $allOk ? $info['key'] : (string)($job['last_schedule_key'] ?? '');
@@ -486,6 +524,7 @@ function fb_process_queue(PDO $pdo, array $cfg): array {
         } else {
             $job['status'] = $allOk ? 'done' : 'error';
         }
+        fb_worker_log('Campaña ' . ($job['id'] ?? '-') . ' modo=' . $publishMode . ' estado=' . $job['status'] . ' publicaciones=' . $sent);
         $changed = true;
         $processed++;
     }
@@ -502,7 +541,7 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_posts','promo_products','promo_my_page_payload','promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
-    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','test_post'
+    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','test_post','worker_logs','manual_groups'
 ];
 if (in_array($action, $adminActions, true)) fb_require_admin_session();
 
@@ -552,6 +591,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'stats') {
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'recent_posts') {
     $rows = $pdo->query("SELECT id,platform,campaign_id,page_id,page_name,fb_post_id,status,error_text,created_at,message_text FROM fb_bot_posts ORDER BY id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'worker_logs') {
+    echo json_encode(['status' => 'success', 'logs' => fb_tail_file($FB_WORKER_LOG_FILE, 400)]); exit;
+}
+
+if ($action === 'manual_groups') {
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $data = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
+        echo json_encode(['status' => 'success', 'rows' => array_values((array)($data['rows'] ?? []))]); exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        $in = json_decode(file_get_contents('php://input'), true) ?: [];
+        $rows = [];
+        foreach ((array)($in['rows'] ?? []) as $row) {
+            $name = substr(trim((string)($row['name'] ?? '')), 0, 180);
+            $url = substr(trim((string)($row['url'] ?? '')), 0, 500);
+            if ($name === '' && $url === '') continue;
+            $rows[] = ['name' => $name, 'url' => $url];
+        }
+        if (!fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $rows])) {
+            echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar listado manual']); exit;
+        }
+        echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'promo_products') {
@@ -686,6 +750,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_update') {
         $found = true;
         if (array_key_exists('name', $in)) $job['name'] = substr(trim((string)$in['name']), 0, 120);
         if (array_key_exists('campaign_group', $in)) $job['campaign_group'] = substr(trim((string)$in['campaign_group']), 0, 80) ?: 'General';
+        if (array_key_exists('publish_mode', $in)) $job['publish_mode'] = fb_normalize_publish_mode($in['publish_mode']);
         if (array_key_exists('schedule_enabled', $in)) $job['schedule_enabled'] = !empty($in['schedule_enabled']) ? 1 : 0;
         if (array_key_exists('schedule_time', $in)) $job['schedule_time'] = substr(trim((string)$in['schedule_time']), 0, 5);
         if (array_key_exists('schedule_days', $in)) {
@@ -740,6 +805,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
     $bannerImages = is_array($in['banner_images'] ?? null) ? $in['banner_images'] : [];
     $campaignName = substr(trim((string)($in['campaign_name'] ?? '')), 0, 120);
     $campaignGroup = substr(trim((string)($in['campaign_group'] ?? 'General')), 0, 80);
+    $publishMode = fb_normalize_publish_mode($in['publish_mode'] ?? 'both');
     $scheduleTime = substr(trim((string)($in['schedule_time'] ?? '')), 0, 5);
     $scheduleDays = is_array($in['schedule_days'] ?? null) ? $in['schedule_days'] : [];
     $templateId = substr(trim((string)($in['template_id'] ?? '')), 0, 80);
@@ -776,8 +842,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         if (count($cleanBannerImages) >= 3) break;
     }
     if ($text === '' && $outroText === '' && !$cleanProducts && !$cleanBannerImages) { echo json_encode(['status' => 'error', 'msg' => 'La campaña está vacía']); exit; }
-    $targets = fb_clean_targets(fb_cfg($pdo));
-    if (!$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura primero la página de Facebook']); exit; }
+    $cfgLive = fb_cfg($pdo);
+    $targets = in_array($publishMode, ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [];
+    if (in_array($publishMode, ['facebook','both'], true) && !$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura primero la página de Facebook']); exit; }
+    if (in_array($publishMode, ['instagram','both'], true) && empty($cfgLive['enable_instagram'])) { echo json_encode(['status' => 'error', 'msg' => 'Instagram no está habilitado en la configuración']); exit; }
 
     $daysFinal = [];
     foreach ($scheduleDays as $d) { $n = (int)$d; if ($n >= 0 && $n <= 6) $daysFinal[$n] = $n; }
@@ -801,6 +869,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         'created_by' => $_SESSION['admin_name'] ?? 'admin',
         'name' => $campaignName !== '' ? $campaignName : ('Campaña ' . date('d/m H:i')),
         'campaign_group' => $campaignGroup !== '' ? $campaignGroup : 'General',
+        'publish_mode' => $publishMode,
         'template_id' => $templateId,
         'text' => $text,
         'banner_images' => $cleanBannerImages,
@@ -816,24 +885,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'promo_create') {
         'log' => []
     ];
     if (!fb_write_json_file($FB_QUEUE_FILE, $queue)) { echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar campaña']); exit; }
+    fb_worker_log('Campaña creada ' . $jobId . ' modo=' . $publishMode . ' nombre=' . ($campaignName !== '' ? $campaignName : 'Campaña'));
     if (!$scheduleEnabled) fb_process_queue($pdo, fb_cfg($pdo));
     echo json_encode(['status' => 'success', 'id' => $jobId]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_post') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $publishMode = fb_normalize_publish_mode($in['publish_mode'] ?? 'both');
     $job = [
         'id' => 'fbtest_' . date('Ymd_His'),
+        'publish_mode' => $publishMode,
         'text' => trim((string)($in['text'] ?? 'Prueba de publicación desde PalWeb Facebook')),
         'banner_images' => is_array($in['banner_images'] ?? null) ? $in['banner_images'] : [],
         'outro_text' => trim((string)($in['outro_text'] ?? '')),
         'products' => is_array($in['products'] ?? null) ? $in['products'] : [],
     ];
-    $targets = fb_clean_targets(fb_cfg($pdo));
-    if (!$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura primero la página']); exit; }
     $cfgLive = fb_cfg($pdo);
-    $resFb = fb_publish_campaign($pdo, $cfgLive, $job, $targets[0]);
-    $resIg = fb_publish_instagram($pdo, $cfgLive, $job);
+    $targets = in_array($publishMode, ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [];
+    if (in_array($publishMode, ['facebook','both'], true) && !$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura primero la página']); exit; }
+    if (in_array($publishMode, ['instagram','both'], true) && empty($cfgLive['enable_instagram'])) { echo json_encode(['status' => 'error', 'msg' => 'Instagram no está habilitado']); exit; }
+    $resFb = ['ok' => true, 'skipped' => true];
+    $resIg = ['ok' => true, 'skipped' => true];
+    if (in_array($publishMode, ['facebook','both'], true)) $resFb = fb_publish_campaign($pdo, $cfgLive, $job, $targets[0]);
+    if (in_array($publishMode, ['instagram','both'], true)) $resIg = fb_publish_instagram($pdo, $cfgLive, $job);
     if (!empty($resFb['ok']) && (!empty($resIg['ok']) || !empty($resIg['skipped']))) {
         echo json_encode([
             'status' => 'success',
@@ -846,6 +921,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_post') {
     $parts = [];
     if (empty($resFb['ok'])) $parts[] = 'Facebook: ' . (string)($resFb['error'] ?? 'Error');
     if (empty($resIg['ok']) && empty($resIg['skipped'])) $parts[] = 'Instagram: ' . (string)($resIg['error'] ?? 'Error');
+    fb_worker_log('Test post modo=' . $publishMode . ' resultado=' . (!empty($parts) ? implode(' | ', $parts) : 'ok'));
     echo json_encode(['status' => 'error', 'msg' => implode(' | ', $parts)]); exit;
 }
 

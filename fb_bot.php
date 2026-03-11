@@ -19,6 +19,13 @@ body{background:#f6f8fc}
 .stat{font-size:1.6rem;font-weight:700}
 .kpi-btn.active{outline:2px solid #0f172a;transform:translateY(-1px)}
 pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10px;border-radius:8px;max-height:60vh;overflow:auto}
+.social-preview{background:#fff;border:1px solid #dbe3f0;border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.08);overflow:hidden}
+.social-preview-header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid #eef2f7}
+.social-avatar{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;background:linear-gradient(135deg,#1877f2,#ef4444)}
+.social-media-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
+.social-media-grid img{width:100%;height:120px;object-fit:cover;border-radius:12px;border:1px solid #dbe3f0}
+.social-preview-body{padding:14px 16px}
+.social-preview-footer{display:flex;gap:16px;padding:12px 16px;border-top:1px solid #eef2f7;color:#64748b;font-size:.9rem}
 </style>
 </head>
 <body class="p-3 p-md-4">
@@ -95,7 +102,15 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
             <div class="card-header bg-white fw-bold">Prueba de publicación</div>
             <div class="card-body row g-2">
               <div class="col-md-8"><input id="testText" class="form-control" placeholder="Texto de prueba para Facebook"></div>
-              <div class="col-md-4"><button class="btn btn-success w-100" type="button" onclick="testPost()"><i class="fas fa-paper-plane"></i> Publicar prueba</button></div>
+              <div class="col-md-4">
+                <label class="form-label">Canal</label>
+                <select id="testPublishMode" class="form-select">
+                  <option value="both">Facebook + Instagram</option>
+                  <option value="facebook">Facebook solo</option>
+                  <option value="instagram">Instagram solo</option>
+                </select>
+              </div>
+              <div class="col-12"><button class="btn btn-success w-100" type="button" onclick="testPost()"><i class="fas fa-paper-plane"></i> Publicar prueba</button></div>
               <div class="col-12"><div class="small text-muted">La prueba publica en la página configurada y registra el resultado en el histórico.</div></div>
             </div>
           </div>
@@ -132,6 +147,23 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
           <div class="card mb-3">
             <div class="card-header bg-white fw-bold">Nueva campaña</div>
             <div class="card-body">
+              <div class="alert alert-warning py-2 small">
+                Los grupos automáticos de Facebook ya no están disponibles por la API oficial actual de Meta. Este módulo publica en tu página y, opcionalmente, en Instagram. Si necesitas publicar en grupos, habría que hacerlo manualmente o con otra estrategia fuera de API oficial.
+              </div>
+              <div class="card border mb-3">
+                <div class="card-header bg-white fw-semibold py-2">Grupos manuales de referencia</div>
+                <div class="card-body">
+                  <div class="small text-muted mb-2">Puedes guardar aquí los grupos donde acostumbras compartir manualmente. Sirve como checklist y acceso rápido, no como publicación automática.</div>
+                  <div id="manualGroupsWrap" class="border rounded p-2 mb-2" style="max-height:180px;overflow:auto">
+                    <div class="text-muted small">Sin grupos manuales guardados.</div>
+                  </div>
+                  <div class="row g-2">
+                    <div class="col-md-5"><input id="manualGroupName" class="form-control" placeholder="Nombre del grupo"></div>
+                    <div class="col-md-5"><input id="manualGroupUrl" class="form-control" placeholder="URL del grupo"></div>
+                    <div class="col-md-2 d-grid"><button class="btn btn-outline-primary" type="button" onclick="addManualGroup()"><i class="fas fa-plus"></i></button></div>
+                  </div>
+                </div>
+              </div>
               <div class="row g-2 mb-2">
                 <div class="col-md-8">
                   <label class="form-label">Plantilla</label>
@@ -168,6 +200,20 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 <div class="col-md-6"><label class="form-label">Grupo de campaña</label><input id="promoCampaignGroup" class="form-control" placeholder="Ej: Mayoristas"></div>
               </div>
               <div class="row g-2 mb-2">
+                <div class="col-md-6">
+                  <label class="form-label">Destino de publicación</label>
+                  <select id="promoPublishMode" class="form-select">
+                    <option value="both">Facebook + Instagram</option>
+                    <option value="facebook">Facebook solo</option>
+                    <option value="instagram">Instagram solo</option>
+                  </select>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Página / canal</label>
+                  <div class="form-control bg-light" id="campaignTargetInfo">Se usará la página configurada.</div>
+                </div>
+              </div>
+              <div class="row g-2 mb-2">
                 <div class="col-md-8">
                   <label class="form-label">Buscar producto</label>
                   <input id="promoSearch" class="form-control" placeholder="Nombre o código">
@@ -198,6 +244,10 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
               </div>
               <div class="mt-2">
                 <button class="btn btn-primary" type="button" onclick="createPromoCampaign()"><i class="fas fa-bullhorn"></i> Programar campaña</button>
+              </div>
+              <div class="mt-3 border rounded p-3" id="campaignPreviewBox" style="background:#f8fafc">
+                <div class="fw-semibold mb-2">Vista previa real del post</div>
+                <div id="campaignPreview" class="small text-muted">Completa el contenido para ver la vista previa.</div>
               </div>
             </div>
           </div>
@@ -238,6 +288,14 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 <div class="col-md-6">
                   <label class="form-label">Grupo de campaña</label>
                   <input id="myPageCampaignGroup" class="form-control" value="Mi pagina">
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label">Destino de publicación</label>
+                  <select id="myPagePublishMode" class="form-select">
+                    <option value="both">Facebook + Instagram</option>
+                    <option value="facebook">Facebook solo</option>
+                    <option value="instagram">Instagram solo</option>
+                  </select>
                 </div>
               </div>
               <div class="mt-3 p-3 rounded" style="background:#f8fafc;border:1px solid #e2e8f0">
@@ -311,6 +369,7 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
         <pre id="logsText" class="fb-console">Sin actividad.</pre>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-outline-danger btn-sm" type="button" onclick="clearLocalLogConsole()"><i class="fas fa-eraser"></i> Limpiar vista</button>
         <button class="btn btn-outline-secondary btn-sm" type="button" onclick="loadLogsSnapshot()"><i class="fas fa-sync"></i> Refrescar</button>
       </div>
     </div>
@@ -348,6 +407,7 @@ let promoBannerImages=[];
 let promoTemplates=[];
 let promoCampaigns=[];
 let recentPosts=[];
+let manualGroups=[];
 let activeCampaignLogId='';
 let promoSearchTimer=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -360,6 +420,32 @@ function selectedPromoDays(){return [...document.querySelectorAll('.promo-day:ch
 function daysToText(days){const map={0:'D',1:'L',2:'M',3:'X',4:'J',5:'V',6:'S'};const arr=(Array.isArray(days)?days:[]).map(x=>parseInt(x,10)).filter(x=>map[x]!==undefined);return arr.length?arr.map(x=>map[x]).join(','):'-';}
 function stateBadge(status){if(status==='success'||status==='done') return '<span class="badge bg-success">OK</span>'; if(status==='scheduled') return '<span class="badge bg-info text-dark">scheduled</span>'; if(status==='queued'||status==='running') return `<span class="badge bg-warning text-dark">${esc(status)}</span>`; if(status==='error') return '<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(status||'-')}</span>`;}
 function targetsToText(targets){const arr=Array.isArray(targets)?targets:[]; if(!arr.length) return '-'; return arr.map(t=>String(t.name||t.id||'')).filter(Boolean).join(' | ')}
+function describePublishMode(mode){if(mode==='facebook') return 'Facebook solo'; if(mode==='instagram') return 'Instagram solo'; return 'Facebook + Instagram';}
+function updateTargetInfo(){const box=document.getElementById('campaignTargetInfo'); if(!box) return; const page=page_name.value.trim()||page_id.value.trim()||'página configurada'; const ig=ig_username.value.trim()||ig_user_id.value.trim()||'Instagram'; const mode=promoPublishMode.value||'both'; box.textContent=mode==='facebook'?page:(mode==='instagram'?ig:`${page} + ${ig}`);}
+function renderCampaignPreview(source='campaign'){
+  const box = source==='my_page' ? document.getElementById('myPagePreview') : document.getElementById('campaignPreview');
+  if(!box) return;
+  const text = source==='my_page' ? '' : (promoText.value||'').trim();
+  const products = source==='my_page' ? [] : promoProducts;
+  const banners = source==='my_page' ? [] : promoBannerImages;
+  const mode = source==='my_page' ? (myPagePublishMode.value||'both') : (promoPublishMode.value||'both');
+  const targetName = page_name.value.trim() || page_id.value.trim() || 'página configurada';
+  const igName = ig_username.value.trim() || ig_user_id.value.trim() || 'Instagram';
+  const channelLabel = mode==='instagram' ? igName : (mode==='facebook' ? targetName : `${targetName} + ${igName}`);
+  const bodyText = text || (source==='my_page' ? 'Publicación automática diaria de catálogo y reservables.' : '');
+  let html = `<div class="social-preview"><div class="social-preview-header"><div class="social-avatar">${esc((business_name.value.trim()||'PW').slice(0,2).toUpperCase())}</div><div><div class="fw-semibold">${esc(business_name.value.trim()||targetName)}</div><div class="small text-muted">${esc(describePublishMode(mode))} · ${esc(channelLabel)}</div></div></div><div class="social-preview-body">`;
+  if(bodyText) html += `<div class="mb-3" style="white-space:pre-wrap">${esc(bodyText)}</div>`;
+  if(banners.length){ html += `<div class="social-media-grid mb-3">` + banners.map(img=>`<img src="${esc(img.url||'')}" alt="">`).join('') + `</div>`; }
+  if(products.length){ html += `<div class="fw-semibold small mb-1">Productos destacados</div><ul class="small mb-2">` + products.slice(0,10).map(p=>`<li>${esc(p.name||p.id)} - $${Number(p.price||0).toFixed(2)}</li>`).join('') + `</ul>`; }
+  if(!text && !products.length && !banners.length && source!=='my_page'){ html += `<div class="text-muted">Completa el contenido para ver la vista previa.</div>`; }
+  html += `</div><div class="social-preview-footer"><span><i class="far fa-heart"></i> Me gusta</span><span><i class="far fa-comment"></i> Comentar</span><span><i class="far fa-paper-plane"></i> Compartir</span></div></div>`;
+  box.innerHTML = html;
+}
+function renderManualGroups(){const wrap=document.getElementById('manualGroupsWrap'); if(!wrap) return; if(!manualGroups.length){wrap.innerHTML='<div class="text-muted small">Sin grupos manuales guardados.</div>';return;} wrap.innerHTML=manualGroups.map((g,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-2 small"><div class="flex-grow-1"><div class="fw-semibold">${esc(g.name||('Grupo '+(idx+1)))}</div>${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener" class="text-decoration-none">${esc(g.url)}</a>`:'<div class="text-muted">Sin URL</div>'}</div><button class="btn btn-sm btn-outline-danger" type="button" onclick="removeManualGroup(${idx})"><i class="fas fa-trash"></i></button></div>`).join('');}
+async function loadManualGroups(){const d=await g(API+'?action=manual_groups'); if(d.status!=='success') return; manualGroups=Array.isArray(d.rows)?d.rows:[]; renderManualGroups();}
+async function saveManualGroups(){const d=await p(API+'?action=manual_groups',{rows:manualGroups}); if(d.status!=='success'){a('danger',d.msg||'No se pudo guardar grupos manuales'); return;} manualGroups=Array.isArray(d.rows)?d.rows:manualGroups; renderManualGroups();}
+function addManualGroup(){const name=(manualGroupName.value||'').trim(); const url=(manualGroupUrl.value||'').trim(); if(!name && !url){a('danger','Escribe nombre o URL del grupo');return;} manualGroups.push({name,url}); manualGroupName.value=''; manualGroupUrl.value=''; renderManualGroups(); saveManualGroups();}
+function removeManualGroup(idx){manualGroups.splice(idx,1); renderManualGroups(); saveManualGroups();}
 function updateStatusLed(){
   const dot=document.getElementById('fbLedDot');
   const txt=document.getElementById('fbLedText');
@@ -393,6 +479,8 @@ async function loadCfg(){
   page_access_token.value='';
   ig_access_token.value='';
   updateStatusLed();
+  updateTargetInfo();
+  renderCampaignPreview();
 }
 async function saveCfg(ev){
   ev.preventDefault();
@@ -411,81 +499,49 @@ async function saveCfg(ev){
   });
   if(d.status==='success'){a('success','Guardado');await loadCfg();await loadStats();page_access_token.value='';ig_access_token.value='';} else a('danger',d.msg||'No se pudo guardar');
 }
-async function loadStats(){
-  const d=await g(API+'?action=stats');
-  if(d.status!=='success') return;
-  s1.textContent=d.stats.posts_today||0;
-  s2.textContent=d.stats.facebook_today||0;
-  s3.textContent=d.stats.instagram_today||0;
-  if(!s4.textContent || s4.textContent==='-') s4.textContent=Number(d.stats.enabled||0)===1?'Activo':'Pausado';
-}
-function renderRecentPosts(){
-  const tb=document.getElementById('recentPostsRows');
-  const preview=document.getElementById('lastPostPreview');
-  if(!recentPosts.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin publicaciones</td></tr>'; preview.textContent='Sin datos.'; return;}
-  tb.innerHTML=recentPosts.map((r,idx)=>`<tr onclick="showPostDetail(${idx})" style="cursor:pointer">
-    <td class="small">${esc(r.created_at||'')}</td>
-    <td class="small"><span class="badge ${String(r.platform)==='instagram'?'bg-danger':'bg-primary'}">${esc(r.platform||'facebook')}</span></td>
-    <td class="small">${esc(r.page_name||'-')}</td>
-    <td class="small">${esc(r.campaign_id||'-')}</td>
-    <td>${stateBadge(r.status||'-')}</td>
-    <td class="small">${esc(r.fb_post_id||'-')}</td>
-  </tr>`).join('');
-  showPostDetail(0);
-}
-function showPostDetail(idx){
-  const row=recentPosts[idx];
-  if(!row) return;
-  const lines=[
-    `Fecha: ${row.created_at||'-'}`,
-    `Plataforma: ${row.platform||'facebook'}`,
-    `Destino: ${row.page_name||'-'} (${row.page_id||'-'})`,
-    `Campaña: ${row.campaign_id||'-'}`,
-    `Estado: ${row.status||'-'}`,
-    `Post ID: ${row.fb_post_id||'-'}`,
-    row.error_text?`Error: ${row.error_text}`:'',
-    '',
-    String(row.message_text||'')
-  ].filter(Boolean);
-  lastPostPreview.textContent=lines.join('\n');
-}
+async function loadStats(){const d=await g(API+'?action=stats'); if(d.status!=='success') return; s1.textContent=d.stats.posts_today||0; s2.textContent=d.stats.facebook_today||0; s3.textContent=d.stats.instagram_today||0; if(!s4.textContent || s4.textContent==='-') s4.textContent=Number(d.stats.enabled||0)===1?'Activo':'Pausado';}
+function renderRecentPosts(){const tb=document.getElementById('recentPostsRows'); const preview=document.getElementById('lastPostPreview'); if(!recentPosts.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin publicaciones</td></tr>'; preview.textContent='Sin datos.'; return;} tb.innerHTML=recentPosts.map((r,idx)=>`<tr onclick="showPostDetail(${idx})" style="cursor:pointer"><td class="small">${esc(r.created_at||'')}</td><td class="small"><span class="badge ${String(r.platform)==='instagram'?'bg-danger':'bg-primary'}">${esc(r.platform||'facebook')}</span></td><td class="small">${esc(r.page_name||'-')}</td><td class="small">${esc(r.campaign_id||'-')}</td><td>${stateBadge(r.status||'-')}</td><td class="small">${esc(r.fb_post_id||'-')}</td></tr>`).join(''); showPostDetail(0);}
+function showPostDetail(idx){const row=recentPosts[idx]; if(!row) return; const lines=[`Fecha: ${row.created_at||'-'}`,`Plataforma: ${row.platform||'facebook'}`,`Destino: ${row.page_name||'-'} (${row.page_id||'-'})`,`Campaña: ${row.campaign_id||'-'}`,`Estado: ${row.status||'-'}`,`Post ID: ${row.fb_post_id||'-'}`,row.error_text?`Error: ${row.error_text}`:'','',String(row.message_text||'')].filter(Boolean); lastPostPreview.textContent=lines.join('\n');}
 async function loadRecentPosts(){const d=await g(API+'?action=recent_posts'); if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar publicaciones');return;} recentPosts=Array.isArray(d.rows)?d.rows:[]; renderRecentPosts();}
 function renderPromoTemplates(){const s=document.getElementById('promoTemplateSelect'); if(!s) return; s.innerHTML=['<option value="">(Sin plantilla)</option>'].concat(promoTemplates.map(t=>`<option value="${esc(t.id)}">${esc(t.name||t.id)}</option>`)).join('');}
 async function loadPromoTemplates(){const d=await g(API+'?action=promo_templates'); if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar plantillas');return;} promoTemplates=Array.isArray(d.rows)?d.rows:[]; renderPromoTemplates(); renderProgrammingTab();}
 async function savePromoTemplate(){const name=(promoTemplateName.value||'').trim(); const text=(promoText.value||'').trim(); if(!name){a('danger','Pon nombre a la plantilla');return;} if(!text && !promoProducts.length && !promoBannerImages.length){a('danger','La plantilla no puede estar vacía');return;} const currentId=(promoTemplateSelect.value||'').trim(); const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts,banner_images:promoBannerImages}); if(d.status==='success'){a('success','Plantilla guardada'); await loadPromoTemplates(); promoTemplateSelect.value=d.id||'';} else a('danger',d.msg||'No se pudo guardar plantilla');}
 function applyPromoTemplate(){const id=(promoTemplateSelect.value||'').trim(); if(!id){a('danger','Selecciona una plantilla');return;} const t=promoTemplates.find(x=>String(x.id)===id); if(!t){a('danger','Plantilla no encontrada');return;} promoTemplateName.value=t.name||''; promoText.value=t.text||''; promoProducts=Array.isArray(t.products)?t.products:[]; promoBannerImages=Array.isArray(t.banner_images)?t.banner_images:[]; renderPromoProducts(); renderPromoBanners(); a('info','Plantilla cargada');}
 async function deletePromoTemplate(){const id=(promoTemplateSelect.value||'').trim(); if(!id){a('danger','Selecciona una plantilla');return;} const d=await p(API+'?action=promo_template_delete',{id}); if(d.status==='success'){a('success','Plantilla eliminada'); await loadPromoTemplates(); promoTemplateName.value='';} else a('danger',d.msg||'No se pudo eliminar plantilla');}
-function renderPromoProducts(){const w=document.getElementById('promoProductsWrap'); if(!w) return; if(!promoProducts.length){w.innerHTML='<div class="text-muted small">Sin productos seleccionados.</div>';return;} w.innerHTML=promoProducts.map((p,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-1"><img src="${esc(p.image||'')}" alt="" width="42" height="42" style="object-fit:cover;border-radius:6px;border:1px solid #ddd"><div class="small"><div class="fw-semibold">${esc(p.name)}</div><div class="text-muted">$${Number(p.price||0).toFixed(2)} · ${esc(p.id)}</div></div><button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoProduct(${idx})"><i class="fas fa-times"></i></button></div>`).join('');}
-function renderPromoBanners(){const w=document.getElementById('promoBannerWrap'); if(!w) return; if(!promoBannerImages.length){w.innerHTML='<div class="text-muted small">Sin imágenes cargadas.</div>';return;} w.innerHTML=promoBannerImages.map((img,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-2"><img src="${esc(img.url||'')}" alt="" width="72" height="48" style="object-fit:cover;border-radius:6px;border:1px solid #ddd"><div class="small" style="min-width:0"><div class="fw-semibold text-truncate">${esc(img.name||('Banner '+(idx+1)))}</div><div class="text-muted text-truncate">${esc(img.url||'')}</div></div><button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoBanner(${idx})"><i class="fas fa-times"></i></button></div>`).join('');}
+function renderPromoProducts(){const w=document.getElementById('promoProductsWrap'); if(!w) return; if(!promoProducts.length){w.innerHTML='<div class="text-muted small">Sin productos seleccionados.</div>'; renderCampaignPreview(); return;} w.innerHTML=promoProducts.map((p,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-1"><img src="${esc(p.image||'')}" alt="" width="42" height="42" style="object-fit:cover;border-radius:6px;border:1px solid #ddd"><div class="small"><div class="fw-semibold">${esc(p.name)}</div><div class="text-muted">$${Number(p.price||0).toFixed(2)} · ${esc(p.id)}</div></div><button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoProduct(${idx})"><i class="fas fa-times"></i></button></div>`).join(''); renderCampaignPreview();}
+function renderPromoBanners(){const w=document.getElementById('promoBannerWrap'); if(!w) return; if(!promoBannerImages.length){w.innerHTML='<div class="text-muted small">Sin imágenes cargadas.</div>'; renderCampaignPreview(); return;} w.innerHTML=promoBannerImages.map((img,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-2"><img src="${esc(img.url||'')}" alt="" width="72" height="48" style="object-fit:cover;border-radius:6px;border:1px solid #ddd"><div class="small" style="min-width:0"><div class="fw-semibold text-truncate">${esc(img.name||('Banner '+(idx+1)))}</div><div class="text-muted text-truncate">${esc(img.url||'')}</div></div><button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoBanner(${idx})"><i class="fas fa-times"></i></button></div>`).join(''); renderCampaignPreview();}
 function removePromoBanner(idx){promoBannerImages.splice(idx,1);renderPromoBanners();}
 function removePromoProduct(idx){promoProducts.splice(idx,1);renderPromoProducts();}
 function addPromoProduct(p){if(!p||!p.id) return; if(promoProducts.some(x=>String(x.id)===String(p.id))) return; promoProducts.push(p); renderPromoProducts();}
 async function onPromoBannerInput(ev){const files=[...(ev.target.files||[])]; if(!files.length) return; const remaining=Math.max(0,3-promoBannerImages.length); if(!remaining){a('danger','Solo se permiten hasta 3 imágenes');ev.target.value='';return;} const selected=files.slice(0,remaining); for(const file of selected){const d=await uploadPromoBanner(file); if(d.status==='success'){promoBannerImages.push({url:d.url,name:d.name||file.name}); renderPromoBanners();}else{a('danger',d.msg||('No se pudo subir '+file.name));}} if(files.length>remaining) a('info','Máximo 3 imágenes por campaña.'); ev.target.value='';}
 async function searchPromoProducts(q){const box=document.getElementById('promoSearchRes'); if(!box) return; if(!q || q.trim().length<2){box.innerHTML='';return;} const d=await g(API+'?action=promo_products&q='+encodeURIComponent(q.trim())); if(d.status!=='success'){box.innerHTML='';return;} const rows=Array.isArray(d.rows)?d.rows:[]; box.innerHTML=rows.map((r,idx)=>`<button class="list-group-item list-group-item-action d-flex align-items-center gap-2" type="button" data-add-idx="${idx}"><img src="${esc(r.image||'')}" alt="" width="32" height="32" style="object-fit:cover;border-radius:5px;border:1px solid #ddd"><span class="small">${esc(r.name)} <span class="text-muted">(${esc(r.id)})</span> - $${Number(r.price||0).toFixed(2)}</span></button>`).join(''); box.querySelectorAll('[data-add-idx]').forEach(btn=>btn.addEventListener('click',()=>{addPromoProduct(rows[parseInt(btn.dataset.addIdx,10)]); box.innerHTML='';}));}
-async function createPromoCampaign(){try{const text=(promoText.value||'').trim(); const campaignName=(promoCampaignName.value||'').trim(); const campaignGroup=(promoCampaignGroup.value||'').trim()||'General'; const scheduleTime=(promoScheduleTime.value||'').trim(); const scheduleDays=selectedPromoDays(); if(!text && !promoProducts.length && !promoBannerImages.length){a('danger','La campaña no puede estar vacía');return;} if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;} if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;} const d=await p(API+'?action=promo_create',{campaign_name:campaignName,campaign_group:campaignGroup,template_id:(promoTemplateSelect.value||'').trim(),text,banner_images:promoBannerImages,products:promoProducts,schedule_enabled:1,schedule_time:scheduleTime,schedule_days:scheduleDays}); if(d.status==='success'){a('success','Campaña programada: '+(d.id||'')); loadPromoList();} else a('danger',d.msg||'Error al crear campaña');}catch(e){a('danger','No se pudo programar la campaña: '+(e?.message||'error inesperado'));}}
-function renderMyPagePreview(payload){const box=document.getElementById('myPagePreview'); if(!box) return; const products=Array.isArray(payload?.products)?payload.products:[]; const reservables=Array.isArray(payload?.reservables)?payload.reservables:[]; box.innerHTML=[`<div class="fw-semibold mb-2">Vista previa para ${esc(page_name.value||page_id.value||'tu página')}</div>`,`<div class="mb-2"><span class="badge bg-success">${products.length}</span> productos con existencias</div>`,`<div class="mb-2"><span class="badge bg-info text-dark">${reservables.length}</span> productos reservables al cierre</div>`,`<div class="text-muted">Texto final:</div>`,`<pre class="mb-0 mt-2" style="white-space:pre-wrap;font-family:inherit">${esc(payload?.outro_text||'')}</pre>`].join('');}
+async function createPromoCampaign(){try{const text=(promoText.value||'').trim(); const campaignName=(promoCampaignName.value||'').trim(); const campaignGroup=(promoCampaignGroup.value||'').trim()||'General'; const publishMode=(promoPublishMode.value||'both').trim(); const scheduleTime=(promoScheduleTime.value||'').trim(); const scheduleDays=selectedPromoDays(); if(!text && !promoProducts.length && !promoBannerImages.length){a('danger','La campaña no puede estar vacía');return;} if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;} if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;} const d=await p(API+'?action=promo_create',{campaign_name:campaignName,campaign_group:campaignGroup,publish_mode:publishMode,template_id:(promoTemplateSelect.value||'').trim(),text,banner_images:promoBannerImages,products:promoProducts,schedule_enabled:1,schedule_time:scheduleTime,schedule_days:scheduleDays}); if(d.status==='success'){a('success','Campaña programada: '+(d.id||'')); loadPromoList();} else a('danger',d.msg||'Error al crear campaña');}catch(e){a('danger','No se pudo programar la campaña: '+(e?.message||'error inesperado'));}}
+function renderMyPagePreview(payload){const box=document.getElementById('myPagePreview'); if(!box) return; const products=Array.isArray(payload?.products)?payload.products:[]; const reservables=Array.isArray(payload?.reservables)?payload.reservables:[]; box.innerHTML=[`<div class="social-preview"><div class="social-preview-header"><div class="social-avatar">${esc((business_name.value.trim()||'PW').slice(0,2).toUpperCase())}</div><div><div class="fw-semibold">${esc(business_name.value.trim()||page_name.value||page_id.value||'tu página')}</div><div class="small text-muted">${esc(describePublishMode(myPagePublishMode.value||'both'))} · ${esc(page_name.value||page_id.value||'tu página')}</div></div></div><div class="social-preview-body"><div class="mb-2"><span class="badge bg-success">${products.length}</span> productos con existencias</div><div class="mb-2"><span class="badge bg-info text-dark">${reservables.length}</span> productos reservables al cierre</div><div class="fw-semibold small mb-1">Texto final</div><div style="white-space:pre-wrap">${esc(payload?.outro_text||'')}</div></div><div class="social-preview-footer"><span><i class="far fa-heart"></i> Me gusta</span><span><i class="far fa-comment"></i> Comentar</span><span><i class="far fa-paper-plane"></i> Compartir</span></div></div>`].join('');}
 async function loadMyPagePreview(){const box=document.getElementById('myPagePreview'); if(!box) return; box.innerHTML='Cargando vista previa...'; const d=await g(API+'?action=promo_my_page_payload'); if(d.status!=='success'){box.innerHTML='No se pudo generar la vista previa.'; a('danger',d.msg||'No se pudo cargar Mi página'); return;} renderMyPagePreview(d);}
-async function createMyPageCampaign(){try{const scheduleTime=(myPageScheduleTime.value||'').trim(); const campaignGroup=(myPageCampaignGroup.value||'').trim()||'Mi pagina'; if(!scheduleTime){a('danger','Selecciona la hora diaria');return;} const payload=await g(API+'?action=promo_my_page_payload'); if(payload.status!=='success'){a('danger',payload.msg||'No se pudo preparar Mi página');return;} const products=Array.isArray(payload.products)?payload.products:[]; if(!products.length){a('danger','No hay productos con existencias disponibles');return;} const d=await p(API+'?action=promo_create',{campaign_name:'Mi pagina diaria',campaign_group:campaignGroup,text:'',outro_text:String(payload.outro_text||'').trim(),products,schedule_enabled:1,schedule_time:scheduleTime,schedule_days:[0,1,2,3,4,5,6]}); if(d.status==='success'){renderMyPagePreview(payload); a('success','Mi página programada: '+(d.id||'')); loadPromoList();} else a('danger',d.msg||'Error al crear Mi página');}catch(e){a('danger','No se pudo programar Mi página: '+(e?.message||'error inesperado'));}}
-async function loadPromoList(){const d=await g(API+'?action=promo_list'); const tb=document.getElementById('promoRows'); if(!tb) return; if(d.status!=='success'){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>'; promoCampaigns=[]; renderProgrammingTab(); return;} promoCampaigns=Array.isArray(d.rows)?d.rows:[]; if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>'; renderProgrammingTab(); return;} tb.innerHTML=promoCampaigns.map(r=>`<tr><td class="small">${esc(r.created_at||'')}</td><td class="small">${esc(r.name||r.id||'')}</td><td class="small">${esc(r.campaign_group||'General')}</td><td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td><td>${stateBadge(r.status||'')}</td><td class="small"><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button><button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button><button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button><button class="btn btn-sm btn-outline-primary" type="button" title="Editar" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button></div></td></tr>`).join(''); renderProgrammingTab();}
+async function createMyPageCampaign(){try{const scheduleTime=(myPageScheduleTime.value||'').trim(); const campaignGroup=(myPageCampaignGroup.value||'').trim()||'Mi pagina'; const publishMode=(myPagePublishMode.value||'both').trim(); if(!scheduleTime){a('danger','Selecciona la hora diaria');return;} const payload=await g(API+'?action=promo_my_page_payload'); if(payload.status!=='success'){a('danger',payload.msg||'No se pudo preparar Mi página');return;} const products=Array.isArray(payload.products)?payload.products:[]; if(!products.length){a('danger','No hay productos con existencias disponibles');return;} const d=await p(API+'?action=promo_create',{campaign_name:'Mi pagina diaria',campaign_group:campaignGroup,publish_mode:publishMode,text:'',outro_text:String(payload.outro_text||'').trim(),products,schedule_enabled:1,schedule_time:scheduleTime,schedule_days:[0,1,2,3,4,5,6]}); if(d.status==='success'){renderMyPagePreview(payload); a('success','Mi página programada: '+(d.id||'')); loadPromoList();} else a('danger',d.msg||'Error al crear Mi página');}catch(e){a('danger','No se pudo programar Mi página: '+(e?.message||'error inesperado'));}}
+async function loadPromoList(){const d=await g(API+'?action=promo_list'); const tb=document.getElementById('promoRows'); if(!tb) return; if(d.status!=='success'){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>'; promoCampaigns=[]; renderProgrammingTab(); return;} promoCampaigns=Array.isArray(d.rows)?d.rows:[]; if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>'; renderProgrammingTab(); return;} tb.innerHTML=promoCampaigns.map(r=>`<tr><td class="small">${esc(r.created_at||'')}</td><td class="small">${esc(r.name||r.id||'')}<br><span class="badge bg-dark mt-1">${esc(describePublishMode(r.publish_mode||'both'))}</span></td><td class="small">${esc(r.campaign_group||'General')}</td><td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td><td>${stateBadge(r.status||'')}</td><td class="small"><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button><button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button><button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button><button class="btn btn-sm btn-outline-primary" type="button" title="Editar" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button></div></td></tr>`).join(''); renderProgrammingTab();}
 async function cloneScheduledCampaign(id){const d=await p(API+'?action=promo_clone',{id}); if(d.status==='success'){a('success','Campaña clonada: '+(d.name||d.id||'')); loadPromoList();} else a('danger',d.msg||'No se pudo clonar');}
 async function deleteScheduledCampaign(id){const row=promoCampaigns.find(x=>String(x.id)===String(id)); if(!row){a('danger','Campaña no encontrada');return;} if(!confirm(`¿Eliminar campaña "${row.name||row.id}"?`)) return; const d=await p(API+'?action=promo_delete',{id}); if(d.status==='success'){a('success','Campaña eliminada'); loadPromoList();} else a('danger',d.msg||'No se pudo eliminar');}
-async function forceCampaignNow(id){const row=promoCampaigns.find(x=>String(x.id)===String(id)); if(!row){a('danger','Campaña no encontrada');return;} if(!confirm(`¿Lanzar ahora la campaña "${row.name||row.id}"?`)) return; const d=await p(API+'?action=promo_force_now',{id}); if(d.status==='success'){a('success','Campaña enviada a cola para ejecutar ahora'); loadPromoList(); loadRecentPosts();} else a('danger',d.msg||'No se pudo forzar');}
-async function editScheduledCampaign(id){const row=promoCampaigns.find(x=>String(x.id)===String(id)); if(!row){a('danger','Campaña no encontrada');return;} const name=prompt('Nombre de campaña:',row.name||''); if(name===null) return; const group=prompt('Grupo de campaña:',row.campaign_group||'General'); if(group===null) return; const time=prompt('Hora (HH:MM) zona Cuba (America/Havana):',row.schedule_time||'09:00'); if(time===null) return; const daysCurrent=Array.isArray(row.schedule_days)?row.schedule_days.join(','):'1,2,3,4,5'; const daysRaw=prompt('Días (0..6 separados por coma). 0=Dom,1=Lun,...,6=Sab',daysCurrent); if(daysRaw===null) return; const days=String(daysRaw).split(',').map(x=>parseInt(String(x).trim(),10)).filter(x=>!Number.isNaN(x) && x>=0 && x<=6); if(!days.length){a('danger','Debes indicar al menos un día válido (0..6)');return;} const d=await p(API+'?action=promo_update',{id,name:String(name).trim(),campaign_group:String(group).trim()||'General',schedule_enabled:1,schedule_time:String(time).trim(),schedule_days:days,status:'scheduled'}); if(d.status==='success'){a('success','Campaña actualizada'); loadPromoList();} else a('danger',d.msg||'No se pudo actualizar');}
-function renderCampaignLogsModal(job){const summary=document.getElementById('campaignLogsSummary'); const rowsEl=document.getElementById('campaignLogsRows'); const logs=Array.isArray(job.log)?job.log:[]; const ok=logs.filter(x=>x&&x.ok===true).length; const fail=logs.filter(x=>x&&x.ok===false).length; const sent=logs.reduce((acc,x)=>acc+Number((x&&x.messages_sent)||0),0); const targets=(Array.isArray(job.targets)?job.targets:[]).map(t=>String(t.name||t.id||'')).join(' | '); summary.textContent=`Campaña: ${job.name||job.id||'-'} | Grupo: ${job.campaign_group||'General'} | Publicaciones: ${sent} | OK: ${ok} | Fallos: ${fail} | Página: ${targets||'-'}`; if(!logs.length){rowsEl.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin logs aún</td></tr>'; return;} rowsEl.innerHTML=logs.slice().reverse().map(l=>`<tr><td class="small">${esc(l.at||'-')}</td><td class="small">${esc(l.target_name||l.target_id||'-')}</td><td class="small">${Number(l.messages_sent||0)}</td><td>${l.ok===true?'<span class="badge bg-success">OK</span>':'<span class="badge bg-danger">Fallo</span>'}</td><td class="small text-danger">${esc(l.error||'')}</td></tr>`).join('');}
+async function forceCampaignNow(id){const row=promoCampaigns.find(x=>String(x.id)===String(id)); if(!row){a('danger','Campaña no encontrada');return;} if(!confirm(`¿Lanzar ahora la campaña "${row.name||row.id}"?`)) return; const d=await p(API+'?action=promo_force_now',{id}); if(d.status==='success'){a('success','Campaña enviada a cola para ejecutar ahora'); loadPromoList(); loadRecentPosts(); loadLogsSnapshot();} else a('danger',d.msg||'No se pudo forzar');}
+async function editScheduledCampaign(id){const row=promoCampaigns.find(x=>String(x.id)===String(id)); if(!row){a('danger','Campaña no encontrada');return;} const name=prompt('Nombre de campaña:',row.name||''); if(name===null) return; const group=prompt('Grupo de campaña:',row.campaign_group||'General'); if(group===null) return; const mode=prompt('Modo de publicación: facebook | instagram | both',row.publish_mode||'both'); if(mode===null) return; const time=prompt('Hora (HH:MM) zona Cuba (America/Havana):',row.schedule_time||'09:00'); if(time===null) return; const daysCurrent=Array.isArray(row.schedule_days)?row.schedule_days.join(','):'1,2,3,4,5'; const daysRaw=prompt('Días (0..6 separados por coma). 0=Dom,1=Lun,...,6=Sab',daysCurrent); if(daysRaw===null) return; const days=String(daysRaw).split(',').map(x=>parseInt(String(x).trim(),10)).filter(x=>!Number.isNaN(x) && x>=0 && x<=6); if(!days.length){a('danger','Debes indicar al menos un día válido (0..6)');return;} const d=await p(API+'?action=promo_update',{id,name:String(name).trim(),campaign_group:String(group).trim()||'General',publish_mode:String(mode).trim(),schedule_enabled:1,schedule_time:String(time).trim(),schedule_days:days,status:'scheduled'}); if(d.status==='success'){a('success','Campaña actualizada'); loadPromoList();} else a('danger',d.msg||'No se pudo actualizar');}
+function renderCampaignLogsModal(job){const summary=document.getElementById('campaignLogsSummary'); const rowsEl=document.getElementById('campaignLogsRows'); const logs=Array.isArray(job.log)?job.log:[]; const ok=logs.filter(x=>x&&x.ok===true).length; const fail=logs.filter(x=>x&&x.ok===false).length; const sent=logs.reduce((acc,x)=>acc+Number((x&&x.messages_sent)||0),0); const targets=(Array.isArray(job.targets)?job.targets:[]).map(t=>String(t.name||t.id||'')).join(' | '); summary.textContent=`Campaña: ${job.name||job.id||'-'} | Grupo: ${job.campaign_group||'General'} | Modo: ${describePublishMode(job.publish_mode||'both')} | Publicaciones: ${sent} | OK: ${ok} | Fallos: ${fail} | Página: ${targets||'-'}`; if(!logs.length){rowsEl.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin logs aún</td></tr>'; return;} rowsEl.innerHTML=logs.slice().reverse().map(l=>`<tr><td class="small">${esc(l.at||'-')}</td><td class="small">${esc(l.target_name||l.target_id||'-')}<br><span class="text-muted">${esc(describePublishMode(l.publish_mode||job.publish_mode||'both'))}</span></td><td class="small">${Number(l.messages_sent||0)}<br><span class="text-muted">${esc([l.facebook_post_id?('FB '+l.facebook_post_id):'',l.instagram_post_id?('IG '+l.instagram_post_id):''].filter(Boolean).join(' | '))}</span></td><td>${l.ok===true?'<span class="badge bg-success">OK</span>':'<span class="badge bg-danger">Fallo</span>'}</td><td class="small text-danger">${esc(l.error||'')}</td></tr>`).join('');}
 async function refreshCampaignLogs(){if(!activeCampaignLogId) return; const d=await g(API+'?action=promo_detail&id='+encodeURIComponent(activeCampaignLogId)); if(d.status!=='success' || !d.row){a('danger',d.msg||'No se pudieron cargar logs');return;} renderCampaignLogsModal(d.row);}
 async function openCampaignLogs(id){activeCampaignLogId=String(id||''); await refreshCampaignLogs(); new bootstrap.Modal(document.getElementById('campaignLogsModal')).show();}
-function renderProgrammingTab(){const tplRows=document.getElementById('promoTemplateRows'); if(tplRows){if(!promoTemplates.length){tplRows.innerHTML='<tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr>';} else {tplRows.innerHTML=promoTemplates.map(t=>`<tr><td class="small fw-semibold">${esc(t.name||t.id||'-')}</td><td class="small">${Array.isArray(t.products)?t.products.length:0}</td><td class="small">${esc(t.updated_at||'-')}</td></tr>`).join('');}}
-  const wrap=document.getElementById('promoProgramGroups'); if(!wrap) return; const scheduled=promoCampaigns.filter(r=>Number(r.schedule_enabled||0)===1); if(!scheduled.length){wrap.innerHTML='<div class="text-muted small">Sin campañas programadas.</div>'; return;} const groups={}; for(const r of scheduled){const g=String(r.campaign_group||'General'); if(!groups[g]) groups[g]=[]; groups[g].push(r);} wrap.innerHTML=Object.keys(groups).sort().map(g=>`<div class="border rounded p-2 mb-2"><div class="fw-semibold mb-1">${esc(g)}</div><div class="table-responsive"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Campaña</th><th>Hora</th><th>Días</th><th>Estado</th><th>Página</th><th>Acciones</th></tr></thead><tbody>${groups[g].map(r=>`<tr><td class="small">${esc(r.name||r.id||'-')}</td><td class="small">${esc(r.schedule_time||'-')}</td><td class="small">${esc(daysToText(r.schedule_days||[]))}</td><td>${stateBadge(r.status||'-')}</td><td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td><td class="small"><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button><button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button><button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button><button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button></div></td></tr>`).join('')}</tbody></table></div></div>`).join('');}
-async function testPost(){const text=(testText.value||'').trim()||'Prueba de publicación desde PalWeb Facebook'; const d=await p(API+'?action=test_post',{text}); if(d.status==='success'){a('success','Publicación de prueba enviada'); loadRecentPosts(); loadStats(); runQueue();} else a('danger',d.msg||'No se pudo publicar');}
+function renderProgrammingTab(){const tplRows=document.getElementById('promoTemplateRows'); if(tplRows){if(!promoTemplates.length){tplRows.innerHTML='<tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr>';} else {tplRows.innerHTML=promoTemplates.map(t=>`<tr><td class="small fw-semibold">${esc(t.name||t.id||'-')}</td><td class="small">${Array.isArray(t.products)?t.products.length:0}</td><td class="small">${esc(t.updated_at||'-')}</td></tr>`).join('');}} const wrap=document.getElementById('promoProgramGroups'); if(!wrap) return; const scheduled=promoCampaigns.filter(r=>Number(r.schedule_enabled||0)===1); if(!scheduled.length){wrap.innerHTML='<div class="text-muted small">Sin campañas programadas.</div>'; return;} const groups={}; for(const r of scheduled){const g=String(r.campaign_group||'General'); if(!groups[g]) groups[g]=[]; groups[g].push(r);} wrap.innerHTML=Object.keys(groups).sort().map(g=>`<div class="border rounded p-2 mb-2"><div class="fw-semibold mb-1">${esc(g)}</div><div class="table-responsive"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Campaña</th><th>Modo</th><th>Hora</th><th>Días</th><th>Estado</th><th>Página</th><th>Acciones</th></tr></thead><tbody>${groups[g].map(r=>`<tr><td class="small">${esc(r.name||r.id||'-')}</td><td class="small">${esc(describePublishMode(r.publish_mode||'both'))}</td><td class="small">${esc(r.schedule_time||'-')}</td><td class="small">${esc(daysToText(r.schedule_days||[]))}</td><td>${stateBadge(r.status||'-')}</td><td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td><td class="small"><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button><button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button><button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button><button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button></div></td></tr>`).join('')}</tbody></table></div></div>`).join('');}
+async function testPost(){const text=(testText.value||'').trim()||'Prueba de publicación desde PalWeb Facebook'; const d=await p(API+'?action=test_post',{text,publish_mode:testPublishMode.value||'both'}); if(d.status==='success'){a('success','Publicación de prueba enviada'); loadRecentPosts(); loadStats(); loadLogsSnapshot();} else a('danger',d.msg||'No se pudo publicar');}
 async function runQueue(){const wk=(worker_key.value||currentConfig.worker_key||'').trim(); if(!wk){a('danger','Configura el worker key primero');return;} const d=await g(API+'?action=process_queue&worker_key='+encodeURIComponent(wk)); if(d.status==='success'){appendLog(`Queue ejecutada. Procesadas: ${d.processed||0}`); loadPromoList(); loadRecentPosts(); loadStats();} else appendLog(`Fallo process_queue: ${d.msg||'error'}`);}
 function appendLog(text){const box=document.getElementById('logsText'); const stamp=new Date().toISOString(); const current=box.textContent||''; box.textContent=`[${stamp}] ${text}\n` + current.slice(0,12000); document.getElementById('logsStatus').textContent=`Última actualización: ${stamp}`;}
-async function loadLogsSnapshot(){appendLog('Resumen local de campañas y publicaciones actualizado.'); await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}
-function openLogsModal(){new bootstrap.Modal(document.getElementById('logsModal')).show();}
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadRecentPosts(),loadPromoTemplates(),loadPromoList(),loadMyPagePreview()]); await runQueueSilently();}catch(e){a('danger',e.message||'error')}}
+async function loadLogsSnapshot(){const d=await g(API+'?action=worker_logs'); if(d.status==='success'){logsText.textContent=(d.logs||'Sin logs persistentes.'); logsStatus.textContent='Logs persistentes del worker y del procesador de campañas';} await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}
+function clearLocalLogConsole(){logsText.textContent=''; logsStatus.textContent='Vista limpiada';}
+async function openLogsModal(){await loadLogsSnapshot(); new bootstrap.Modal(document.getElementById('logsModal')).show();}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadRecentPosts(),loadPromoTemplates(),loadPromoList(),loadMyPagePreview(),loadManualGroups()]); await runQueueSilently();}catch(e){a('danger',e.message||'error')}}
 async function runQueueSilently(){const wk=(worker_key.value||currentConfig.worker_key||'').trim(); if(!wk) return; const d=await g(API+'?action=process_queue&worker_key='+encodeURIComponent(wk)); if(d.status==='success' && Number(d.processed||0)>0){appendLog(`Queue automática: ${d.processed} campaña(s) procesada(s).`); await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}}
 document.getElementById('f').addEventListener('submit',saveCfg);
 document.getElementById('promoSearch').addEventListener('input',ev=>{if(promoSearchTimer) clearTimeout(promoSearchTimer); promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);});
 document.getElementById('promoBannerInput').addEventListener('change',onPromoBannerInput);
+['promoText','promoCampaignName','promoCampaignGroup','promoPublishMode','page_name','page_id','ig_username','ig_user_id'].forEach(id=>document.getElementById(id)?.addEventListener('input',()=>{updateTargetInfo();renderCampaignPreview();}));
+document.getElementById('promoPublishMode')?.addEventListener('change',()=>{updateTargetInfo();renderCampaignPreview();});
+document.getElementById('myPagePublishMode')?.addEventListener('change',()=>loadMyPagePreview());
 loadAll();
 setInterval(()=>{loadStats();loadRecentPosts();loadPromoList();runQueueSilently();},15000);
 </script>

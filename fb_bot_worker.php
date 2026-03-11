@@ -8,6 +8,7 @@ $interval = max(10, (int)(getenv('FB_BOT_WORKER_INTERVAL') ?: 15));
 $hostname = gethostname() ?: 'localhost';
 
 fwrite(STDOUT, '[' . date('c') . "] [fb-worker] iniciado en {$hostname} con intervalo {$interval}s\n");
+fb_worker_log("[fb-worker] iniciado en {$hostname} con intervalo {$interval}s");
 
 while (true) {
     try {
@@ -17,9 +18,11 @@ while (true) {
         $processed = (int)($res['processed'] ?? 0);
         if ($processed > 0) {
             fwrite(STDOUT, '[' . date('c') . "] [fb-worker] campañas procesadas: {$processed}\n");
+            fb_worker_log("[fb-worker] campañas procesadas: {$processed}");
         }
     } catch (Throwable $e) {
         fwrite(STDERR, '[' . date('c') . '] [fb-worker] error: ' . $e->getMessage() . "\n");
+        fb_worker_log('[fb-worker] error: ' . $e->getMessage());
     }
     sleep($interval);
 }
