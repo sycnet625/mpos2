@@ -7,6 +7,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clock LCD</title>
   <style>
+    @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Orbitron:wght@500;700&family=Audiowide&display=swap");
+
+    @font-face {
+      font-family: "DSEGDisplay";
+      src:
+        url("assets/fonts/dseg7-classic-400.woff2") format("woff2"),
+        url("assets/fonts/dseg14-classic-400.woff2") format("woff2"),
+        local("DSEG7 Classic"),
+        local("DSEG7Classic-Regular"),
+        local("DSEG14 Classic"),
+        local("DSEG14Classic-Regular");
+      font-display: swap;
+    }
+
     :root {
       --bg: #000000;
       --clock-bg: #0a100a;
@@ -21,6 +35,22 @@
       --letter-spacing: 0.14em;
       --panel-bg: rgba(0, 0, 0, 0.90);
       --panel-border: #174117;
+      --time-shadow: 0 0 8px var(--clock-text), 0 0 18px var(--clock-glow);
+      --rainbow-gradient: linear-gradient(270deg, #ff004c, #ff7a00, #ffe600, #00d26a, #00b7ff, #6c5cff, #ff00c8);
+      --clock-offset-x: 0px;
+      --clock-offset-y: 0px;
+      --segment-shadow: drop-shadow(0 0 8px var(--clock-glow));
+      --shadow-color: rgba(0, 230, 118, 0.55);
+      --shadow-blur: 8px;
+      --seg-h-left: 14%;
+      --seg-h-width: 72%;
+      --seg-h-thickness: 10%;
+      --seg-v-width: 10%;
+      --seg-v-height: 36%;
+      --seg-side-offset: 4.5%;
+      --seg-v-top: 6%;
+      --seg-v-bottom: 6%;
+      --seg-radius: 999px;
     }
 
     * { box-sizing: border-box; }
@@ -62,16 +92,174 @@
       font-weight: 700;
       letter-spacing: var(--letter-spacing);
       color: var(--clock-text);
-      text-shadow: 0 0 8px var(--clock-text), 0 0 18px var(--clock-glow);
+      font-family: var(--font-main);
+      text-shadow: var(--time-shadow);
       white-space: nowrap;
       display: flex;
       justify-content: center;
       align-items: baseline;
       gap: 0.04em;
       flex-wrap: nowrap;
+      transform: translate(var(--clock-offset-x), var(--clock-offset-y));
+      transition: transform 1.2s ease, filter 0.6s ease;
     }
     #clockLine.blink-colon .sep { opacity: 0.2; }
+    #clockLine.colorful {
+      filter: saturate(1.2) brightness(1.06);
+    }
+    #clockLine.colorful .time-text {
+      background-image: var(--rainbow-gradient);
+      background-size: 140vw 100%;
+      background-attachment: fixed;
+      color: transparent;
+      -webkit-background-clip: text;
+      background-clip: text;
+      text-shadow: none;
+      animation: rainbow-flow-rtl 7s linear infinite;
+    }
+    #clockLine.colorful .ampm {
+      background-image: var(--rainbow-gradient);
+      color: transparent;
+      -webkit-background-clip: text;
+      background-clip: text;
+      background-size: 140vw 100%;
+      background-attachment: fixed;
+      text-shadow: none;
+      animation: rainbow-flow-rtl 7s linear infinite;
+    }
 
+    @keyframes rainbow-flow-rtl {
+      0% { background-position: 100vw 50%; }
+      100% { background-position: 0vw 50%; }
+    }
+
+    .time-segment {
+      display: inline-flex;
+      align-items: center;
+      gap: clamp(6px, 0.6vw, 10px);
+    }
+
+    .digit-7 {
+      position: relative;
+      width: 0.66em;
+      height: 1em;
+      display: inline-block;
+      filter: var(--segment-shadow);
+    }
+
+    .digit-7 .seg {
+      position: absolute;
+      background: color-mix(in srgb, var(--clock-text) 10%, transparent);
+      border-radius: var(--seg-radius);
+      transition: background 0.35s ease, opacity 0.35s ease, box-shadow 0.35s ease;
+      opacity: 0.12;
+    }
+
+    .digit-7 .seg.on {
+      background: var(--clock-text);
+      opacity: 1;
+      box-shadow: 0 0 10px var(--clock-text), 0 0 24px var(--clock-glow);
+    }
+
+    #clockLine.colorful .digit-7 .seg.on,
+    #clockLine.colorful .colon-7 span {
+      background-image: var(--rainbow-gradient);
+      background-size: 140vw 100%;
+      background-attachment: fixed;
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.28), 0 0 18px rgba(255, 0, 180, 0.24);
+      animation: rainbow-flow-rtl 7s linear infinite;
+    }
+
+    .digit-7 .a, .digit-7 .d, .digit-7 .g {
+      left: var(--seg-h-left);
+      width: var(--seg-h-width);
+      height: var(--seg-h-thickness);
+    }
+    .digit-7 .a { top: 1.5%; }
+    .digit-7 .g { top: 45%; }
+    .digit-7 .d { bottom: 1.5%; }
+    .digit-7 .b, .digit-7 .c, .digit-7 .e, .digit-7 .f {
+      width: var(--seg-v-width);
+      height: var(--seg-v-height);
+    }
+    .digit-7 .b { right: var(--seg-side-offset); top: var(--seg-v-top); }
+    .digit-7 .c { right: var(--seg-side-offset); bottom: var(--seg-v-bottom); }
+    .digit-7 .e { left: var(--seg-side-offset); bottom: var(--seg-v-bottom); }
+    .digit-7 .f { left: var(--seg-side-offset); top: var(--seg-v-top); }
+
+    #clockLine[data-segment-style="segments-thin"] {
+      --seg-h-left: 18%;
+      --seg-h-width: 64%;
+      --seg-h-thickness: 7%;
+      --seg-v-width: 7%;
+      --seg-v-height: 33%;
+      --seg-side-offset: 7%;
+      --seg-v-top: 8%;
+      --seg-v-bottom: 8%;
+    }
+
+    #clockLine[data-segment-style="segments-fat"] {
+      --seg-h-left: 11%;
+      --seg-h-width: 78%;
+      --seg-h-thickness: 12%;
+      --seg-v-width: 12%;
+      --seg-v-height: 38%;
+      --seg-side-offset: 2.5%;
+      --seg-v-top: 5%;
+      --seg-v-bottom: 5%;
+    }
+
+    #clockLine[data-segment-style="segments-block"] {
+      --seg-h-left: 10%;
+      --seg-h-width: 80%;
+      --seg-h-thickness: 12%;
+      --seg-v-width: 12%;
+      --seg-v-height: 38%;
+      --seg-side-offset: 2.5%;
+      --seg-v-top: 5%;
+      --seg-v-bottom: 5%;
+      --seg-radius: 2px;
+    }
+
+    #clockLine[data-segment-style="segments-rounded"] {
+      --seg-h-left: 13%;
+      --seg-h-width: 74%;
+      --seg-h-thickness: 10%;
+      --seg-v-width: 10%;
+      --seg-v-height: 36%;
+      --seg-side-offset: 4%;
+      --seg-v-top: 6%;
+      --seg-v-bottom: 6%;
+      --seg-radius: 999px;
+    }
+
+    #clockLine[data-segment-style="segments-font"] {
+      --seg-h-left: 15%;
+      --seg-h-width: 70%;
+      --seg-h-thickness: 9%;
+      --seg-v-width: 9%;
+      --seg-v-height: 35%;
+      --seg-side-offset: 5.5%;
+      --seg-v-top: 6.5%;
+      --seg-v-bottom: 6.5%;
+      --seg-radius: 3px;
+      letter-spacing: 0.05em;
+    }
+
+    .colon-7 {
+      display: inline-flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.18em;
+      margin: 0 0.03em;
+    }
+    .colon-7 span {
+      width: 0.09em;
+      height: 0.09em;
+      border-radius: 50%;
+      background: var(--clock-text);
+      box-shadow: 0 0 6px var(--clock-text), 0 0 14px var(--clock-glow);
+    }
     .ampm {
       font-size: 0.30em;
       letter-spacing: 0.02em;
@@ -149,9 +337,65 @@
       border-radius: 8px;
       padding: 6px 8px;
     }
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .switch-row label { font-size: 0.9rem; }
+    .switch {
+      position: relative;
+      width: 58px;
+      height: 32px;
+      display: inline-block;
+      flex: 0 0 auto;
+    }
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
+    }
+    .switch-slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #173117;
+      border: 1px solid #2f7b2f;
+      transition: background 0.2s ease, border-color 0.2s ease;
+      box-shadow: inset 0 1px 5px rgba(0, 0, 0, 0.45);
+    }
+    .switch-slider::before {
+      content: "";
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      left: 3px;
+      top: 3px;
+      border-radius: 50%;
+      background: #d5ffd5;
+      transition: transform 0.2s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    }
+    .switch input:checked + .switch-slider {
+      background: linear-gradient(90deg, #0c7f3f, #1fc86b);
+      border-color: #57e08f;
+    }
+    .switch input:checked + .switch-slider::before {
+      transform: translateX(26px);
+      background: #ffffff;
+    }
     .split { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
     .hint { font-size: 0.8rem; opacity: 0.86; margin-bottom: 10px; }
     .title { margin: 0 0 8px 0; font-size: 1.05rem; }
+    .panel-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
     .section {
       margin: 12px 0;
       padding: 10px;
@@ -201,6 +445,10 @@
   <aside id="panel" aria-label="Panel de personalizacion">
     <h2 class="title">Personalizacion</h2>
     <div class="hint">Ajusta colores, tipografia, tamanos, modo nocturno y alarmas. Se guarda en este navegador.</div>
+    <div class="panel-actions">
+      <button id="panelFullscreenBtn" type="button">Pantalla completa</button>
+      <button id="panelCloseBtn" type="button">Cerrar opciones</button>
+    </div>
 
     <div class="section">
       <h3>Apariencia</h3>
@@ -215,40 +463,34 @@
         <select id="fontFamily">
           <option value="Courier New, Lucida Console, monospace">LCD Clasico</option>
           <option value="Consolas, Monaco, monospace">Consolas</option>
+          <option value="DSEGDisplay, 'DSEG7 Classic', 'DSEG14 Classic', monospace">DSEG 7/14 segmentos</option>
+          <option value="'Roboto', Arial, sans-serif">Roboto</option>
+          <option value="'Orbitron', 'Roboto', sans-serif">Orbitron</option>
+          <option value="'Audiowide', 'Roboto', sans-serif">Audiowide</option>
           <option value="monospace">Monospace</option>
         </select>
+      </div>
+      <div class="switch-row"><label for="colorMode">Modo a color</label>
+        <label class="switch"><input id="colorMode" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="shadowMode">Sombra en hora</label>
+        <label class="switch"><input id="shadowMode" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="shadowColor">Color sombra</label><input id="shadowColor" type="color" value="#00e676"></div>
+      <div class="row"><label for="shadowStrength">Grosor sombra</label><input id="shadowStrength" type="range" min="0" max="24" step="1" value="8"></div>
+      <div class="switch-row"><label for="ampmToggle">Formato AM/PM</label>
+        <label class="switch"><input id="ampmToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="soundToggle">Sonido horario</label>
+        <label class="switch"><input id="soundToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="nightMode">Modo nocturno (22:00-06:00)</label>
+        <label class="switch"><input id="nightMode" type="checkbox" checked><span class="switch-slider"></span></label>
       </div>
 
       <div class="row"><label for="timeSize">Tamano hora</label><input id="timeSize" type="range" min="3" max="18" step="0.1" value="13"></div>
       <div class="row"><label for="metaSize">Tamano fecha/clima</label><input id="metaSize" type="range" min="0.8" max="3.2" step="0.05" value="1.7"></div>
       <div class="row"><label for="spacing">Espaciado letras</label><input id="spacing" type="range" min="0.02" max="0.30" step="0.01" value="0.14"></div>
-    </div>
-
-    <div class="section">
-      <h3>Reloj y Sonido</h3>
-      <div class="row">
-        <label for="ampmToggle">Formato AM/PM</label>
-        <select id="ampmToggle">
-          <option value="1">Mostrar AM/PM</option>
-          <option value="0">Ocultar (24h)</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label for="soundToggle">Sonido horario</label>
-        <select id="soundToggle">
-          <option value="1">Activado</option>
-          <option value="0">Silenciado</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label for="nightMode">Modo nocturno (22:00-06:00)</label>
-        <select id="nightMode">
-          <option value="0">Desactivado</option>
-          <option value="1">Activado</option>
-        </select>
-      </div>
     </div>
 
     <div class="section">
@@ -258,10 +500,7 @@
       <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:4px;">
         <div class="row">
           <label for="alarm1Enabled">Alarma 1</label>
-          <select id="alarm1Enabled">
-            <option value="1">Activada</option>
-            <option value="0">Desactivada</option>
-          </select>
+          <label class="switch"><input id="alarm1Enabled" type="checkbox" checked><span class="switch-slider"></span></label>
         </div>
         <div class="row"><label for="alarm1Time">Hora</label><input id="alarm1Time" type="time" value="07:00"></div>
         <div class="days" id="alarm1DaysWrap">
@@ -278,10 +517,7 @@
       <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:8px;">
         <div class="row">
           <label for="alarm2Enabled">Alarma 2</label>
-          <select id="alarm2Enabled">
-            <option value="1">Activada</option>
-            <option value="0">Desactivada</option>
-          </select>
+          <label class="switch"><input id="alarm2Enabled" type="checkbox" checked><span class="switch-slider"></span></label>
         </div>
         <div class="row"><label for="alarm2Time">Hora</label><input id="alarm2Time" type="time" value="20:00"></div>
         <div class="days" id="alarm2DaysWrap">
@@ -314,7 +550,7 @@
   </main>
 
   <script>
-    const STORAGE_KEY = "clock_lcd_settings_v2";
+    const STORAGE_KEY = "clock_lcd_settings_v5";
     const DEFAULT_DAYS = "1,2,3,4,5,6,0";
     const DEFAULTS = {
       bg: "#000000",
@@ -324,16 +560,20 @@
       dateColor: "#87d4a5",
       weatherColor: "#b7f3ce",
       fontFamily: "Courier New, Lucida Console, monospace",
+      colorMode: true,
+      shadowMode: true,
+      shadowColor: "#00e676",
+      shadowStrength: "8",
       timeSize: "13",
       metaSize: "1.7",
       spacing: "0.14",
-      ampm: "1",
-      sound: "1",
-      nightMode: "0",
-      alarm1Enabled: "1",
+      ampm: true,
+      sound: true,
+      nightMode: true,
+      alarm1Enabled: true,
       alarm1Time: "07:00",
       alarm1Days: DEFAULT_DAYS,
-      alarm2Enabled: "1",
+      alarm2Enabled: true,
       alarm2Time: "20:00",
       alarm2Days: DEFAULT_DAYS
     };
@@ -348,6 +588,21 @@
     let alarmTimeout = null;
     let alarmActiveId = "";
     const lastAlarmMinuteKey = { "1": "", "2": "" };
+    let rainbowPatternIndex = 0;
+    let rainbowMoveIndex = 0;
+
+    const rainbowPatterns = [
+      "linear-gradient(90deg, #ff004c, #ff7a00, #ffe600, #00d26a, #00b7ff, #6c5cff, #ff00c8)",
+      "linear-gradient(120deg, #ff3d00, #ffd600, #00e5ff, #2979ff, #d500f9, #ff1744)",
+      "linear-gradient(100deg, #f50057, #ff9100, #c6ff00, #00c853, #00b0ff, #651fff)",
+      "linear-gradient(135deg, #ff1744, #ffea00, #00e676, #00b8d4, #7c4dff, #f50057)"
+    ];
+    const driftVectors = [
+      { x: 20, y: 0 },
+      { x: -20, y: 0 },
+      { x: 0, y: 20 },
+      { x: 0, y: -20 }
+    ];
 
     const Synth = {
       playTone: (freq, type, duration, vol = 0.1) => {
@@ -403,16 +658,20 @@
         dateColor: $("#dateColor").value,
         weatherColor: $("#weatherColor").value,
         fontFamily: $("#fontFamily").value,
+        colorMode: $("#colorMode").checked,
+        shadowMode: $("#shadowMode").checked,
+        shadowColor: $("#shadowColor").value,
+        shadowStrength: $("#shadowStrength").value,
         timeSize: $("#timeSize").value,
         metaSize: $("#metaSize").value,
         spacing: $("#spacing").value,
-        ampm: $("#ampmToggle").value,
-        sound: $("#soundToggle").value,
-        nightMode: $("#nightMode").value,
-        alarm1Enabled: $("#alarm1Enabled").value,
+        ampm: $("#ampmToggle").checked,
+        sound: $("#soundToggle").checked,
+        nightMode: $("#nightMode").checked,
+        alarm1Enabled: $("#alarm1Enabled").checked,
         alarm1Time: $("#alarm1Time").value,
         alarm1Days: getCheckedDays("1") || DEFAULT_DAYS,
-        alarm2Enabled: $("#alarm2Enabled").value,
+        alarm2Enabled: $("#alarm2Enabled").checked,
         alarm2Time: $("#alarm2Time").value,
         alarm2Days: getCheckedDays("2") || DEFAULT_DAYS
       };
@@ -431,15 +690,19 @@
       $("#dateColor").value = s.dateColor;
       $("#weatherColor").value = s.weatherColor;
       $("#fontFamily").value = s.fontFamily;
+      $("#colorMode").checked = !!s.colorMode;
+      $("#shadowMode").checked = !!s.shadowMode;
+      $("#shadowColor").value = s.shadowColor;
+      $("#shadowStrength").value = s.shadowStrength;
       $("#timeSize").value = s.timeSize;
       $("#metaSize").value = s.metaSize;
       $("#spacing").value = s.spacing;
-      $("#ampmToggle").value = s.ampm;
-      $("#soundToggle").value = s.sound;
-      $("#nightMode").value = s.nightMode;
-      $("#alarm1Enabled").value = s.alarm1Enabled;
+      $("#ampmToggle").checked = !!s.ampm;
+      $("#soundToggle").checked = !!s.sound;
+      $("#nightMode").checked = !!s.nightMode;
+      $("#alarm1Enabled").checked = !!s.alarm1Enabled;
       $("#alarm1Time").value = s.alarm1Time;
-      $("#alarm2Enabled").value = s.alarm2Enabled;
+      $("#alarm2Enabled").checked = !!s.alarm2Enabled;
       $("#alarm2Time").value = s.alarm2Time;
       setCheckedDays("1", s.alarm1Days || DEFAULT_DAYS);
       setCheckedDays("2", s.alarm2Days || DEFAULT_DAYS);
@@ -448,6 +711,8 @@
 
     function applySettings(s) {
       const root = document.documentElement;
+      const selectedFont = String(s.fontFamily || "");
+      const isDseg = selectedFont.includes("DSEGDisplay") || selectedFont.includes("DSEG7 Classic") || selectedFont.includes("DSEG14 Classic");
       root.style.setProperty("--bg", s.bg);
       root.style.setProperty("--clock-bg", s.clockBg);
       root.style.setProperty("--clock-border", s.clockBorder);
@@ -455,10 +720,47 @@
       root.style.setProperty("--clock-glow", hexToRgba(s.clockText, 0.55));
       root.style.setProperty("--date-text", s.dateColor);
       root.style.setProperty("--weather-text", s.weatherColor);
-      root.style.setProperty("--font-main", s.fontFamily);
+      root.style.setProperty("--font-main", isDseg ? `"Courier New", "Lucida Console", monospace` : s.fontFamily);
       root.style.setProperty("--time-size", `clamp(3rem, 16vw, ${parseFloat(s.timeSize)}rem)`);
       root.style.setProperty("--meta-size", `clamp(0.85rem, 2.2vw, ${parseFloat(s.metaSize)}rem)`);
       root.style.setProperty("--letter-spacing", `${parseFloat(s.spacing)}em`);
+      const shadowBlur = `${parseFloat(s.shadowStrength || 0)}px`;
+      const shadowColor = hexToRgba(s.shadowColor || s.clockText, 0.82);
+      root.style.setProperty("--shadow-color", shadowColor);
+      root.style.setProperty("--shadow-blur", shadowBlur);
+      root.style.setProperty("--time-shadow", s.shadowMode ? `0 0 ${shadowBlur} ${shadowColor}, 0 0 calc(${shadowBlur} * 2) ${shadowColor}` : "none");
+      root.style.setProperty("--segment-shadow", s.shadowMode ? `drop-shadow(0 0 ${shadowBlur} ${shadowColor})` : "none");
+      root.style.setProperty("--clock-offset-x", "0px");
+      root.style.setProperty("--clock-offset-y", "0px");
+      const line = $("#clockLine");
+      line.style.fontFamily = isDseg ? selectedFont : "";
+      line.classList.toggle("colorful", !!s.colorMode);
+    }
+
+    function renderTimeLine(hoursText, minutesText, useAmpm, ampm) {
+      const line = $("#clockLine");
+      line.innerHTML = `<span class="h time-text">${hoursText}</span><span class="sep time-text">:</span><span class="m time-text">${minutesText}</span><span class="ampm">${ampm}</span>`;
+      $("#clockLine .ampm").style.display = useAmpm ? "" : "none";
+      line.classList.toggle("colorful", $("#colorMode").checked);
+    }
+
+    function rotateRainbowPattern() {
+      if (!$("#colorMode").checked) return;
+      rainbowPatternIndex = (rainbowPatternIndex + 1) % rainbowPatterns.length;
+      document.documentElement.style.setProperty("--rainbow-gradient", rainbowPatterns[rainbowPatternIndex]);
+    }
+
+    function driftClockIfColorMode() {
+      const root = document.documentElement;
+      if (!$("#colorMode").checked) {
+        root.style.setProperty("--clock-offset-x", "0px");
+        root.style.setProperty("--clock-offset-y", "0px");
+        return;
+      }
+      rainbowMoveIndex = Math.floor(Math.random() * driftVectors.length);
+      const drift = driftVectors[rainbowMoveIndex];
+      root.style.setProperty("--clock-offset-x", `${drift.x}px`);
+      root.style.setProperty("--clock-offset-y", `${drift.y}px`);
     }
 
     function hexToRgba(hex, a) {
@@ -513,13 +815,13 @@
     }
 
     function isNightModeActive(now) {
-      if ($("#nightMode").value !== "1") return false;
+      if (!$("#nightMode").checked) return false;
       const h = now.getHours();
       return (h >= 22 || h < 6);
     }
 
     function canPlaySound(now) {
-      if ($("#soundToggle").value !== "1") return false;
+      if (!$("#soundToggle").checked) return false;
       if (isNightModeActive(now)) return false;
       return true;
     }
@@ -559,7 +861,7 @@
     }
 
     function alarmMatch(alarmId, now) {
-      const enabled = $(`#alarm${alarmId}Enabled`).value === "1";
+      const enabled = $(`#alarm${alarmId}Enabled`).checked;
       if (!enabled) return false;
 
       const time = $(`#alarm${alarmId}Time`).value || "";
@@ -581,9 +883,6 @@
     function startClock() {
       let lastBeepMinute = -1;
       const line = $("#clockLine");
-      const hEl = $("#clockLine .h");
-      const mEl = $("#clockLine .m");
-      const ampmEl = $("#clockLine .ampm");
       const dateEl = $("#dateLine");
 
       function tick() {
@@ -591,15 +890,12 @@
         applyNightVisual(now);
 
         const hours24 = now.getHours();
-        const useAmpm = $("#ampmToggle").value === "1";
+        const useAmpm = $("#ampmToggle").checked;
         const h = useAmpm ? (hours24 % 12 || 12) : hours24;
         const m = String(now.getMinutes()).padStart(2, "0");
         const ampm = hours24 < 12 ? "AM" : "PM";
 
-        hEl.textContent = String(h).padStart(2, "0");
-        mEl.textContent = m;
-        ampmEl.textContent = ampm;
-        ampmEl.style.display = useAmpm ? "" : "none";
+        renderTimeLine(String(h).padStart(2, "0"), m, useAmpm, ampm);
         line.classList.toggle("blink-colon", now.getSeconds() % 2 === 1);
         dateEl.textContent = formatDateEs(now);
 
@@ -622,6 +918,8 @@
 
       tick();
       setInterval(tick, 1000);
+      setInterval(rotateRainbowPattern, 5000);
+      setInterval(driftClockIfColorMode, 10000);
     }
 
     function bindAlarmDismiss() {
@@ -637,6 +935,17 @@
 
     customizeBtn.addEventListener("click", () => {
       panel.classList.toggle("open");
+    });
+
+    $("#panelCloseBtn").addEventListener("click", () => {
+      panel.classList.remove("open");
+    });
+
+    $("#panelFullscreenBtn").addEventListener("click", async () => {
+      try {
+        if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+        else await document.exitFullscreen();
+      } catch (_) {}
     });
 
     document.querySelectorAll("#panel input, #panel select").forEach((el) => {
