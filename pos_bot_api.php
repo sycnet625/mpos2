@@ -4,12 +4,14 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
+require_once __DIR__ . '/habana_delivery.php';
 
 $BOT_OUTBOX = [];
 $BOT_BRIDGE_STATUS_FILE = __DIR__ . '/wa_web_bridge/status.json';
 $BOT_BRIDGE_CHATS_FILE = '/tmp/palweb_wa_chats.json';
 $BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
 $BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
+$BOT_BRIDGE_OUTBOX_FILE = '/tmp/palweb_wa_outbox_queue.json';
 
 function bot_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
@@ -23,6 +25,12 @@ function bot_require_admin_session(): void {
 function bot_has_column(PDO $pdo, string $table, string $column): bool {
     $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     $st->execute([$table, $column]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+function bot_table_exists(PDO $pdo, string $table): bool {
+    $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+    $st->execute([$table]);
     return (int)$st->fetchColumn() > 0;
 }
 
@@ -50,11 +58,34 @@ function bot_write_json_file(string $file, array $data): bool {
     return @rename($tmp, $file);
 }
 
+function bot_enqueue_bridge_job(array $job): bool {
+    global $BOT_BRIDGE_OUTBOX_FILE;
+    $queue = bot_read_json_file($BOT_BRIDGE_OUTBOX_FILE, ['jobs' => []]);
+    $queue['jobs'] = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $job['id'] = trim((string)($job['id'] ?? ('out_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)))));
+    $job['created_at'] = $job['created_at'] ?? date('c');
+    $job['status'] = $job['status'] ?? 'queued';
+    $queue['jobs'][] = $job;
+    return bot_write_json_file($BOT_BRIDGE_OUTBOX_FILE, $queue);
+}
+
 function bot_public_base_url(): string {
+    global $config;
+    $website = trim((string)($config['website'] ?? ''));
+    if ($website !== '') {
+        if (!preg_match('~^https?://~i', $website)) $website = 'https://' . ltrim($website, '/');
+        $parts = parse_url($website);
+        if (!empty($parts['scheme']) && !empty($parts['host'])) {
+            $origin = $parts['scheme'] . '://' . $parts['host'];
+            if (!empty($parts['port'])) $origin .= ':' . (int)$parts['port'];
+            return $origin;
+        }
+    }
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
     $scheme = $https ? 'https' : 'http';
     $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
     if ($host === '') $host = trim((string)($_SERVER['SERVER_NAME'] ?? 'localhost'));
+    if (in_array($host, ['127.0.0.1', 'localhost'], true)) return 'https://www.palweb.net';
     return $scheme . '://' . $host;
 }
 
@@ -231,16 +262,66 @@ function bot_send_image(PDO $pdo, string $wa, string $url, string $caption=''): 
     bot_queue_response($pdo, $wa, 'image', ['url' => $url, 'caption' => trim($caption)]);
 }
 
+function bot_send_buttons(PDO $pdo, string $wa, string $body, array $buttons, string $title='', string $footer=''): void {
+    $cleanButtons = [];
+    foreach ($buttons as $b) {
+        $txt = trim((string)$b);
+        if ($txt === '') continue;
+        $cleanButtons[] = $txt;
+        if (count($cleanButtons) >= 3) break;
+    }
+    if (!$cleanButtons) {
+        if (trim($body) !== '') bot_send($pdo, [], $wa, $body);
+        return;
+    }
+    bot_queue_response($pdo, $wa, 'buttons', [
+        'text' => trim($body),
+        'buttons' => $cleanButtons,
+        'title' => trim($title),
+        'footer' => trim($footer)
+    ]);
+}
+
+function bot_send_quick_actions(PDO $pdo, array $cfg, array $appCfg, string $wa, string $context='main'): void {
+    $title = 'Accesos rápidos';
+    $footer = preg_replace('~^https?://~i', '', bot_site_url($appCfg));
+    $body1 = $context === 'recovery'
+        ? 'Retoma tu compra con un toque:'
+        : 'Usa estos botones para ir más rápido:';
+    bot_send_buttons($pdo, $wa, $body1, ['Menu', 'Repetir pedido', 'Carrito'], $title, $footer);
+    bot_send_buttons($pdo, $wa, 'Más opciones:', ['Confirmar', 'Comprar en web'], $title, $footer);
+}
+
+function bot_mark_cart_activity(array &$cart): void {
+    $cart['last_cart_activity_at'] = date('c');
+    $cart['last_cart_reminder_at'] = '';
+}
+
 function bot_default_cart(string $name=''): array {
     return [
         'items' => [],
         'item_notes' => [],
         'customer_name' => $name,
         'customer_address' => '',
+        'fulfillment_mode' => '',
+        'address_validation' => null,
+        'delivery_fee' => 0.0,
+        'delivery_distance_km' => 0.0,
+        'delivery_rate_per_km' => 100.0,
+        'requested_datetime' => '',
+        'requested_datetime_label' => '',
+        'escalation_active' => 0,
+        'escalation_reason' => '',
+        'escalation_label' => '',
+        'escalation_at' => '',
         'awaiting_field' => '',
         'pending_choice' => null,
         'last_order' => null,
-        'greet_count' => 0
+        'greet_count' => 0,
+        'bot_paused' => 0,
+        'last_cart_activity_at' => '',
+        'last_cart_reminder_at' => '',
+        'last_manual_reply_at' => ''
     ];
 }
 
@@ -251,6 +332,7 @@ function bot_merge_cart_shape(array $cart, string $name=''): array {
     if (!is_array($cart['item_notes'] ?? null)) $cart['item_notes'] = [];
     if (!is_array($cart['last_order'] ?? null)) $cart['last_order'] = $base['last_order'];
     if (!is_array($cart['pending_choice'] ?? null)) $cart['pending_choice'] = null;
+    $cart['bot_paused'] = !empty($cart['bot_paused']) ? 1 : 0;
     if (($cart['customer_name'] ?? '') === '' && $name !== '') $cart['customer_name'] = $name;
     return $cart;
 }
@@ -328,6 +410,166 @@ function bot_extract_address(string $text): string {
     $hasAddressHint = preg_match('/\d/', $val) || preg_match('/\b(calle|callejon|avenida|ave|av|reparto|edificio|apto|apartamento|casa|km|kilometro|barrio|entre|esquina|carretera|pasaje|zona)\b/u', $normVal);
     if (!$hasAddressHint) return '';
     return mb_substr($val, 0, 220);
+}
+
+function bot_delivery_rate_per_km(): float {
+    return 100.0;
+}
+
+function bot_detect_fulfillment_mode(string $norm): string {
+    if (bot_intent_has($norm, ['recoger','recojo','recogida','recoger en tienda','paso a buscar','voy a buscar','retiro','retirar'])) {
+        return 'pickup';
+    }
+    if (bot_intent_has($norm, ['mensajeria','mensajería','mensajero','envio','envío','domicilio','delivery','entrega'])) {
+        return 'delivery';
+    }
+    return '';
+}
+
+function bot_validate_habana_address(string $address): array {
+    $result = palweb_habana_address_resolve($address);
+    if (!$result['ok']) return $result;
+    $result['rate_per_km'] = bot_delivery_rate_per_km();
+    $result['delivery_fee'] = palweb_habana_delivery_fee((float)$result['distance_km'], (float)$result['rate_per_km']);
+    return $result;
+}
+
+function bot_fulfillment_label(string $mode): string {
+    return $mode === 'delivery' ? 'Mensajería' : ($mode === 'pickup' ? 'Recoger en tienda' : 'Sin definir');
+}
+
+function bot_delivery_summary_line(array $cart): string {
+    if (($cart['fulfillment_mode'] ?? '') !== 'delivery') return 'Entrega: recoger en tienda';
+    $km = (float)($cart['delivery_distance_km'] ?? 0);
+    $fee = (float)($cart['delivery_fee'] ?? 0);
+    $validation = is_array($cart['address_validation'] ?? null) ? $cart['address_validation'] : [];
+    $zone = trim((string)(($validation['municipio'] ?? '') . ' / ' . ($validation['barrio'] ?? '')), ' /');
+    $suffix = $zone !== '' ? " ({$zone})" : '';
+    return "Mensajería: {$km} km{$suffix} = $" . number_format($fee, 2);
+}
+
+function bot_extract_schedule_datetime(string $text, string $timezone='America/Havana'): ?array {
+    $raw = trim($text);
+    if ($raw === '') return null;
+    $norm = bot_norm($raw);
+    $normLoose = mb_strtolower($raw, 'UTF-8');
+    $normLoose = strtr($normLoose, ['á'=>'a','à'=>'a','ä'=>'a','â'=>'a','é'=>'e','è'=>'e','ë'=>'e','ê'=>'e','í'=>'i','ì'=>'i','ï'=>'i','î'=>'i','ó'=>'o','ò'=>'o','ö'=>'o','ô'=>'o','ú'=>'u','ù'=>'u','ü'=>'u','û'=>'u']);
+    $tz = new DateTimeZone($timezone);
+    $now = new DateTimeImmutable('now', $tz);
+
+    $setTime = static function (DateTimeImmutable $base, int $hour, int $minute): DateTimeImmutable {
+        return $base->setTime(max(0, min(23, $hour)), max(0, min(59, $minute)), 0);
+    };
+
+    if (preg_match('/\b(hoy|manana|mañana)\b/u', $normLoose, $dMatch)) {
+        $dayWord = $dMatch[1];
+        $base = $dayWord === 'hoy' ? $now : $now->modify('+1 day');
+        $hour = null;
+        $minute = 0;
+        if (preg_match('/\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/u', $normLoose, $m) || preg_match('/\b(\d{1,2})(?::(\d{2}))\b/u', $normLoose, $m) || preg_match('/\b(\d{1,2})\s*(am|pm)\b/u', $normLoose, $m)) {
+            $hour = (int)$m[1];
+            if (isset($m[3]) || isset($m[2])) {
+                if (isset($m[3]) && in_array(strtolower((string)$m[3]), ['am','pm'], true)) {
+                    $minute = isset($m[2]) && ctype_digit((string)$m[2]) ? (int)$m[2] : 0;
+                    $ampm = strtolower((string)$m[3]);
+                } else {
+                    $minute = isset($m[2]) && ctype_digit((string)$m[2]) ? (int)$m[2] : 0;
+                    $ampm = isset($m[2]) && in_array(strtolower((string)$m[2]), ['am','pm'], true) ? strtolower((string)$m[2]) : '';
+                }
+            } else {
+                $ampm = '';
+            }
+            if ($ampm === 'pm' && $hour < 12) $hour += 12;
+            if ($ampm === 'am' && $hour === 12) $hour = 0;
+        }
+        if ($hour !== null) {
+            $dt = $setTime($base, $hour, $minute);
+            if ($dt <= $now) $dt = $dt->modify('+1 day');
+            return [
+                'value' => $dt->format('Y-m-d H:i:s'),
+                'label' => $dt->format('d/m/Y h:i A'),
+                'date' => $dt->format('Y-m-d'),
+                'time' => $dt->format('H:i')
+            ];
+        }
+    }
+
+    $formats = [
+        'd/m/Y H:i', 'd-m-Y H:i', 'Y-m-d H:i',
+        'd/m/Y g:i A', 'd-m-Y g:i A', 'Y-m-d g:i A',
+        'd/m/Y g A', 'd-m-Y g A'
+    ];
+    foreach ($formats as $fmt) {
+        $dt = DateTimeImmutable::createFromFormat($fmt, $raw, $tz);
+        if ($dt instanceof DateTimeImmutable) {
+            $errors = DateTimeImmutable::getLastErrors();
+            if (($errors['warning_count'] ?? 0) === 0 && ($errors['error_count'] ?? 0) === 0 && $dt > $now) {
+                return [
+                    'value' => $dt->format('Y-m-d H:i:s'),
+                    'label' => $dt->format('d/m/Y h:i A'),
+                    'date' => $dt->format('Y-m-d'),
+                    'time' => $dt->format('H:i')
+                ];
+            }
+        }
+    }
+
+    if (preg_match('/^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*$/iu', $raw, $m)) {
+        $hour = (int)$m[1];
+        $minute = isset($m[2]) && $m[2] !== '' ? (int)$m[2] : 0;
+        $ampm = strtolower((string)($m[3] ?? ''));
+        if ($ampm === 'pm' && $hour < 12) $hour += 12;
+        if ($ampm === 'am' && $hour === 12) $hour = 0;
+        $dt = $setTime($now, $hour, $minute);
+        if ($dt <= $now) $dt = $dt->modify('+1 day');
+        return [
+            'value' => $dt->format('Y-m-d H:i:s'),
+            'label' => $dt->format('d/m/Y h:i A'),
+            'date' => $dt->format('Y-m-d'),
+            'time' => $dt->format('H:i')
+        ];
+    }
+
+    return null;
+}
+
+function bot_delivery_address_prompt(): string {
+    return "Compárteme la dirección completa en La Habana, Cuba.\nEjemplo: Calle 10 #45 entre A y B, Vedado, Plaza de la Revolución, La Habana.";
+}
+
+function bot_datetime_prompt(string $mode): string {
+    $target = $mode === 'delivery' ? 'entrega' : 'recogida en tienda';
+    return "Ahora dime la fecha y hora para la {$target}.\nEjemplos válidos:\n- hoy 5:30 pm\n- mañana 10:00 am\n- 15/03/2026 14:30";
+}
+
+function bot_ticket_url(int $idReserva): string {
+    return bot_public_base_url() . '/ticket_view.php?id=' . $idReserva . '&source=qr';
+}
+
+function bot_send_fulfillment_prompt(PDO $pdo, string $wa): void {
+    bot_send_buttons($pdo, $wa, 'Antes de cerrar la reserva, dime cómo la quieres recibir:', ['Recoger en tienda', 'Mensajeria'], 'Tipo de entrega', 'La Habana / Cuba');
+}
+
+function bot_detect_escalation(string $norm): ?array {
+    $rules = [
+        ['label' => 'No ha llegado', 'reason' => 'delivery_delay', 'patterns' => ['no ha llegado', 'todavia no llega', 'todavia no ha llegado', 'mi pedido no llega', 'no me ha llegado', 'demora pedido']],
+        ['label' => 'Cobro incorrecto', 'reason' => 'billing_issue', 'patterns' => ['me cobraron mal', 'cobro mal', 'cobro incorrecto', 'precio mal', 'me cobraron de mas', 'me cobraron demás']],
+        ['label' => 'Reclamación', 'reason' => 'complaint', 'patterns' => ['quiero reclamar', 'quiero poner una queja', 'tengo una queja', 'necesito reclamar', 'reclamo', 'queja']],
+    ];
+    foreach ($rules as $rule) {
+        foreach ($rule['patterns'] as $pattern) {
+            if (str_contains($norm, bot_norm($pattern))) return $rule;
+        }
+    }
+    return null;
+}
+
+function bot_mark_escalation(array &$cart, array $escalation): void {
+    $cart['bot_paused'] = 1;
+    $cart['escalation_active'] = 1;
+    $cart['escalation_reason'] = (string)($escalation['reason'] ?? 'complaint');
+    $cart['escalation_label'] = (string)($escalation['label'] ?? 'Atención humana');
+    $cart['escalation_at'] = date('c');
 }
 
 function bot_intent_has(string $norm, array $needles): bool {
@@ -485,12 +727,43 @@ function bot_parse_remove_item(array $menu, string $text): ?string {
 }
 
 function bot_menu(PDO $pdo, int $emp, int $suc): array {
-    $st = $pdo->prepare("SELECT codigo,nombre,precio FROM productos
+    global $config;
+    $idAlmacen = (int)($config['id_almacen'] ?? 1);
+    $st = $pdo->prepare("SELECT p.codigo,p.nombre,p.precio,p.categoria,COALESCE(p.es_servicio,0) AS es_servicio,
+                            COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = ?),0) AS stock_total
+                         FROM productos p
                          WHERE activo=1 AND es_web=1 AND id_empresa=?
                            AND (sucursales_web='' OR sucursales_web IS NULL OR FIND_IN_SET(?, sucursales_web)>0)
-                         ORDER BY categoria,nombre LIMIT 40");
-    $st->execute([$emp,$suc]);
+                         ORDER BY categoria,nombre LIMIT 80");
+    $st->execute([$idAlmacen,$emp,$suc]);
     return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function bot_product_in_stock(array $product, int $qty=1): bool {
+    if (!empty($product['es_servicio'])) return true;
+    return (float)($product['stock_total'] ?? 0) >= max(1, $qty);
+}
+
+function bot_find_substitutes(array $menu, array $product, int $limit=3): array {
+    $category = trim((string)($product['categoria'] ?? ''));
+    $currentSku = (string)($product['codigo'] ?? '');
+    $out = [];
+    foreach ($menu as $p) {
+        if ((string)($p['codigo'] ?? '') === $currentSku) continue;
+        if ($category !== '' && trim((string)($p['categoria'] ?? '')) !== $category) continue;
+        if (!bot_product_in_stock($p, 1)) continue;
+        $out[] = $p;
+        if (count($out) >= $limit) break;
+    }
+    if (!$out) {
+        foreach ($menu as $p) {
+            if ((string)($p['codigo'] ?? '') === $currentSku) continue;
+            if (!bot_product_in_stock($p, 1)) continue;
+            $out[] = $p;
+            if (count($out) >= $limit) break;
+        }
+    }
+    return $out;
 }
 
 function bot_pick(array $options, string $seed=''): string {
@@ -518,6 +791,106 @@ function bot_business_logo_url(array $appCfg): string {
     if (preg_match('~^https?://~i', $logo)) return $logo;
     $base = bot_public_base_url();
     return $logo[0] === '/' ? ($base . $logo) : ($base . '/' . ltrim($logo, '/'));
+}
+
+function bot_merge_text_block(string $existing, string $append): string {
+    $existing = trim($existing);
+    $append = trim($append);
+    if ($append === '') return $existing;
+    if ($existing === '') return $append;
+    $lines = preg_split('/\R+/', $existing . "\n" . $append) ?: [];
+    $seen = [];
+    $out = [];
+    foreach ($lines as $line) {
+        $line = trim($line);
+        if ($line === '') continue;
+        $key = mb_strtolower($line, 'UTF-8');
+        if (isset($seen[$key])) continue;
+        $seen[$key] = true;
+        $out[] = $line;
+    }
+    return implode("\n", $out);
+}
+
+function bot_crm_preferences_from_cart(array $cart): string {
+    $parts = [];
+    $last = is_array($cart['last_order'] ?? null) ? $cart['last_order'] : [];
+    $items = is_array($last['items'] ?? null) && $last['items'] ? $last['items'] : (is_array($cart['items'] ?? null) ? $cart['items'] : []);
+    $itemNotes = is_array($last['item_notes'] ?? null) && $last['item_notes'] ? $last['item_notes'] : (is_array($cart['item_notes'] ?? null) ? $cart['item_notes'] : []);
+    if ($items) {
+        $itemParts = [];
+        foreach ($items as $sku => $qty) {
+            $entry = trim((string)$sku) . ' x' . max(1, (int)$qty);
+            $note = trim((string)($itemNotes[$sku] ?? ''));
+            if ($note !== '') $entry .= " [{$note}]";
+            $itemParts[] = $entry;
+        }
+        if ($itemParts) $parts[] = 'Preferencias de compra: ' . implode(' | ', $itemParts);
+    }
+    if (!empty($cart['customer_address'])) {
+        $parts[] = 'Dirección habitual: ' . trim((string)$cart['customer_address']);
+    }
+    return implode("\n", $parts);
+}
+
+function bot_sync_crm_client(PDO $pdo, string $wa, string $name, string $address='', array $cart=[], string $extraNote=''): void {
+    if (!bot_table_exists($pdo, 'clientes')) return;
+    if (!bot_has_column($pdo, 'clientes', 'preferencias')) {
+        $pdo->exec("ALTER TABLE clientes ADD COLUMN preferencias TEXT NULL");
+    }
+    $phone = substr(preg_replace('/\D+/', '', $wa) ?? '', 0, 50);
+    if ($phone === '') return;
+    $hasOrigen = bot_has_column($pdo, 'clientes', 'origen');
+    $hasCategoria = bot_has_column($pdo, 'clientes', 'categoria');
+    $hasNotas = bot_has_column($pdo, 'clientes', 'notas');
+    $hasPreferencias = bot_has_column($pdo, 'clientes', 'preferencias');
+    $hasFechaRegistro = bot_has_column($pdo, 'clientes', 'fecha_registro');
+    $st = $pdo->prepare("SELECT * FROM clientes WHERE telefono = ? LIMIT 1");
+    $st->execute([$phone]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $name = trim($name) !== '' ? trim($name) : 'Cliente WhatsApp';
+    $address = trim($address);
+    $notes = 'Cliente sincronizado desde pos_bot / WhatsApp.';
+    if (trim($extraNote) !== '') $notes .= "\n" . trim($extraNote);
+    $preferences = bot_crm_preferences_from_cart($cart);
+    if ($row) {
+        $fields = ['nombre = ?', 'telefono = ?'];
+        $params = [$name, $phone];
+        if ($address !== '' && bot_has_column($pdo, 'clientes', 'direccion')) {
+            $fields[] = 'direccion = ?';
+            $params[] = $address;
+        }
+        if ($hasOrigen) {
+            $fields[] = 'origen = ?';
+            $params[] = 'WhatsApp Bot';
+        }
+        if ($hasCategoria && trim((string)($row['categoria'] ?? '')) === '') {
+            $fields[] = 'categoria = ?';
+            $params[] = 'Regular';
+        }
+        if ($hasNotas) {
+            $fields[] = 'notas = ?';
+            $params[] = bot_merge_text_block((string)($row['notas'] ?? ''), $notes);
+        }
+        if ($hasPreferencias) {
+            $fields[] = 'preferencias = ?';
+            $params[] = bot_merge_text_block((string)($row['preferencias'] ?? ''), $preferences);
+        }
+        $params[] = (int)$row['id'];
+        $pdo->prepare("UPDATE clientes SET " . implode(',', $fields) . " WHERE id = ?")->execute($params);
+        return;
+    }
+    $cols = ['nombre', 'telefono'];
+    $vals = [$name, $phone];
+    if (bot_has_column($pdo, 'clientes', 'direccion')) { $cols[] = 'direccion'; $vals[] = $address; }
+    if ($hasOrigen) { $cols[] = 'origen'; $vals[] = 'WhatsApp Bot'; }
+    if ($hasCategoria) { $cols[] = 'categoria'; $vals[] = 'Regular'; }
+    if ($hasNotas) { $cols[] = 'notas'; $vals[] = $notes; }
+    if ($hasPreferencias) { $cols[] = 'preferencias'; $vals[] = $preferences; }
+    if ($hasFechaRegistro) { $cols[] = 'fecha_registro'; $vals[] = date('Y-m-d H:i:s'); }
+    if (bot_has_column($pdo, 'clientes', 'activo')) { $cols[] = 'activo'; $vals[] = 1; }
+    $placeholders = implode(',', array_fill(0, count($cols), '?'));
+    $pdo->prepare("INSERT INTO clientes (" . implode(',', $cols) . ") VALUES ({$placeholders})")->execute($vals);
 }
 
 function bot_tone(array $cfg): string {
@@ -731,73 +1104,256 @@ function bot_cart_text(PDO $pdo, array $cart): array {
         $line .= " = $" . number_format($sub,2);
         $lines[] = $line;
     }
-    $lines[] = "TOTAL: $" . number_format($tot,2);
+    $deliveryFee = (($cart['fulfillment_mode'] ?? '') === 'delivery') ? (float)($cart['delivery_fee'] ?? 0) : 0.0;
+    if ($deliveryFee > 0) $lines[] = "Mensajería: $" . number_format($deliveryFee, 2);
+    $grandTotal = $tot + $deliveryFee;
+    $lines[] = "TOTAL: $" . number_format($grandTotal,2);
     if (!empty($cart['customer_name'])) $lines[] = "Nombre: " . $cart['customer_name'];
     if (!empty($cart['customer_address'])) $lines[] = "Direccion: " . $cart['customer_address'];
+    if (!empty($cart['fulfillment_mode'])) $lines[] = bot_delivery_summary_line($cart);
+    if (!empty($cart['requested_datetime_label'])) $lines[] = (($cart['fulfillment_mode'] ?? '') === 'delivery' ? 'Entrega: ' : 'Recogida: ') . $cart['requested_datetime_label'];
     $lines[] = "Si lo ves bien, escribe CONFIRMAR y lo cierro por ti.";
-    return ['text' => implode("\n", $lines), 'total' => $tot];
+    return ['text' => implode("\n", $lines), 'total' => $grandTotal, 'subtotal' => $tot, 'delivery_fee' => $deliveryFee];
 }
 
-function bot_create_order(PDO $pdo, array $appCfg, string $wa, string $name, string $address, array $cart): array {
+function bot_find_cliente_by_phone(PDO $pdo, string $wa): ?array {
+    if (!bot_table_exists($pdo, 'clientes') || !bot_has_column($pdo, 'clientes', 'telefono')) return null;
+    $phone = substr(preg_replace('/\D+/', '', $wa) ?? '', 0, 50);
+    if ($phone === '') return null;
+    $st = $pdo->prepare("SELECT * FROM clientes WHERE telefono = ? LIMIT 1");
+    $st->execute([$phone]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function bot_upsert_cliente_for_reserva(PDO $pdo, string $wa, string $name, string $address, array $cart): int {
+    bot_sync_crm_client($pdo, $wa, $name, $address, $cart, 'Reserva generada desde WhatsApp Bot.');
+    $row = bot_find_cliente_by_phone($pdo, $wa);
+    return (int)($row['id'] ?? 0);
+}
+
+function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, string $address, array $cart): array {
     $items = $cart['items'] ?? [];
     if (!$items) return ['ok'=>false, 'msg'=>'Carrito vacio'];
+    $fulfillmentMode = (string)($cart['fulfillment_mode'] ?? '');
+    if (!in_array($fulfillmentMode, ['pickup', 'delivery'], true)) {
+        return ['ok' => false, 'msg' => 'Falta definir si es recogida o mensajería'];
+    }
+    if (trim((string)($cart['requested_datetime'] ?? '')) === '') {
+        return ['ok' => false, 'msg' => 'Falta fecha y hora de entrega'];
+    }
+    if ($fulfillmentMode === 'delivery' && trim($address) === '') {
+        return ['ok' => false, 'msg' => 'Falta dirección para la mensajería'];
+    }
 
     $pdo->beginTransaction();
     try {
         $total = 0.0; $valid = [];
         $itemNotes = (array)($cart['item_notes'] ?? []);
+        $deliveryFee = $fulfillmentMode === 'delivery' ? (float)($cart['delivery_fee'] ?? 0) : 0.0;
+        $validation = is_array($cart['address_validation'] ?? null) ? $cart['address_validation'] : [];
+        $requestedAt = trim((string)($cart['requested_datetime'] ?? ''));
+        $requestedLabel = trim((string)($cart['requested_datetime_label'] ?? ''));
         foreach ($items as $sku => $qty) {
-            $st = $pdo->prepare("SELECT codigo,nombre,precio FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
+            $st = $pdo->prepare("SELECT codigo,nombre,precio,categoria,COALESCE(es_servicio,0) AS es_servicio FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
             $st->execute([$sku, (int)$appCfg['id_empresa']]);
             $p = $st->fetch(PDO::FETCH_ASSOC);
             if (!$p) continue;
             $q = max(1, (int)$qty);
+            if (empty($p['es_servicio'])) {
+                $stockSt = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+                $stockSt->execute([$sku, (int)($appCfg['id_almacen'] ?? 1)]);
+                $stock = (float)$stockSt->fetchColumn();
+                if ($stock < $q) {
+                    throw new Exception("Sin existencia suficiente para {$p['nombre']}.");
+                }
+            }
             $total += (float)$p['precio'] * $q;
             $valid[] = [
                 'sku'=>$p['codigo'],
                 'name'=>(string)$p['nombre'],
                 'qty'=>$q,
                 'price'=>(float)$p['precio'],
-                'note'=>trim((string)($itemNotes[(string)$p['codigo']] ?? ''))
+                'note'=>trim((string)($itemNotes[(string)$p['codigo']] ?? '')),
+                'category'=>(string)($p['categoria'] ?? 'General')
             ];
         }
         if (!$valid) throw new Exception('Sin productos validos');
-
-        $orderLines = ["WHATSAPP_BOT","wa_user={$wa}","wa_name={$name}","wa_address={$address}"];
-        foreach ($valid as $it) {
-            $line = "item={$it['sku']} x{$it['qty']}";
-            if ($it['note'] !== '') $line .= " note={$it['note']}";
-            $orderLines[] = $line;
+        $idCliente = bot_upsert_cliente_for_reserva($pdo, $wa, $name, $address, $cart);
+        $totalFinal = $total + $deliveryFee;
+        $addressForReserva = trim($address);
+        $notes = [
+            'Reserva creada desde WhatsApp Bot',
+            'Tipo: ' . bot_fulfillment_label($fulfillmentMode),
+            'Fecha solicitada: ' . ($requestedLabel !== '' ? $requestedLabel : $requestedAt),
+            'Cliente WA: ' . $wa
+        ];
+        if ($fulfillmentMode === 'delivery') {
+            $municipio = trim((string)($validation['municipio'] ?? ''));
+            $barrio = trim((string)($validation['barrio'] ?? ''));
+            $distanceKm = (float)($cart['delivery_distance_km'] ?? ($validation['distance_km'] ?? 0));
+            $notes[] = 'Mensajería: ' . number_format($distanceKm, 2) . ' km x 100 CUP';
+            if ($municipio !== '' || $barrio !== '') {
+                $notes[] = 'Zona: ' . trim($municipio . ' / ' . $barrio, ' /');
+                $addressForReserva = '[MENSAJERÍA: ' . trim($municipio . ' - ' . $barrio, ' -') . '] ' . $addressForReserva;
+            }
+        } else {
+            $addressForReserva = trim($addressForReserva) !== '' ? '[RECOGER EN TIENDA] ' . $addressForReserva : 'RECOGER EN TIENDA';
         }
-        $notes = implode("\n", $orderLines);
-        $h = $pdo->prepare("INSERT INTO pedidos_cabecera
-            (cliente_nombre,cliente_telefono,total,estado,fecha,id_empresa,id_sucursal,notas)
-            VALUES (?,?,?,'pendiente',NOW(),?,?,?)");
-        $h->execute([$name ?: 'Cliente WhatsApp', $wa, $total, (int)$appCfg['id_empresa'], (int)$appCfg['id_sucursal'], $notes]);
-        $idp = (int)$pdo->lastInsertId();
 
-        $d = $pdo->prepare("INSERT INTO pedidos_detalle (id_pedido,id_producto,cantidad,precio_unitario) VALUES (?,?,?,?)");
-        foreach ($valid as $it) $d->execute([$idp, $it['sku'], $it['qty'], $it['price']]);
+        $uuid = uniqid('R-WA-', true);
+        $h = $pdo->prepare("INSERT INTO ventas_cabecera
+            (uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, tipo_servicio,
+             fecha_reserva, notas, cliente_nombre, cliente_telefono, cliente_direccion,
+             abono, estado_pago, id_empresa, estado_reserva, sincronizado, id_caja, id_cliente, canal_origen)
+            VALUES (?, NOW(), ?, 'Pendiente', ?, ?, 'reserva', ?, ?, ?, ?, ?, 0, 'pendiente', ?, 'PENDIENTE', 0, 1, ?, 'WhatsApp')");
+        $h->execute([
+            $uuid,
+            $totalFinal,
+            (int)$appCfg['id_sucursal'],
+            (int)$appCfg['id_almacen'],
+            $requestedAt,
+            implode("\n", $notes),
+            $name ?: 'Cliente WhatsApp',
+            substr(preg_replace('/\D+/', '', $wa) ?? '', 0, 50),
+            mb_substr($addressForReserva, 0, 255),
+            (int)$appCfg['id_empresa'],
+            $idCliente
+        ]);
+        $idReserva = (int)$pdo->lastInsertId();
 
-        $pdo->prepare("INSERT INTO pos_bot_orders (id_pedido,wa_user_id,total) VALUES (?,?,?)")->execute([$idp,$wa,$total]);
+        $sinExistencia = 0;
+        $d = $pdo->prepare("INSERT INTO ventas_detalle
+            (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
+            VALUES (?,?,?,?,?,?,?)");
+        foreach ($valid as $it) {
+            $d->execute([$idReserva, $it['sku'], $it['qty'], $it['price'], $it['name'], $it['sku'], $it['category']]);
+        }
+        if ($sinExistencia) {
+            $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=1 WHERE id=?")->execute([$idReserva]);
+        }
+
+        $pdo->prepare("INSERT INTO pos_bot_orders (id_pedido,wa_user_id,total) VALUES (?,?,?)")->execute([$idReserva, $wa, $totalFinal]);
         $pdo->commit();
         return [
             'ok'=>true,
-            'id_pedido'=>$idp,
-            'total'=>$total,
+            'id_reserva'=>$idReserva,
+            'id_pedido'=>$idReserva,
+            'total'=>$totalFinal,
+            'ticket_url'=>bot_ticket_url($idReserva),
             'order_snapshot'=>[
                 'items' => $items,
                 'item_notes' => $itemNotes,
                 'customer_name' => $name,
                 'customer_address' => $address,
+                'fulfillment_mode' => $fulfillmentMode,
+                'delivery_fee' => $deliveryFee,
+                'delivery_distance_km' => (float)($cart['delivery_distance_km'] ?? 0),
+                'address_validation' => $validation,
+                'requested_datetime' => $requestedAt,
+                'requested_datetime_label' => $requestedLabel,
                 'created_at' => date('c'),
-                'id_pedido' => $idp
+                'id_reserva' => $idReserva
             ]
         ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         return ['ok'=>false, 'msg'=>$e->getMessage()];
     }
+}
+
+function bot_build_conversation_rows(PDO $pdo): array {
+    $rows = $pdo->query("SELECT wa_user_id, wa_name, cart_json, last_seen FROM pos_bot_sessions ORDER BY last_seen DESC LIMIT 80")->fetchAll(PDO::FETCH_ASSOC);
+    $latestMsgSt = $pdo->prepare("SELECT direction, msg_type, message_text, created_at FROM pos_bot_messages WHERE wa_user_id=? ORDER BY id DESC LIMIT 1");
+    $out = [];
+    foreach ($rows as $row) {
+        $cart = json_decode((string)($row['cart_json'] ?? ''), true);
+        if (!is_array($cart)) $cart = [];
+        $cart = bot_merge_cart_shape($cart, (string)($row['wa_name'] ?? ''));
+        $latestMsgSt->execute([(string)$row['wa_user_id']]);
+        $lastMsg = $latestMsgSt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $itemsCount = 0;
+        foreach ((array)$cart['items'] as $qty) $itemsCount += max(0, (int)$qty);
+        $out[] = [
+            'wa_user_id' => (string)$row['wa_user_id'],
+            'wa_name' => (string)($cart['customer_name'] ?: ($row['wa_name'] ?? '')),
+            'customer_address' => (string)($cart['customer_address'] ?? ''),
+            'items_count' => $itemsCount,
+            'awaiting_field' => (string)($cart['awaiting_field'] ?? ''),
+            'bot_paused' => !empty($cart['bot_paused']) ? 1 : 0,
+            'escalation_active' => !empty($cart['escalation_active']) ? 1 : 0,
+            'escalation_reason' => (string)($cart['escalation_reason'] ?? ''),
+            'escalation_label' => (string)($cart['escalation_label'] ?? ''),
+            'escalation_at' => (string)($cart['escalation_at'] ?? ''),
+            'last_seen' => (string)($row['last_seen'] ?? ''),
+            'last_message_text' => (string)($lastMsg['message_text'] ?? ''),
+            'last_message_dir' => (string)($lastMsg['direction'] ?? ''),
+            'last_message_at' => (string)($lastMsg['created_at'] ?? ''),
+            'last_cart_activity_at' => (string)($cart['last_cart_activity_at'] ?? ''),
+            'last_cart_reminder_at' => (string)($cart['last_cart_reminder_at'] ?? ''),
+            'last_order' => is_array($cart['last_order'] ?? null) ? $cart['last_order'] : null
+        ];
+    }
+    return $out;
+}
+
+function bot_conversation_update(PDO $pdo, string $wa, callable $mutator): array {
+    $st = $pdo->prepare("SELECT wa_name, cart_json FROM pos_bot_sessions WHERE wa_user_id=? LIMIT 1");
+    $st->execute([$wa]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $name = (string)($row['wa_name'] ?? '');
+    $cart = is_array(json_decode((string)($row['cart_json'] ?? ''), true)) ? json_decode((string)($row['cart_json'] ?? ''), true) : [];
+    $cart = bot_merge_cart_shape($cart, $name);
+    $cart = $mutator($cart) ?: $cart;
+    if ($row) {
+        bot_save_cart($pdo, $wa, $name, $cart);
+    } else {
+        $ins = $pdo->prepare("INSERT INTO pos_bot_sessions (wa_user_id,wa_name,cart_json) VALUES (?,?,?)");
+        $ins->execute([$wa,$name,json_encode($cart, JSON_UNESCAPED_UNICODE)]);
+    }
+    return $cart;
+}
+
+function bot_enqueue_cart_recovery_jobs(PDO $pdo, array $cfg, array $appCfg): int {
+    $rows = $pdo->query("SELECT wa_user_id, wa_name, cart_json, last_seen FROM pos_bot_sessions ORDER BY last_seen DESC LIMIT 150")->fetchAll(PDO::FETCH_ASSOC);
+    $enqueued = 0;
+    $now = time();
+    foreach ($rows as $row) {
+        $cart = json_decode((string)($row['cart_json'] ?? ''), true);
+        if (!is_array($cart)) continue;
+        $cart = bot_merge_cart_shape($cart, (string)($row['wa_name'] ?? ''));
+        if (!empty($cart['bot_paused'])) continue;
+        if (empty($cart['items'])) continue;
+        $lastSeenTs = strtotime((string)($row['last_seen'] ?? '')) ?: 0;
+        $lastActivityTs = strtotime((string)($cart['last_cart_activity_at'] ?? '')) ?: $lastSeenTs;
+        if ($lastActivityTs <= 0 || ($now - $lastActivityTs) < 20 * 60) continue;
+        $lastReminderTs = strtotime((string)($cart['last_cart_reminder_at'] ?? '')) ?: 0;
+        if ($lastReminderTs > 0 && ($now - $lastReminderTs) < 6 * 3600) continue;
+        $name = bot_customer_display_name($cart, (string)($row['wa_name'] ?? 'Cliente'));
+        $text = bot_pick([
+            "Hola {$name}, dejaste un pedido a medias. Si quieres, te ayudo a terminarlo ahora mismo.",
+            "{$name}, tu carrito sigue guardado. Puedes retomarlo cuando quieras.",
+            "Seguimos teniendo guardado tu carrito, {$name}. Si quieres, lo cerramos enseguida."
+        ], $row['wa_user_id'] . date('YmdH'));
+        $text .= "\n" . bot_site_promo($cfg, $appCfg, $row['wa_user_id'] . 'recovery');
+        bot_enqueue_bridge_job([
+            'target_id' => (string)$row['wa_user_id'],
+            'type' => 'text',
+            'text' => $text
+        ]);
+        bot_enqueue_bridge_job([
+            'target_id' => (string)$row['wa_user_id'],
+            'type' => 'buttons',
+            'text' => 'Retoma tu compra con un toque:',
+            'buttons' => ['Carrito', 'Confirmar', 'Comprar en web'],
+            'title' => 'Carrito pendiente',
+            'footer' => preg_replace('~^https?://~i', '', bot_site_url($appCfg))
+        ]);
+        $cart['last_cart_reminder_at'] = date('c', $now);
+        bot_save_cart($pdo, (string)$row['wa_user_id'], (string)($row['wa_name'] ?? ''), $cart);
+        $enqueued++;
+    }
+    return $enqueued;
 }
 
 function bot_add_items_to_cart(array &$cart, array $items): array {
@@ -867,6 +1423,7 @@ function bot_try_resolve_pending_choice(array $menu, array &$cart, string $msg):
         'name' => (string)$product['nombre'],
         'note' => trim((string)($pending['note'] ?? ''))
     ]]);
+    bot_mark_cart_activity($cart);
     $cart['pending_choice'] = null;
     return ['status' => 'resolved', 'added' => $added];
 }
@@ -885,9 +1442,25 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
     $isConfirm = bot_intent_has($norm, ['confirmar','ordenar','pedir','finalizar','checkout','cerrar pedido']);
     $isAdd = bot_intent_has($norm, ['agregar','añadir','anadir','sumar','quiero','dame','deseo','me das','ponme','mandame','preparame','me pones']);
     $isRemove = bot_intent_has($norm, ['quitar','eliminar','sacar','remover']);
-    $isRepeat = bot_intent_has($norm, ['lo mismo','lo de siempre','repite el ultimo','repite mi ultimo','igual que la vez pasada','igual que siempre']);
+    $isRepeat = bot_intent_has($norm, ['lo mismo','lo de siempre','repite el ultimo','repite mi ultimo','igual que la vez pasada','igual que siempre','repetir pedido']);
+    $isWebBuyReq = bot_intent_has($norm, ['comprar en web','comprar web','tienda web','catalogo web','catálogo web','comprar online']);
     $looksLikeName = bot_intent_has($norm, ['mi nombre es','soy','me llamo','nombre']);
     $looksLikeAddress = bot_intent_has($norm, ['direccion','dirección','mi direccion es','vivo en','entrega en','dir']);
+    $fulfillmentDetected = bot_detect_fulfillment_mode($norm);
+    $scheduleDetected = bot_extract_schedule_datetime($msg);
+    $escalationDetected = bot_detect_escalation($norm);
+
+    if ($escalationDetected) {
+        bot_mark_escalation($cart, $escalationDetected);
+        bot_save_cart($pdo, $wa, $name, $cart);
+        bot_send($pdo, $cfg, $wa, "Entendido. Ya pasé tu caso a atención humana por: {$escalationDetected['label']}.\nUn operador revisará tu chat lo antes posible.");
+        return;
+    }
+
+    if (!empty($cart['bot_paused'])) {
+        bot_save_cart($pdo, $wa, $name, $cart);
+        return;
+    }
 
     $faq = ((string)($cart['awaiting_field'] ?? '') === '') ? bot_faq_answer($norm, $cfg, $appCfg) : null;
     if ($faq && !$isAdd && !$isConfirm && !$isCartReq) {
@@ -922,12 +1495,57 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         $candidateName = bot_extract_name($msg);
         if ($candidateName !== '') {
             $cart['customer_name'] = $candidateName;
-            $cart['awaiting_field'] = 'address';
+            $cart['awaiting_field'] = 'fulfillment';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Gracias, {$candidateName}. Ahora comparteme la direccion de entrega.\n" . bot_site_promo($cfg, $appCfg, $wa . 'name'));
+            bot_sync_crm_client($pdo, $wa, $candidateName, (string)($cart['customer_address'] ?? ''), $cart, 'Nombre actualizado desde conversación.');
+            bot_send($pdo, $cfg, $wa, "Gracias, {$candidateName}. Ahora voy a preparar tu reserva.");
+            bot_send_fulfillment_prompt($pdo, $wa);
             return;
         }
         bot_send($pdo, $cfg, $wa, 'Para continuar necesito tu nombre completo. Ejemplo: Mi nombre es Juan Perez.');
+        return;
+    }
+
+    if (($cart['awaiting_field'] ?? '') === 'fulfillment' && !$isMenuReq && !$isCartReq && !$isCancel) {
+        if ($fulfillmentDetected === '') {
+            bot_send($pdo, $cfg, $wa, 'Necesito que me digas si prefieres recoger en tienda o mensajería.');
+            bot_send_fulfillment_prompt($pdo, $wa);
+            return;
+        }
+        $cart['fulfillment_mode'] = $fulfillmentDetected;
+        $cart['awaiting_field'] = '';
+        if ($fulfillmentDetected === 'pickup') {
+            $cart['address_validation'] = null;
+            $cart['delivery_distance_km'] = 0.0;
+            $cart['delivery_fee'] = 0.0;
+            $cart['requested_datetime'] = '';
+            $cart['requested_datetime_label'] = '';
+            $cart['awaiting_field'] = 'datetime';
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, 'Perfecto, será para recoger en tienda.');
+            bot_send($pdo, $cfg, $wa, bot_datetime_prompt('pickup'));
+            return;
+        }
+        if (trim((string)($cart['customer_address'] ?? '')) !== '') {
+            $validation = bot_validate_habana_address((string)$cart['customer_address']);
+            if (!empty($validation['ok'])) {
+                $cart['address_validation'] = $validation;
+                $cart['delivery_distance_km'] = (float)$validation['distance_km'];
+                $cart['delivery_fee'] = (float)$validation['delivery_fee'];
+                $cart['delivery_rate_per_km'] = (float)$validation['rate_per_km'];
+                $cart['requested_datetime'] = '';
+                $cart['requested_datetime_label'] = '';
+                $cart['awaiting_field'] = 'datetime';
+                bot_save_cart($pdo, $wa, $name, $cart);
+                bot_send($pdo, $cfg, $wa, "Perfecto, será por mensajería.\nDirección validada en {$validation['municipio']} / {$validation['barrio']}.\nDistancia estimada: " . number_format((float)$validation['distance_km'], 2) . " km.\nCosto de mensajería: $" . number_format((float)$validation['delivery_fee'], 2) . '.');
+                bot_send($pdo, $cfg, $wa, bot_datetime_prompt('delivery'));
+                return;
+            }
+        }
+        $cart['awaiting_field'] = 'address';
+        bot_save_cart($pdo, $wa, $name, $cart);
+        bot_send($pdo, $cfg, $wa, 'Perfecto, será por mensajería.');
+        bot_send($pdo, $cfg, $wa, bot_delivery_address_prompt());
         return;
     }
 
@@ -935,12 +1553,57 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         $candidateAddress = bot_extract_address($msg);
         if ($candidateAddress !== '') {
             $cart['customer_address'] = $candidateAddress;
-            $cart['awaiting_field'] = '';
+            $validation = bot_validate_habana_address($candidateAddress);
+            if (empty($validation['ok'])) {
+                $cart['address_validation'] = null;
+                $cart['delivery_distance_km'] = 0.0;
+                $cart['delivery_fee'] = 0.0;
+                $cart['awaiting_field'] = 'address';
+                bot_save_cart($pdo, $wa, $name, $cart);
+                bot_send($pdo, $cfg, $wa, ($validation['msg'] ?? 'No pude validar esa dirección.') . "\n" . bot_delivery_address_prompt());
+                return;
+            }
+            $cart['address_validation'] = $validation;
+            $cart['delivery_distance_km'] = (float)$validation['distance_km'];
+            $cart['delivery_fee'] = (float)$validation['delivery_fee'];
+            $cart['delivery_rate_per_km'] = (float)$validation['rate_per_km'];
+            $cart['awaiting_field'] = 'datetime';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Perfecto. Ya guardé tu direccion: {$candidateAddress}.\nCuando quieras, escribe CONFIRMAR y cierro el pedido.");
+            bot_sync_crm_client($pdo, $wa, (string)($cart['customer_name'] ?: $name), $candidateAddress, $cart, 'Dirección validada para reserva por WhatsApp.');
+            bot_send($pdo, $cfg, $wa, "Perfecto. Validé tu dirección en {$validation['municipio']} / {$validation['barrio']}.\nDistancia estimada: " . number_format((float)$validation['distance_km'], 2) . " km.\nCosto de mensajería: $" . number_format((float)$validation['delivery_fee'], 2) . ".\n" . bot_datetime_prompt('delivery'));
             return;
         }
-        bot_send($pdo, $cfg, $wa, 'Necesito una direccion valida para entrega. Ejemplo: Direccion: Calle 10 #45 entre A y B.');
+        bot_send($pdo, $cfg, $wa, bot_delivery_address_prompt());
+        return;
+    }
+
+    if (($cart['awaiting_field'] ?? '') === 'datetime' && !$isMenuReq && !$isCartReq && !$isCancel) {
+        if (!$scheduleDetected) {
+            bot_send($pdo, $cfg, $wa, bot_datetime_prompt((string)($cart['fulfillment_mode'] ?? 'pickup')));
+            return;
+        }
+        $cart['requested_datetime'] = (string)$scheduleDetected['value'];
+        $cart['requested_datetime_label'] = (string)$scheduleDetected['label'];
+        $cart['awaiting_field'] = '';
+        bot_save_cart($pdo, $wa, $name, $cart);
+        $res = bot_create_reserva($pdo, $appCfg, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cart);
+        if ($res['ok']) {
+            $cartAfter = bot_default_cart((string)$cart['customer_name']);
+            $cartAfter['customer_address'] = (string)$cart['customer_address'];
+            $cartAfter['fulfillment_mode'] = (string)($cart['fulfillment_mode'] ?? '');
+            $cartAfter['address_validation'] = is_array($cart['address_validation'] ?? null) ? $cart['address_validation'] : null;
+            $cartAfter['delivery_fee'] = (float)($cart['delivery_fee'] ?? 0);
+            $cartAfter['delivery_distance_km'] = (float)($cart['delivery_distance_km'] ?? 0);
+            $cartAfter['requested_datetime'] = (string)$scheduleDetected['value'];
+            $cartAfter['requested_datetime_label'] = (string)$scheduleDetected['label'];
+            $cartAfter['greet_count'] = (int)($cart['greet_count'] ?? 0);
+            $cartAfter['last_order'] = is_array($res['order_snapshot'] ?? null) ? $res['order_snapshot'] : null;
+            bot_save_cart($pdo, $wa, $name, $cartAfter);
+            bot_sync_crm_client($pdo, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cartAfter, 'Reserva confirmada desde WhatsApp Bot.');
+            bot_send($pdo, $cfg, $wa, "Perfecto, {$cart['customer_name']}. Ya quedó creada tu reserva #{$res['id_reserva']}.\nFecha y hora: {$scheduleDetected['label']}.\n" . bot_delivery_summary_line($cart) . "\nTotal: $" . number_format((float)$res['total'], 2) . "\nTicket: {$res['ticket_url']}\n\n" . bot_site_promo($cfg, $appCfg, $wa . 'reserva'));
+        } else {
+            bot_send($pdo, $cfg, $wa, "No pude crear la reserva: {$res['msg']}");
+        }
         return;
     }
 
@@ -950,6 +1613,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             $cart['customer_name'] = $candidateName;
             if (($cart['awaiting_field'] ?? '') === 'name') $cart['awaiting_field'] = '';
             bot_save_cart($pdo, $wa, $name, $cart);
+            bot_sync_crm_client($pdo, $wa, $candidateName, (string)($cart['customer_address'] ?? ''), $cart, 'Nombre confirmado desde conversación.');
             bot_send($pdo, $cfg, $wa, "Perfecto, {$candidateName}. Ya guardé tu nombre.");
             return;
         }
@@ -960,10 +1624,55 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         if ($candidateAddress !== '') {
             $cart['customer_address'] = $candidateAddress;
             if (($cart['awaiting_field'] ?? '') === 'address') $cart['awaiting_field'] = '';
+            if (($cart['fulfillment_mode'] ?? '') === 'delivery') {
+                $validation = bot_validate_habana_address($candidateAddress);
+                if (!empty($validation['ok'])) {
+                    $cart['address_validation'] = $validation;
+                    $cart['delivery_distance_km'] = (float)$validation['distance_km'];
+                    $cart['delivery_fee'] = (float)$validation['delivery_fee'];
+                    $cart['delivery_rate_per_km'] = (float)$validation['rate_per_km'];
+                } else {
+                    $cart['address_validation'] = null;
+                    $cart['delivery_distance_km'] = 0.0;
+                    $cart['delivery_fee'] = 0.0;
+                }
+            }
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, "Direccion guardada: {$candidateAddress}.");
+            bot_sync_crm_client($pdo, $wa, (string)($cart['customer_name'] ?: $name), $candidateAddress, $cart, 'Dirección confirmada desde conversación.');
+            if (($cart['fulfillment_mode'] ?? '') === 'delivery' && !empty($cart['address_validation']['ok'])) {
+                $validation = $cart['address_validation'];
+                bot_send($pdo, $cfg, $wa, "Direccion guardada y validada en {$validation['municipio']} / {$validation['barrio']}.\nCosto estimado de mensajería: $" . number_format((float)$validation['delivery_fee'], 2) . '.');
+            } else {
+                bot_send($pdo, $cfg, $wa, "Direccion guardada: {$candidateAddress}.");
+            }
             return;
         }
+    }
+
+    if ($fulfillmentDetected !== '') {
+        $cart['fulfillment_mode'] = $fulfillmentDetected;
+        if ($fulfillmentDetected === 'pickup') {
+            $cart['address_validation'] = null;
+            $cart['delivery_distance_km'] = 0.0;
+            $cart['delivery_fee'] = 0.0;
+        }
+        if (($cart['awaiting_field'] ?? '') === 'fulfillment') $cart['awaiting_field'] = '';
+        bot_save_cart($pdo, $wa, $name, $cart);
+        if ($fulfillmentDetected === 'pickup') {
+            bot_send($pdo, $cfg, $wa, 'Perfecto, te dejo el pedido como recogida en tienda.');
+        } else {
+            bot_send($pdo, $cfg, $wa, 'Perfecto, te lo dejo por mensajería. Cuando quieras, envíame la dirección completa en La Habana.');
+        }
+        return;
+    }
+
+    if ($scheduleDetected && !empty($cart['items'])) {
+        $cart['requested_datetime'] = (string)$scheduleDetected['value'];
+        $cart['requested_datetime_label'] = (string)$scheduleDetected['label'];
+        if (($cart['awaiting_field'] ?? '') === 'datetime') $cart['awaiting_field'] = '';
+        bot_save_cart($pdo, $wa, $name, $cart);
+        bot_send($pdo, $cfg, $wa, (($cart['fulfillment_mode'] ?? '') === 'delivery' ? 'Entrega' : 'Recogida') . " programada para {$scheduleDetected['label']}.");
+        return;
     }
 
     if (
@@ -981,27 +1690,42 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         bot_send($pdo, $cfg, $wa, $greetingText);
         $logo = bot_business_logo_url($appCfg);
         if ($logo !== '') bot_send_image($pdo, $wa, $logo, "Compra fácil por chat o en " . bot_site_url($appCfg));
+        bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         return;
     }
 
     if ($isMenuReq) {
+        $menuVisible = array_values(array_filter($menu, static fn($p) => bot_product_in_stock($p, 1)));
+        if (!$menuVisible) $menuVisible = $menu;
         $lines = [bot_greeting_text($cfg, $appCfg, $cart, $name), '', (string)($cfg['menu_intro'] ?? 'Menu:')];
-        foreach ($menu as $p) $lines[] = "{$p['codigo']} - {$p['nombre']} - $" . number_format((float)$p['precio'],2);
+        foreach (array_slice($menuVisible, 0, 40) as $p) {
+            $suffix = !empty($p['es_servicio']) ? '' : (' · stock ' . max(0, (int)($p['stock_total'] ?? 0)));
+            $lines[] = "{$p['codigo']} - {$p['nombre']} - $" . number_format((float)$p['precio'],2) . $suffix;
+        }
         $lines[] = '';
         $lines[] = 'Puedes pedirme algo natural, por ejemplo: "quiero 2 croquetas y 1 refresco sin hielo".';
         $lines[] = 'Tambien puedo repetir tu ultimo pedido si me dices: "lo de siempre".';
         $lines[] = bot_site_promo($cfg, $appCfg, $wa . 'menu');
         bot_send($pdo, $cfg, $wa, implode("\n", $lines));
-        bot_send_catalog_showcase($pdo, $wa, $appCfg, $menu, 'Aquí tienes una vista rápida del catálogo.');
+        bot_send_catalog_showcase($pdo, $wa, $appCfg, $menuVisible, 'Aquí tienes una vista rápida del catálogo.');
+        bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'menu');
+        return;
+    }
+
+    if ($isWebBuyReq) {
+        bot_send($pdo, $cfg, $wa, "Compra directa: " . bot_site_url($appCfg) . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'webbuy'));
+        bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         return;
     }
 
     if ($isRepeat) {
         $repeated = bot_repeat_last_order($cart);
         if ($repeated) {
+            bot_mark_cart_activity($cart);
             bot_save_cart($pdo, $wa, $name, $cart);
             $summary = bot_cart_text($pdo, $cart);
             bot_send($pdo, $cfg, $wa, "Te repetí el ultimo pedido que tenías guardado.\n\n" . $summary['text'] . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'repeat'));
+            bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         } else {
             bot_send($pdo, $cfg, $wa, "Todavia no tengo un pedido anterior guardado para repetir. Si quieres, te muestro el menu o puedes pedirme algo natural.");
         }
@@ -1019,20 +1743,61 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         if (empty($parsed['items'])) {
             $extra = !empty($parsed['unknown']) ? ("\nNo reconocí bien: " . implode(', ', $parsed['unknown']) . '.') : '';
             bot_send($pdo, $cfg, $wa, 'No logré identificar bien los productos.' . $extra . "\nPrueba algo como: \"quiero 2 empanadas y 1 refresco\" o pideme el menu.");
+            bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
             return;
         }
-        $added = bot_add_items_to_cart($cart, $parsed['items']);
+        $catalogBySku = [];
+        foreach ($menu as $p) $catalogBySku[(string)$p['codigo']] = $p;
+        $availableItems = [];
+        $unavailable = [];
+        foreach ($parsed['items'] as $it) {
+            $sku = (string)($it['sku'] ?? '');
+            $product = $catalogBySku[$sku] ?? null;
+            if (!$product) continue;
+            $qty = max(1, (int)($it['qty'] ?? 1));
+            if (!bot_product_in_stock($product, $qty)) {
+                $unavailable[] = ['product' => $product, 'qty' => $qty];
+                continue;
+            }
+            $availableItems[] = $it;
+        }
+        $added = bot_add_items_to_cart($cart, $availableItems);
+        if (!$added && $unavailable) {
+            $lines = ['Ahora mismo no tengo existencia suficiente de ese producto.'];
+            foreach ($unavailable as $row) {
+                $product = $row['product'];
+                $subs = bot_find_substitutes($menu, $product, 3);
+                $lines[] = "- {$product['nombre']} no disponible.";
+                if ($subs) {
+                    $lines[] = 'Sustituciones: ' . implode(' | ', array_map(static fn($p) => "{$p['nombre']} ({$p['codigo']})", $subs));
+                }
+            }
+            $lines[] = bot_site_promo($cfg, $appCfg, $wa . 'stock');
+            bot_send($pdo, $cfg, $wa, implode("\n", $lines));
+            bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
+            return;
+        }
+        if ($added) bot_mark_cart_activity($cart);
         bot_save_cart($pdo, $wa, $name, $cart);
+        bot_sync_crm_client($pdo, $wa, (string)($cart['customer_name'] ?: $name), (string)($cart['customer_address'] ?? ''), $cart, 'Preferencias de compra actualizadas por actividad del carrito.');
         $lines = ['Perfecto, ya te lo agregué:'];
         foreach ($added as $it) {
             $line = "- {$it['name']} x{$it['qty']}";
             if ($it['note'] !== '') $line .= " [{$it['note']}]";
             $lines[] = $line;
         }
+        if ($unavailable) {
+            foreach ($unavailable as $row) {
+                $subs = bot_find_substitutes($menu, $row['product'], 3);
+                $lines[] = "{$row['product']['nombre']} no tenía stock suficiente.";
+                if ($subs) $lines[] = 'Te puedo sugerir: ' . implode(' | ', array_map(static fn($p) => "{$p['nombre']} ({$p['codigo']})", $subs));
+            }
+        }
         $suggest = bot_suggest_item($menu, $cart);
         if ($suggest) $lines[] = "Sugerencia: ¿quieres añadir {$suggest['nombre']} por $" . number_format((float)$suggest['precio'],2) . '?';
         $lines[] = bot_site_promo($cfg, $appCfg, $wa . 'add');
         bot_send($pdo, $cfg, $wa, implode("\n", $lines));
+        bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         return;
     }
 
@@ -1041,6 +1806,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         if (!$sku && preg_match('/^QUITAR\s+(\S+)/iu', $msg, $m)) $sku = (string)$m[1];
         if ($sku !== null && $sku !== '' && isset($cart['items'][$sku])) {
             unset($cart['items'][$sku], $cart['item_notes'][$sku]);
+            bot_mark_cart_activity($cart);
             bot_save_cart($pdo, $wa, $name, $cart);
             bot_send($pdo, $cfg, $wa, "Listo, quité {$sku} de tu carrito.");
         } else {
@@ -1052,6 +1818,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
     if ($isCartReq || mb_strtoupper($msg) === 'CARRITO') {
         $summary = bot_cart_text($pdo, $cart);
         bot_send($pdo, $cfg, $wa, $summary['text'] . "\n" . bot_site_promo($cfg, $appCfg, $wa . 'cart'));
+        if (!empty($cart['items'])) bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         return;
     }
 
@@ -1064,6 +1831,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         $cart['greet_count'] = $greetCount;
         bot_save_cart($pdo, $wa, $name, $cart);
         bot_send($pdo, $cfg, $wa, 'Listo, dejé el carrito vacío. Cuando quieras, empezamos de nuevo.');
+        bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
         return;
     }
 
@@ -1078,24 +1846,57 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             bot_send($pdo, $cfg, $wa, 'Antes de confirmar, necesito tu nombre completo.');
             return;
         }
-        if (trim((string)($cart['customer_address'] ?? '')) === '') {
+        if (!in_array((string)($cart['fulfillment_mode'] ?? ''), ['pickup', 'delivery'], true)) {
+            $cart['awaiting_field'] = 'fulfillment';
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send_fulfillment_prompt($pdo, $wa);
+            return;
+        }
+        if (($cart['fulfillment_mode'] ?? '') === 'delivery' && trim((string)($cart['customer_address'] ?? '')) === '') {
             $cart['awaiting_field'] = 'address';
             bot_save_cart($pdo, $wa, $name, $cart);
-            bot_send($pdo, $cfg, $wa, 'Ya casi. Ahora necesito la direccion de entrega.');
+            bot_send($pdo, $cfg, $wa, bot_delivery_address_prompt());
+            return;
+        }
+        if (($cart['fulfillment_mode'] ?? '') === 'delivery' && empty($cart['address_validation']['ok'])) {
+            $validation = bot_validate_habana_address((string)$cart['customer_address']);
+            if (empty($validation['ok'])) {
+                $cart['awaiting_field'] = 'address';
+                bot_save_cart($pdo, $wa, $name, $cart);
+                bot_send($pdo, $cfg, $wa, ($validation['msg'] ?? 'No pude validar la dirección.') . "\n" . bot_delivery_address_prompt());
+                return;
+            }
+            $cart['address_validation'] = $validation;
+            $cart['delivery_distance_km'] = (float)$validation['distance_km'];
+            $cart['delivery_fee'] = (float)$validation['delivery_fee'];
+            $cart['delivery_rate_per_km'] = (float)$validation['rate_per_km'];
+            bot_save_cart($pdo, $wa, $name, $cart);
+        }
+        if (trim((string)($cart['requested_datetime'] ?? '')) === '') {
+            $cart['awaiting_field'] = 'datetime';
+            bot_save_cart($pdo, $wa, $name, $cart);
+            bot_send($pdo, $cfg, $wa, bot_datetime_prompt((string)($cart['fulfillment_mode'] ?? 'pickup')));
             return;
         }
         $summary = bot_cart_text($pdo, $cart);
-        $res = bot_create_order($pdo, $appCfg, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cart);
+        $res = bot_create_reserva($pdo, $appCfg, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cart);
         if ($res['ok']) {
             $cartAfter = bot_default_cart((string)$cart['customer_name']);
             $cartAfter['customer_address'] = (string)$cart['customer_address'];
+            $cartAfter['fulfillment_mode'] = (string)($cart['fulfillment_mode'] ?? '');
+            $cartAfter['address_validation'] = is_array($cart['address_validation'] ?? null) ? $cart['address_validation'] : null;
+            $cartAfter['delivery_fee'] = (float)($cart['delivery_fee'] ?? 0);
+            $cartAfter['delivery_distance_km'] = (float)($cart['delivery_distance_km'] ?? 0);
+            $cartAfter['requested_datetime'] = (string)($cart['requested_datetime'] ?? '');
+            $cartAfter['requested_datetime_label'] = (string)($cart['requested_datetime_label'] ?? '');
             $cartAfter['greet_count'] = (int)($cart['greet_count'] ?? 0);
             $cartAfter['last_order'] = is_array($res['order_snapshot'] ?? null) ? $res['order_snapshot'] : null;
             bot_save_cart($pdo, $wa, $name, $cartAfter);
+            bot_sync_crm_client($pdo, $wa, (string)$cart['customer_name'], (string)$cart['customer_address'], $cartAfter, 'Reserva confirmada desde WhatsApp Bot.');
             $summaryText = preg_replace('/\nSi lo ves bien, escribe CONFIRMAR y lo cierro por ti\.\s*$/u', '', $summary['text']) ?? $summary['text'];
-            bot_send($pdo, $cfg, $wa, "Perfecto, {$cart['customer_name']}. Ya quedó creado tu pedido #{$res['id_pedido']} por $" . number_format((float)$res['total'],2) . ".\n\nResumen final:\n" . $summaryText . "\n\n" . bot_site_promo($cfg, $appCfg, $wa . 'confirm'));
+            bot_send($pdo, $cfg, $wa, "Perfecto, {$cart['customer_name']}. Ya quedó creada tu reserva #{$res['id_reserva']} por $" . number_format((float)$res['total'],2) . ".\n\nResumen final:\n" . $summaryText . "\n\nTicket: {$res['ticket_url']}\n" . bot_site_promo($cfg, $appCfg, $wa . 'confirm'));
         } else {
-            bot_send($pdo, $cfg, $wa, "No pude crear el pedido: {$res['msg']}");
+            bot_send($pdo, $cfg, $wa, "No pude crear la reserva: {$res['msg']}");
         }
         return;
     }
@@ -1106,6 +1907,7 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
         $wa,
         "No te entendí del todo, pero te ayudo.\nPuedes escribirme cosas como:\n- quiero 2 croquetas y 1 refresco sin hielo\n- quita la pizza\n- carrito\n- confirmar\n- lo de siempre\n\n" . bot_site_promo($cfg, $appCfg, $wa . 'fallback')
     );
+    bot_send_quick_actions($pdo, $cfg, $appCfg, $wa, 'main');
 }
 
 bot_ensure_tables($pdo);
@@ -1114,6 +1916,7 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
+    'conversation_list','conversation_pause','conversation_resume','conversation_send_manual',
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'bridge_restart','bridge_logs'
@@ -1128,6 +1931,18 @@ if ($action === 'webhook_verify' || ($_SERVER['REQUEST_METHOD']==='GET' && (isse
         header('Content-Type: text/plain; charset=utf-8'); echo $challenge; exit;
     }
     http_response_code(403); echo json_encode(['status'=>'error','msg'=>'verify failed']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_scan_jobs') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $provided = (string)($in['verify_token'] ?? '');
+    $expected = (string)($cfg['verify_token'] ?? '');
+    if ($expected === '' || !hash_equals($expected, $provided)) {
+        http_response_code(403);
+        echo json_encode(['status'=>'error','msg'=>'invalid token']); exit;
+    }
+    $count = bot_enqueue_cart_recovery_jobs($pdo, $cfg, $config);
+    echo json_encode(['status' => 'success', 'enqueued' => $count]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='get_config') {
@@ -1175,6 +1990,76 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='stats') {
     echo json_encode(['status'=>'success','stats'=>$s]); exit;
 }
 
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='conversation_list') {
+    echo json_encode(['status' => 'success', 'rows' => bot_build_conversation_rows($pdo)]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='conversation_pause') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $wa = bot_clean_wa_id((string)($in['wa_user_id'] ?? ''));
+    if ($wa === '') { echo json_encode(['status'=>'error','msg'=>'wa_user_id requerido']); exit; }
+    bot_conversation_update($pdo, $wa, static function (array $cart) {
+        $cart['bot_paused'] = 1;
+        return $cart;
+    });
+    echo json_encode(['status' => 'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='conversation_resume') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $wa = bot_clean_wa_id((string)($in['wa_user_id'] ?? ''));
+    if ($wa === '') { echo json_encode(['status'=>'error','msg'=>'wa_user_id requerido']); exit; }
+    bot_conversation_update($pdo, $wa, static function (array $cart) {
+        $cart['bot_paused'] = 0;
+        $cart['escalation_active'] = 0;
+        $cart['escalation_reason'] = '';
+        $cart['escalation_label'] = '';
+        return $cart;
+    });
+    echo json_encode(['status' => 'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='conversation_send_manual') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $wa = bot_clean_wa_id((string)($in['wa_user_id'] ?? ''));
+    $text = trim((string)($in['text'] ?? ''));
+    $sendQuick = !empty($in['send_quick_actions']);
+    if ($wa === '') { echo json_encode(['status'=>'error','msg'=>'wa_user_id requerido']); exit; }
+    if ($text === '' && !$sendQuick) { echo json_encode(['status'=>'error','msg'=>'Mensaje vacío']); exit; }
+    if ($text !== '' && !bot_enqueue_bridge_job([
+        'target_id' => $wa,
+        'type' => 'text',
+        'text' => $text
+    ])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo encolar mensaje']); exit;
+    }
+    if ($text !== '') bot_log($pdo, $wa, 'out', $text, 'manual');
+    if ($sendQuick) {
+        bot_enqueue_bridge_job([
+            'target_id' => $wa,
+            'type' => 'buttons',
+            'text' => 'Accesos rápidos:',
+            'buttons' => ['Menu', 'Repetir pedido', 'Carrito'],
+            'title' => 'Atajos',
+            'footer' => preg_replace('~^https?://~i', '', bot_site_url($config))
+        ]);
+        bot_enqueue_bridge_job([
+            'target_id' => $wa,
+            'type' => 'buttons',
+            'text' => 'Más opciones:',
+            'buttons' => ['Confirmar', 'Comprar en web'],
+            'title' => 'Atajos',
+            'footer' => preg_replace('~^https?://~i', '', bot_site_url($config))
+        ]);
+    }
+    bot_conversation_update($pdo, $wa, static function (array $cart) {
+        $cart['bot_paused'] = 1;
+        $cart['last_manual_reply_at'] = date('c');
+        return $cart;
+    });
+    echo json_encode(['status' => 'success']); exit;
+}
+
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_messages') {
     $rows = $pdo->query("SELECT m.wa_user_id,m.direction,m.msg_type,m.message_text,m.created_at,COALESCE(s.wa_name,'') AS wa_name
         FROM pos_bot_messages m
@@ -1184,7 +2069,12 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_messages') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_orders') {
-    $rows = $pdo->query("SELECT bo.id,bo.id_pedido,bo.wa_user_id,bo.total,bo.created_at,pc.cliente_nombre FROM pos_bot_orders bo LEFT JOIN pedidos_cabecera pc ON pc.id=bo.id_pedido ORDER BY bo.id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $pdo->query("SELECT bo.id,bo.id_pedido,bo.wa_user_id,bo.total,bo.created_at,
+            COALESCE(vc.cliente_nombre, pc.cliente_nombre, '') AS cliente_nombre
+        FROM pos_bot_orders bo
+        LEFT JOIN pedidos_cabecera pc ON pc.id=bo.id_pedido
+        LEFT JOIN ventas_cabecera vc ON vc.id=bo.id_pedido AND vc.tipo_servicio='reserva'
+        ORDER BY bo.id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['status'=>'success','rows'=>$rows]); exit;
 }
 

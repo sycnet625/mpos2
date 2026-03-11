@@ -18,7 +18,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 <body class="p-3 p-md-4">
 <div class="container-fluid" style="max-width:1400px;">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <div><h4 class="mb-0"><i class="fab fa-whatsapp text-success"></i> POS BOT WhatsApp</h4><small class="text-muted">Auto-reply, menu ordering y pedidos por WhatsApp</small></div>
+    <div><h4 class="mb-0"><i class="fab fa-whatsapp text-success"></i> POS BOT WhatsApp</h4><small class="text-muted">Auto-reply, reservas y ventas por WhatsApp</small></div>
     <button class="btn btn-outline-secondary" onclick="loadAll()"><i class="fas fa-sync"></i> Refrescar</button>
   </div>
 
@@ -27,7 +27,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
   <div class="row g-3 mb-3">
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Sesiones</div><div id="s1" class="stat">0</div></div></div>
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Mensajes hoy</div><div id="s2" class="stat">0</div></div></div>
-    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Pedidos hoy</div><div id="s3" class="stat">0</div></div></div>
+    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Reservas hoy</div><div id="s3" class="stat">0</div></div></div>
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Ventas hoy</div><div id="s4" class="stat">$0.00</div></div></div>
     <div class="col-12">
       <div class="card p-3">
@@ -125,7 +125,65 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
     <div class="col-lg-6">
       <div class="card mb-3"><div class="card-header bg-white fw-bold">Mensajes</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Teléfono/WA</th><th>Nombre</th><th>Dir</th><th>Texto</th></tr></thead><tbody id="tm"><tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
-      <div class="card"><div class="card-header bg-white fw-bold">Pedidos BOT</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Pedido</th><th>Cliente</th><th>Total</th></tr></thead><tbody id="to"><tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
+      <div class="card"><div class="card-header bg-white fw-bold">Reservas BOT</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Reserva</th><th>Cliente</th><th>Total</th></tr></thead><tbody id="to"><tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
+      <div class="card mt-3">
+        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+          <span>Conversaciones activas</span>
+          <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadConversations()"><i class="fas fa-sync"></i></button>
+        </div>
+        <div class="card-body">
+          <div class="row g-2 mb-2">
+            <div class="col-md-5">
+              <input id="conversationSearch" class="form-control form-control-sm" placeholder="Buscar por nombre o WA">
+            </div>
+            <div class="col-md-7">
+              <div class="small text-muted h-100 d-flex align-items-center justify-content-md-end">Toca un KPI para filtrar el panel.</div>
+            </div>
+          </div>
+          <div class="row g-2 mb-2" id="conversationKpis">
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border active" type="button" data-conv-filter="all" style="background:#111827;color:#fff">
+                <div class="small opacity-75">Todas</div>
+                <div id="kpiConvAll" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border" type="button" data-conv-filter="human" style="background:#fee2e2;color:#991b1b;border-color:#fecaca !important">
+                <div class="small">Humanas</div>
+                <div id="kpiConvHuman" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border" type="button" data-conv-filter="alarm" style="background:#7f1d1d;color:#fff;border-color:#991b1b !important">
+                <div class="small">Alarmas</div>
+                <div id="kpiConvAlarm" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border" type="button" data-conv-filter="cart" style="background:#dbeafe;color:#1d4ed8;border-color:#bfdbfe !important">
+                <div class="small">Con carrito</div>
+                <div id="kpiConvCart" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border" type="button" data-conv-filter="awaiting" style="background:#fef3c7;color:#92400e;border-color:#fde68a !important">
+                <div class="small">Pendientes</div>
+                <div id="kpiConvAwaiting" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+            <div class="col-6 col-md-4 col-xl">
+              <button class="btn btn-sm w-100 text-start border" type="button" data-conv-filter="abandoned" style="background:#e5e7eb;color:#374151;border-color:#d1d5db !important">
+                <div class="small">Abandonadas</div>
+                <div id="kpiConvAbandoned" class="fs-5 fw-bold">0</div>
+              </button>
+            </div>
+          </div>
+          <div id="conversationSummary" class="small text-muted mb-2">Sin conversaciones activas.</div>
+          <div id="conversationWrap">
+            <div class="text-muted small">Sin conversaciones activas.</div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
   </div>
@@ -402,6 +460,29 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
   </div>
 </div>
 
+<div class="modal fade" id="conversationModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title mb-0"><i class="fas fa-comments"></i> Responder conversación</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="conversationModalMeta" class="small text-muted mb-2">-</div>
+        <textarea id="conversationReplyText" class="form-control" rows="4" placeholder="Escribe la respuesta manual..."></textarea>
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" id="conversationSendQuick">
+          <label class="form-check-label" for="conversationSendQuick">Enviar también accesos rápidos</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" type="button" data-bs-dismiss="modal">Cerrar</button>
+        <button class="btn btn-primary" type="button" onclick="sendConversationManual()"><i class="fas fa-paper-plane"></i> Enviar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const API='pos_bot_api.php';
 let lastBridgeState=null;
@@ -410,8 +491,11 @@ let promoProducts=[];
 let promoBannerImages=[];
 let promoTemplates=[];
 let promoCampaigns=[];
+let conversationRows=[];
+let activeConversationId='';
 let activeCampaignLogId='';
 let promoSearchTimer=null;
+let conversationFilter='all';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const a=(t,m)=>{const e=document.getElementById('alertBox');e.innerHTML=`<div class="alert alert-${t} py-2">${esc(m)}</div>`;setTimeout(()=>e.innerHTML='',3500)};
 async function parseApiResponse(r){
@@ -452,6 +536,123 @@ async function saveCfg(ev){ev.preventDefault();const d=await p(API+'?action=save
 async function loadStats(){const d=await g(API+'?action=stats');if(d.status!=='success')return;s1.textContent=d.stats.sessions||0;s2.textContent=d.stats.msgs_today||0;s3.textContent=d.stats.orders_today||0;s4.textContent='$'+Number(d.stats.sales_today||0).toFixed(2)}
 async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td class="small">${esc(r.wa_name||'-')}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
+function conversationBadge(row){
+  if(Number(row.escalation_active||0)===1) return `<span class="badge bg-danger text-white">ALARMA ${esc(row.escalation_label||'Humano')}</span>`;
+  if(Number(row.bot_paused||0)===1) return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Humano</span>';
+  if((row.awaiting_field||'').trim()) return `<span class="badge bg-warning-subtle text-dark border border-warning-subtle">Esperando ${esc(row.awaiting_field)}</span>`;
+  return '<span class="badge bg-success-subtle text-success border border-success-subtle">Bot activo</span>';
+}
+function isConversationAbandoned(row){
+  if(Number(row.items_count||0)<=0) return false;
+  const ref=row.last_cart_activity_at||row.last_seen||'';
+  const ts=Date.parse(ref);
+  if(!Number.isFinite(ts)) return false;
+  return (Date.now()-ts) > (20*60*1000);
+}
+function filteredConversations(){
+  const q=(document.getElementById('conversationSearch')?.value||'').trim().toLowerCase();
+  return conversationRows.filter(r=>{
+    if(q){
+      const hay=`${String(r.wa_name||'').toLowerCase()} ${String(r.wa_user_id||'').toLowerCase()}`;
+      if(!hay.includes(q)) return false;
+    }
+    if(conversationFilter==='alarm') return Number(r.escalation_active||0)===1;
+    if(conversationFilter==='human') return Number(r.bot_paused||0)===1;
+    if(conversationFilter==='cart') return Number(r.items_count||0)>0;
+    if(conversationFilter==='awaiting') return String(r.awaiting_field||'').trim()!=='';
+    if(conversationFilter==='abandoned') return isConversationAbandoned(r);
+    return true;
+  });
+}
+function updateConversationKpis(){
+  const all=conversationRows.length;
+  const alarm=conversationRows.filter(r=>Number(r.escalation_active||0)===1).length;
+  const human=conversationRows.filter(r=>Number(r.bot_paused||0)===1).length;
+  const cart=conversationRows.filter(r=>Number(r.items_count||0)>0).length;
+  const awaiting=conversationRows.filter(r=>String(r.awaiting_field||'').trim()!=='').length;
+  const abandoned=conversationRows.filter(r=>isConversationAbandoned(r)).length;
+  const ids={
+    kpiConvAll:all,
+    kpiConvAlarm:alarm,
+    kpiConvHuman:human,
+    kpiConvCart:cart,
+    kpiConvAwaiting:awaiting,
+    kpiConvAbandoned:abandoned
+  };
+  Object.entries(ids).forEach(([id,val])=>{
+    const el=document.getElementById(id);
+    if(el) el.textContent=String(val);
+  });
+  document.querySelectorAll('[data-conv-filter]').forEach(btn=>{
+    btn.classList.toggle('active',(btn.dataset.convFilter||'all')===conversationFilter);
+    btn.style.outline=(btn.dataset.convFilter||'all')===conversationFilter?'2px solid #0f172a':'none';
+    btn.style.transform=(btn.dataset.convFilter||'all')===conversationFilter?'translateY(-1px)':'none';
+  });
+}
+function renderConversations(){
+  const wrap=document.getElementById('conversationWrap');
+  const summary=document.getElementById('conversationSummary');
+  if(!wrap) return;
+  updateConversationKpis();
+  const rows=filteredConversations();
+  const alarmCount=conversationRows.filter(r=>Number(r.escalation_active||0)===1).length;
+  if(summary) summary.textContent=(alarmCount>0?`ALARMA: ${alarmCount} conversación(es) escaladas a humano. `:'') + (rows.length?`${rows.length} conversación(es) visibles de ${conversationRows.length} total`:'Sin conversaciones activas para ese filtro.');
+  if(!rows.length){wrap.innerHTML='<div class="text-muted small">Sin conversaciones activas para ese filtro.</div>';return;}
+  wrap.innerHTML=rows.map(r=>`<div class="border rounded p-2 mb-2 ${Number(r.escalation_active||0)===1?'border-danger border-2 bg-danger-subtle':''}">
+    <div class="d-flex gap-2 align-items-start">
+      <div class="flex-grow-1">
+        <div class="fw-semibold">${esc(r.wa_name||r.wa_user_id)}</div>
+        <div class="small text-muted">${esc(r.wa_user_id)} · ${esc(r.last_seen||'-')}</div>
+        <div class="small mt-1">${conversationBadge(r)} <span class="ms-2">Items: ${Number(r.items_count||0)}</span></div>
+        ${Number(r.escalation_active||0)===1?`<div class="small mt-1 text-danger fw-semibold"><i class="fas fa-triangle-exclamation"></i> ${esc(r.escalation_label||'Atención humana')} ${r.escalation_at?`· ${esc(r.escalation_at)}`:''}</div>`:''}
+        ${isConversationAbandoned(r)?`<div class="small mt-1"><span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Carrito abandonado</span></div>`:''}
+        ${r.customer_address?`<div class="small text-muted mt-1"><i class="fas fa-location-dot"></i> ${esc(r.customer_address)}</div>`:''}
+        ${r.last_message_text?`<div class="small mt-1"><span class="text-muted">${esc(r.last_message_dir||'')}:</span> ${esc(String(r.last_message_text||'').slice(0,120))}</div>`:''}
+      </div>
+      <div class="d-flex flex-column gap-1">
+        ${Number(r.bot_paused||0)===1
+          ? `<button class="btn btn-sm btn-outline-success" type="button" onclick="resumeConversation('${esc(r.wa_user_id)}')"><i class="fas fa-robot"></i></button>`
+          : `<button class="btn btn-sm btn-outline-danger" type="button" onclick="pauseConversation('${esc(r.wa_user_id)}')"><i class="fas fa-user"></i></button>`
+        }
+        <button class="btn btn-sm btn-outline-primary" type="button" onclick="openConversationModal('${esc(r.wa_user_id)}')"><i class="fas fa-reply"></i></button>
+      </div>
+    </div>
+  </div>`).join('');
+}
+async function loadConversations(){
+  const d=await g(API+'?action=conversation_list');
+  if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar conversaciones');return;}
+  conversationRows=Array.isArray(d.rows)?d.rows:[];
+  renderConversations();
+}
+async function pauseConversation(wa){
+  const d=await p(API+'?action=conversation_pause',{wa_user_id:wa});
+  if(d.status==='success'){a('success','Conversación tomada por humano');loadConversations();} else a('danger',d.msg||'No se pudo pausar');
+}
+async function resumeConversation(wa){
+  const d=await p(API+'?action=conversation_resume',{wa_user_id:wa});
+  if(d.status==='success'){a('success','Bot reactivado en la conversación');loadConversations();} else a('danger',d.msg||'No se pudo reanudar');
+}
+function openConversationModal(wa){
+  activeConversationId=String(wa||'');
+  const row=conversationRows.find(x=>String(x.wa_user_id)===activeConversationId);
+  conversationReplyText.value='';
+  conversationSendQuick.checked=false;
+  conversationModalMeta.textContent=row?`${row.wa_name||row.wa_user_id} · ${row.wa_user_id}`:activeConversationId;
+  new bootstrap.Modal(document.getElementById('conversationModal')).show();
+}
+async function sendConversationManual(){
+  if(!activeConversationId){a('danger','Conversación no seleccionada');return;}
+  const text=(conversationReplyText.value||'').trim();
+  const sendQuick=conversationSendQuick.checked?1:0;
+  if(!text && !sendQuick){a('danger','Escribe un mensaje o marca accesos rápidos');return;}
+  const d=await p(API+'?action=conversation_send_manual',{wa_user_id:activeConversationId,text,send_quick_actions:sendQuick});
+  if(d.status==='success'){
+    a('success','Mensaje manual en cola');
+    bootstrap.Modal.getInstance(document.getElementById('conversationModal'))?.hide();
+    loadConversations();
+  } else a('danger',d.msg||'No se pudo enviar');
+}
 async function loadBridgeStatus(){
   const s = document.getElementById('waWebStatus');
   const ledDot = document.getElementById('waLedDot');
@@ -933,7 +1134,7 @@ function renderProgrammingTab(){
     </div>
   </div>`).join('');
 }
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates()])}catch(e){a('danger',e.message||'error')}}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadConversations(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates()])}catch(e){a('danger',e.message||'error')}}
 function openWhatsAppWeb(){
   const w = window.open('https://web.whatsapp.com/','_blank','noopener,noreferrer');
   const s = document.getElementById('waWebStatus');
@@ -949,6 +1150,13 @@ document.getElementById('f').addEventListener('submit',saveCfg);
 wa_mode.addEventListener('change',applyModeUI);
 bot_tone.addEventListener('change',renderBotTonePreview);
 tname.addEventListener('input',renderBotTonePreview);
+document.getElementById('conversationSearch').addEventListener('input',renderConversations);
+document.querySelectorAll('[data-conv-filter]').forEach(btn=>btn.addEventListener('click',()=>{
+  conversationFilter=btn.dataset.convFilter||'all';
+  document.querySelectorAll('[data-conv-filter]').forEach(x=>x.classList.remove('active'));
+  btn.classList.add('active');
+  renderConversations();
+}));
 document.getElementById('promoSearch').addEventListener('input',ev=>{
   if(promoSearchTimer) clearTimeout(promoSearchTimer);
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);
@@ -958,7 +1166,7 @@ document.addEventListener('change',ev=>{
   if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });
 loadAll();
-setInterval(()=>{loadStats();loadMsgs();loadOrders();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates()},12000);
+setInterval(()=>{loadStats();loadMsgs();loadOrders();loadConversations();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates()},12000);
 </script>
 <script src="assets/js/qrcode.min.js"></script>
 <script src="assets/js/bootstrap.bundle.min.js"></script>
