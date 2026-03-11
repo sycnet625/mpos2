@@ -307,8 +307,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
           <div class="card-body p-0">
             <div class="table-responsive" style="max-height:260px">
               <table class="table table-sm mb-0">
-                <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th></tr></thead>
-                <tbody id="promoRows"><tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
+                <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th><th>Acciones</th></tr></thead>
+                <tbody id="promoRows"><tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -994,9 +994,9 @@ async function loadPromoList(){
   const d=await g(API+'?action=promo_list');
   const tb=document.getElementById('promoRows');
   if(!tb) return;
-  if(d.status!=='success'){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';promoCampaigns=[];renderProgrammingTab();return;}
+  if(d.status!=='success'){tb.innerHTML='<tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr>';promoCampaigns=[];renderProgrammingTab();return;}
   promoCampaigns=Array.isArray(d.rows)?d.rows:[];
-  if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr>';renderProgrammingTab();return;}
+  if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr>';renderProgrammingTab();return;}
   tb.innerHTML=promoCampaigns.map(r=>`<tr>
     <td class="small">${esc(r.created_at||'')}</td>
     <td class="small">${esc(r.name||r.id||'')}</td>
@@ -1004,8 +1004,22 @@ async function loadPromoList(){
     <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td>
     <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-warning text-dark')}">${esc(r.status||'')}</span></td>
     <td class="small">${Number(r.current_index||0)}/${(r.targets||[]).length}</td>
+    <td class="small">
+      <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button>
+        <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
+        <button class="btn btn-sm btn-outline-primary" type="button" title="Editar" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>
+        <button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button>
+      </div>
+    </td>
   </tr>`).join('');
   renderProgrammingTab();
+}
+async function cloneScheduledCampaign(id){
+  const row=promoCampaigns.find(x=>String(x.id)===String(id));
+  if(!row){a('danger','Campaña no encontrada');return;}
+  const d=await p(API+'?action=promo_clone',{id});
+  if(d.status==='success'){a('success','Campaña clonada: '+(d.name||d.id||''));loadPromoList();} else a('danger',d.msg||'No se pudo clonar');
 }
 async function deleteScheduledCampaign(id){
   const row=promoCampaigns.find(x=>String(x.id)===String(id));
@@ -1120,12 +1134,13 @@ function renderProgrammingTab(){
             <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-secondary')))}">${esc(r.status||'-')}</span></td>
             <td class="small">${Array.isArray(r.targets)?r.targets.length:0}</td>
             <td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td>
-            <td class="small">
-              <div class="d-flex gap-1">
-                <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
-                <button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button>
-                <button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>
-                <button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button>
+	            <td class="small">
+	              <div class="d-flex gap-1">
+	                <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
+	                <button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button>
+	                <button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button>
+	                <button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>
+	                <button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button>
               </div>
             </td>
           </tr>`).join('')}

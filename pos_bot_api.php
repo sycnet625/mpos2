@@ -13,6 +13,35 @@ $BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
 $BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
 $BOT_BRIDGE_OUTBOX_FILE = '/tmp/palweb_wa_outbox_queue.json';
 
+function bot_clone_promo_job(array $job): array {
+    $now = time();
+    $baseName = trim((string)($job['name'] ?? 'Campaña'));
+    $newName = $baseName !== '' ? ($baseName . ' (Copia)') : ('Campaña ' . date('d/m H:i', $now) . ' (Copia)');
+    return [
+        'id' => 'promo_' . date('Ymd_His', $now) . '_' . bin2hex(random_bytes(3)),
+        'status' => !empty($job['schedule_enabled']) ? 'scheduled' : 'queued',
+        'created_at' => date('c', $now),
+        'created_by' => $_SESSION['admin_name'] ?? 'admin',
+        'name' => mb_substr($newName, 0, 120),
+        'campaign_group' => substr(trim((string)($job['campaign_group'] ?? 'General')), 0, 80) ?: 'General',
+        'template_id' => substr(trim((string)($job['template_id'] ?? '')), 0, 80),
+        'text' => trim((string)($job['text'] ?? '')),
+        'banner_images' => array_values(is_array($job['banner_images'] ?? null) ? $job['banner_images'] : []),
+        'outro_text' => trim((string)($job['outro_text'] ?? '')),
+        'targets' => array_values(is_array($job['targets'] ?? null) ? $job['targets'] : []),
+        'products' => array_values(is_array($job['products'] ?? null) ? $job['products'] : []),
+        'min_seconds' => max(60, min(180, (int)($job['min_seconds'] ?? 60))),
+        'max_seconds' => max(60, min(300, (int)($job['max_seconds'] ?? 120))),
+        'schedule_enabled' => !empty($job['schedule_enabled']) ? 1 : 0,
+        'schedule_time' => substr(trim((string)($job['schedule_time'] ?? '')), 0, 5),
+        'schedule_days' => array_values(is_array($job['schedule_days'] ?? null) ? $job['schedule_days'] : []),
+        'last_schedule_key' => '',
+        'next_run_at' => !empty($job['schedule_enabled']) ? ($now + 30) : $now,
+        'current_index' => 0,
+        'log' => []
+    ];
+}
+
 function bot_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
     if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -1917,7 +1946,7 @@ $action = $_GET['action'] ?? '';
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
     'conversation_list','conversation_pause','conversation_resume','conversation_send_manual',
-    'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
+    'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'bridge_restart','bridge_logs'
 ];
@@ -2509,6 +2538,27 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_delete') {
         echo json_encode(['status'=>'error','msg'=>'No se pudo eliminar campaña']); exit;
     }
     echo json_encode(['status'=>'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_clone') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $source = null;
+    foreach ($jobs as $job) {
+        if ((string)($job['id'] ?? '') !== $jobId) continue;
+        $source = $job;
+        break;
+    }
+    if (!$source) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
+    $clone = bot_clone_promo_job($source);
+    $jobs[] = $clone;
+    if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => $jobs])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo clonar campaña']); exit;
+    }
+    echo json_encode(['status'=>'success','id'=>$clone['id'],'name'=>$clone['name']]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
