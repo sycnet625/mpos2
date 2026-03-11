@@ -45,7 +45,10 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
       <button class="nav-link active" id="tab-bot-btn" data-bs-toggle="tab" data-bs-target="#tab-bot" type="button" role="tab">BOT</button>
     </li>
     <li class="nav-item" role="presentation">
-      <button class="nav-link" id="tab-promo-btn" data-bs-toggle="tab" data-bs-target="#tab-promo" type="button" role="tab">Promoción</button>
+      <button class="nav-link" id="tab-promo-btn" data-bs-toggle="tab" data-bs-target="#tab-promo" type="button" role="tab">Campañas</button>
+    </li>
+    <li class="nav-item" role="presentation">
+      <button class="nav-link" id="tab-mi-grupo-btn" data-bs-toggle="tab" data-bs-target="#tab-mi-grupo" type="button" role="tab">Mi grupo</button>
     </li>
     <li class="nav-item" role="presentation">
       <button class="nav-link" id="tab-programacion-btn" data-bs-toggle="tab" data-bs-target="#tab-programacion" type="button" role="tab">Programación</button>
@@ -223,6 +226,57 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                 <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th></tr></thead>
                 <tbody id="promoRows"><tr><td colspan="6" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab-pane fade" id="tab-mi-grupo" role="tabpanel">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+            <span>Grupo destino diario</span>
+            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoChats()"><i class="fas fa-sync"></i></button>
+          </div>
+          <div class="card-body">
+            <div class="small text-muted mb-2">Selecciona un solo grupo. Se enviarán todos los productos con existencias y, al final, un texto con los reservables y la promoción web.</div>
+            <div id="myGroupWrap" style="max-height:360px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
+              <div class="text-muted small">Sin grupos detectados aún.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-header bg-white fw-bold">Publicación diaria automática</div>
+          <div class="card-body">
+            <div class="row g-2">
+              <div class="col-md-6">
+                <label class="form-label">Hora diaria</label>
+                <input id="myGroupScheduleTime" type="time" class="form-control" value="10:00">
+                <div class="form-text">Zona horaria fija: America/Havana (Cuba).</div>
+              </div>
+              <div class="col-md-6">
+                <label class="form-label">Grupo de campaña</label>
+                <input id="myGroupCampaignGroup" class="form-control" value="Mi grupo">
+              </div>
+            </div>
+            <div class="mt-3 p-3 rounded" style="background:#f8fafc;border:1px solid #e2e8f0">
+              <div class="fw-semibold mb-1">Contenido generado automáticamente</div>
+              <div class="small text-muted">
+                1. Todos los productos con existencias disponibles.<br>
+                2. Texto final con todos los productos reservables.<br>
+                3. Cierre con promoción a <b>www.palweb.net</b>.
+              </div>
+            </div>
+            <div class="mt-3">
+              <button class="btn btn-success" type="button" onclick="createMyGroupCampaign()"><i class="fas fa-calendar-check"></i> Programar publicación diaria</button>
+            </div>
+            <div id="myGroupPreview" class="mt-3 border rounded p-3 small text-muted" style="min-height:180px;max-height:320px;overflow:auto">
+              Vista previa pendiente.
             </div>
           </div>
         </div>
@@ -433,19 +487,71 @@ async function testBot(){const d=await p(API+'?action=test_incoming',{wa_user_id
 function renderPromoChats(){
   const w=document.getElementById('promoChatsWrap');
   if(!w) return;
-  if(!promoChats.length){w.innerHTML='<div class="text-muted small">Sin chats detectados aún. Verifica estado listo y refresca.</div>';return;}
+  if(!promoChats.length){w.innerHTML='<div class="text-muted small">Sin chats detectados aún. Verifica estado listo y refresca.</div>';renderMyGroupOptions();return;}
   w.innerHTML=promoChats.map((c,i)=>`<label class="d-flex align-items-center gap-2 py-1 border-bottom small">
       <input type="checkbox" class="form-check-input promo-chat" data-idx="${i}">
       <span class="badge ${c.is_group?'bg-primary':'bg-secondary'}">${c.is_group?'Grupo':'Chat'}</span>
       <span>${esc(c.name||c.id)}</span>
       <span class="text-muted ms-auto">${esc(c.id)}</span>
     </label>`).join('');
+  renderMyGroupOptions();
 }
 async function loadPromoChats(){
   const d=await g(API+'?action=promo_chats');
   if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar chats');return;}
   promoChats=Array.isArray(d.rows)?d.rows:[];
   renderPromoChats();
+}
+function renderMyGroupOptions(){
+  const w=document.getElementById('myGroupWrap');
+  if(!w) return;
+  const groups=promoChats.filter(c=>Number(c.is_group||0)===1);
+  if(!groups.length){
+    w.innerHTML='<div class="text-muted small">Sin grupos detectados aún. Conecta WhatsApp Web y refresca.</div>';
+    return;
+  }
+  const selected=document.querySelector('input[name="my_group_chat"]:checked')?.value||'';
+  w.innerHTML=groups.map(c=>`<label class="d-flex align-items-center gap-2 py-1 border-bottom small">
+      <input type="radio" name="my_group_chat" class="form-check-input" value="${esc(c.id)}" ${selected===String(c.id)?'checked':''}>
+      <span class="badge bg-primary">Grupo</span>
+      <span>${esc(c.name||c.id)}</span>
+      <span class="text-muted ms-auto">${esc(c.id)}</span>
+    </label>`).join('');
+}
+function selectedMyGroup(){
+  const id=document.querySelector('input[name="my_group_chat"]:checked')?.value||'';
+  if(!id) return null;
+  return promoChats.find(c=>String(c.id)===String(id))||null;
+}
+function renderMyGroupPreview(payload, groupName){
+  const box=document.getElementById('myGroupPreview');
+  if(!box) return;
+  const products=Array.isArray(payload?.products)?payload.products:[];
+  const reservables=Array.isArray(payload?.reservables)?payload.reservables:[];
+  box.innerHTML=[
+    `<div class="fw-semibold mb-2">Vista previa para ${esc(groupName||'grupo seleccionado')}</div>`,
+    `<div class="mb-2"><span class="badge bg-success">${products.length}</span> productos con existencias</div>`,
+    `<div class="mb-2"><span class="badge bg-info text-dark">${reservables.length}</span> productos reservables al cierre</div>`,
+    `<div class="text-muted">Texto final:</div>`,
+    `<pre class="mb-0 mt-2" style="white-space:pre-wrap;font-family:inherit">${esc(payload?.outro_text||'')}</pre>`
+  ].join('');
+}
+async function loadMyGroupPreview(){
+  const box=document.getElementById('myGroupPreview');
+  if(!box) return;
+  const target=selectedMyGroup();
+  if(!target){
+    box.innerHTML='Selecciona un grupo para ver la vista previa.';
+    return;
+  }
+  box.innerHTML='Cargando vista previa...';
+  const d=await g(API+'?action=promo_my_group_payload');
+  if(d.status!=='success'){
+    box.innerHTML='No se pudo generar la vista previa.';
+    a('danger',d.msg||'No se pudo cargar Mi grupo');
+    return;
+  }
+  renderMyGroupPreview(d, target.name||target.id);
 }
 function renderPromoTemplates(){
   const s=document.getElementById('promoTemplateSelect');
@@ -572,6 +678,39 @@ async function createPromoCampaign(){
     if(d.status==='success'){a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
   }catch(e){
     a('danger','No se pudo programar la campaña: '+(e?.message||'error inesperado'));
+  }
+}
+async function createMyGroupCampaign(){
+  try{
+    const target=selectedMyGroup();
+    const scheduleTime=(myGroupScheduleTime.value||'').trim();
+    const campaignGroup=(myGroupCampaignGroup.value||'').trim()||'Mi grupo';
+    if(!target){a('danger','Selecciona un grupo');return;}
+    if(!scheduleTime){a('danger','Selecciona la hora diaria');return;}
+    const payload=await g(API+'?action=promo_my_group_payload');
+    if(payload.status!=='success'){a('danger',payload.msg||'No se pudo preparar Mi grupo');return;}
+    const products=Array.isArray(payload.products)?payload.products:[];
+    if(!products.length){a('danger','No hay productos con existencias disponibles');return;}
+    const d=await p(API+'?action=promo_create',{
+      campaign_name:'Mi grupo diario',
+      campaign_group:campaignGroup,
+      text:'',
+      outro_text:String(payload.outro_text||'').trim(),
+      targets:[target],
+      products,
+      min_seconds:60,
+      max_seconds:120,
+      schedule_enabled:1,
+      schedule_time:scheduleTime,
+      schedule_days:[0,1,2,3,4,5,6]
+    });
+    if(d.status==='success'){
+      renderMyGroupPreview(payload, target.name||target.id);
+      a('success','Mi grupo programado: '+(d.id||''));
+      loadPromoList();
+    } else a('danger',d.msg||'Error al crear Mi grupo');
+  }catch(e){
+    a('danger','No se pudo programar Mi grupo: '+(e?.message||'error inesperado'));
   }
 }
 async function loadPromoList(){
@@ -735,6 +874,9 @@ wa_mode.addEventListener('change',applyModeUI);
 document.getElementById('promoSearch').addEventListener('input',ev=>{
   if(promoSearchTimer) clearTimeout(promoSearchTimer);
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);
+});
+document.addEventListener('change',ev=>{
+  if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });
 loadAll();
 setInterval(()=>{loadStats();loadMsgs();loadOrders();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates()},12000);

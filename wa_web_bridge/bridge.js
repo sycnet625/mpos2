@@ -159,7 +159,7 @@ function normalizeProductImageUrl(rawUrl, productId = '') {
   return mediaUrl;
 }
 
-async function sendProductCards(targetId, text, products) {
+async function sendProductCards(targetId, text, products, outroText) {
   let sentCount = 0;
   const intro = String(text || '').trim();
   if (intro) {
@@ -205,6 +205,11 @@ async function sendProductCards(targetId, text, products) {
       }
     }
     await client.sendMessage(targetId, caption);
+    sentCount += 1;
+  }
+  const outro = String(outroText || '').trim();
+  if (outro) {
+    await client.sendMessage(targetId, outro);
     sentCount += 1;
   }
   return sentCount;
@@ -278,7 +283,7 @@ async function processPromoQueueTick() {
     }
 
     try {
-      const sentCount = await sendProductCards(targetId, job.text || '', products);
+      const sentCount = await sendProductCards(targetId, job.text || '', products, job.outro_text || '');
       job.log = Array.isArray(job.log) ? job.log : [];
       job.log.push({
         at: new Date().toISOString(),

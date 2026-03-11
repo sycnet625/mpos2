@@ -58,6 +58,63 @@ function bot_public_base_url(): string {
     return $scheme . '://' . $host;
 }
 
+function bot_public_product_image(string $sku): string {
+    return bot_public_base_url() . "/image.php?code=" . rawurlencode($sku);
+}
+
+function bot_catalog_for_campaigns(PDO $pdo, array $config): array {
+    $idEmpresa = (int)($config['id_empresa'] ?? 0);
+    $idAlmacen = (int)($config['id_almacen'] ?? 1);
+    $sql = "SELECT p.codigo, p.nombre, p.precio, p.es_reservable, COALESCE(SUM(s.cantidad),0) AS stock_total
+            FROM productos p
+            LEFT JOIN stock_almacen s ON s.id_producto = p.codigo AND s.id_almacen = ?
+            WHERE p.activo = 1 AND p.id_empresa = ?
+            GROUP BY p.codigo, p.nombre, p.precio, p.es_reservable
+            ORDER BY p.nombre ASC";
+    $st = $pdo->prepare($sql);
+    $st->execute([$idAlmacen, $idEmpresa]);
+    return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function bot_my_group_campaign_payload(PDO $pdo, array $config): array {
+    $rows = bot_catalog_for_campaigns($pdo, $config);
+    $products = [];
+    $reservables = [];
+    foreach ($rows as $r) {
+        $sku = trim((string)($r['codigo'] ?? ''));
+        if ($sku === '') continue;
+        $name = trim((string)($r['nombre'] ?? $sku));
+        $price = (float)($r['precio'] ?? 0);
+        $stock = (float)($r['stock_total'] ?? 0);
+        $isReservable = !empty($r['es_reservable']);
+        if ($stock > 0) {
+            $products[] = [
+                'id' => $sku,
+                'name' => $name,
+                'price' => $price,
+                'image' => bot_public_product_image($sku),
+                'stock' => $stock
+            ];
+        }
+        if ($isReservable) {
+            $reservables[] = $name;
+        }
+    }
+    $outroLines = [];
+    if ($reservables) {
+        $outroLines[] = 'Productos reservables:';
+        foreach ($reservables as $name) {
+            $outroLines[] = '- ' . $name;
+        }
+    }
+    $outroLines[] = 'En www.palweb.net se pueden comprar automaticamente.';
+    return [
+        'products' => $products,
+        'reservables' => $reservables,
+        'outro_text' => implode("\n", $outroLines)
+    ];
+}
+
 function bot_sanitize_shell_output(string $text): string {
     $lines = preg_split('/\R+/', trim($text)) ?: [];
     $clean = [];
@@ -534,7 +591,7 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
-    'promo_chats','promo_products','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
+    'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
     'promo_templates','promo_template_save','promo_template_delete',
     'bridge_restart','bridge_logs'
 ];
@@ -755,6 +812,17 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
     echo json_encode(['status'=>'success','rows'=>$out]); exit;
 }
 
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_my_group_payload') {
+    $payload = bot_my_group_campaign_payload($pdo, $config);
+    echo json_encode([
+        'status' => 'success',
+        'products' => $payload['products'],
+        'reservables' => $payload['reservables'],
+        'outro_text' => $payload['outro_text']
+    ]);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_templates') {
     $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
@@ -970,6 +1038,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_delete') {
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $text = trim((string)($in['text'] ?? ''));
+    $outroText = trim((string)($in['outro_text'] ?? ''));
     $targets = is_array($in['targets'] ?? null) ? $in['targets'] : [];
     $products = is_array($in['products'] ?? null) ? $in['products'] : [];
     $minSec = max(60, min(180, (int)($in['min_seconds'] ?? 60)));
@@ -1014,9 +1083,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         ];
     }
 
-    if ($text === '') { echo json_encode(['status'=>'error','msg'=>'Texto obligatorio']); exit; }
+    if ($text === '' && $outroText === '' && count($cleanProducts) === 0) { echo json_encode(['status'=>'error','msg'=>'La campaña está vacía']); exit; }
     if (count($targetsFinal) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un grupo/chat']); exit; }
-    if (count($cleanProducts) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un producto']); exit; }
+    if (count($cleanProducts) === 0 && $outroText === '') { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un producto']); exit; }
 
     $daysFinal = [];
     foreach ($scheduleDays as $d) {
@@ -1049,6 +1118,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         'campaign_group' => $campaignGroup !== '' ? $campaignGroup : 'General',
         'template_id' => $templateId,
         'text' => $text,
+        'outro_text' => $outroText,
         'targets' => $targetsFinal,
         'products' => $cleanProducts,
         'min_seconds' => $minSec,
