@@ -159,10 +159,54 @@ function normalizeProductImageUrl(rawUrl, productId = '') {
   return mediaUrl;
 }
 
-async function sendProductCards(targetId, text, products, outroText) {
+async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner') {
+  const mediaUrl = normalizeProductImageUrl(rawUrl, '');
+  if (!mediaUrl) {
+    if (caption) {
+      await client.sendMessage(targetId, caption);
+      return 1;
+    }
+    return 0;
+  }
+  try {
+    const res = await fetch(mediaUrl, {
+      method: 'GET',
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (PalWebBot/1.0)' }
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const contentType = String(res.headers.get('content-type') || '').split(';')[0].trim();
+    if (!contentType.startsWith('image/')) throw new Error(`MIME inválido: ${contentType}`);
+    const bytes = await res.arrayBuffer();
+    const b64 = Buffer.from(bytes).toString('base64');
+    if (!b64) throw new Error('imagen vacía');
+    const ext = contentType.split('/')[1] || 'jpg';
+    const fileName = `${String(fileBase || 'banner').replace(/[^a-zA-Z0-9._-]/g, '_')}.${ext}`;
+    const media = new MessageMedia(contentType, b64, fileName);
+    if (caption) {
+      await client.sendMessage(targetId, media, { caption });
+    } else {
+      await client.sendMessage(targetId, media);
+    }
+    return 1;
+  } catch (err) {
+    const fallback = caption ? `${caption}\n${mediaUrl}` : mediaUrl;
+    await client.sendMessage(targetId, fallback);
+    return 1;
+  }
+}
+
+async function sendProductCards(targetId, text, products, outroText, bannerImages) {
   let sentCount = 0;
   const intro = String(text || '').trim();
-  if (intro) {
+  const banners = Array.isArray(bannerImages) ? bannerImages.slice(0, 3) : [];
+  if (banners.length) {
+    for (let i = 0; i < banners.length; i += 1) {
+      const b = banners[i] || {};
+      const caption = i === 0 ? intro : '';
+      sentCount += await sendMediaUrl(targetId, String(b.url || b).trim(), caption, String(b.name || `banner_${i + 1}`));
+    }
+  } else if (intro) {
     await client.sendMessage(targetId, intro);
     sentCount += 1;
   }
@@ -283,7 +327,7 @@ async function processPromoQueueTick() {
     }
 
     try {
-      const sentCount = await sendProductCards(targetId, job.text || '', products, job.outro_text || '');
+      const sentCount = await sendProductCards(targetId, job.text || '', products, job.outro_text || '', job.banner_images || []);
       job.log = Array.isArray(job.log) ? job.log : [];
       job.log.push({
         at: new Date().toISOString(),

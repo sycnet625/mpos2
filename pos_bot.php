@@ -161,6 +161,14 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               <label class="form-label">Texto de promoción</label>
               <textarea id="promoText" class="form-control" rows="3" placeholder="Ej: Oferta especial solo hoy..."></textarea>
             </div>
+            <div class="mb-2">
+              <label class="form-label">Banners o logo del texto (máximo 3)</label>
+              <input id="promoBannerInput" type="file" class="form-control" accept="image/*" multiple>
+              <div class="form-text">Estas imágenes acompañarán el texto promocional como banners publicitarios o logo de empresa.</div>
+              <div id="promoBannerWrap" class="border rounded p-2 mt-2" style="min-height:84px;max-height:200px;overflow:auto">
+                <div class="text-muted small">Sin imágenes cargadas.</div>
+              </div>
+            </div>
             <div class="row g-2 mb-2">
               <div class="col-md-6">
                 <label class="form-label">Nombre campaña</label>
@@ -381,6 +389,7 @@ const API='pos_bot_api.php';
 let lastBridgeState=null;
 let promoChats=[];
 let promoProducts=[];
+let promoBannerImages=[];
 let promoTemplates=[];
 let promoCampaigns=[];
 let activeCampaignLogId='';
@@ -396,6 +405,7 @@ async function parseApiResponse(r){
 }
 async function g(u){const r=await fetch(u,{credentials:'same-origin'});return parseApiResponse(r)}
 async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return parseApiResponse(r)}
+async function uploadPromoBanner(file){const fd=new FormData();fd.append('image',file);const r=await fetch(API+'?action=promo_upload_image',{method:'POST',credentials:'same-origin',body:fd});return parseApiResponse(r)}
 
 function applyModeUI(){
   const isMeta = wa_mode.value === 'meta_api';
@@ -572,9 +582,9 @@ async function savePromoTemplate(){
   const name=(promoTemplateName.value||'').trim();
   const text=(promoText.value||'').trim();
   if(!name){a('danger','Pon nombre a la plantilla');return;}
-  if(!text && !promoProducts.length){a('danger','La plantilla no puede estar vacía');return;}
+  if(!text && !promoProducts.length && !promoBannerImages.length){a('danger','La plantilla no puede estar vacía');return;}
   const currentId=(promoTemplateSelect.value||'').trim();
-  const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts});
+  const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts,banner_images:promoBannerImages});
   if(d.status==='success'){
     a('success','Plantilla guardada');
     await loadPromoTemplates();
@@ -589,7 +599,9 @@ function applyPromoTemplate(){
   promoTemplateName.value=t.name||'';
   promoText.value=t.text||'';
   promoProducts=Array.isArray(t.products)?t.products:[];
+  promoBannerImages=Array.isArray(t.banner_images)?t.banner_images:[];
   renderPromoProducts();
+  renderPromoBanners();
   a('info','Plantilla cargada');
 }
 async function deletePromoTemplate(){
@@ -627,6 +639,38 @@ function renderPromoProducts(){
     <div class="small"><div class="fw-semibold">${esc(p.name)}</div><div class="text-muted">$${Number(p.price||0).toFixed(2)} · ${esc(p.id)}</div></div>
     <button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoProduct(${idx})"><i class="fas fa-times"></i></button>
   </div>`).join('');
+}
+function renderPromoBanners(){
+  const w=document.getElementById('promoBannerWrap');
+  if(!w) return;
+  if(!promoBannerImages.length){w.innerHTML='<div class="text-muted small">Sin imágenes cargadas.</div>';return;}
+  w.innerHTML=promoBannerImages.map((img,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-2">
+    <img src="${esc(img.url||'')}" alt="" width="72" height="48" style="object-fit:cover;border-radius:6px;border:1px solid #ddd">
+    <div class="small" style="min-width:0">
+      <div class="fw-semibold text-truncate">${esc(img.name||('Banner '+(idx+1)))}</div>
+      <div class="text-muted text-truncate">${esc(img.url||'')}</div>
+    </div>
+    <button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoBanner(${idx})"><i class="fas fa-times"></i></button>
+  </div>`).join('');
+}
+function removePromoBanner(idx){promoBannerImages.splice(idx,1);renderPromoBanners();}
+async function onPromoBannerInput(ev){
+  const files=[...(ev.target.files||[])];
+  if(!files.length) return;
+  const remaining=Math.max(0,3-promoBannerImages.length);
+  if(!remaining){a('danger','Solo se permiten hasta 3 imágenes');ev.target.value='';return;}
+  const selected=files.slice(0,remaining);
+  for(const file of selected){
+    const d=await uploadPromoBanner(file);
+    if(d.status==='success'){
+      promoBannerImages.push({url:d.url,name:d.name||file.name});
+      renderPromoBanners();
+    }else{
+      a('danger',d.msg||('No se pudo subir '+file.name));
+    }
+  }
+  if(files.length>remaining) a('info','Máximo 3 imágenes por campaña.');
+  ev.target.value='';
 }
 function removePromoProduct(idx){promoProducts.splice(idx,1);renderPromoProducts();}
 function addPromoProduct(p){
@@ -667,6 +711,7 @@ async function createPromoCampaign(){
       campaign_group:campaignGroup,
       template_id:(promoTemplateSelect.value||'').trim(),
       text,
+      banner_images:promoBannerImages,
       targets,
       products:promoProducts,
       min_seconds:minSec,
@@ -875,6 +920,7 @@ document.getElementById('promoSearch').addEventListener('input',ev=>{
   if(promoSearchTimer) clearTimeout(promoSearchTimer);
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);
 });
+document.getElementById('promoBannerInput').addEventListener('change',onPromoBannerInput);
 document.addEventListener('change',ev=>{
   if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });

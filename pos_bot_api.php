@@ -592,7 +592,7 @@ $action = $_GET['action'] ?? '';
 $adminActions = [
     'get_config','save_config','stats','recent_messages','recent_orders','test_incoming','bridge_status',
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete',
-    'promo_templates','promo_template_save','promo_template_delete',
+    'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'bridge_restart','bridge_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();
@@ -835,9 +835,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
     $name = substr(trim((string)($in['name'] ?? '')), 0, 120);
     $text = trim((string)($in['text'] ?? ''));
     $products = is_array($in['products'] ?? null) ? $in['products'] : [];
+    $bannerImages = is_array($in['banner_images'] ?? null) ? $in['banner_images'] : [];
     $templateId = substr(trim((string)($in['id'] ?? '')), 0, 80);
     if ($name === '') { echo json_encode(['status' => 'error', 'msg' => 'Nombre de plantilla obligatorio']); exit; }
-    if ($text === '' && count($products) === 0) { echo json_encode(['status' => 'error', 'msg' => 'Plantilla vacía']); exit; }
+    if ($text === '' && count($products) === 0 && count($bannerImages) === 0) { echo json_encode(['status' => 'error', 'msg' => 'Plantilla vacía']); exit; }
 
     $cleanProducts = [];
     foreach ($products as $p) {
@@ -849,6 +850,16 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
             'price' => (float)($p['price'] ?? 0),
             'image' => trim((string)($p['image'] ?? ''))
         ];
+    }
+    $cleanBannerImages = [];
+    foreach ($bannerImages as $img) {
+        $url = trim((string)($img['url'] ?? $img));
+        if ($url === '') continue;
+        $cleanBannerImages[] = [
+            'url' => substr($url, 0, 500),
+            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
+        ];
+        if (count($cleanBannerImages) >= 3) break;
     }
 
     $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
@@ -862,6 +873,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
         $row['name'] = $name;
         $row['text'] = $text;
         $row['products'] = $cleanProducts;
+        $row['banner_images'] = $cleanBannerImages;
         $row['updated_at'] = $nowIso;
         $updated = true;
         break;
@@ -873,6 +885,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
             'name' => $name,
             'text' => $text,
             'products' => $cleanProducts,
+            'banner_images' => $cleanBannerImages,
             'updated_at' => $nowIso,
             'created_by' => $_SESSION['admin_name'] ?? 'admin'
         ];
@@ -881,6 +894,52 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar plantilla']); exit;
     }
     echo json_encode(['status' => 'success', 'id' => $templateId]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_upload_image') {
+    if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+        echo json_encode(['status' => 'error', 'msg' => 'Imagen requerida']); exit;
+    }
+    $file = $_FILES['image'];
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        echo json_encode(['status' => 'error', 'msg' => 'Error al subir imagen']); exit;
+    }
+    $tmp = (string)($file['tmp_name'] ?? '');
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        echo json_encode(['status' => 'error', 'msg' => 'Carga inválida']); exit;
+    }
+    if ((int)($file['size'] ?? 0) > 5 * 1024 * 1024) {
+        echo json_encode(['status' => 'error', 'msg' => 'La imagen supera 5MB']); exit;
+    }
+    $mime = (string)(mime_content_type($tmp) ?: '');
+    $allowed = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/gif' => 'gif'
+    ];
+    if (!isset($allowed[$mime])) {
+        echo json_encode(['status' => 'error', 'msg' => 'Formato no permitido']); exit;
+    }
+    $dir = __DIR__ . '/uploads/promo_campaigns';
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo crear carpeta de banners']); exit;
+    }
+    $nameSafe = preg_replace('/[^a-zA-Z0-9._-]/', '_', (string)($file['name'] ?? 'banner')) ?: 'banner';
+    $baseName = pathinfo($nameSafe, PATHINFO_FILENAME);
+    $ext = $allowed[$mime];
+    $fileName = 'promo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)) . '_' . substr($baseName, 0, 40) . '.' . $ext;
+    $target = $dir . '/' . $fileName;
+    if (!@move_uploaded_file($tmp, $target)) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar la imagen']); exit;
+    }
+    @chmod($target, 0664);
+    echo json_encode([
+        'status' => 'success',
+        'url' => bot_public_base_url() . '/uploads/promo_campaigns/' . rawurlencode($fileName),
+        'name' => $fileName
+    ]);
+    exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
@@ -1041,6 +1100,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $outroText = trim((string)($in['outro_text'] ?? ''));
     $targets = is_array($in['targets'] ?? null) ? $in['targets'] : [];
     $products = is_array($in['products'] ?? null) ? $in['products'] : [];
+    $bannerImages = is_array($in['banner_images'] ?? null) ? $in['banner_images'] : [];
     $minSec = max(60, min(180, (int)($in['min_seconds'] ?? 60)));
     $maxSec = max($minSec, min(300, (int)($in['max_seconds'] ?? 120)));
     $campaignName = substr(trim((string)($in['campaign_name'] ?? '')), 0, 120);
@@ -1056,6 +1116,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
             if ((string)($tpl['id'] ?? '') !== $templateId) continue;
             if ($text === '') $text = trim((string)($tpl['text'] ?? ''));
             if (count($products) === 0 && is_array($tpl['products'] ?? null)) $products = $tpl['products'];
+            if (count($bannerImages) === 0 && is_array($tpl['banner_images'] ?? null)) $bannerImages = $tpl['banner_images'];
             if ($campaignName === '') $campaignName = substr(trim((string)($tpl['name'] ?? '')), 0, 120);
             break;
         }
@@ -1082,8 +1143,18 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
             'image' => trim((string)($p['image'] ?? ('image.php?code=' . rawurlencode($pid))))
         ];
     }
+    $cleanBannerImages = [];
+    foreach ($bannerImages as $img) {
+        $url = trim((string)($img['url'] ?? $img));
+        if ($url === '') continue;
+        $cleanBannerImages[] = [
+            'url' => substr($url, 0, 500),
+            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
+        ];
+        if (count($cleanBannerImages) >= 3) break;
+    }
 
-    if ($text === '' && $outroText === '' && count($cleanProducts) === 0) { echo json_encode(['status'=>'error','msg'=>'La campaña está vacía']); exit; }
+    if ($text === '' && $outroText === '' && count($cleanProducts) === 0 && count($cleanBannerImages) === 0) { echo json_encode(['status'=>'error','msg'=>'La campaña está vacía']); exit; }
     if (count($targetsFinal) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un grupo/chat']); exit; }
     if (count($cleanProducts) === 0 && $outroText === '') { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un producto']); exit; }
 
@@ -1118,6 +1189,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         'campaign_group' => $campaignGroup !== '' ? $campaignGroup : 'General',
         'template_id' => $templateId,
         'text' => $text,
+        'banner_images' => $cleanBannerImages,
         'outro_text' => $outroText,
         'targets' => $targetsFinal,
         'products' => $cleanProducts,
