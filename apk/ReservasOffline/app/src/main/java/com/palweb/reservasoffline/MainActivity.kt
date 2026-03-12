@@ -652,6 +652,8 @@ private fun ReservationCard(
 ) {
     val now = System.currentTimeMillis()
     val late = reservation.estadoReserva == "PENDIENTE" && reservation.fechaReservaEpoch < now
+    val textColor = if (late) Color.Black else Color(0xFF0F172A)
+    val mutedTextColor = if (late) Color.Black.copy(alpha = 0.82f) else Color(0xFF334155)
     val cardColor by animateColorAsState(
         targetValue = when {
             reservation.estadoReserva == "ENTREGADO" -> Color(0xFFECFDF5)
@@ -666,17 +668,17 @@ private fun ReservationCard(
     Card(colors = CardDefaults.cardColors(containerColor = cardColor), shape = RoundedCornerShape(16.dp)) {
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("#${reservation.remoteId ?: "LOCAL"}", fontWeight = FontWeight.Bold)
+                Text("#${reservation.remoteId ?: "LOCAL"}", fontWeight = FontWeight.Bold, color = textColor)
                 Spacer(Modifier.width(8.dp))
-                Text(reservation.clientName, fontWeight = FontWeight.Bold)
+                Text(reservation.clientName, fontWeight = FontWeight.Bold, color = textColor)
                 Spacer(Modifier.weight(1f))
                 if (reservation.needsSync == 1) {
                     Text("Pendiente", color = Color(0xFFB45309), fontWeight = FontWeight.SemiBold)
                 }
             }
-            Text(epochToText(reservation.fechaReservaEpoch))
-            Text("Total: $${"%.2f".format(reservation.total)}  Abono: $${"%.2f".format(reservation.abono)}")
-            Text("Estado: ${reservation.estadoReserva}  Pago: ${reservation.estadoPago}  Origen: ${reservation.canalOrigen}")
+            Text(epochToText(reservation.fechaReservaEpoch), color = mutedTextColor)
+            Text("Total: $${"%.2f".format(reservation.total)}  Abono: $${"%.2f".format(reservation.abono)}", color = textColor)
+            Text("Estado: ${reservation.estadoReserva}  Pago: ${reservation.estadoPago}  Origen: ${reservation.canalOrigen}", color = mutedTextColor)
             if (reservation.sinExistencia == 1) Text("Sin existencia", color = Color(0xFFB91C1C), fontWeight = FontWeight.Bold)
             if (reservation.syncAttempts > 0 || reservation.syncError.isNotBlank()) {
                 Text(
