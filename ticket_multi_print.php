@@ -29,6 +29,18 @@ $allItems = $stmtD->fetchAll(PDO::FETCH_ASSOC);
 $itemsByVenta = [];
 foreach ($allItems as $it) $itemsByVenta[$it['id_venta_cabecera']][] = $it;
 
+$ticketCount = count($ventas);
+$gridClass = 'cols-2';
+if ($ticketCount <= 1) {
+    $gridClass = 'cols-1';
+} elseif ($ticketCount === 2) {
+    $gridClass = 'cols-2';
+} elseif ($ticketCount >= 3 && $ticketCount <= 4) {
+    $gridClass = 'cols-2';
+} else {
+    $gridClass = 'cols-2';
+}
+
 $tiposServicio = [
     'consumir_aqui' => 'COMER AQUÍ',
     'llevar'        => 'PARA LLEVAR',
@@ -44,7 +56,7 @@ $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
 <title>Tickets A4 · <?= count($ventas) ?> tickets</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Courier New', monospace; font-size: 9px; background: #f0f0f0; color: #000; }
+body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0f0; color: #000; }
 
 /* ── Barra de herramientas (solo pantalla) ── */
 .no-print {
@@ -59,46 +71,70 @@ body { font-family: 'Courier New', monospace; font-size: 9px; background: #f0f0f
 /* ── Grid de tickets ── */
 .tickets-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
     gap: 6mm;
     padding: 8mm;
+}
+.tickets-grid.cols-1 { grid-template-columns: 1fr; }
+.tickets-grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+.tickets-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+.tickets-grid.cols-1 .ticket-cell {
+    min-height: 255mm;
+}
+.tickets-grid.cols-2 .ticket-cell {
+    min-height: 86mm;
+}
+.tickets-grid.cols-3 .ticket-cell {
+    min-height: 86mm;
 }
 
 /* ── Celda de un ticket ── */
 .ticket-cell {
     background: #fff;
     border: 1px dashed #999;
-    padding: 4mm;
+    padding: 5mm;
     overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
 }
 
 /* ── Elementos internos ── */
-.tk-store    { font-weight: 700; font-size: 10px; text-align: center; }
-.tk-slogan   { font-size: 7.5px; font-style: italic; text-align: center; }
-.tk-sep      { border: none; border-top: 1px dashed #666; margin: 3px 0; }
-.tk-row      { display: flex; justify-content: space-between; gap: 4px; line-height: 1.6; }
+.tk-store    { font-weight: 700; font-size: 14px; text-align: center; }
+.tk-slogan   { font-size: 10px; font-style: italic; text-align: center; }
+.tk-sep      { border: none; border-top: 1px dashed #666; margin: 5px 0; }
+.tk-row      { display: flex; justify-content: space-between; gap: 6px; line-height: 1.75; font-size: 12px; }
 .tk-label    { color: #555; flex-shrink: 0; }
 .tk-val      { font-weight: 700; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tk-service  {
-    text-align: center; font-weight: 700; font-size: 8.5px;
-    background: #f0f0f0; padding: 2px 4px; margin: 3px 0;
+    text-align: center; font-weight: 700; font-size: 11px;
+    background: #f0f0f0; padding: 4px 6px; margin: 4px 0;
     border: 1px solid #bbb;
 }
 .tk-delivery {
-    text-align: center; font-weight: 700; font-size: 8px; color: #7c3aed;
-    margin: 2px 0;
+    text-align: center; font-weight: 700; font-size: 11px; color: #7c3aed;
+    margin: 4px 0;
 }
-.tk-items { width: 100%; border-collapse: collapse; margin: 2px 0; }
-.tk-items th { border-bottom: 1px solid #000; font-size: 8px; padding: 1px 2px; }
-.tk-items td { font-size: 8px; padding: 1px 2px; border-bottom: 1px dotted #ddd; }
+.tk-items { width: 100%; border-collapse: collapse; margin: 4px 0; }
+.tk-items th { border-bottom: 1px solid #000; font-size: 11px; padding: 3px 4px; }
+.tk-items td { font-size: 11px; padding: 3px 4px; border-bottom: 1px dotted #ddd; }
 .tk-items .r { text-align: right; white-space: nowrap; }
 .tk-total {
-    text-align: center; font-weight: 700; font-size: 11px;
-    background: #111; color: #fff; padding: 3px;
-    margin-top: 3px;
+    text-align: center; font-weight: 700; font-size: 15px;
+    background: #111; color: #fff; padding: 6px;
+    margin-top: 6px;
     print-color-adjust: exact; -webkit-print-color-adjust: exact;
 }
-.tk-extra { font-size: 7.5px; color: #444; margin-top: 2px; }
+.tk-extra { font-size: 10px; color: #444; margin-top: 4px; line-height: 1.5; }
+.tk-address {
+    font-size: 13px;
+    font-weight: 700;
+    color: #111;
+    line-height: 1.55;
+    margin-top: 6px;
+    padding: 5px 6px;
+    border: 1px dashed #666;
+    background: #fafafa;
+}
 
 /* ── Print ── */
 @media print {
@@ -117,12 +153,12 @@ body { font-family: 'Courier New', monospace; font-size: 9px; background: #f0f0f
 <body>
 
 <div class="no-print">
-    <span><?= count($ventas) ?> ticket(s) — 3 columnas — A4</span>
+    <span><?= count($ventas) ?> ticket(s) — diseño ampliado A4</span>
     <button class="btn-print-a4" onclick="window.print()">🖨️ IMPRIMIR A4</button>
     <button class="btn-close-w"  onclick="window.close()">✕ Cerrar</button>
 </div>
 
-<div class="tickets-grid">
+<div class="tickets-grid <?= $gridClass ?>">
 <?php foreach ($ventas as $v):
     $items      = $itemsByVenta[$v['id']] ?? [];
     $subtotal   = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
@@ -178,7 +214,7 @@ body { font-family: 'Courier New', monospace; font-size: 9px; background: #f0f0f
         <tbody>
         <?php foreach ($items as $item): $sub = $item['cantidad'] * $item['precio']; ?>
             <tr>
-                <td><?= htmlspecialchars(mb_strimwidth($item['nombre_producto'], 0, 20, '…')) ?></td>
+        <td><?= htmlspecialchars(mb_strimwidth($item['nombre_producto'], 0, 30, '…')) ?></td>
                 <td class="r"><?= rtrim(rtrim(number_format($item['cantidad'], 2), '0'), '.') ?></td>
                 <td class="r">$<?= number_format($item['precio'], 2) ?></td>
                 <td class="r">$<?= number_format($sub, 2) ?></td>
@@ -200,7 +236,7 @@ body { font-family: 'Courier New', monospace; font-size: 9px; background: #f0f0f
     <div class="tk-extra">📝 <?= htmlspecialchars(mb_strimwidth($v['notas'], 0, 90, '…')) ?></div>
     <?php endif; ?>
     <?php if (!empty($v['cliente_direccion'])): ?>
-    <div class="tk-extra">📍 <?= htmlspecialchars(mb_strimwidth($v['cliente_direccion'], 0, 90, '…')) ?></div>
+    <div class="tk-extra tk-address">📍 <?= htmlspecialchars(mb_strimwidth($v['cliente_direccion'], 0, 140, '…')) ?></div>
     <?php endif; ?>
 
 </div>
