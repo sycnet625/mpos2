@@ -258,6 +258,9 @@ $dbUtil = new DbBackup($pdo);
 $msg = "";
 $msgType = "";
 $restoreReport = null;
+$currentHost = $_SERVER['HTTP_HOST'] ?? '';
+$expectedHost = 'shop.palweb.net';
+$hostMatches = strcasecmp($currentHost, $expectedHost) === 0;
 
 // --- PROCESAR ACCIONES ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -415,6 +418,7 @@ rsort($backups);
         #ajaxRestorePanel .progress { height: 12px; }
         #ajaxRestoreLog { max-height: 360px; overflow: auto; font-size: 0.9rem; }
         #ajaxRestoreLog .log-line { border-bottom: 1px solid #eef2f7; padding: 6px 0; }
+        .host-guard-disabled { opacity: 0.55; pointer-events: none; filter: grayscale(0.15); }
     </style>
 </head>
 <body class="p-4">
@@ -437,6 +441,20 @@ rsort($backups);
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         </div>
     <?php endif; ?>
+
+    <div class="alert alert-<?php echo $hostMatches ? 'success' : 'danger'; ?> d-flex justify-content-between align-items-center" role="alert">
+        <div>
+            <b>Host actual:</b> <?php echo htmlspecialchars($currentHost ?: '[sin host]'); ?>
+            <?php if($hostMatches): ?>
+                <span class="ms-2">Todo el flujo de backup/restauración apunta al servidor correcto.</span>
+            <?php else: ?>
+                <span class="ms-2">Este no es el host correcto para restauraciones grandes. Use <b><?php echo htmlspecialchars($expectedHost); ?></b>.</span>
+            <?php endif; ?>
+        </div>
+        <?php if(!$hostMatches): ?>
+            <a class="btn btn-sm btn-danger" href="https://<?php echo htmlspecialchars($expectedHost); ?>/pos_admin.php">Abrir host correcto</a>
+        <?php endif; ?>
+    </div>
 
     <div id="ajaxRestorePanel" class="card shadow-sm border-0 mb-4 border-start border-info border-5 d-none">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
@@ -573,7 +591,7 @@ rsort($backups);
 
     <div class="row g-4">
         
-        <div class="col-lg-6">
+        <div class="col-lg-6 <?php echo !$hostMatches ? 'host-guard-disabled' : ''; ?>">
             <div class="card shadow-sm border-0 h-100">
                 <div class="card-header bg-white py-3">
                     <h5 class="fw-bold m-0"><i class="fas fa-save text-success"></i> Copias de Seguridad</h5>
@@ -627,6 +645,11 @@ rsort($backups);
                         <button class="btn btn-danger" name="action" value="upload_restore" onclick="return confirm('¡PELIGRO! Sobreescribirá la BD.');"><i class="fas fa-upload"></i> Restaurar</button>
                     </form>
                     <div class="small text-muted mt-2">Soporta archivos <code>.sql</code>, <code>.tar.gz</code> y <code>.tgz</code>. Use primero Dry-run para validar tablas y pasos.</div>
+                    <?php if(!$hostMatches): ?>
+                        <div class="alert alert-danger mt-3 mb-0">
+                            Las acciones de esta tarjeta están bloqueadas en este host. Entra por <b>https://<?php echo htmlspecialchars($expectedHost); ?>/pos_admin.php</b>
+                        </div>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
