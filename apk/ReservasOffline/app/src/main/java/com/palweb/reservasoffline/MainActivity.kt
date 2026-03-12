@@ -80,6 +80,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -580,23 +581,37 @@ private fun NetworkBanner(
     val fg = if (online) Color(0xFF166534) else Color(0xFF991B1B)
     Card(
         colors = CardDefaults.cardColors(containerColor = bg),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (online) "Internet disponible" else "Sin internet", color = fg, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(10.dp))
-            Text("Ops cola: $queueCount", color = fg)
-            Spacer(Modifier.width(10.dp))
-            Text("Reservas por subir: $pendingReservations", color = fg)
-            Spacer(Modifier.width(10.dp))
-            Text("Productos locales: $localProducts", color = fg)
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                if (online) "Internet disponible" else "Sin internet",
+                color = fg,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.labelMedium
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Cola: $queueCount", color = fg, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.width(8.dp))
+            Text("Pend: $pendingReservations", color = fg, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.width(8.dp))
+            Text("Prod: $localProducts", color = fg, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.weight(1f))
             if (syncing) {
-                CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = fg)
-                Spacer(Modifier.width(6.dp))
+                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp, color = fg)
+                Spacer(Modifier.width(4.dp))
             }
-            Text(status, color = fg)
+            Text(
+                status,
+                color = fg,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
