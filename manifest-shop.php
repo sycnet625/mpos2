@@ -10,15 +10,20 @@ if (file_exists($cfgFile)) {
     $cfg = json_decode(file_get_contents($cfgFile), true) ?? [];
 }
 
+$scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
+$basePath = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
+if ($basePath === '') $basePath = '/';
+$prefix = $basePath === '/' ? '' : $basePath;
+
 $nombre      = $cfg['tienda_nombre'] ?? 'Tienda PalWeb';
 $nombreCorto = explode(' ', $nombre)[0]; // Primera palabra
 
 $manifest = [
-    'id'               => '/marinero/shop',
+    'id'               => $prefix . '/shop',
     'name'             => $nombre,
     'short_name'       => $nombreCorto,
-    'start_url'        => '/marinero/shop.php',
-    'scope'            => '/marinero/shop.php',
+    'start_url'        => $prefix . '/shop.php',
+    'scope'            => ($prefix === '' ? '/' : $prefix . '/'),
     'display'          => 'standalone',
     'orientation'      => 'portrait-primary',
     'lang'             => 'es',
@@ -26,8 +31,8 @@ $manifest = [
     'theme_color'      => '#0d6efd',
     'description'      => 'Tienda en línea — ' . $nombre,
     'icons'            => [
-        ['src' => 'icon-192.png', 'sizes' => '192x192', 'type' => 'image/png'],
-        ['src' => 'icon-512.png', 'sizes' => '512x512', 'type' => 'image/png'],
+        ['src' => 'icon-shop-192.png', 'sizes' => '192x192', 'type' => 'image/png'],
+        ['src' => 'icon-shop-512.png', 'sizes' => '512x512', 'type' => 'image/png'],
     ],
 ];
 

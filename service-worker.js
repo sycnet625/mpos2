@@ -12,7 +12,7 @@ const OFFLINE_ASSETS = [
     './cds.php',
     './pos1.js',                               // CORREGIDO: era pos.js (no existe)
     './pos-offline-system.js',
-    './manifest.json',
+    './manifest-pos.php',
     './icon-192.png',
     './icon-512.png',
     './assets/css/bootstrap.min.css',          // LOCAL: era CDN

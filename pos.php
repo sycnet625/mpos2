@@ -716,7 +716,7 @@ try {
         .bg-primary-custom { background-color: #2c3e50 !important; }
     </style>
 
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest-pos.php">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -727,7 +727,8 @@ try {
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('service-worker.js')
+            const posScope = new URL('./', window.location.href).pathname;
+            navigator.serviceWorker.register('service-worker.js', { scope: posScope })
                 .then(reg => console.log('SW registrado: ', reg))
                 .catch(err => console.log('SW error: ', err));
         });

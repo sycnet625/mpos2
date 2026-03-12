@@ -1,27 +1,28 @@
 // ==========================================
 // SERVICE WORKER - TIENDA PÚBLICA
 // Versión 2.0 - Online First + Offline Real
-// Scope: /marinero/shop.php (solo tienda)
+// Scope: directorio actual de la tienda
 // ==========================================
 
 const CACHE_NAME = 'palweb-shop-v2';
 const IMG_CACHE  = 'palweb-shop-images-v1';
 const PUSH_CACHE = 'push-config-v1';
-const BASE       = self.registration.scope; // https://example.com/marinero/shop.php
+const BASE_URL   = new URL('./', self.registration.scope);
+const assetUrl   = (rel) => new URL(rel, BASE_URL).toString();
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
-    '/marinero/shop.php',
-    '/marinero/manifest-shop.php',
-    '/marinero/icon-192.png',
-    '/marinero/icon-512.png',
-    '/marinero/assets/css/bootstrap.min.css',
-    '/marinero/assets/css/all.min.css',
-    '/marinero/assets/js/bootstrap.bundle.min.js',
-    '/marinero/assets/webfonts/fa-solid-900.woff2',
-    '/marinero/assets/webfonts/fa-regular-400.woff2',
-    '/marinero/assets/webfonts/fa-brands-400.woff2',
-    '/marinero/assets/webfonts/fa-v4compatibility.woff2',
+    assetUrl('shop.php'),
+    assetUrl('manifest-shop.php'),
+    assetUrl('icon-shop-192.png'),
+    assetUrl('icon-shop-512.png'),
+    assetUrl('assets/css/bootstrap.min.css'),
+    assetUrl('assets/css/all.min.css'),
+    assetUrl('assets/js/bootstrap.bundle.min.js'),
+    assetUrl('assets/webfonts/fa-solid-900.woff2'),
+    assetUrl('assets/webfonts/fa-regular-400.woff2'),
+    assetUrl('assets/webfonts/fa-brands-400.woff2'),
+    assetUrl('assets/webfonts/fa-v4compatibility.woff2'),
 ];
 
 // Parámetros GET que identifican peticiones AJAX (deben recibir JSON offline)
@@ -149,7 +150,7 @@ async function onlineFirst(request) {
 
         // Navegación (categoría, sort, producto, sin params) → shop.php cacheada
         const cached = await caches.match(request)
-                    || await caches.match(new URL('/marinero/shop.php', request.url).href);
+                    || await caches.match(assetUrl('shop.php'));
         if (cached) return cached;
 
         return new Response('Sin conexión. Abre la tienda conectado primero.', { status: 503 });
@@ -171,11 +172,9 @@ async function getPushTipo() {
 }
 
 self.addEventListener('push', event => {
-    // BASE del scope termina en shop.php, construir URL base del directorio
-    const baseDir = BASE.replace(/shop\.php$/, '');
     event.waitUntil(
         getPushTipo().then(tipo =>
-            fetch(baseDir + 'push_api.php?action=latest&tipo=' + encodeURIComponent(tipo), {
+            fetch(assetUrl('push_api.php') + '?action=latest&tipo=' + encodeURIComponent(tipo), {
                 credentials: 'same-origin',
                 cache: 'no-store',
             })
@@ -184,9 +183,9 @@ self.addEventListener('push', event => {
                 if (!data || !data.titulo) return;
                 return self.registration.showNotification(data.titulo, {
                     body:    data.cuerpo || '',
-                    icon:    baseDir + 'icon-192.png',
-                    badge:   baseDir + 'icon-192.png',
-                    data:    { url: data.url || baseDir + 'shop.php' },
+                    icon:    assetUrl('icon-shop-192.png'),
+                    badge:   assetUrl('icon-shop-192.png'),
+                    data:    { url: data.url || assetUrl('shop.php') },
                     tag:     'palweb-shop-' + (data.id || Date.now()),
                     renotify: true,
                     vibrate: [200, 100, 200],
@@ -199,7 +198,7 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
     event.notification.close();
-    const target = event.notification.data?.url || BASE;
+    const target = event.notification.data?.url || assetUrl('shop.php');
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
             for (const client of list) {
