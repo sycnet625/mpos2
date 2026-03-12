@@ -41,28 +41,262 @@ class DbBackup {
         return $sql;
     }
 
-    public function restoreSQL($sqlContent) {
+    private function splitStatements($sqlContent) {
+        $lines = preg_split("/\\r\\n|\\n|\\r/", $sqlContent);
+        $statements = [];
+        $buffer = '';
+        foreach ($lines as $line) {
+            $trim = trim($line);
+            if ($trim === '' || str_starts_with($trim, '--')) {
+                continue;
+            }
+            $buffer .= $line . "\n";
+            if (preg_match('/;\\s*$/', $trim)) {
+                $stmt = trim($buffer);
+                if ($stmt !== '') {
+                    $statements[] = $stmt;
+                }
+                $buffer = '';
+            }
+        }
+        $tail = trim($buffer);
+        if ($tail !== '') {
+            $statements[] = $tail;
+        }
+        return $statements;
+    }
+
+    private function detectStatementMeta($query) {
+        $query = trim($query);
+        $clean = rtrim($query, "; \t\n\r\0\x0B");
+        if (preg_match('/^SET\\s+FOREIGN_KEY_CHECKS/i', $clean)) {
+            return ['op' => 'SET FK', 'table' => '[sistema]'];
+        }
+        if (preg_match('/^DROP\\s+TABLE\\s+IF\\s+EXISTS\\s+`?([a-zA-Z0-9_]+)`?/i', $clean, $m)) {
+            return ['op' => 'DROP', 'table' => $m[1]];
+        }
+        if (preg_match('/^CREATE\\s+TABLE\\s+`?([a-zA-Z0-9_]+)`?/i', $clean, $m)) {
+            return ['op' => 'CREATE', 'table' => $m[1]];
+        }
+        if (preg_match('/^INSERT\\s+INTO\\s+`?([a-zA-Z0-9_]+)`?/i', $clean, $m)) {
+            return ['op' => 'INSERT', 'table' => $m[1]];
+        }
+        if (preg_match('/^(ALTER|UPDATE|DELETE|TRUNCATE)\\s+(TABLE\\s+)?`?([a-zA-Z0-9_]+)`?/i', $clean, $m)) {
+            return ['op' => strtoupper($m[1]), 'table' => $m[3]];
+        }
+        return ['op' => 'OTRO', 'table' => '[sin tabla]'];
+    }
+
+    private function initTableLog(&$tableLogs, $table) {
+        if (!isset($tableLogs[$table])) {
+            $tableLogs[$table] = [
+                'table' => $table,
+                'steps' => [],
+                'inserts_total' => 0,
+                'inserts_ok' => 0,
+                'errors' => 0,
+                'notes' => [],
+            ];
+        }
+    }
+
+    private function noteTable(&$tableLogs, $table, $step, $status, $detail = '') {
+        $this->initTableLog($tableLogs, $table);
+        $tableLogs[$table]['steps'][] = [
+            'step' => $step,
+            'status' => $status,
+            'detail' => $detail,
+        ];
+        if ($step === 'INSERT') {
+            $tableLogs[$table]['inserts_total']++;
+            if ($status === 'ok' || $status === 'dry-run') {
+                $tableLogs[$table]['inserts_ok']++;
+            }
+        }
+        if ($status === 'error') {
+            $tableLogs[$table]['errors']++;
+        }
+        if ($detail !== '') {
+            $tableLogs[$table]['notes'][] = $detail;
+        }
+    }
+
+    public function analyzeSQL($sqlContent, $dryRun = true, callable $progress = null) {
+        $tableLogs = [];
+        $summary = ['tables' => 0, 'statements' => 0, 'errors' => 0, 'mode' => $dryRun ? 'dry-run' : 'restore', 'processed' => 0];
+        $statements = $this->splitStatements($sqlContent);
+        $summary['statements'] = count($statements);
+
         $this->pdo->exec("SET FOREIGN_KEY_CHECKS=0");
-        $queries = explode(";\n", $sqlContent);
-        foreach ($queries as $query) {
-            $query = trim($query);
-            if (!empty($query) && substr($query, 0, 2) != '--') {
-                try { $this->pdo->exec($query); } catch (Exception $e) {}
+        foreach ($statements as $idx => $query) {
+            $meta = $this->detectStatementMeta($query);
+            $table = $meta['table'];
+            $op = $meta['op'];
+            if ($dryRun) {
+                $this->noteTable($tableLogs, $table, $op, 'dry-run', 'Consulta detectada, no ejecutada');
+                $summary['processed'] = $idx + 1;
+                $summary['tables'] = count($tableLogs);
+                if ($progress) {
+                    $progress([
+                        'current' => $idx + 1,
+                        'total' => $summary['statements'],
+                        'table' => $table,
+                        'op' => $op,
+                        'status' => 'dry-run',
+                        'detail' => 'Consulta detectada, no ejecutada',
+                        'summary' => $summary,
+                    ]);
+                }
+                continue;
+            }
+            try {
+                $this->pdo->exec($query);
+                $this->noteTable($tableLogs, $table, $op, 'ok');
+                $eventStatus = 'ok';
+                $eventDetail = '';
+            } catch (Exception $e) {
+                $summary['errors']++;
+                $this->noteTable($tableLogs, $table, $op, 'error', $e->getMessage());
+                $eventStatus = 'error';
+                $eventDetail = $e->getMessage();
+            }
+            $summary['processed'] = $idx + 1;
+            $summary['tables'] = count($tableLogs);
+            if ($progress) {
+                $progress([
+                    'current' => $idx + 1,
+                    'total' => $summary['statements'],
+                    'table' => $table,
+                    'op' => $op,
+                    'status' => $eventStatus,
+                    'detail' => $eventDetail,
+                    'summary' => $summary,
+                ]);
             }
         }
         $this->pdo->exec("SET FOREIGN_KEY_CHECKS=1");
+        $summary['tables'] = count($tableLogs);
+
+        return [
+            'summary' => $summary,
+            'tables' => array_values($tableLogs),
+        ];
     }
+
+    public function restoreSQL($sqlContent, callable $progress = null) {
+        return $this->analyzeSQL($sqlContent, false, $progress);
+    }
+}
+
+function stream_start_json() {
+    header('Content-Type: application/x-ndjson; charset=utf-8');
+    header('Cache-Control: no-cache');
+    header('X-Accel-Buffering: no');
+    @ini_set('output_buffering', 'off');
+    @ini_set('zlib.output_compression', '0');
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+    ob_implicit_flush(true);
+}
+
+function stream_emit(array $payload): void {
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
+    @flush();
+}
+
+function load_sql_from_uploaded_file(array $file): array {
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        throw new Exception('Error al subir archivo.');
+    }
+    $tmp = $file['tmp_name'];
+    $name = $file['name'] ?? 'archivo.sql';
+    if (preg_match('/\\.sql$/i', $name)) {
+        return ['name' => $name, 'sql' => file_get_contents($tmp)];
+    }
+    if (preg_match('/\\.(tar\\.gz|tgz)$/i', $name)) {
+        $tempDir = sys_get_temp_dir() . '/restore_' . uniqid();
+        mkdir($tempDir, 0777, true);
+        $cmd = "tar -xzf " . escapeshellarg($tmp) . " -C " . escapeshellarg($tempDir) . " 2>&1";
+        $out = shell_exec($cmd);
+        $files = glob($tempDir . '/*.sql');
+        if (!$files) {
+            @array_map('unlink', glob($tempDir . '/*'));
+            @rmdir($tempDir);
+            throw new Exception('No se encontró un SQL dentro del archivo comprimido. ' . trim((string)$out));
+        }
+        $sql = file_get_contents($files[0]);
+        @array_map('unlink', glob($tempDir . '/*'));
+        @rmdir($tempDir);
+        return ['name' => $name, 'sql' => $sql];
+    }
+    throw new Exception('Formato no soportado. Use .sql o .tar.gz');
+}
+
+function load_sql_from_local_backup(string $backupDir, string $file): array {
+    $fullPath = $backupDir . '/' . basename($file);
+    if (!file_exists($fullPath)) {
+        throw new Exception('Backup no encontrado.');
+    }
+    $tempDir = sys_get_temp_dir() . '/restore_local_' . uniqid();
+    mkdir($tempDir, 0777, true);
+    $cmd = "tar -xzf " . escapeshellarg($fullPath) . " -C " . escapeshellarg($tempDir) . " 2>&1";
+    $out = shell_exec($cmd);
+    $files = glob($tempDir . '/*.sql');
+    if (!$files) {
+        @array_map('unlink', glob($tempDir . '/*'));
+        @rmdir($tempDir);
+        throw new Exception('No se pudo extraer el SQL. ' . trim((string)$out));
+    }
+    $sql = file_get_contents($files[0]);
+    @array_map('unlink', glob($tempDir . '/*'));
+    @rmdir($tempDir);
+    return ['name' => basename($file), 'sql' => $sql];
 }
 
 $dbUtil = new DbBackup($pdo);
 $msg = "";
 $msgType = "";
+$restoreReport = null;
 
 // --- PROCESAR ACCIONES ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
     try {
+        if (in_array($action, ['ajax_upload_dry_run', 'ajax_upload_restore', 'ajax_restore_local_dry_run', 'ajax_restore_local'], true)) {
+            stream_start_json();
+            $isDryRun = in_array($action, ['ajax_upload_dry_run', 'ajax_restore_local_dry_run'], true);
+            $loaded = str_starts_with($action, 'ajax_upload')
+                ? load_sql_from_uploaded_file($_FILES['sql_file'] ?? [])
+                : load_sql_from_local_backup($backupDir, $_POST['filename'] ?? '');
+
+            stream_emit([
+                'type' => 'start',
+                'source' => $loaded['name'],
+                'mode' => $isDryRun ? 'dry-run' : 'restore',
+                'message' => ($isDryRun ? 'Iniciando dry-run' : 'Iniciando restauración') . ' de ' . $loaded['name'],
+            ]);
+
+            $progress = function(array $event) {
+                stream_emit(['type' => 'progress'] + $event);
+            };
+            $restoreReport = $isDryRun
+                ? $dbUtil->analyzeSQL($loaded['sql'], true, $progress)
+                : $dbUtil->restoreSQL($loaded['sql'], $progress);
+            $restoreReport['source'] = $loaded['name'];
+
+            stream_emit([
+                'type' => 'finish',
+                'message' => $isDryRun
+                    ? "Dry-run completado para {$loaded['name']}"
+                    : "Restauración completada desde {$loaded['name']}",
+                'msgType' => $isDryRun ? 'info' : 'success',
+                'report' => $restoreReport,
+            ]);
+            exit;
+        }
+
         // ACCIONES EXISTENTES DE BACKUP...
         if ($action === 'download_sql') {
             $sql = $dbUtil->generateSQL();
@@ -86,28 +320,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else { throw new Exception("Error al comprimir."); }
         }
 
-        if ($action === 'upload_restore') {
-            if ($_FILES['sql_file']['error'] === 0) {
-                $content = file_get_contents($_FILES['sql_file']['tmp_name']);
-                $dbUtil->restoreSQL($content);
-                $msg = "Restauración completada."; $msgType = "success";
-            } else { throw new Exception("Error al subir archivo."); }
+        if ($action === 'upload_dry_run' || $action === 'upload_restore') {
+            $loaded = load_sql_from_uploaded_file($_FILES['sql_file'] ?? []);
+            $restoreReport = ($action === 'upload_dry_run')
+                ? $dbUtil->analyzeSQL($loaded['sql'], true)
+                : $dbUtil->restoreSQL($loaded['sql']);
+            $restoreReport['source'] = $loaded['name'];
+            if ($action === 'upload_dry_run') {
+                $msg = "Dry-run completado para <b>{$loaded['name']}</b>."; $msgType = "info";
+            } else {
+                $msg = "Restauración completada desde <b>{$loaded['name']}</b>."; $msgType = "success";
+            }
         }
 
-        if ($action === 'restore_local') {
+        if ($action === 'restore_local_dry_run' || $action === 'restore_local') {
             $file = $_POST['filename'];
-            $fullPath = "$backupDir/$file";
-            if (file_exists($fullPath)) {
-                $cmd = "cd " . escapeshellarg($backupDir) . " && tar -xzf " . escapeshellarg($file);
-                shell_exec($cmd);
-                $sqlName = str_replace('.tar.gz', '.sql', $file);
-                $sqlPath = "$backupDir/$sqlName";
-                if (file_exists($sqlPath)) {
-                    $content = file_get_contents($sqlPath);
-                    $dbUtil->restoreSQL($content);
-                    unlink($sqlPath);
-                    $msg = "Sistema restaurado al punto: <b>$file</b>"; $msgType = "warning";
-                } else { throw new Exception("No se pudo extraer el SQL."); }
+            $loaded = load_sql_from_local_backup($backupDir, $file);
+            $restoreReport = ($action === 'restore_local_dry_run')
+                ? $dbUtil->analyzeSQL($loaded['sql'], true)
+                : $dbUtil->restoreSQL($loaded['sql']);
+            $restoreReport['source'] = $loaded['name'];
+            if ($action === 'restore_local_dry_run') {
+                $msg = "Dry-run completado para <b>$file</b>."; $msgType = "info";
+            } else {
+                $msg = "Sistema restaurado al punto: <b>$file</b>"; $msgType = "warning";
             }
         }
         
@@ -143,6 +379,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
     } catch (Exception $e) {
+        if (in_array($action, ['ajax_upload_dry_run', 'ajax_upload_restore', 'ajax_restore_local_dry_run', 'ajax_restore_local'], true)) {
+            stream_start_json();
+            stream_emit([
+                'type' => 'error',
+                'message' => $e->getMessage(),
+            ]);
+            exit;
+        }
         if ($pdo->inTransaction()) $pdo->rollBack();
         $msg = "Error: " . $e->getMessage();
         $msgType = "danger";
@@ -167,6 +411,10 @@ rsort($backups);
         .card-stat { border: none; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: transform 0.2s; }
         .card-stat:hover { transform: translateY(-5px); }
         .icon-box { font-size: 2rem; opacity: 0.8; }
+        .restore-log-table td, .restore-log-table th { vertical-align: top; }
+        #ajaxRestorePanel .progress { height: 12px; }
+        #ajaxRestoreLog { max-height: 360px; overflow: auto; font-size: 0.9rem; }
+        #ajaxRestoreLog .log-line { border-bottom: 1px solid #eef2f7; padding: 6px 0; }
     </style>
 </head>
 <body class="p-4">
@@ -187,6 +435,91 @@ rsort($backups);
         <div class="alert alert-<?php echo $msgType; ?> alert-dismissible fade show" role="alert">
             <?php echo $msg; ?>
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+    <?php endif; ?>
+
+    <div id="ajaxRestorePanel" class="card shadow-sm border-0 mb-4 border-start border-info border-5 d-none">
+        <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+            <div>
+                <h5 class="fw-bold m-0"><i class="fas fa-stream text-info"></i> Restauración en vivo</h5>
+                <small id="ajaxRestoreMeta" class="text-muted">Esperando acción...</small>
+            </div>
+            <div class="text-end">
+                <div id="ajaxRestoreCounters" class="small text-muted">0 / 0 sentencias</div>
+                <div id="ajaxRestoreMode" class="small fw-bold text-info">-</div>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="progress mb-3">
+                <div id="ajaxRestoreProgressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: 0%">0%</div>
+            </div>
+            <div id="ajaxRestoreSummary" class="small text-muted mb-3">Sin ejecución.</div>
+            <div id="ajaxRestoreLog" class="small"></div>
+        </div>
+    </div>
+
+    <?php if($restoreReport): ?>
+        <div class="card shadow-sm border-0 mb-4 border-start border-primary border-5">
+            <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
+                <div>
+                    <h5 class="fw-bold m-0"><i class="fas fa-clipboard-list text-primary"></i> Log de restauración SQL</h5>
+                    <small class="text-muted">Origen: <?php echo htmlspecialchars($restoreReport['source'] ?? 'desconocido'); ?> | Modo: <?php echo htmlspecialchars($restoreReport['summary']['mode'] ?? 'n/a'); ?></small>
+                </div>
+                <div class="text-end">
+                    <div class="small text-muted">Tablas: <b><?php echo intval($restoreReport['summary']['tables'] ?? 0); ?></b></div>
+                    <div class="small text-muted">Sentencias: <b><?php echo intval($restoreReport['summary']['statements'] ?? 0); ?></b></div>
+                    <div class="small text-muted">Errores: <b class="<?php echo !empty($restoreReport['summary']['errors']) ? 'text-danger' : 'text-success'; ?>"><?php echo intval($restoreReport['summary']['errors'] ?? 0); ?></b></div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive" style="max-height: 420px;">
+                    <table class="table table-sm table-hover restore-log-table align-middle">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Tabla</th>
+                                <th>Pasos</th>
+                                <th class="text-center">Inserts</th>
+                                <th class="text-center">OK</th>
+                                <th class="text-center">Errores</th>
+                                <th>Notas</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        <?php foreach(($restoreReport['tables'] ?? []) as $row): ?>
+                            <tr>
+                                <td class="fw-bold"><?php echo htmlspecialchars($row['table']); ?></td>
+                                <td>
+                                    <?php foreach(($row['steps'] ?? []) as $step): ?>
+                                        <?php
+                                            $badge = 'secondary';
+                                            if (($step['status'] ?? '') === 'ok') $badge = 'success';
+                                            elseif (($step['status'] ?? '') === 'error') $badge = 'danger';
+                                            elseif (($step['status'] ?? '') === 'dry-run') $badge = 'info';
+                                        ?>
+                                        <span class="badge bg-<?php echo $badge; ?> me-1 mb-1"><?php echo htmlspecialchars(($step['step'] ?? '?') . ' · ' . ($step['status'] ?? '?')); ?></span>
+                                    <?php endforeach; ?>
+                                </td>
+                                <td class="text-center"><?php echo intval($row['inserts_total'] ?? 0); ?></td>
+                                <td class="text-center"><?php echo intval($row['inserts_ok'] ?? 0); ?></td>
+                                <td class="text-center <?php echo !empty($row['errors']) ? 'text-danger fw-bold' : ''; ?>"><?php echo intval($row['errors'] ?? 0); ?></td>
+                                <td class="small text-muted">
+                                    <?php
+                                        $notes = array_values(array_unique(array_filter($row['notes'] ?? [])));
+                                        if (!$notes) {
+                                            echo 'Sin observaciones.';
+                                        } else {
+                                            foreach($notes as $note) {
+                                                echo '<div>' . htmlspecialchars($note) . '</div>';
+                                            }
+                                        }
+                                    ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     <?php endif; ?>
 
@@ -268,7 +601,11 @@ rsort($backups);
                                         <td><i class="fas fa-file-archive text-warning"></i> <?php echo $name; ?></td>
                                         <td><?php echo round(filesize($bk)/1024, 2)." KB"; ?></td>
                                         <td class="text-end">
-                                            <form method="POST" class="d-inline" onsubmit="return confirm('¿Restaurar?');">
+                                            <form method="POST" class="d-inline ajax-local-restore-form">
+                                                <input type="hidden" name="action" value="restore_local_dry_run"><input type="hidden" name="filename" value="<?php echo $name; ?>">
+                                                <button class="btn btn-sm btn-outline-primary" title="Dry run"><i class="fas fa-vial"></i></button>
+                                            </form>
+                                            <form method="POST" class="d-inline ajax-local-restore-form" onsubmit="return confirm('¿Restaurar?');">
                                                 <input type="hidden" name="action" value="restore_local"><input type="hidden" name="filename" value="<?php echo $name; ?>">
                                                 <button class="btn btn-sm btn-warning"><i class="fas fa-undo"></i></button>
                                             </form>
@@ -284,11 +621,12 @@ rsort($backups);
                     </div>
                     <hr>
                     <h6 class="fw-bold text-muted mb-2">Restaurar externo</h6>
-                    <form method="POST" enctype="multipart/form-data" class="d-flex gap-2" onsubmit="return confirm('¡PELIGRO! Sobreescribirá la BD.');">
-                        <input type="hidden" name="action" value="upload_restore">
-                        <input type="file" name="sql_file" class="form-control" accept=".sql" required>
-                        <button class="btn btn-danger"><i class="fas fa-upload"></i> Restaurar</button>
+                    <form method="POST" enctype="multipart/form-data" class="d-flex gap-2" id="externalRestoreForm">
+                        <input type="file" name="sql_file" class="form-control" accept=".sql,.tar.gz,.tgz" required>
+                        <button class="btn btn-outline-primary" name="action" value="upload_dry_run"><i class="fas fa-vial"></i> Dry-run</button>
+                        <button class="btn btn-danger" name="action" value="upload_restore" onclick="return confirm('¡PELIGRO! Sobreescribirá la BD.');"><i class="fas fa-upload"></i> Restaurar</button>
                     </form>
+                    <div class="small text-muted mt-2">Soporta archivos <code>.sql</code>, <code>.tar.gz</code> y <code>.tgz</code>. Use primero Dry-run para validar tablas y pasos.</div>
                 </div>
             </div>
         </div>
@@ -339,6 +677,135 @@ async function fetchHealthData() {
         document.getElementById('health-uptime').innerText = (data.server && data.server.uptime) ? data.server.uptime : 'N/A';
     } catch (e) { console.error("Health check failed", e); }
 }
+
+const ajaxRestorePanel = document.getElementById('ajaxRestorePanel');
+const ajaxRestoreMeta = document.getElementById('ajaxRestoreMeta');
+const ajaxRestoreCounters = document.getElementById('ajaxRestoreCounters');
+const ajaxRestoreMode = document.getElementById('ajaxRestoreMode');
+const ajaxRestoreSummary = document.getElementById('ajaxRestoreSummary');
+const ajaxRestoreLog = document.getElementById('ajaxRestoreLog');
+const ajaxRestoreProgressBar = document.getElementById('ajaxRestoreProgressBar');
+
+function escapeHtml(text) {
+    return String(text ?? '').replace(/[&<>"']/g, function (m) {
+        return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[m];
+    });
+}
+
+function resetAjaxRestoreUi(mode, source) {
+    ajaxRestorePanel.classList.remove('d-none');
+    ajaxRestoreMeta.textContent = 'Origen: ' + source;
+    ajaxRestoreMode.textContent = mode;
+    ajaxRestoreSummary.textContent = 'Preparando...';
+    ajaxRestoreCounters.textContent = '0 / 0 sentencias';
+    ajaxRestoreProgressBar.style.width = '0%';
+    ajaxRestoreProgressBar.textContent = '0%';
+    ajaxRestoreProgressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+    ajaxRestoreLog.innerHTML = '';
+}
+
+function appendRestoreLogLine(event) {
+    const badgeClass = event.status === 'ok' ? 'success' : (event.status === 'error' ? 'danger' : 'info');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.innerHTML = `
+        <div class="d-flex justify-content-between gap-3">
+            <div>
+                <span class="badge bg-${badgeClass} me-2">${escapeHtml(event.op)} · ${escapeHtml(event.status)}</span>
+                <b>${escapeHtml(event.table)}</b>
+            </div>
+            <div class="text-muted">${event.current || 0}/${event.total || 0}</div>
+        </div>
+        ${event.detail ? `<div class="text-muted mt-1">${escapeHtml(event.detail)}</div>` : ''}
+    `;
+    ajaxRestoreLog.prepend(line);
+}
+
+function setRestoreProgress(current, total, errors) {
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+    ajaxRestoreCounters.textContent = `${current} / ${total} sentencias`;
+    ajaxRestoreProgressBar.style.width = `${percent}%`;
+    ajaxRestoreProgressBar.textContent = `${percent}%`;
+    ajaxRestoreSummary.textContent = `Procesadas ${current} de ${total} sentencias. Errores: ${errors}`;
+}
+
+async function runRestoreAjax(formData, modeLabel, sourceLabel) {
+    resetAjaxRestoreUi(modeLabel, sourceLabel);
+    const res = await fetch('pos_admin.php', {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-Requested-With': 'fetch' }
+    });
+    if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status}`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 1);
+            if (!line) continue;
+            const event = JSON.parse(line);
+            if (event.type === 'start') {
+                ajaxRestoreMeta.textContent = `Origen: ${event.source}`;
+                ajaxRestoreMode.textContent = event.mode;
+                ajaxRestoreSummary.textContent = event.message;
+            } else if (event.type === 'progress') {
+                appendRestoreLogLine(event);
+                setRestoreProgress(event.current || 0, event.total || 0, event.summary?.errors || 0);
+            } else if (event.type === 'finish') {
+                const errors = event.report?.summary?.errors || 0;
+                setRestoreProgress(
+                    event.report?.summary?.processed || event.report?.summary?.statements || 0,
+                    event.report?.summary?.statements || 0,
+                    errors
+                );
+                ajaxRestoreSummary.textContent = event.message;
+                ajaxRestoreProgressBar.className = 'progress-bar bg-' + (errors ? 'warning' : 'success');
+            } else if (event.type === 'error') {
+                ajaxRestoreSummary.textContent = event.message;
+                ajaxRestoreProgressBar.className = 'progress-bar bg-danger';
+                throw new Error(event.message);
+            }
+        }
+    }
+}
+
+document.getElementById('externalRestoreForm')?.addEventListener('submit', async function(ev) {
+    ev.preventDefault();
+    const submitter = ev.submitter;
+    if (!submitter) return;
+    const fd = new FormData(this);
+    const action = submitter.value === 'upload_dry_run' ? 'ajax_upload_dry_run' : 'ajax_upload_restore';
+    fd.set('action', action);
+    const fileName = this.querySelector('input[name="sql_file"]').files[0]?.name || 'archivo';
+    try {
+        await runRestoreAjax(fd, submitter.value === 'upload_dry_run' ? 'dry-run' : 'restore', fileName);
+    } catch (e) {
+        alert('Error en restauración AJAX: ' + e.message);
+    }
+});
+
+document.querySelectorAll('.ajax-local-restore-form').forEach(form => {
+    form.addEventListener('submit', async function(ev) {
+        ev.preventDefault();
+        const fd = new FormData(this);
+        const filename = fd.get('filename') || 'backup';
+        const action = fd.get('action') === 'restore_local_dry_run' ? 'ajax_restore_local_dry_run' : 'ajax_restore_local';
+        fd.set('action', action);
+        try {
+            await runRestoreAjax(fd, action.includes('dry_run') ? 'dry-run' : 'restore', filename);
+        } catch (e) {
+            alert('Error en restauración AJAX: ' + e.message);
+        }
+    });
+});
 </script>
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 

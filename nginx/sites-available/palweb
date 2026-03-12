@@ -27,6 +27,8 @@ server {
     root /var/www;
     index index.php index.html index.htm;
 
+    client_max_body_size 512M;
+
     # --- CERTIFICADOS SSL (Autofirmados) ---
     ssl_certificate /etc/letsencrypt/live/shop.palweb.net/fullchain.pem; # managed by Certbot
     ssl_certificate_key /etc/letsencrypt/live/shop.palweb.net/privkey.pem; # managed by Certbot
