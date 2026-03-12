@@ -3,3 +3,6 @@
 # Build/runtime caches
 wa_web_bridge/.cache/
 **/.cache/puppeteer/
+
+# Local database backups
+backups/*.sql
