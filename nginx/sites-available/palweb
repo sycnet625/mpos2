@@ -28,8 +28,10 @@ server {
     index index.php index.html index.htm;
 
     # --- CERTIFICADOS SSL (Autofirmados) ---
-    ssl_certificate /etc/letsencrypt/live/palweb.mooo.com/fullchain.pem; # managed by Certbot
-    ssl_certificate_key /etc/letsencrypt/live/palweb.mooo.com/privkey.pem; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/shop.palweb.net/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/shop.palweb.net/privkey.pem; # managed by Certbot
+    #ssl_certificate /etc/letsencrypt/live/palweb.mooo.com/fullchain.pem; # managed by Certbot
+    #ssl_certificate_key /etc/letsencrypt/live/palweb.mooo.com/privkey.pem; # managed by Certbot
     
     # --- PROTOCOLOS SEGUROS ---
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -61,11 +63,20 @@ server {
         access_log off;
     }
 
-    # Laravel API endpoints
-    location ^~ /api/ {
+    # ====== Legacy API real en /var/www/api ======
+    location = /api {
+        return 301 /api/;
+    }
+
+    location ~ ^/api/.*\.php$ {
+        include snippets/fastcgi-php.conf;
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME /var/www/palweb-api/public/index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
         include fastcgi_params;
+    }
+
+    location /api/ {
+        try_files $uri $uri/ =404;
     }
 
     # Sanctum CSRF

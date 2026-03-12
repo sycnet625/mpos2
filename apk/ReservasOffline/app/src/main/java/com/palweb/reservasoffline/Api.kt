@@ -11,8 +11,13 @@ import java.net.URL
 class AppConfig(context: Context) {
     private val prefs = context.getSharedPreferences("reservas_offline_cfg", Context.MODE_PRIVATE)
 
+    companion object {
+        const val DEFAULT_BASE_URL = "https://shop.palweb.net"
+        const val DEFAULT_OTA_JSON_URL = "https://shop.palweb.net/api/reservas_offline_ota.php"
+    }
+
     var baseUrl: String
-        get() = prefs.getString("base_url", "http://10.0.2.2") ?: "http://10.0.2.2"
+        get() = prefs.getString("base_url", DEFAULT_BASE_URL) ?: DEFAULT_BASE_URL
         set(value) = prefs.edit().putString("base_url", value.trim().trimEnd('/')).apply()
 
     var apiKey: String
@@ -36,7 +41,7 @@ class AppConfig(context: Context) {
         set(value) = prefs.edit().putLong("last_reservations_sync", value).apply()
 
     var otaJsonUrl: String
-        get() = prefs.getString("ota_json_url", "") ?: ""
+        get() = prefs.getString("ota_json_url", DEFAULT_OTA_JSON_URL) ?: DEFAULT_OTA_JSON_URL
         set(value) = prefs.edit().putString("ota_json_url", value.trim()).apply()
 
     var sucursalId: Int
@@ -196,12 +201,18 @@ class OfflineApi(private val cfg: AppConfig) {
         val reader = if (code in 200..299) conn.inputStream.bufferedReader() else conn.errorStream?.bufferedReader()
         val text = reader?.use(BufferedReader::readText).orEmpty()
         if (text.isBlank()) {
-            if (code !in 200..299) error("HTTP $code")
+            if (code !in 200..299) error("HTTP $code | $method $url | respuesta vacia")
             return JSONObject()
         }
-        val result = JSONObject(text)
+        val result = try {
+            JSONObject(text)
+        } catch (_: Exception) {
+            val preview = text.replace("\n", " ").replace("\r", " ").take(180)
+            error("Respuesta no JSON | HTTP $code | $method $url | body=$preview")
+        }
         if (code !in 200..299) {
-            error(result.optString("msg", "HTTP $code"))
+            val msg = result.optString("msg", "HTTP $code")
+            error("$msg | HTTP $code | $method $url")
         }
         return result
     }

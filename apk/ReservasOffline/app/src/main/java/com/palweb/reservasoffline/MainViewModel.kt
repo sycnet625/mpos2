@@ -104,6 +104,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         statusMsg.value = "Configuracion guardada"
     }
 
+    private fun activeBaseUrl(): String = baseUrl.value.trim().trimEnd('/').ifBlank { AppConfig.DEFAULT_BASE_URL }
+
+    private fun apiEndpoint(action: String, extraQuery: String = ""): String {
+        val base = activeBaseUrl()
+        val tail = if (extraQuery.isBlank()) "" else "&$extraQuery"
+        return "$base${BuildConfig.DEFAULT_API_PATH}?action=$action&sucursal_id=${sucursalId.value}$tail"
+    }
+
+    private fun activeOtaUrl(): String = otaJsonUrl.value.trim().ifBlank { "${activeBaseUrl()}${BuildConfig.DEFAULT_OTA_JSON_PATH}" }
+
+    private fun debugError(action: String, endpoint: String, e: Exception): String {
+        val root = generateSequence(e as Throwable?) { it.cause }.lastOrNull()
+        val rootMsg = root?.message?.takeIf { it.isNotBlank() && it != e.message }
+        val apiInfo = if (apiKey.value.isBlank()) "API key=no" else "API key=si"
+        return buildString {
+            append(action)
+            append(" fallo")
+            append(" | endpoint=")
+            append(endpoint)
+            append(" | sucursal=")
+            append(sucursalId.value)
+            append(" | ")
+            append(apiInfo)
+            append(" | error=")
+            append(e.message ?: e::class.java.simpleName)
+            if (!rootMsg.isNullOrBlank()) {
+                append(" | causa=")
+                append(rootMsg)
+            }
+        }
+    }
+
     fun runBootstrap() = viewModelScope.launch {
         try {
             isBootstrapping.value = true
@@ -112,7 +144,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             repo.bootstrapSync()
             statusMsg.value = "Descarga inicial completada"
         } catch (e: Exception) {
-            statusMsg.value = "Error bootstrap: ${e.message}"
+            val msg = debugError("Bootstrap", apiEndpoint("bootstrap"), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             isBootstrapping.value = false
         }
@@ -126,8 +160,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             statusMsg.value = "Catalogo actualizado"
             toastMessage.value = "Se descargaron $count productos a la base local"
         } catch (e: Exception) {
-            statusMsg.value = "Error productos: ${e.message}"
-            toastMessage.value = statusMsg.value
+            val msg = debugError("Descargar productos", apiEndpoint("download_products", "updated_after=${cfg.lastProductsSyncEpoch / 1000}"), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             isBootstrapping.value = false
         }
@@ -141,8 +176,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             statusMsg.value = "Reservaciones descargadas"
             toastMessage.value = "Se descargaron $count reservaciones del servidor"
         } catch (e: Exception) {
-            statusMsg.value = "Error reservaciones: ${e.message}"
-            toastMessage.value = statusMsg.value
+            val msg = debugError("Descargar reservaciones", apiEndpoint("download_reservations", "updated_after=${cfg.lastReservationsSyncEpoch / 1000}"), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             isBootstrapping.value = false
         }
@@ -156,8 +192,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             statusMsg.value = "Clientes descargados"
             toastMessage.value = "Se descargaron $count clientes a la base local"
         } catch (e: Exception) {
-            statusMsg.value = "Error clientes: ${e.message}"
-            toastMessage.value = statusMsg.value
+            val msg = debugError("Descargar clientes", apiEndpoint("download_clients", "updated_after=${cfg.lastClientsSyncEpoch / 1000}"), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             isBootstrapping.value = false
         }
@@ -177,8 +214,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 repo.downloadReservationsOnly()
             }
         } catch (e: Exception) {
-            statusMsg.value = "Error sync: ${e.message}"
-            toastMessage.value = statusMsg.value
+            val msg = debugError("Sincronizar cola", apiEndpoint("sync"), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             isSyncingQueue.value = false
         }
@@ -191,9 +229,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun checkOtaUpdate() = viewModelScope.launch {
         try {
             saveSettings()
-            val otaUrl = cfg.otaJsonUrl.ifBlank {
-                cfg.endpoint(BuildConfig.DEFAULT_OTA_JSON_PATH)
-            }
+            val otaUrl = activeOtaUrl()
             val info = OfflineApi(cfg).checkOtaUpdate(otaUrl)
             if (info.versionCode > BuildConfig.VERSION_CODE) {
                 toastMessage.value = "Nueva version ${info.versionName} disponible"
@@ -202,7 +238,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 toastMessage.value = "Ya tienes la ultima version instalada"
             }
         } catch (e: Exception) {
-            toastMessage.value = "Error OTA: ${e.message}"
+            val msg = debugError("Buscar OTA", activeOtaUrl(), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         }
     }
 
@@ -273,7 +311,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             toastMessage.value = "OTA descargada: $path"
         } catch (e: Exception) {
-            toastMessage.value = "Error OTA install: ${e.message}"
+            val msg = debugError("Instalar OTA", activeOtaUrl(), e)
+            statusMsg.value = msg
+            toastMessage.value = msg
         } finally {
             otaEvent.value = null
         }
@@ -295,7 +335,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             file.writeText(csv)
             toastMessage.value = "CSV exportado: ${file.absolutePath}"
         } catch (e: Exception) {
-            toastMessage.value = "Error exportando CSV: ${e.message}"
+            val msg = "Exportar CSV fallo | dir=${getApplication<Application>().getExternalFilesDir(null)?.absolutePath ?: getApplication<Application>().filesDir.absolutePath} | error=${e.message ?: e::class.java.simpleName}"
+            statusMsg.value = msg
+            toastMessage.value = msg
         }
     }
 
@@ -320,7 +362,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
             statusMsg.value = "Reserva guardada en modo offline"
         } catch (e: Exception) {
-            statusMsg.value = "Error guardando: ${e.message}"
+            val msg = "Guardar reserva fallo | cliente=${input.clientName.ifBlank { "Sin nombre" }} | items=${input.items.size} | error=${e.message ?: e::class.java.simpleName}"
+            statusMsg.value = msg
+            toastMessage.value = msg
         }
     }
 
