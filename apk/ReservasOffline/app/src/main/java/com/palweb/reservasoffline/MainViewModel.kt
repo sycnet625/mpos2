@@ -141,7 +141,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             isBootstrapping.value = true
             statusMsg.value = "Sincronizando catalogo..."
             saveSettings()
-            repo.bootstrapSync()
+            withContext(Dispatchers.IO) {
+                repo.bootstrapSync()
+            }
             statusMsg.value = "Descarga inicial completada"
         } catch (e: Exception) {
             val msg = debugError("Bootstrap", apiEndpoint("bootstrap"), e)
@@ -156,7 +158,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             isBootstrapping.value = true
             saveSettings()
-            val count = repo.downloadProductsOnly()
+            val count = withContext(Dispatchers.IO) {
+                repo.downloadProductsOnly()
+            }
             statusMsg.value = "Catalogo actualizado"
             toastMessage.value = "Se descargaron $count productos a la base local"
         } catch (e: Exception) {
@@ -172,7 +176,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             isBootstrapping.value = true
             saveSettings()
-            val count = repo.downloadReservationsOnly()
+            val count = withContext(Dispatchers.IO) {
+                repo.downloadReservationsOnly()
+            }
             statusMsg.value = "Reservaciones descargadas"
             toastMessage.value = "Se descargaron $count reservaciones del servidor"
         } catch (e: Exception) {
@@ -188,7 +194,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             isBootstrapping.value = true
             saveSettings()
-            val count = repo.downloadClientsOnly()
+            val count = withContext(Dispatchers.IO) {
+                repo.downloadClientsOnly()
+            }
             statusMsg.value = "Clientes descargados"
             toastMessage.value = "Se descargaron $count clientes a la base local"
         } catch (e: Exception) {
@@ -205,13 +213,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             isSyncingQueue.value = true
             statusMsg.value = "Subiendo pendientes..."
             saveSettings()
-            val (ok, total) = repo.syncQueue()
+            val (ok, total) = withContext(Dispatchers.IO) {
+                repo.syncQueue()
+            }
             statusMsg.value = "Sincronizadas $ok/$total operaciones"
             toastMessage.value = "Subidas $ok de $total operaciones pendientes"
             if (online.value) {
-                repo.downloadProductsOnly()
-                repo.downloadClientsOnly()
-                repo.downloadReservationsOnly()
+                withContext(Dispatchers.IO) {
+                    repo.downloadProductsOnly()
+                    repo.downloadClientsOnly()
+                    repo.downloadReservationsOnly()
+                }
             }
         } catch (e: Exception) {
             val msg = debugError("Sincronizar cola", apiEndpoint("sync"), e)
@@ -230,7 +242,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         try {
             saveSettings()
             val otaUrl = activeOtaUrl()
-            val info = OfflineApi(cfg).checkOtaUpdate(otaUrl)
+            val info = withContext(Dispatchers.IO) {
+                OfflineApi(cfg).checkOtaUpdate(otaUrl)
+            }
             if (info.versionCode > BuildConfig.VERSION_CODE) {
                 toastMessage.value = "Nueva version ${info.versionName} disponible"
                 otaEvent.value = info
@@ -264,7 +278,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             sb.appendLine("Reservas por subir: ${pendingReservationsToUpload.value}")
             sb.appendLine("Ops cola: ${queueCount.value}")
 
-            val changes = runCatching { api.changesSince(cfg.lastReservationsSyncEpoch / 1000) }.getOrNull()
+            val changes = runCatching {
+                withContext(Dispatchers.IO) {
+                    api.changesSince(cfg.lastReservationsSyncEpoch / 1000)
+                }
+            }.getOrNull()
             if (changes != null && changes.optString("status") == "success") {
                 sb.appendLine("API changes_since: OK")
                 sb.appendLine("Cambios remotos -> reservas:${changes.optInt("reservations_changed", 0)}, productos:${changes.optInt("products_changed", 0)}, clientes:${changes.optInt("clients_changed", 0)}")
@@ -273,7 +291,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
 
             val otaUrl = cfg.otaJsonUrl.ifBlank { cfg.endpoint(BuildConfig.DEFAULT_OTA_JSON_PATH) }
-            val ota = runCatching { api.checkOtaUpdate(otaUrl) }.getOrNull()
+            val ota = runCatching {
+                withContext(Dispatchers.IO) {
+                    api.checkOtaUpdate(otaUrl)
+                }
+            }.getOrNull()
             if (ota != null) {
                 sb.appendLine("OTA endpoint: OK")
                 sb.appendLine("OTA version: ${ota.versionName} (${ota.versionCode})")
@@ -382,7 +404,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     suspend fun loadItems(uuid: String): List<ReservationItemEntity> = repo.reservationItems(uuid)
     suspend fun loadReservation(uuid: String): ReservationEntity? = repo.reservationByUuid(uuid)
-    suspend fun loadServerReservation(remoteId: Long): ReservationWithItems? = repo.fetchServerReservation(remoteId)
+    suspend fun loadServerReservation(remoteId: Long): ReservationWithItems? = withContext(Dispatchers.IO) {
+        repo.fetchServerReservation(remoteId)
+    }
 
     private fun observeConnectivity(app: Application) {
         val cm = app.getSystemService(ConnectivityManager::class.java)
