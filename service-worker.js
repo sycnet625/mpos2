@@ -1,15 +1,14 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.0 - Assets locales + offline real
+// Versión 8.1 - Assets locales + offline real
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v8';
+const CACHE_NAME = 'palweb-pos-v81';
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
     './pos.php',
     './clock.php',
-    './cds.php',
     './pos1.js',                               // CORREGIDO: era pos.js (no existe)
     './pos-offline-system.js',
     './manifest-pos.php',
@@ -29,7 +28,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8 (Online First)...');
+    console.log('[SW-POS] Instalando Service Worker v8.1 (Online First)...');
 
     event.waitUntil(
         caches.open(CACHE_NAME)
@@ -51,7 +50,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8...');
+    console.log('[SW-POS] Activando Service Worker v8.1...');
     
     event.waitUntil(
         caches.keys()
@@ -200,11 +199,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v8-online-first' });
+        event.ports[0].postMessage({ version: 'v81-online-first' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.1 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

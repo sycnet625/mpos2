@@ -10,11 +10,10 @@ if (file_exists($cfgFile)) {
     $cfg = json_decode(file_get_contents($cfgFile), true) ?? [];
 }
 
-$scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
-$basePath = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
+$scriptDir   = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
+$basePath    = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
 if ($basePath === '') $basePath = '/';
-$prefix = $basePath === '/' ? '' : $basePath;
-
+$prefix      = $basePath === '/' ? '' : $basePath;
 $nombre      = $cfg['tienda_nombre'] ?? 'Tienda PalWeb';
 $nombreCorto = explode(' ', $nombre)[0]; // Primera palabra
 

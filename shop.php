@@ -712,7 +712,10 @@ ob_end_flush();
     <!-- PWA Tienda -->
     <meta name="theme-color" content="#0d6efd">
     <link rel="manifest" href="manifest-shop.php">
-    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="apple-touch-icon" href="icon-shop-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
 
     <!-- Performance: preconnect -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3988,6 +3991,7 @@ async function subscribeShopPush() {
         const { publicKey } = await resp.json();
 
         const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
+        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
         const swReg = await Promise.race([
             navigator.serviceWorker.ready,
             new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
@@ -4023,6 +4027,7 @@ async function subscribeShopPush() {
 
 async function unsubscribeShopPush() {
     try {
+        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         if (!reg) return;
         const sub = await reg.pushManager.getSubscription();
@@ -4062,6 +4067,7 @@ async function handleShopBellClick() {
         return;
     }
     const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
+    const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     if (sub) {
         await unsubscribeShopPush();
@@ -4079,6 +4085,7 @@ async function initShopPush() {
         updateShopBellUI('denied'); return;
     }
     try {
+        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const sub = reg ? await reg.pushManager.getSubscription() : null;
         updateShopBellUI(sub ? 'active' : 'off');
