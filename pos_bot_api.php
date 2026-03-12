@@ -196,6 +196,31 @@ function bot_is_bridge_process_running(): bool {
     return $code === 0 && !empty($out);
 }
 
+function bot_run_bridge_service_command(string $verb, ?string &$detail = null): bool {
+    $verb = trim($verb);
+    if ($verb === '') {
+        $detail = 'Comando de servicio vacío.';
+        return false;
+    }
+    $commands = [
+        "systemctl {$verb} palweb-wa-bridge.service 2>&1",
+        "sudo -n systemctl {$verb} palweb-wa-bridge.service 2>&1"
+    ];
+    $lastOut = '';
+    foreach ($commands as $cmd) {
+        $out = [];
+        $code = 1;
+        @exec($cmd, $out, $code);
+        $lastOut = bot_sanitize_shell_output(implode("\n", $out));
+        if ($code === 0) {
+            $detail = $lastOut;
+            return true;
+        }
+    }
+    $detail = $lastOut !== '' ? $lastOut : 'Permisos insuficientes para systemctl desde PHP.';
+    return false;
+}
+
 function bot_ensure_tables(PDO $pdo): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS pos_bot_config (
         id TINYINT PRIMARY KEY DEFAULT 1,
@@ -2144,24 +2169,8 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_status') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
-    $commands = [
-        'systemctl restart palweb-wa-bridge.service 2>&1',
-        'sudo -n systemctl restart palweb-wa-bridge.service 2>&1'
-    ];
-    $lastOut = '';
-    $ok = false;
-    foreach ($commands as $cmd) {
-        $out = [];
-        $code = 1;
-        @exec($cmd, $out, $code);
-        $lastOut = bot_sanitize_shell_output(implode("\n", $out));
-        if ($code === 0) {
-            $ok = true;
-            break;
-        }
-    }
-    if (!$ok) {
-        $detail = $lastOut !== '' ? $lastOut : 'Permisos insuficientes para systemctl desde PHP.';
+    $detail = '';
+    if (!bot_run_bridge_service_command('restart', $detail)) {
         echo json_encode([
             'status' => 'error',
             'msg' => 'No se pudo reiniciar el bridge desde PHP. Revisa permisos de systemctl/sudo.',
@@ -2177,6 +2186,76 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
     echo json_encode([
         'status' => 'success',
         'msg' => 'Bridge reiniciado. Estado: ' . ($active !== '' ? $active : 'desconocido')
+    ]);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
+    $detail = '';
+    if (!bot_run_bridge_service_command('stop', $detail)) {
+        echo json_encode([
+            'status' => 'error',
+            'msg' => 'No se pudo detener el bridge antes de cerrar la sesión.',
+            'detail' => $detail
+        ]);
+        exit;
+    }
+
+    $sessionDir = __DIR__ . '/wa_web_bridge/.wwebjs_auth/session-palweb-pos-bot';
+    $cacheDir = __DIR__ . '/wa_web_bridge/.wwebjs_cache';
+    $statusFile = __DIR__ . '/wa_web_bridge/status.json';
+    $removed = [];
+    $errors = [];
+
+    $deleteTree = static function (string $path) use (&$deleteTree, &$errors): void {
+        if (!file_exists($path) && !is_link($path)) return;
+        if (is_file($path) || is_link($path)) {
+            if (!@unlink($path)) $errors[] = 'No se pudo borrar ' . $path;
+            return;
+        }
+        $items = @scandir($path);
+        if (!is_array($items)) {
+            $errors[] = 'No se pudo leer ' . $path;
+            return;
+        }
+        foreach ($items as $item) {
+            if ($item === '.' || $item === '..') continue;
+            $deleteTree($path . DIRECTORY_SEPARATOR . $item);
+        }
+        if (!@rmdir($path)) $errors[] = 'No se pudo borrar ' . $path;
+    };
+
+    if (is_dir($sessionDir)) {
+        $deleteTree($sessionDir);
+        if (!file_exists($sessionDir)) $removed[] = basename($sessionDir);
+    } else {
+        $removed[] = basename($sessionDir) . ' (no existía)';
+    }
+    if (is_dir($cacheDir)) {
+        $deleteTree($cacheDir);
+        if (!file_exists($cacheDir)) $removed[] = basename($cacheDir);
+    }
+    if (is_file($statusFile) && @unlink($statusFile)) {
+        $removed[] = basename($statusFile);
+    }
+
+    $startDetail = '';
+    if (!bot_run_bridge_service_command('start', $startDetail)) {
+        echo json_encode([
+            'status' => 'error',
+            'msg' => 'La sesión fue cerrada, pero no se pudo arrancar el bridge.',
+            'detail' => trim(implode(' | ', array_filter([$startDetail, implode('; ', $errors)])))
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'status' => 'success',
+        'msg' => 'Sesión cerrada. El bridge reinició limpio y debe generar un QR nuevo.',
+        'detail' => trim(implode(' | ', array_filter([
+            $removed ? ('Borrado: ' . implode(', ', $removed)) : '',
+            $errors ? ('Avisos: ' . implode('; ', $errors)) : ''
+        ])))
     ]);
     exit;
 }

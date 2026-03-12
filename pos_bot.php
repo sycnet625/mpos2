@@ -69,6 +69,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               <button class="btn btn-success btn-sm" type="button" onclick="openWhatsAppWeb()"><i class="fas fa-external-link-alt"></i> Abrir web.whatsapp.com</button>
               <button class="btn btn-outline-success btn-sm" type="button" onclick="showBridgeQr()"><i class="fas fa-qrcode"></i> Ver QR del servicio</button>
               <button class="btn btn-outline-warning btn-sm" type="button" onclick="restartBridge()"><i class="fas fa-rotate-right"></i> Reiniciar bridge</button>
+              <button class="btn btn-outline-danger btn-sm" type="button" onclick="resetBridgeSession()"><i class="fas fa-right-from-bracket"></i> Cerrar sesión y QR nuevo</button>
               <button class="btn btn-outline-dark btn-sm" type="button" onclick="showBridgeLogs()"><i class="fas fa-file-lines"></i> Ver logs bridge</button>
             </div>
             <div id="waWebStatus" class="small text-muted mt-2">Estado: pendiente de apertura</div>
@@ -710,6 +711,20 @@ async function restartBridge(){
   }
   const detail = d.detail ? ' Detalle: '+String(d.detail) : '';
   a('danger',(d.msg||'No se pudo reiniciar bridge') + detail);
+}
+async function resetBridgeSession(){
+  if(!confirm('Esto cerrará la sesión actual de WhatsApp Web, borrará la sesión guardada y forzará un QR nuevo. ¿Continuar?')) return;
+  const d=await p(API+'?action=bridge_reset_session',{});
+  if(d.status==='success'){
+    a('warning',(d.msg||'Sesión cerrada') + (d.detail ? ' ' + String(d.detail) : ''));
+    setTimeout(async ()=>{
+      await loadBridgeStatus();
+      await showBridgeQr();
+    }, 2500);
+    return;
+  }
+  const detail = d.detail ? ' Detalle: '+String(d.detail) : '';
+  a('danger',(d.msg||'No se pudo cerrar la sesión del bridge') + detail);
 }
 async function loadBridgeLogs(){
   const d=await g(API+'?action=bridge_logs');
