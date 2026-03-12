@@ -1,5 +1,5 @@
 <?php
-// ARCHIVO: client_order.php
+// ARCHIVO: kiosk.php
 require_once 'db.php';
 require_once 'config_loader.php';
 ?>
