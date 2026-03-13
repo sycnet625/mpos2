@@ -85,6 +85,9 @@ try {
             <h5 class="m-0 fw-bold"><i class="fas fa-industry me-2"></i> CENTRO DE PRODUCCIÓN</h5>
         </div>
         <div>
+            <a href="importar_recetas_palweb_ok.php" class="btn btn-outline-info btn-sm fw-bold me-2" target="_blank" title="Importar Fórmulas (Excel)" aria-label="Importar Fórmulas (Excel)">
+                <i class="fas fa-file-excel"></i>
+            </a>
             <a href="dashboard.php" class="btn btn-outline-light btn-sm fw-bold"><i class="fas fa-home me-1"></i> Inicio</a>
         </div>
     </nav>
@@ -821,4 +824,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
