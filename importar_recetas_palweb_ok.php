@@ -1603,6 +1603,9 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             box-shadow: 0 10px 20px rgba(0, 0, 0, .25);
             padding: 10px 16px;
         }
+        .replicate-action-btn {
+            min-width: 32px;
+        }
     </style>
 </head>
 <body>
@@ -1622,6 +1625,9 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             <a href="main_menu.php" class="btn btn-outline-info btn-sm me-2" title="Main menu">
                 <i class="fas fa-th-large me-1"></i> Main Menu
             </a>
+            <button type="button" class="btn btn-outline-warning btn-sm me-2" data-bs-toggle="modal" data-bs-target="#helpModal">
+                <i class="fa-solid fa-circle-question me-1"></i> Ayuda
+            </button>
             <button class="btn btn-outline-primary" id="openReload" <?php echo $isParsingReady ? '' : 'disabled'; ?>>Reanalizar</button>
         </div>
     </div>
@@ -1769,18 +1775,30 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                         <div class="mb-2">
                             <strong>Producto final:</strong>
                             <span id="finalLabel-<?php echo $i; ?>"><?php echo htmlspecialchars($finalCode === '' ? 'Pendiente asignar' : $finalCode . ' - ' . ($final['resolved_name'] ?? $final['name'] ?? 'Producto encontrado')); ?></span>
-                            <?php if (!empty($final['resolved_mode']) && !in_array($final['resolved_mode'], ['exacto', 'codigo'], true)): ?>
-                                <span class="badge text-bg-info ms-1">
-                                    <?php echo htmlspecialchars('Auto: ' . $final['resolved_mode'] . ' ' . number_format((float)($final['resolved_score'] ?? 0), 2)); ?>
-                                </span>
-                            <?php endif; ?>
-                            <input type="hidden" id="finalCode-<?php echo $i; ?>" value="<?php echo htmlspecialchars($finalCode); ?>">
-                            <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="openProductPicker(<?php echo $i; ?>, null)">Seleccionar</button>
-                            <?php if ($finalNeeds): ?>
-                                <button type="button" class="btn btn-sm btn-outline-success ms-1" onclick="openFinalCreate(<?php echo $i; ?>)">Crear nuevo</button>
-                            <?php else: ?>
-                                <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="openProductPicker(<?php echo $i; ?>, null)">Cambiar</button>
-                            <?php endif; ?>
+                                <?php if (!empty($final['resolved_mode']) && !in_array($final['resolved_mode'], ['exacto', 'codigo'], true)): ?>
+                                    <span class="badge text-bg-info ms-1">
+                                        <?php echo htmlspecialchars('Auto: ' . $final['resolved_mode'] . ' ' . number_format((float)($final['resolved_score'] ?? 0), 2)); ?>
+                                    </span>
+                                <?php endif; ?>
+                                <input type="hidden" id="finalCode-<?php echo $i; ?>" value="<?php echo htmlspecialchars($finalCode); ?>">
+                                <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="openProductPicker(<?php echo $i; ?>, null)">Seleccionar</button>
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-info ms-1 d-none replicate-action-btn replicate-final-btn"
+                                    id="replicateFinalBtn-<?php echo $i; ?>"
+                                    data-recipe="<?php echo $i; ?>"
+                                    data-ingredient=""
+                                    data-code="<?php echo htmlspecialchars((string)$finalCode, ENT_QUOTES, 'UTF-8'); ?>"
+                                    data-name="<?php echo urlencode((string)($final['resolved_name'] ?? $final['name'] ?? '')); ?>"
+                                    title="Replicar este producto final en otras recetas pendientes"
+                                >
+                                    ↻
+                                </button>
+                                <?php if ($finalNeeds): ?>
+                                    <button type="button" class="btn btn-sm btn-outline-success ms-1" onclick="openFinalCreate(<?php echo $i; ?>)">Crear nuevo</button>
+                                <?php else: ?>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="openProductPicker(<?php echo $i; ?>, null)">Cambiar</button>
+                                <?php endif; ?>
                             <?php if ($finalNeeds && !empty($final['suggestions'])): ?>
                                 <div class="small text-muted mt-2">Sugerencias parecidas:</div>
                                 <div class="d-flex flex-wrap gap-1 mt-1">
@@ -1889,12 +1907,26 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                             <?php endif; ?>
                                         </div>
                                         <div>
-                                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="openProductPicker(<?php echo $i; ?>, <?php echo $j; ?>)">
-                                                <?php echo $needsManual ? 'Seleccionar producto correcto' : 'Cambiar'; ?>
-                                            </button>
-                                        </div>
+                                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="openProductPicker(<?php echo $i; ?>, <?php echo $j; ?>)">
+                                            <?php echo $needsManual ? 'Seleccionar producto correcto' : 'Cambiar'; ?>
+                                        </button>
+                                        <button
+                                            type="button"
+                                            class="btn btn-sm btn-outline-info mt-1 replicate-action-btn replicate-ingredient-btn d-none"
+                                            id="replicateIngBtn-<?php echo $i; ?>-<?php echo $j; ?>"
+                                            data-recipe="<?php echo $i; ?>"
+                                            data-ingredient="<?php echo $j; ?>"
+                                            data-code="<?php echo htmlspecialchars((string)$current, ENT_QUOTES, 'UTF-8'); ?>"
+                                            data-name="<?php echo urlencode((string)($it['resolved_name'] ?? $it['name'] ?? '')); ?>"
+                                            title="Replicar este ingrediente en otras recetas pendientes"
+                                        >
+                                            ↻
+                                        </button>
+                                    </div>
+                                    <div>
                                         <input type="hidden" id="ingCode-<?php echo $i; ?>-<?php echo $j; ?>" value="<?php echo htmlspecialchars($current); ?>">
                                     </div>
+                                </div>
                                 <?php endforeach; ?>
                             </div>
                         </div>
@@ -1926,6 +1958,41 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="helpModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Cómo usar Importar Recetas</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <ol class="mb-0">
+          <li><strong>Cargar archivo:</strong> Sube el archivo <code>.xls/.xlsx</code> desde el botón <strong>Cargar y analizar</strong>.</li>
+          <li><strong>Revisar resumen:</strong> Verifica el total de recetas, ingredientes y pendientes desde las tarjetas iniciales.</li>
+          <li><strong>Editar coincidencias:</strong>
+            <ul class="mt-1">
+              <li>Si un ingrediente o producto final ya se resolvió, aparece como verde.</li>
+              <li>Si aparece <strong>Pendiente asignar</strong>, haz clic en <strong>Seleccionar producto correcto</strong> o <strong>Seleccionar</strong> para buscar en la base.</li>
+            </ul>
+          </li>
+          <li><strong>Selección masiva:</strong>
+            <ul class="mt-1">
+              <li>Después de una selección manual, usa el botón <strong>↻</strong> para replicar ese mismo producto al resto de recetas con el mismo nombre de ingrediente/receta pendiente.</li>
+              <li>Esto reduce tiempo cuando hay varios errores repetidos.</li>
+            </ul>
+          </li>
+          <li><strong>Importar:</strong> Marca las recetas y pulsa <strong>Importar recetas aprobadas</strong>.</li>
+          <li><strong>Paginación:</strong> Usa <strong>Registros por página</strong> o el selector <strong>Todas</strong> si quieres ver todo el lote en una sola vista.</li>
+          <li><strong>Consola:</strong> Revisa el estado en la barra inferior (éxitos/errores) mientras se aplica la importación.</li>
+        </ol>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cerrar</button>
       </div>
     </div>
   </div>
@@ -1980,6 +2047,7 @@ let pickerMode = {
     recipe: null,
     ingredient: null
 };
+const statusEl = document.getElementById('applyStatus');
 
 const searchModalEl = document.getElementById('searchPickerModal');
 const searchModal = new bootstrap.Modal(searchModalEl);
@@ -1989,32 +2057,100 @@ const queryInput = document.getElementById('productSearchInput');
 const toggleCardsBtn = document.getElementById('toggleCardsBtn');
 const recipeCollapses = document.querySelectorAll('.recipe-collapse');
 
-function setFinalLabel(recipeIdx, code, name) {
-    const label = document.getElementById('finalLabel-' + recipeIdx);
-    const inp = document.getElementById('finalCode-' + recipeIdx);
-    inp.value = code;
-    label.textContent = code + ' - ' + (name || 'Producto seleccionado');
-    if (label.classList) {
-        label.classList.remove('text-danger');
-        label.classList.add('text-success');
+function setStatus(message) {
+    if (statusEl) {
+        statusEl.textContent = message;
     }
 }
 
-function setIngredientLabel(recipeIdx, ingIdx, code, name) {
+function normalizeTextForMatch(value) {
+    const source = (value || '').toString().normalize('NFD');
+    return source
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function setIngredientDraft(recipeIdx, ingIdx, code, name) {
+    if (!recipes[recipeIdx] || !recipes[recipeIdx].ingredients || !recipes[recipeIdx].ingredients[ingIdx]) {
+        return;
+    }
+    recipes[recipeIdx].ingredients[ingIdx].resolved_code = code;
+    recipes[recipeIdx].ingredients[ingIdx].resolved_name = name;
+    recipes[recipeIdx].ingredients[ingIdx].needs_manual = false;
+    recipes[recipeIdx].ingredients[ingIdx].resolved_mode = 'manual';
+    recipes[recipeIdx].ingredients[ingIdx].resolved_score = 1.0;
+    recipes[recipeIdx].ingredients[ingIdx].resolved_why = null;
+}
+
+function setFinalDraft(recipeIdx, code, name) {
+    if (!recipes[recipeIdx] || !recipes[recipeIdx].final_product) {
+        return;
+    }
+    recipes[recipeIdx].final_product.code = code;
+    recipes[recipeIdx].final_product.resolved_name = name;
+    recipes[recipeIdx].final_product.resolved_mode = 'manual';
+    recipes[recipeIdx].final_product.resolved_score = 1.0;
+    recipes[recipeIdx].final_product.needs_manual = false;
+    recipes[recipeIdx].final_product.resolved_why = null;
+}
+
+function setFinalLabel(recipeIdx, code, name, isManual = false) {
+    const label = document.getElementById('finalLabel-' + recipeIdx);
+    const inp = document.getElementById('finalCode-' + recipeIdx);
+    const repBtn = document.getElementById('replicateFinalBtn-' + recipeIdx);
+    if (inp) {
+        inp.value = code;
+    }
+    if (label) {
+        label.textContent = code + ' - ' + (name || 'Producto seleccionado');
+        label.classList.remove('text-danger');
+        label.classList.add('text-success');
+    }
+    setFinalDraft(recipeIdx, code, name);
+    if (repBtn) {
+        repBtn.dataset.code = code;
+        repBtn.dataset.name = encodeURIComponent(name || '');
+        if (isManual) {
+            repBtn.classList.remove('d-none');
+        }
+    }
+}
+
+function setIngredientLabel(recipeIdx, ingIdx, code, name, isManual = false) {
     const label = document.getElementById('ingLabel-' + recipeIdx + '-' + ingIdx);
     const inp = document.getElementById('ingCode-' + recipeIdx + '-' + ingIdx);
-    inp.value = code;
-    label.textContent = code + ' · ' + name;
-    label.classList.remove('text-danger');
-    label.classList.add('text-success');
+    const repBtn = document.getElementById('replicateIngBtn-' + recipeIdx + '-' + ingIdx);
+    if (inp) {
+        inp.value = code;
+    }
+    if (label) {
+        label.textContent = code + ' · ' + name;
+        label.classList.remove('text-danger');
+        label.classList.add('text-success');
+    }
+    setIngredientDraft(recipeIdx, ingIdx, code, name);
+    if (repBtn) {
+        repBtn.dataset.code = code;
+        repBtn.dataset.name = encodeURIComponent(name || '');
+        if (isManual) {
+            repBtn.classList.remove('d-none');
+        }
+    }
 }
 
 function pickSuggestedProduct(recipeIdx, ingredientIdx, code, name) {
     if (ingredientIdx === null || ingredientIdx === undefined) {
-        setFinalLabel(recipeIdx, code, name);
+        setFinalLabel(recipeIdx, code, name, true);
         return;
     }
-    setIngredientLabel(recipeIdx, ingredientIdx, code, name);
+    setIngredientLabel(recipeIdx, ingredientIdx, code, name, true);
+    const sourceDraft = recipes[recipeIdx];
+    if (sourceDraft && sourceDraft.ingredients && sourceDraft.ingredients[ingredientIdx]) {
+        sourceDraft.ingredients[ingredientIdx].needs_manual = false;
+    }
 }
 
 function openProductPicker(recipeIdx, ingredientIdx) {
@@ -2083,11 +2219,98 @@ async function searchProducts(q) {
 
 function pickProduct(code, name) {
     if (pickerMode.type === 'final') {
-        setFinalLabel(pickerMode.recipe, code, name);
+        setFinalLabel(pickerMode.recipe, code, name, true);
     } else if (pickerMode.type === 'ingredient') {
-        setIngredientLabel(pickerMode.recipe, pickerMode.ingredient, code, name);
+        setIngredientLabel(pickerMode.recipe, pickerMode.ingredient, code, name, true);
     }
     searchModal.hide();
+}
+
+function replicateIngredient(recipeIdx, ingredientIdx, code, name) {
+    const source = recipes[recipeIdx]?.ingredients?.[ingredientIdx];
+    if (!source) {
+        setStatus('No se pudo leer el ingrediente origen.');
+        return;
+    }
+    const normalizedSource = normalizeTextForMatch(source.name || '');
+    if (!normalizedSource) {
+        setStatus('No se pudo identificar el nombre del ingrediente para replicar.');
+        return;
+    }
+    const targetCode = (code || '').trim();
+    if (!targetCode) {
+        setStatus('Selecciona un producto primero para poder replicarlo.');
+        return;
+    }
+    const targetName = (name || '').trim() || (source.resolved_name || source.name || '');
+
+    let affected = 0;
+    recipes.forEach((draft, targetRecipeIdx) => {
+        if (!draft || !Array.isArray(draft.ingredients)) {
+            return;
+        }
+        draft.ingredients.forEach((it, targetIngIdx) => {
+            if (!it) {
+                return;
+            }
+            if (targetRecipeIdx === recipeIdx && targetIngIdx === ingredientIdx) {
+                return;
+            }
+            if (normalizeTextForMatch(it.name || '') !== normalizedSource) {
+                return;
+            }
+            const alreadyHasCode = (it.resolved_code || '').trim();
+            const isPending = Boolean(it.needs_manual) || !alreadyHasCode;
+            if (!isPending) {
+                return;
+            }
+            setIngredientLabel(targetRecipeIdx, targetIngIdx, targetCode, targetName, true);
+            affected++;
+        });
+    });
+
+    if (affected > 0) {
+        setStatus(`Se replicó el ingrediente en ${affected} receta(s) pendiente(s).`);
+    } else {
+        setStatus('No había ingredientes pendientes iguales para replicar.');
+    }
+}
+
+function replicateFinal(recipeIdx, code, name) {
+    const source = recipes[recipeIdx];
+    if (!source || !source.final_product) {
+        setStatus('No se pudo leer el producto final origen.');
+        return;
+    }
+    const targetCode = (code || '').trim();
+    const targetName = (name || '').trim();
+    if (!targetCode) {
+        setStatus('Selecciona un producto final primero para replicarlo.');
+        return;
+    }
+
+    let affected = 0;
+    recipes.forEach((draft, targetRecipeIdx) => {
+        if (!draft || !draft.final_product) {
+            return;
+        }
+        if (targetRecipeIdx === recipeIdx) {
+            return;
+        }
+        const needsFinal = Boolean(draft.final_product.needs_manual);
+        const currentCode = (draft.final_product.code || '').trim();
+        if (!needsFinal && currentCode) {
+            return;
+        }
+        setFinalLabel(targetRecipeIdx, targetCode, targetName, true);
+        affected++;
+    });
+
+    if (affected > 0) {
+        setStatus(`Se replicó el final en ${affected} receta(s) pendiente(s).`);
+    } else {
+        setStatus('No había productos finales pendientes para replicar.');
+    }
 }
 
 document.addEventListener('click', (ev) => {
@@ -2106,6 +2329,28 @@ document.addEventListener('click', (ev) => {
     }
     const ingredientIdx = (ingredientRaw === null || ingredientRaw === '') ? null : parseInt(ingredientRaw, 10);
     pickSuggestedProduct(recipeIdx, ingredientIdx, code, name);
+});
+
+document.addEventListener('click', (ev) => {
+    const finalRepBtn = ev.target.closest('.replicate-final-btn');
+    if (finalRepBtn) {
+        ev.preventDefault();
+        const recipeIdx = parseInt(finalRepBtn.dataset.recipe || '0', 10);
+        const code = (finalRepBtn.dataset.code || '').trim();
+        const name = decodeURIComponent(finalRepBtn.dataset.name || '');
+        replicateFinal(recipeIdx, code, name);
+        return;
+    }
+
+    const ingRepBtn = ev.target.closest('.replicate-ingredient-btn');
+    if (ingRepBtn) {
+        ev.preventDefault();
+        const recipeIdx = parseInt(ingRepBtn.dataset.recipe || '0', 10);
+        const ingIdx = parseInt(ingRepBtn.dataset.ingredient || '0', 10);
+        const code = (ingRepBtn.dataset.code || '').trim();
+        const name = decodeURIComponent(ingRepBtn.dataset.name || '');
+        replicateIngredient(recipeIdx, ingIdx, code, name);
+    }
 });
 
 let searchTimer = null;
@@ -2222,6 +2467,27 @@ document.getElementById('saveNewFinalBtn').addEventListener('click', async () =>
     createModal.hide();
 });
 
+function getFinalCodeForRecipe(recipeIdx) {
+    const domCode = (document.getElementById('finalCode-' + recipeIdx)?.value || '').trim();
+    if (domCode) {
+        return domCode;
+    }
+    const draft = recipes[recipeIdx];
+    return draft && draft.final_product ? (draft.final_product.code || '').toString().trim() : '';
+}
+
+function getIngredientCodeForRecipe(recipeIdx, ingIdx) {
+    const domCode = (document.getElementById('ingCode-' + recipeIdx + '-' + ingIdx)?.value || '').trim();
+    if (domCode) {
+        return domCode;
+    }
+    const draft = recipes[recipeIdx];
+    if (!draft || !draft.ingredients || !draft.ingredients[ingIdx]) {
+        return '';
+    }
+    return (draft.ingredients[ingIdx].resolved_code || '').toString().trim();
+}
+
 async function applySelected(forceSingle) {
     const approved = [];
     const ingredient_codes = {};
@@ -2231,7 +2497,7 @@ async function applySelected(forceSingle) {
         const recipeIdx = parseInt(el.getAttribute('data-index') || '0', 10);
         approved.push(recipeIdx);
 
-        const finalCode = (document.getElementById('finalCode-' + recipeIdx)?.value || '').trim();
+        const finalCode = getFinalCodeForRecipe(recipeIdx);
         final_codes[String(recipeIdx)] = finalCode;
 
         const payloadMap = {};
@@ -2239,7 +2505,8 @@ async function applySelected(forceSingle) {
             const m = inp.id.match(/ingCode-(\d+)-(\d+)/);
             const ingIdx = m ? m[2] : null;
             if (ingIdx !== null) {
-                payloadMap[String(ingIdx)] = inp.value.trim();
+                const code = getIngredientCodeForRecipe(recipeIdx, ingIdx);
+                payloadMap[String(ingIdx)] = code;
             }
         });
         ingredient_codes[String(recipeIdx)] = payloadMap;
