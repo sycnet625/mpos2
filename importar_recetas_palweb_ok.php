@@ -1697,8 +1697,11 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                         <div>
                                             <button
                                                 type="button"
-                                                class="suggestion-chip"
-                                                onclick="pickSuggestedProduct(<?php echo $i; ?>, null, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                                class="suggestion-chip suggestion-pill"
+                                                data-recipe="<?php echo $i; ?>"
+                                                data-ingredient=""
+                                                data-code="<?php echo htmlspecialchars((string)($suggestion['codigo'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-name="<?php echo urlencode((string)($suggestion['nombre'] ?? '')); ?>"
                                             >
                                                 <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
                                             </button>
@@ -1764,12 +1767,15 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                             <?php endif; ?>
                                             <?php if ($needsManual && !empty($it['suggestions'])): ?>
                                                 <div class="d-flex flex-wrap gap-1 mt-1">
-                                                    <?php foreach ((array)$it['suggestions'] as $suggestion): ?>
+                                                        <?php foreach ((array)$it['suggestions'] as $suggestion): ?>
                                                         <div>
                                                             <button
                                                                 type="button"
-                                                                class="suggestion-chip"
-                                                                onclick="pickSuggestedProduct(<?php echo $i; ?>, <?php echo $j; ?>, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                                                class="suggestion-chip suggestion-pill"
+                                                                data-recipe="<?php echo $i; ?>"
+                                                                data-ingredient="<?php echo $j; ?>"
+                                                                data-code="<?php echo htmlspecialchars((string)($suggestion['codigo'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"
+                                                                data-name="<?php echo urlencode((string)($suggestion['nombre'] ?? '')); ?>"
                                                             >
                                                                 <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
                                                             </button>
@@ -1985,6 +1991,24 @@ function pickProduct(code, name) {
     }
     searchModal.hide();
 }
+
+document.addEventListener('click', (ev) => {
+    const button = ev.target.closest('.suggestion-pill');
+    if (!button) {
+        return;
+    }
+    ev.preventDefault();
+    const recipeIdxRaw = button.getAttribute('data-recipe');
+    const ingredientRaw = button.getAttribute('data-ingredient');
+    const code = button.getAttribute('data-code') || '';
+    const name = decodeURIComponent(button.getAttribute('data-name') || '');
+    const recipeIdx = recipeIdxRaw !== null ? parseInt(recipeIdxRaw, 10) : NaN;
+    if (!Number.isInteger(recipeIdx)) {
+        return;
+    }
+    const ingredientIdx = (ingredientRaw === null || ingredientRaw === '') ? null : parseInt(ingredientRaw, 10);
+    pickSuggestedProduct(recipeIdx, ingredientIdx, code, name);
+});
 
 let searchTimer = null;
 queryInput.addEventListener('input', () => {
