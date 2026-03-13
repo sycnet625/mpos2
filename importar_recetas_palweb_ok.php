@@ -4,6 +4,7 @@ declare(strict_types=1);
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
 set_time_limit(600);
+ini_set('memory_limit', '1024M');
 
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/db.php';
@@ -119,6 +120,18 @@ function isValidExcelUpload(array $file): bool
     }
     $ext = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
     return in_array($ext, ['xls', 'xlsx'], true);
+}
+
+function loadRecipeSpreadsheet(string $file): Spreadsheet
+{
+    $reader = IOFactory::createReaderForFile($file);
+    if (method_exists($reader, 'setReadDataOnly')) {
+        $reader->setReadDataOnly(true);
+    }
+    if (method_exists($reader, 'setReadEmptyCells')) {
+        $reader->setReadEmptyCells(false);
+    }
+    return $reader->load($file);
 }
 
 function normalizeName(string $name): string
@@ -979,7 +992,6 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
     }
 }
 
-if (!$isCli) {
     $defaultStats = [
         'sheets_total' => 0,
         'recipes_total' => 0,
@@ -1007,7 +1019,7 @@ if (!$isCli) {
         $productsByCode = $loadedProducts['byCode'];
 
         try {
-            $spreadsheet = IOFactory::load($file);
+            $spreadsheet = loadRecipeSpreadsheet($file);
         } catch (Throwable $e) {
             $uploadNotice = 'No se pudo leer el archivo: ' . $e->getMessage();
             $uploadNoticeType = 'danger';
@@ -1020,23 +1032,23 @@ if (!$isCli) {
             $insumosUnmatched = $parsed['insumos_unmatched'];
             $productsByCode = $parsed['products_by_code'];
             $productsByNorm = $parsed['products_by_norm'];
-            $token = bin2hex(random_bytes(16));
-            $_SESSION['recipe_import_drafts'][$token] = [
-                'created_at' => $now,
-                'file' => $file,
-                'stats' => $stats,
-                'drafts' => $drafts,
-                'insumos_unmatched' => $insumosUnmatched,
-            ];
+            if (!$isCli) {
+                $token = bin2hex(random_bytes(16));
+                $_SESSION['recipe_import_drafts'][$token] = [
+                    'created_at' => $now,
+                    'file' => $file,
+                    'stats' => $stats,
+                    'drafts' => $drafts,
+                    'insumos_unmatched' => $insumosUnmatched,
+                ];
+            }
         }
     } else {
-        if ($uploadNotice === '') {
+        if (!$isCli && $uploadNotice === '') {
             $uploadNotice = 'No se encontró el archivo para procesar. Sube un archivo Excel desde esta misma pantalla.';
             $uploadNoticeType = 'warning';
         }
     }
-}
-
 if ($isCli && !file_exists($file)) {
     out("ERROR: no existe el archivo: $file");
     exit(1);
