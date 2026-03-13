@@ -1473,9 +1473,9 @@ $currentFileLabel = $selectedFileLabel !== '' ? $selectedFileLabel : (is_file($f
 $hasUploadedFile = isset($_SESSION['recipe_import_file']) && is_string($_SESSION['recipe_import_file']) && is_file($_SESSION['recipe_import_file']);
 $isParsingReady = (bool)(!$isCli && is_file($file) && $uploadNoticeType !== 'danger');
 $allowedPerPage = [10, 20, 50, 100];
-$perPage = (int)($_GET['per_page'] ?? 20);
+$perPage = (int)($_GET['per_page'] ?? 10);
 if (!in_array($perPage, $allowedPerPage, true)) {
-    $perPage = 20;
+    $perPage = 10;
 }
 $page = max(1, (int)($_GET['page'] ?? 1));
 $totalRecipes = count($drafts);
@@ -1695,6 +1695,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                 <span class="text-muted small">Página <?php echo (int)$page; ?> de <?php echo (int)$totalPages; ?> · Mostrando <?php echo (int)$pageFrom; ?> - <?php echo (int)$pageTo; ?> de <?php echo (int)$totalRecipes; ?></span>
                 <a class="btn btn-outline-secondary btn-sm <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page - 1]); ?>">Anterior</a>
                 <a class="btn btn-outline-secondary btn-sm <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page + 1]); ?>">Siguiente</a>
+                <button type="button" class="btn btn-outline-secondary btn-sm" id="toggleCardsBtn">Expandir todas</button>
             </div>
             <span id="applyStatus" class="small text-muted ms-md-2"></span>
         </div>
@@ -1734,9 +1735,20 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                             <span class="badge <?php echo $draft['overwrites'] ? 'text-bg-warning' : 'text-bg-success'; ?>">
                                 <?php echo $draft['overwrites'] ? 'Sobrescribir existente' : 'Nueva'; ?>
                             </span>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-outline-secondary ms-2"
+                                data-bs-toggle="collapse"
+                                data-bs-target="#recipeBody-<?php echo $i; ?>"
+                                aria-expanded="false"
+                                aria-controls="recipeBody-<?php echo $i; ?>"
+                            >
+                                Ver detalle
+                            </button>
                         </div>
                     </div>
-                    <div class="card-body">
+                    <div class="collapse recipe-collapse" id="recipeBody-<?php echo $i; ?>">
+                        <div class="card-body">
                         <div class="mb-2">
                             <strong>Producto final:</strong>
                             <span id="finalLabel-<?php echo $i; ?>"><?php echo htmlspecialchars($finalCode === '' ? 'Pendiente asignar' : $finalCode . ' - ' . ($final['resolved_name'] ?? $final['name'] ?? 'Producto encontrado')); ?></span>
@@ -1869,6 +1881,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                 <?php endforeach; ?>
                             </div>
                         </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1956,6 +1969,8 @@ const searchModal = new bootstrap.Modal(searchModalEl);
 const createModal = new bootstrap.Modal(document.getElementById('createFinalModal'));
 const resultWrap = document.getElementById('searchResults');
 const queryInput = document.getElementById('productSearchInput');
+const toggleCardsBtn = document.getElementById('toggleCardsBtn');
+const recipeCollapses = document.querySelectorAll('.recipe-collapse');
 
 function setFinalLabel(recipeIdx, code, name) {
     const label = document.getElementById('finalLabel-' + recipeIdx);
@@ -2090,11 +2105,71 @@ if (perPageSelect) {
     perPageSelect.addEventListener('change', () => {
         const val = parseInt(perPageSelect.value || '20', 10);
         const params = new URLSearchParams(window.location.search);
-        params.set('per_page', String(isNaN(val) ? 20 : val));
+        params.set('per_page', String(isNaN(val) ? 10 : val));
         params.set('page', '1');
         window.location.href = 'importar_recetas_palweb_ok.php?' + params.toString();
     });
 }
+
+function updateCardsToggleLabel() {
+    if (!toggleCardsBtn) {
+        return;
+    }
+    const total = recipeCollapses.length;
+    if (total === 0) {
+        toggleCardsBtn.textContent = 'Expandir todas';
+        return;
+    }
+    let shown = 0;
+    recipeCollapses.forEach(el => {
+        if (el.classList.contains('show')) {
+            shown++;
+        }
+    });
+    if (shown === 0) {
+        toggleCardsBtn.textContent = 'Expandir todas';
+    } else if (shown === total) {
+        toggleCardsBtn.textContent = 'Colapsar todas';
+    } else {
+        toggleCardsBtn.textContent = 'Expandir todas';
+    }
+}
+
+function toggleAllRecipesCardState() {
+    const total = recipeCollapses.length;
+    if (total === 0 || !toggleCardsBtn) {
+        return;
+    }
+    let shouldExpandAll = true;
+    let allExpanded = 0;
+    recipeCollapses.forEach(el => {
+        if (el.classList.contains('show')) {
+            allExpanded++;
+        }
+    });
+    if (allExpanded === total && total > 0) {
+        shouldExpandAll = false;
+    }
+
+    recipeCollapses.forEach(el => {
+        const bsCollapse = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+        if (shouldExpandAll) {
+            bsCollapse.show();
+        } else {
+            bsCollapse.hide();
+        }
+    });
+}
+
+if (toggleCardsBtn) {
+    toggleCardsBtn.addEventListener('click', toggleAllRecipesCardState);
+}
+
+recipeCollapses.forEach(el => {
+    el.addEventListener('shown.bs.collapse', updateCardsToggleLabel);
+    el.addEventListener('hidden.bs.collapse', updateCardsToggleLabel);
+});
+updateCardsToggleLabel();
 
 document.getElementById('saveNewFinalBtn').addEventListener('click', async () => {
     const name = (document.getElementById('createName').value || '').trim();
