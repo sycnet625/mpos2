@@ -2,6 +2,7 @@ package com.palweb.reservasoffline
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
@@ -20,12 +21,22 @@ object SyncNotifier {
 
     fun notify(context: Context, id: Int, title: String, body: String) {
         ensureChannel(context)
+        val openIntent = MainActivity.intentForLaunch(context).let { intent ->
+            PendingIntent.getActivity(
+                context,
+                11_001,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
         val n = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_popup_sync)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setContentIntent(openIntent)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
             .build()
         runCatching { NotificationManagerCompat.from(context).notify(id, n) }
     }
