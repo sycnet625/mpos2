@@ -198,6 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['a
                                         <option value="lb">Libra (lb)</option>
                                         <option value="lt">Litro (lt)</option>
                                         <option value="m">Metro (m)</option>
+                                        <option value="MANGA">Manga</option>
                                     </select>
                                 </div>
                                 <div class="col-md-4">
@@ -370,4 +371,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['a
         }
     }
 </script>
-

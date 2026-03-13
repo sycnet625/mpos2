@@ -234,7 +234,7 @@ $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#2
         <div class="col-md-3">
             <label class="form-label small fw-bold">Unidad de Medida</label>
             <select name="unidad_medida" class="form-select">
-                <?php foreach(['UNIDAD','KG','GRAMO','LITRO','ML','METRO','CM','CAJA','PAQUETE','DOCENA','SERVICIO'] as $u): ?>
+                <?php foreach(['UNIDAD','KG','GRAMO','LITRO','ML','METRO','CM','CAJA','PAQUETE','DOCENA','MANGA','SERVICIO'] as $u): ?>
                     <option <?php echo $p['unidad_medida']===$u?'selected':''; ?>><?php echo $u; ?></option>
                 <?php endforeach; ?>
             </select>
