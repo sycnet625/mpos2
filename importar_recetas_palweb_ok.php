@@ -2038,6 +2038,36 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
   </div>
 </div>
 
+<div class="modal fade" id="replicateReportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="replicateReportTitle">Resultado de réplica</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="replicateReportMessage" class="fw-semibold mb-2"></div>
+        <div id="replicateReportStats" class="small text-muted mb-2"></div>
+        <div class="mb-2">
+          <strong>Aplicadas:</strong>
+          <ul id="replicateReportApplied" class="small mb-0"></ul>
+        </div>
+        <div class="mb-2">
+          <strong>Sin cambios:</strong>
+          <ul id="replicateReportSkipped" class="small mb-0"></ul>
+        </div>
+        <div class="small text-danger">
+          <strong>Errores:</strong>
+          <ul id="replicateReportErrors" class="small mb-0"></ul>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
 const recipes = <?php echo json_encode($drafts, JSON_UNESCAPED_UNICODE); ?>;
@@ -2052,10 +2082,63 @@ const statusEl = document.getElementById('applyStatus');
 const searchModalEl = document.getElementById('searchPickerModal');
 const searchModal = new bootstrap.Modal(searchModalEl);
 const createModal = new bootstrap.Modal(document.getElementById('createFinalModal'));
+const replicateReportModal = new bootstrap.Modal(document.getElementById('replicateReportModal'));
 const resultWrap = document.getElementById('searchResults');
 const queryInput = document.getElementById('productSearchInput');
 const toggleCardsBtn = document.getElementById('toggleCardsBtn');
 const recipeCollapses = document.querySelectorAll('.recipe-collapse');
+const replicateReport = {
+    title: document.getElementById('replicateReportTitle'),
+    message: document.getElementById('replicateReportMessage'),
+    stats: document.getElementById('replicateReportStats'),
+    applied: document.getElementById('replicateReportApplied'),
+    skipped: document.getElementById('replicateReportSkipped'),
+    errors: document.getElementById('replicateReportErrors'),
+};
+
+function normalizeItemName(recipe) {
+    return (recipe && recipe.recipe_name ? recipe.recipe_name : '').toString().trim() || 'Sin nombre';
+}
+
+function setListItems(listEl, items) {
+    if (!listEl) {
+        return;
+    }
+    listEl.innerHTML = '';
+    if (!Array.isArray(items) || items.length === 0) {
+        const li = document.createElement('li');
+        li.className = 'text-muted';
+        li.textContent = 'Ninguno';
+        listEl.appendChild(li);
+        return;
+    }
+
+    items.forEach(item => {
+        const li = document.createElement('li');
+        li.textContent = item;
+        listEl.appendChild(li);
+    });
+}
+
+function showReplicationReport({ title, message, totals, applied, skipped, errors }) {
+    if (replicateReport.title) {
+        replicateReport.title.textContent = title || 'Resultado de réplica';
+    }
+    if (replicateReport.message) {
+        replicateReport.message.textContent = message || '';
+    }
+    if (replicateReport.stats) {
+        const total = Number(totals?.total || 0);
+        const appliedCount = Number(totals?.applied || 0);
+        const skippedCount = Number(totals?.skipped || 0);
+        const errorCount = Number(totals?.errors || 0);
+        replicateReport.stats.textContent = `Coincidencias encontradas: ${total} | Aplicadas: ${appliedCount} | Sin cambios: ${skippedCount} | Errores: ${errorCount}`;
+    }
+    setListItems(replicateReport.applied, applied);
+    setListItems(replicateReport.skipped, skipped);
+    setListItems(replicateReport.errors, errors);
+    replicateReportModal.show();
+}
 
 function setStatus(message) {
     if (statusEl) {
@@ -2230,21 +2313,50 @@ function replicateIngredient(recipeIdx, ingredientIdx, code, name) {
     const source = recipes[recipeIdx]?.ingredients?.[ingredientIdx];
     if (!source) {
         setStatus('No se pudo leer el ingrediente origen.');
+        showReplicationReport({
+            title: 'Error de réplica',
+            message: 'No se pudo leer el ingrediente origen.',
+            totals: { total: 0, applied: 0, skipped: 0, errors: 1 },
+            applied: [],
+            skipped: ['No se pudo identificar la fila origen.'],
+            errors: ['No se pudo leer el ingrediente origen.'],
+        });
         return;
     }
     const normalizedSource = normalizeTextForMatch(source.name || '');
     if (!normalizedSource) {
         setStatus('No se pudo identificar el nombre del ingrediente para replicar.');
+        showReplicationReport({
+            title: 'Error de réplica',
+            message: 'No se pudo identificar el nombre del ingrediente para replicar.',
+            totals: { total: 0, applied: 0, skipped: 0, errors: 1 },
+            applied: [],
+            skipped: ['No se pudo normalizar el nombre del ingrediente origen.'],
+            errors: ['No se pudo normalizar el nombre del ingrediente origen.'],
+        });
         return;
     }
     const targetCode = (code || '').trim();
     if (!targetCode) {
         setStatus('Selecciona un producto primero para poder replicarlo.');
+        showReplicationReport({
+            title: 'Réplica no ejecutada',
+            message: 'Selecciona un producto primero para poder replicarlo.',
+            totals: { total: 0, applied: 0, skipped: 0, errors: 1 },
+            applied: [],
+            skipped: ['No hay código de producto origen.'],
+            errors: ['No hay código de producto seleccionado para replicar.'],
+        });
         return;
     }
     const targetName = (name || '').trim() || (source.resolved_name || source.name || '');
 
+    let totalMatches = 0;
     let affected = 0;
+    let skippedCount = 0;
+    const applied = [];
+    const skipped = [];
+    const errors = [];
     recipes.forEach((draft, targetRecipeIdx) => {
         if (!draft || !Array.isArray(draft.ingredients)) {
             return;
@@ -2259,13 +2371,23 @@ function replicateIngredient(recipeIdx, ingredientIdx, code, name) {
             if (normalizeTextForMatch(it.name || '') !== normalizedSource) {
                 return;
             }
+            totalMatches++;
             const alreadyHasCode = (it.resolved_code || '').trim();
             const isPending = Boolean(it.needs_manual) || !alreadyHasCode;
+            const recipeName = normalizeItemName(draft);
+            const lineLabel = `${recipeName} · ${it.name}`;
             if (!isPending) {
+                skippedCount++;
+                skipped.push(`${lineLabel} (ya estaba resuelto con ${alreadyHasCode || 'código vacío'})`);
                 return;
             }
-            setIngredientLabel(targetRecipeIdx, targetIngIdx, targetCode, targetName, true);
-            affected++;
+            try {
+                setIngredientLabel(targetRecipeIdx, targetIngIdx, targetCode, targetName, true);
+                affected++;
+                applied.push(`${lineLabel} -> ${targetCode}`);
+            } catch (err) {
+                errors.push(`${lineLabel} (${err && err.message ? err.message : 'error al aplicar' })`);
+            }
         });
     });
 
@@ -2274,22 +2396,56 @@ function replicateIngredient(recipeIdx, ingredientIdx, code, name) {
     } else {
         setStatus('No había ingredientes pendientes iguales para replicar.');
     }
+    showReplicationReport({
+        title: 'Resultado de réplica de ingrediente',
+        message: `Ingrediente origen: ${source.name} -> ${targetCode} ${targetName ? `(${targetName})` : ''}`,
+        totals: {
+            total: totalMatches,
+            applied: affected,
+            skipped: skippedCount,
+            errors: errors.length,
+        },
+        applied,
+        skipped,
+        errors,
+    });
 }
 
 function replicateFinal(recipeIdx, code, name) {
     const source = recipes[recipeIdx];
     if (!source || !source.final_product) {
         setStatus('No se pudo leer el producto final origen.');
+        showReplicationReport({
+            title: 'Error de réplica',
+            message: 'No se pudo leer el producto final origen.',
+            totals: { total: 0, applied: 0, skipped: 0, errors: 1 },
+            applied: [],
+            skipped: ['No se pudo identificar la receta de origen.'],
+            errors: ['No se pudo leer el producto final origen.'],
+        });
         return;
     }
     const targetCode = (code || '').trim();
     const targetName = (name || '').trim();
     if (!targetCode) {
         setStatus('Selecciona un producto final primero para replicarlo.');
+        showReplicationReport({
+            title: 'Réplica no ejecutada',
+            message: 'Selecciona un producto final primero para replicarlo.',
+            totals: { total: 0, applied: 0, skipped: 0, errors: 1 },
+            applied: [],
+            skipped: ['No hay código de producto final origen.'],
+            errors: ['No hay código de producto final para replicar.'],
+        });
         return;
     }
 
+    let totalMatches = 0;
     let affected = 0;
+    let skippedCount = 0;
+    const applied = [];
+    const skipped = [];
+    const errors = [];
     recipes.forEach((draft, targetRecipeIdx) => {
         if (!draft || !draft.final_product) {
             return;
@@ -2297,13 +2453,23 @@ function replicateFinal(recipeIdx, code, name) {
         if (targetRecipeIdx === recipeIdx) {
             return;
         }
+        const recipeName = normalizeItemName(draft);
+        const finalName = draft.final_product.code || '';
         const needsFinal = Boolean(draft.final_product.needs_manual);
         const currentCode = (draft.final_product.code || '').trim();
         if (!needsFinal && currentCode) {
+            skippedCount++;
+            skipped.push(`${recipeName} (ya tenía final: ${currentCode})`);
             return;
         }
-        setFinalLabel(targetRecipeIdx, targetCode, targetName, true);
-        affected++;
+        totalMatches++;
+        try {
+            setFinalLabel(targetRecipeIdx, targetCode, targetName, true);
+            affected++;
+            applied.push(`${recipeName} (${finalName || 'sin final previo'} -> ${targetCode})`);
+        } catch (err) {
+            errors.push(`${recipeName} (${err && err.message ? err.message : 'error al aplicar'})`);
+        }
     });
 
     if (affected > 0) {
@@ -2311,6 +2477,19 @@ function replicateFinal(recipeIdx, code, name) {
     } else {
         setStatus('No había productos finales pendientes para replicar.');
     }
+    showReplicationReport({
+        title: 'Resultado de réplica de producto final',
+        message: `Producto origen: ${source.final_product.code || '(sin código)'} -> ${targetCode} ${targetName ? `(${targetName})` : ''}`,
+        totals: {
+            total: totalMatches,
+            applied: affected,
+            skipped: skippedCount,
+            errors: errors.length,
+        },
+        applied,
+        skipped,
+        errors,
+    });
 }
 
 document.addEventListener('click', (ev) => {
