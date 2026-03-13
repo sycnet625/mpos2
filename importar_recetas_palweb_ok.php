@@ -9,7 +9,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
 
-use PhpOffice\\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
@@ -508,7 +508,7 @@ function applyFromDraft(array $draft, array $manualMap, array &$productsByCode, 
     $qtyTotal = 0.0;
 
     foreach ($ingredients as $idx => $it) {
-        $selectedCode = trim((string)($manualMap['ingredients'][$idx] ?? ($it['resolved_code'] ?? ''));
+        $selectedCode = trim((string)($manualMap['ingredients'][$idx] ?? ($it['resolved_code'] ?? '')));
         if ($selectedCode === '') {
             return [
                 'status' => 'error',
