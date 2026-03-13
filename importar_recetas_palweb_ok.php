@@ -15,6 +15,10 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 $defaultFile = '/home/ubuntu/Recetas_Palweb_ok.xlsx';
+$uploadDir = __DIR__ . '/tmp/recetas_upload_import';
+$uploadNotice = '';
+$uploadNoticeType = 'info';
+$selectedFileLabel = '';
 $isCli = (PHP_SAPI === 'cli');
 $action = $isCli ? '' : (string)($_REQUEST['action'] ?? '');
 
@@ -22,10 +26,17 @@ if (!$isCli) {
     if (session_status() !== PHP_SESSION_ACTIVE) {
         session_start();
     }
+
+    if (!is_dir($uploadDir)) {
+        if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+            $uploadNotice = 'No se pudo inicializar el directorio temporal de carga.';
+            $uploadNoticeType = 'danger';
+        }
+    }
 }
 
 $args = $isCli ? getopt('', ['file::', 'apply', 'create-missing']) : [];
-$file = $args['file'] ?? ($_REQUEST['file'] ?? $defaultFile);
+$file = $isCli ? ($args['file'] ?? $defaultFile) : $defaultFile;
 $apply = $isCli ? isset($args['apply']) : (isset($_GET['apply']) && $_GET['apply'] === '1');
 $createMissingAllowed = $isCli ? isset($args['create-missing']) : false;
 $EMP_ID = intval($config['id_empresa'] ?? 1);
@@ -45,6 +56,54 @@ function out(string $msg): void
 {
     echo $msg . PHP_EOL;
     flush();
+}
+
+function cleanupRecipeUpload(?string $path, string $uploadDir): void
+{
+    if ($path === null || $path === '') {
+        return;
+    }
+    $realBase = realpath($uploadDir);
+    $realPath = realpath($path);
+    if ($realBase === false || $realPath === false) {
+        return;
+    }
+    if (strpos($realPath, $realBase . DIRECTORY_SEPARATOR) !== 0 && $realPath !== $realBase) {
+        return;
+    }
+    if (is_file($realPath)) {
+        @unlink($realPath);
+    }
+}
+
+function nextRecipeUploadPath(string $uploadDir, string $originalName): string
+{
+    $base = preg_replace('/[^a-zA-Z0-9._-]+/u', '_', pathinfo($originalName, PATHINFO_FILENAME));
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($ext === '') {
+        $ext = 'xlsx';
+    }
+    if (!in_array($ext, ['xls', 'xlsx'], true)) {
+        $ext = 'xlsx';
+    }
+    $token = bin2hex(random_bytes(4));
+    $safeBase = trim($base, '._-');
+    if ($safeBase === '') {
+        $safeBase = 'recetas_palweb';
+    }
+    return $uploadDir . '/' . $safeBase . '_' . date('Ymd_His') . '_' . $token . '.' . $ext;
+}
+
+function isValidExcelUpload(array $file): bool
+{
+    if (!isset($file['error']) || !isset($file['name']) || !isset($file['tmp_name'])) {
+        return false;
+    }
+    if ((int)$file['error'] !== UPLOAD_ERR_OK) {
+        return false;
+    }
+    $ext = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
+    return in_array($ext, ['xls', 'xlsx'], true);
 }
 
 function normalizeName(string $name): string
@@ -642,15 +701,67 @@ function applyFromDraft(array $draft, array $manualMap, array &$productsByCode, 
     ];
 }
 
-if (!file_exists($file)) {
-    if ($isCli) {
-        out("ERROR: no existe el archivo: $file");
-        exit(1);
+if (isset($_GET['clear_uploaded']) && !$isCli) {
+    $old = $_SESSION['recipe_import_file'] ?? null;
+    if (is_string($old)) {
+        cleanupRecipeUpload($old, $uploadDir);
     }
-    jsonOut(['status' => 'error', 'msg' => "No existe el archivo: $file"], 404);
+    unset($_SESSION['recipe_import_file']);
+    unset($_SESSION['recipe_import_file_name']);
+    header('Location: importar_recetas_palweb_ok.php');
+    exit;
 }
 
+if (!$isCli && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_recipe_file'])) {
+    if (!isset($_FILES['excel_file'])) {
+        $uploadNotice = 'No se envió ningún archivo.';
+        $uploadNoticeType = 'danger';
+    } elseif (!isValidExcelUpload($_FILES['excel_file'])) {
+        $uploadNotice = 'Formato inválido. Sube solo archivos .xlsx o .xls';
+        $uploadNoticeType = 'danger';
+    } else {
+        $fileUpload = $_FILES['excel_file'];
+        $target = nextRecipeUploadPath($uploadDir, (string)$fileUpload['name']);
+        if (!move_uploaded_file((string)$fileUpload['tmp_name'], $target)) {
+            $uploadNotice = 'No se pudo guardar el archivo subido.';
+            $uploadNoticeType = 'danger';
+        } else {
+            $old = $_SESSION['recipe_import_file'] ?? null;
+            if (is_string($old)) {
+                cleanupRecipeUpload($old, $uploadDir);
+            }
+            $_SESSION['recipe_import_file'] = $target;
+            $_SESSION['recipe_import_file_name'] = $fileUpload['name'];
+            header('Location: importar_recetas_palweb_ok.php?uploaded=1');
+            exit;
+        }
+    }
+}
+
+$jsonActions = ['search_products', 'create_product', 'load_draft', 'apply_recipes'];
+
 if (!$isCli) {
+    $sessionFile = $_SESSION['recipe_import_file'] ?? null;
+    if (is_string($sessionFile) && is_file($sessionFile)) {
+        $file = $sessionFile;
+        $selectedFileLabel = $_SESSION['recipe_import_file_name'] ?? basename($sessionFile);
+    } elseif (isset($_REQUEST['file']) && is_string($_REQUEST['file']) && is_file($_REQUEST['file'])) {
+        $file = $_REQUEST['file'];
+        $selectedFileLabel = basename($file);
+    } elseif ($defaultFile !== '' && is_file($defaultFile)) {
+        $file = $defaultFile;
+        $selectedFileLabel = basename($defaultFile);
+    } else {
+        $file = $defaultFile;
+        $selectedFileLabel = '';
+    }
+
+    if ($action === 'upload_file') {
+        jsonOut(['status' => 'error', 'msg' => 'Usa el formulario de carga para seleccionar el archivo.'], 400);
+    }
+}
+
+if (!$isCli && in_array($action, $jsonActions, true)) {
     if ($action === 'search_products') {
         $q = trim((string)($_GET['q'] ?? $_POST['q'] ?? ''));
         if ($q === '') {
@@ -850,27 +961,68 @@ if (!$isCli) {
     }
 }
 
-ensureRecetaSchema($pdo);
-$loadedProducts = loadProducts($pdo, $EMP_ID);
-$productsByNorm = $loadedProducts['byNorm'];
-$productsByCode = $loadedProducts['byCode'];
+if (!$isCli) {
+    $defaultStats = [
+        'sheets_total' => 0,
+        'recipes_total' => 0,
+        'recipes_ready' => 0,
+        'recipes_skipped' => 0,
+        'ingredients' => 0,
+        'ingredients_resolved' => 0,
+        'ingredients_unresolved' => 0,
+        'insumos_rows' => 0,
+        'insumos_matched' => 0,
+        'insumos_unmatched' => 0,
+        'errors' => 0,
+    ];
+    $stats = $defaultStats;
+    $drafts = [];
+    $insumosUnmatched = [];
+    $pendingFinals = [];
+    $pendingIngredients = 0;
+    $token = '';
 
-try {
-    $spreadsheet = IOFactory::load($file);
-} catch (Throwable $e) {
-    if ($isCli) {
-        out('ERROR leyendo Excel: ' . $e->getMessage());
-        exit(1);
+    if (file_exists($file)) {
+        ensureRecetaSchema($pdo);
+        $loadedProducts = loadProducts($pdo, $EMP_ID);
+        $productsByNorm = $loadedProducts['byNorm'];
+        $productsByCode = $loadedProducts['byCode'];
+
+        try {
+            $spreadsheet = IOFactory::load($file);
+        } catch (Throwable $e) {
+            $uploadNotice = 'No se pudo leer el archivo: ' . $e->getMessage();
+            $uploadNoticeType = 'danger';
+        }
+
+        if (!($uploadNotice !== '' && $uploadNoticeType === 'danger')) {
+            $parsed = parseDrafts($spreadsheet, $productsByNorm, $productsByCode, $pdo, $EMP_ID);
+            $stats = $parsed['stats'];
+            $drafts = $parsed['drafts'];
+            $insumosUnmatched = $parsed['insumos_unmatched'];
+            $productsByCode = $parsed['products_by_code'];
+            $productsByNorm = $parsed['products_by_norm'];
+            $token = bin2hex(random_bytes(16));
+            $_SESSION['recipe_import_drafts'][$token] = [
+                'created_at' => $now,
+                'file' => $file,
+                'stats' => $stats,
+                'drafts' => $drafts,
+                'insumos_unmatched' => $insumosUnmatched,
+            ];
+        }
+    } else {
+        if ($uploadNotice === '') {
+            $uploadNotice = 'No se encontró el archivo para procesar. Sube un archivo Excel desde esta misma pantalla.';
+            $uploadNoticeType = 'warning';
+        }
     }
-    jsonOut(['status' => 'error', 'msg' => 'ERROR leyendo Excel: ' . $e->getMessage()], 500);
 }
 
-$parsed = parseDrafts($spreadsheet, $productsByNorm, $productsByCode, $pdo, $EMP_ID);
-$stats = $parsed['stats'];
-$drafts = $parsed['drafts'];
-$insumosUnmatched = $parsed['insumos_unmatched'];
-$productsByCode = $parsed['products_by_code'];
-$productsByNorm = $parsed['products_by_norm'];
+if ($isCli && !file_exists($file)) {
+    out("ERROR: no existe el archivo: $file");
+    exit(1);
+}
 
 if ($isCli) {
     out("Archivo: $file");
@@ -943,14 +1095,11 @@ if ($isCli) {
     exit;
 }
 
-$token = bin2hex(random_bytes(16));
-$_SESSION['recipe_import_drafts'][$token] = [
-    'created_at' => $now,
-    'file' => $file,
-    'stats' => $stats,
-    'drafts' => $drafts,
-    'insumos_unmatched' => $insumosUnmatched,
-];
+$uploadedSuccess = (!$isCli && isset($_GET['uploaded']) && $_GET['uploaded'] === '1');
+if ($uploadedSuccess && $uploadNotice === '') {
+    $uploadNotice = 'Archivo cargado. Se está analizando para generar el dashboard.';
+    $uploadNoticeType = 'success';
+}
 
 $pendingFinals = [];
 foreach ($drafts as $i => $draft) {
@@ -967,6 +1116,9 @@ foreach ($drafts as $draft) {
         }
     }
 }
+$currentFileLabel = $selectedFileLabel !== '' ? $selectedFileLabel : (is_file($file) ? basename((string)$file) : 'Sin archivo');
+$hasUploadedFile = isset($_SESSION['recipe_import_file']) && is_string($_SESSION['recipe_import_file']) && is_file($_SESSION['recipe_import_file']);
+$isParsingReady = (bool)(!$isCli && is_file($file) && $uploadNoticeType !== 'danger');
 
 $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
 
@@ -1027,18 +1179,42 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
     <div class="d-flex justify-content-between align-items-start flex-wrap mb-3 gap-2">
         <div>
             <h4 class="mb-1">Importar recetas desde Excel</h4>
-            <div class="text-muted">Archivo: <code><?php echo htmlspecialchars($file); ?></code></div>
+            <div class="text-muted">Archivo activo: <code><?php echo htmlspecialchars($currentFileLabel); ?></code></div>
+            <?php if ($hasUploadedFile): ?>
+                <div class="small text-success">Archivo cargado desde tu equipo.</div>
+            <?php endif; ?>
         </div>
         <div>
-            <button class="btn btn-outline-primary" id="openReload">Reanalizar</button>
-            <a class="btn btn-link" href="<?php echo htmlspecialchars($file); ?>" target="_blank">Abrir archivo</a>
+            <button class="btn btn-outline-primary" id="openReload" <?php echo $isParsingReady ? '' : 'disabled'; ?>>Reanalizar</button>
         </div>
     </div>
 
-    <div class="alert alert-warning" style="font-size: .92rem;">
-        No se crean productos nuevos automáticamente.
-        Para productos finales faltantes puedes crear uno nuevo o escoger uno existente.
+    <div class="card card-body mb-3">
+        <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+                <div class="fw-semibold">Subir archivo de recetas (.xls/.xlsx)</div>
+                <div class="small text-muted">Selecciona el archivo del disco del cliente para procesarlo y crear/actualizar el dashboard.</div>
+            </div>
+            <form id="uploadForm" method="post" enctype="multipart/form-data" class="d-flex gap-2 align-items-start flex-grow-1 justify-content-end">
+                <input type="file" name="excel_file" id="excelFileInput" class="form-control" accept=".xlsx,.xls" required>
+                <button class="btn btn-primary" name="upload_recipe_file" value="1" type="submit">Cargar y analizar</button>
+            </form>
+        </div>
+        <?php if ($hasUploadedFile): ?>
+            <a class="btn btn-sm btn-outline-secondary mt-2" href="importar_recetas_palweb_ok.php?clear_uploaded=1">Quitar archivo cargado</a>
+        <?php endif; ?>
     </div>
+
+    <?php if ($uploadNotice !== ''): ?>
+        <div class="alert alert-<?php echo htmlspecialchars($uploadNoticeType); ?>" style="font-size: .92rem;">
+            <?php echo htmlspecialchars($uploadNotice); ?>
+        </div>
+    <?php else: ?>
+        <div class="alert alert-warning" style="font-size: .92rem;">
+            No se crean productos nuevos automáticamente.
+            Para productos finales faltantes puedes crear uno nuevo o escoger uno existente.
+        </div>
+    <?php endif; ?>
 
     <div class="row g-2 mb-3">
         <div class="col-md-3">
@@ -1074,7 +1250,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
     <?php endif; ?>
 
     <div class="mb-3">
-        <button class="btn btn-success" id="applySelected">Importar recetas aprobadas</button>
+        <button class="btn btn-success" id="applySelected" <?php echo $token !== '' ? '' : 'disabled'; ?>>Importar recetas aprobadas</button>
         <span id="applyStatus" class="ms-2 text-muted"></span>
     </div>
 
