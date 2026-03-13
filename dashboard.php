@@ -1158,8 +1158,8 @@ function auditResumen(string $accion, array $d): string {
                                         <td>
                                             <div class="fw-bold"><?php echo htmlspecialchars($row['cliente_nombre']); ?></div>
                                             <div class="small text-muted"><b>Notas: </b> <?php echo htmlspecialchars($row['notas']); ?></div>
-                                            <div class="small text-muted"><i class="fas fa-map-marker-alt"></i> <?php echo htmlspecialchars($row['cliente_direccion']); ?></div>
-                                            <div class="small text-primary"><i class="fab fa-whatsapp"></i> <?php echo htmlspecialchars($row['cliente_telefono']); ?></div>
+                                            <div class="small text-muted"><i class="fas fa-map-marker-alt"></i> <?php echo htmlspecialchars($row['cliente_direccion'] ?? ''); ?></div>
+                                            <div class="small text-primary"><i class="fab fa-whatsapp"></i> <?php echo htmlspecialchars($row['cliente_telefono'] ?? ''); ?></div>
                                         </td>
                                         <td><?php echo $itemsStr; ?></td>
                                         <td>
@@ -2120,4 +2120,3 @@ function auditFilter() {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

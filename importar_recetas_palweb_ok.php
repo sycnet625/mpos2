@@ -16,6 +16,7 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 $defaultFile = '/home/ubuntu/Recetas_Palweb_ok.xlsx';
+$uploadBaseDir = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . '/palweb_recetas_upload_import';
 $uploadNotice = '';
 $uploadNoticeType = 'info';
 $selectedFileLabel = '';
@@ -23,6 +24,7 @@ $isCli = (PHP_SAPI === 'cli');
 $action = $isCli ? '' : (string)($_REQUEST['action'] ?? '');
 $uploadDirCandidates = [
     __DIR__ . '/tmp/recetas_upload_import',
+    $uploadBaseDir,
     rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . '/reservas_upload_import',
     '/tmp/recetas_upload_import',
 ];
@@ -35,7 +37,7 @@ if (!$isCli) {
 
     foreach ($uploadDirCandidates as $candidate) {
         if (!is_dir($candidate)) {
-            if (!mkdir($candidate, 0755, true) && !is_dir($candidate)) {
+            if (!@mkdir($candidate, 0755, true) && !is_dir($candidate)) {
                 continue;
             }
         }

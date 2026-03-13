@@ -4,6 +4,9 @@
   "private": true,
   "description": "Bridge between whatsapp-web.js and pos_bot_api.php",
   "main": "bridge.js",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node bridge.js"
   },

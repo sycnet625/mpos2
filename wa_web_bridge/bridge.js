@@ -18,6 +18,10 @@ const CHATS_FILE = process.env.WA_CHATS_FILE || '/tmp/palweb_wa_chats.json';
 const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || '/tmp/palweb_wa_promo_queue.json';
 const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || '/tmp/palweb_wa_outbox_queue.json';
 const PROMO_TIMEZONE = process.env.WA_PROMO_TIMEZONE || 'America/Havana';
+const LOCAL_PRODUCT_IMAGE_DIRS = [
+  path.join(__dirname, '..', 'assets', 'product_images'),
+  path.join(__dirname, 'assets', 'product_images')
+];
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: SESSION_NAME, dataPath: AUTH_PATH }),
@@ -164,10 +168,36 @@ function normalizeProductImageUrl(rawUrl, productId = '') {
     const sep = mediaUrl.includes('?') ? '&' : '?';
     mediaUrl = `${mediaUrl}${sep}code=${encodeURIComponent(String(productId))}`;
   }
+  if (/image\.php(?:\?|$)/i.test(mediaUrl) && !/[?&]fmt=/i.test(mediaUrl)) {
+    const sep = mediaUrl.includes('?') ? '&' : '?';
+    mediaUrl = `${mediaUrl}${sep}fmt=jpg`;
+  }
   if (!/^https?:\/\//i.test(mediaUrl) && API_ORIGIN) {
     mediaUrl = mediaUrl.startsWith('/') ? `${API_ORIGIN}${mediaUrl}` : `${API_ORIGIN}/${mediaUrl}`;
   }
   return mediaUrl;
+}
+
+function resolveLocalProductImage(productId = '') {
+  const sku = String(productId || '').trim();
+  if (!sku) return null;
+  const exts = [
+    ['.jpg', 'image/jpeg'],
+    ['.jpeg', 'image/jpeg'],
+    ['.webp', 'image/webp'],
+    ['.avif', 'image/avif'],
+    ['.gif', 'image/gif'],
+    ['.png', 'image/png']
+  ];
+  for (const baseDir of LOCAL_PRODUCT_IMAGE_DIRS) {
+    for (const [ext, mime] of exts) {
+      const filePath = path.join(baseDir, `${sku}${ext}`);
+      if (fs.existsSync(filePath)) {
+        return { filePath, mime, ext: ext.slice(1) };
+      }
+    }
+  }
+  return null;
 }
 
 async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner') {
@@ -251,6 +281,21 @@ async function sendProductCards(targetId, text, products, outroText, bannerImage
     const price = Number(p?.price || 0);
     const caption = `${name}\nPrecio: $${price.toFixed(2)}`;
     const imageUrl = String(p?.image || '').trim();
+    const localImage = resolveLocalProductImage(sku);
+    if (localImage) {
+      try {
+        const bytes = fs.readFileSync(localImage.filePath);
+        const b64 = Buffer.from(bytes).toString('base64');
+        if (!b64) throw new Error('imagen local vacía');
+        const fileName = `${(sku || 'producto').replace(/[^a-zA-Z0-9._-]/g, '_')}.${localImage.ext || 'jpg'}`;
+        const media = new MessageMedia(localImage.mime, b64, fileName);
+        await client.sendMessage(targetId, media, { caption });
+        sentCount += 1;
+        continue;
+      } catch (err) {
+        console.error('[bridge] No se pudo enviar imagen local de producto:', sku || name, localImage.filePath, err.message || err);
+      }
+    }
     if (imageUrl) {
       try {
         const mediaUrl = normalizeProductImageUrl(imageUrl, sku);
@@ -265,13 +310,15 @@ async function sendProductCards(targetId, text, products, outroText, bannerImage
         const bytes = await res.arrayBuffer();
         const b64 = Buffer.from(bytes).toString('base64');
         if (!b64) throw new Error('imagen vacía');
-        const fileName = `${(sku || 'producto').replace(/[^a-zA-Z0-9._-]/g, '_')}.jpg`;
+        const ext = contentType.split('/')[1] || 'jpg';
+        const fileName = `${(sku || 'producto').replace(/[^a-zA-Z0-9._-]/g, '_')}.${ext}`;
         const media = new MessageMedia(contentType, b64, fileName);
         await client.sendMessage(targetId, media, { caption });
         sentCount += 1;
         continue;
       } catch (err) {
         const fallbackUrl = normalizeProductImageUrl(imageUrl, sku);
+        console.error('[bridge] No se pudo enviar imagen de producto:', sku || name, fallbackUrl, err.message || err);
         if (fallbackUrl) {
           await client.sendMessage(targetId, `${caption}\n${fallbackUrl}`);
           sentCount += 1;

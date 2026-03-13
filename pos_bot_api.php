@@ -203,8 +203,8 @@ function bot_run_bridge_service_command(string $verb, ?string &$detail = null): 
         return false;
     }
     $commands = [
-        "systemctl {$verb} palweb-wa-bridge.service 2>&1",
-        "sudo -n systemctl {$verb} palweb-wa-bridge.service 2>&1"
+        "/usr/bin/systemctl {$verb} palweb-wa-bridge.service 2>&1",
+        "/usr/bin/sudo -n /usr/bin/systemctl {$verb} palweb-wa-bridge.service 2>&1"
     ];
     $lastOut = '';
     foreach ($commands as $cmd) {
@@ -2179,10 +2179,20 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
         exit;
     }
 
-    $activeOut = [];
-    $activeCode = 1;
-    @exec('systemctl is-active palweb-wa-bridge.service 2>&1', $activeOut, $activeCode);
-    $active = trim(implode("\n", $activeOut));
+    $active = '';
+    $activeCmds = [
+        '/usr/bin/systemctl is-active palweb-wa-bridge.service 2>&1',
+        '/usr/bin/sudo -n /usr/bin/systemctl is-active palweb-wa-bridge.service 2>&1'
+    ];
+    foreach ($activeCmds as $cmd) {
+        $activeOut = [];
+        $activeCode = 1;
+        @exec($cmd, $activeOut, $activeCode);
+        $active = trim(bot_sanitize_shell_output(implode("\n", $activeOut)));
+        if ($activeCode === 0 && $active !== '') {
+            break;
+        }
+    }
     echo json_encode([
         'status' => 'success',
         'msg' => 'Bridge reiniciado. Estado: ' . ($active !== '' ? $active : 'desconocido')
@@ -2262,8 +2272,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
     $cmds = [
-        'journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1',
-        'sudo -n journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1'
+        '/usr/bin/journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1',
+        '/usr/bin/sudo -n /usr/bin/journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1'
     ];
     $logText = '';
     foreach ($cmds as $cmd) {
