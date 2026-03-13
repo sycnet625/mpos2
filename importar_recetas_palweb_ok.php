@@ -2019,14 +2019,32 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             <label class="form-label">Precio</label>
             <input id="createPrice" type="number" class="form-control" min="0" step="0.01" value="0">
           </div>
-          <div class="col-4">
-            <label class="form-label">Unidad</label>
-            <input id="createUnit" class="form-control" value="u">
-          </div>
         </div>
         <div class="mt-2">
-          <label class="form-label">Categoría</label>
+        <label class="form-label">Categoría</label>
           <input id="createCategory" class="form-control" value="Elaborado">
+        </div>
+        <div class="row g-2 mt-2">
+          <div class="col-8">
+            <label class="form-label">Unidad de medida</label>
+            <select id="createUnitSelect" class="form-select">
+              <option value="u" selected>u (unidad)</option>
+              <option value="kg">kg</option>
+              <option value="g">g</option>
+              <option value="gr">gr</option>
+              <option value="lb">lb</option>
+              <option value="L">L</option>
+              <option value="ml">ml</option>
+              <option value="cc">cc</option>
+              <option value="pz">pz</option>
+              <option value="pc">pc</option>
+              <option value="otro">Otro...</option>
+            </select>
+          </div>
+          <div class="col-4 d-none" id="createUnitCustomWrap">
+            <label class="form-label">Otra unidad</label>
+            <input id="createUnitOther" class="form-control" placeholder="Ej: tazas">
+          </div>
         </div>
         <div class="text-muted small mt-2">Crea el producto final y lo asigna a la receta actual.</div>
       </div>
@@ -2087,6 +2105,9 @@ const resultWrap = document.getElementById('searchResults');
 const queryInput = document.getElementById('productSearchInput');
 const toggleCardsBtn = document.getElementById('toggleCardsBtn');
 const recipeCollapses = document.querySelectorAll('.recipe-collapse');
+const createUnitSelect = document.getElementById('createUnitSelect');
+const createUnitOther = document.getElementById('createUnitOther');
+const createUnitCustomWrap = document.getElementById('createUnitCustomWrap');
 const replicateReport = {
     title: document.getElementById('replicateReportTitle'),
     message: document.getElementById('replicateReportMessage'),
@@ -2253,7 +2274,18 @@ function openFinalCreate(recipeIdx) {
     document.getElementById('createName').value = recipes[recipeIdx].recipe_name || '';
     document.getElementById('createCost').value = 0;
     document.getElementById('createPrice').value = 0;
-    document.getElementById('createUnit').value = 'u';
+    const unitSelect = document.getElementById('createUnitSelect');
+    const customWrap = document.getElementById('createUnitCustomWrap');
+    const customUnit = document.getElementById('createUnitOther');
+    if (unitSelect) {
+        unitSelect.value = 'u';
+    }
+    if (customWrap) {
+        customWrap.classList.add('d-none');
+    }
+    if (customUnit) {
+        customUnit.value = '';
+    }
     document.getElementById('createCategory').value = 'Elaborado';
     pickerMode = {
         type: 'create_final',
@@ -2616,11 +2648,18 @@ document.getElementById('saveNewFinalBtn').addEventListener('click', async () =>
     const name = (document.getElementById('createName').value || '').trim();
     const cost = parseFloat(document.getElementById('createCost').value || '0');
     const price = parseFloat(document.getElementById('createPrice').value || '0');
-    const unit = (document.getElementById('createUnit').value || 'u').trim();
+    let unit = (document.getElementById('createUnitSelect')?.value || 'u').trim();
+    if (unit === 'otro') {
+        unit = (document.getElementById('createUnitOther')?.value || '').trim();
+    }
     const category = (document.getElementById('createCategory').value || 'Elaborado').trim();
 
     if (!name) {
         alert('Ingrese nombre');
+        return;
+    }
+    if (!unit) {
+        alert('Seleccione o escriba la unidad de medida');
         return;
     }
 
@@ -2645,6 +2684,21 @@ document.getElementById('saveNewFinalBtn').addEventListener('click', async () =>
     setFinalLabel(pickerMode.recipe, data.product.id, data.product.name);
     createModal.hide();
 });
+
+if (createUnitSelect) {
+    createUnitSelect.addEventListener('change', () => {
+        if (!createUnitCustomWrap || !createUnitOther) {
+            return;
+        }
+        if (createUnitSelect.value === 'otro') {
+            createUnitCustomWrap.classList.remove('d-none');
+            createUnitOther.focus();
+        } else {
+            createUnitCustomWrap.classList.add('d-none');
+            createUnitOther.value = '';
+        }
+    });
+}
 
 function getFinalCodeForRecipe(recipeIdx) {
     const domCode = (document.getElementById('finalCode-' + recipeIdx)?.value || '').trim();
