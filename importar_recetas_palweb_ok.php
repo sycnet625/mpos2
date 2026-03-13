@@ -15,23 +15,38 @@ use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
 $defaultFile = '/home/ubuntu/Recetas_Palweb_ok.xlsx';
-$uploadDir = __DIR__ . '/tmp/recetas_upload_import';
 $uploadNotice = '';
 $uploadNoticeType = 'info';
 $selectedFileLabel = '';
 $isCli = (PHP_SAPI === 'cli');
 $action = $isCli ? '' : (string)($_REQUEST['action'] ?? '');
+$uploadDirCandidates = [
+    __DIR__ . '/tmp/recetas_upload_import',
+    rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . '/reservas_upload_import',
+    '/tmp/recetas_upload_import',
+];
+$uploadDir = '';
 
 if (!$isCli) {
     if (session_status() !== PHP_SESSION_ACTIVE) {
         session_start();
     }
 
-    if (!is_dir($uploadDir)) {
-        if (!mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
-            $uploadNotice = 'No se pudo inicializar el directorio temporal de carga.';
-            $uploadNoticeType = 'danger';
+    foreach ($uploadDirCandidates as $candidate) {
+        if (!is_dir($candidate)) {
+            if (!mkdir($candidate, 0755, true) && !is_dir($candidate)) {
+                continue;
+            }
         }
+        if (is_writable($candidate)) {
+            $uploadDir = $candidate;
+            break;
+        }
+    }
+
+    if ($uploadDir === '') {
+        $uploadNotice = 'No se pudo inicializar el directorio temporal de carga (permisos insuficientes).';
+        $uploadNoticeType = 'danger';
     }
 }
 
@@ -713,7 +728,10 @@ if (isset($_GET['clear_uploaded']) && !$isCli) {
 }
 
 if (!$isCli && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_recipe_file'])) {
-    if (!isset($_FILES['excel_file'])) {
+    if ($uploadDir === '') {
+        $uploadNotice = 'No hay directorio temporal disponible para guardar el archivo subido.';
+        $uploadNoticeType = 'danger';
+    } elseif (!isset($_FILES['excel_file'])) {
         $uploadNotice = 'No se envió ningún archivo.';
         $uploadNoticeType = 'danger';
     } elseif (!isValidExcelUpload($_FILES['excel_file'])) {
