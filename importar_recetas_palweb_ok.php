@@ -1333,6 +1333,7 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
     $pendingFinals = [];
     $pendingIngredients = 0;
     $token = '';
+    $recipeImportCategories = ['Insumos'];
 
     if (file_exists($file)) {
         ensureRecetaSchema($pdo);
@@ -1340,6 +1341,21 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
         $productsByNorm = $loadedProducts['byNorm'];
         $productsByCode = $loadedProducts['byCode'];
         $GLOBALS['recipe_import_loaded_products'] = $loadedProducts;
+        $stmtCategories = $pdo->prepare("SELECT DISTINCT TRIM(categoria) AS categoria FROM productos WHERE id_empresa = ? AND categoria IS NOT NULL AND TRIM(categoria) <> ''");
+        $stmtCategories->execute([$EMP_ID]);
+        $recipeImportCategories = [];
+        while (($cat = $stmtCategories->fetchColumn()) !== false) {
+            $cat = trim((string)$cat);
+            if ($cat !== '') {
+                $recipeImportCategories[] = $cat;
+            }
+        }
+        if (empty($recipeImportCategories)) {
+            $recipeImportCategories = ['Insumos'];
+        } elseif (!in_array('Insumos', $recipeImportCategories, true)) {
+            array_unshift($recipeImportCategories, 'Insumos');
+        }
+        sort($recipeImportCategories, SORT_NATURAL | SORT_FLAG_CASE);
 
         try {
             $spreadsheet = loadRecipeSpreadsheet($file);
@@ -2021,8 +2037,17 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
           </div>
         </div>
         <div class="mt-2">
-        <label class="form-label">Categoría</label>
-          <input id="createCategory" class="form-control" value="Insumos">
+          <label class="form-label">Categoría</label>
+          <select id="createCategorySelect" class="form-select">
+            <?php foreach ($recipeImportCategories as $cat): ?>
+              <option value="<?php echo htmlspecialchars($cat, ENT_QUOTES, 'UTF-8'); ?>" <?php echo $cat === 'Insumos' ? 'selected' : ''; ?>><?php echo htmlspecialchars($cat, ENT_QUOTES, 'UTF-8'); ?></option>
+            <?php endforeach; ?>
+            <option value="__custom__">Otra categoría...</option>
+          </select>
+        </div>
+        <div class="mt-2 d-none" id="createCategoryCustomWrap">
+          <label class="form-label">Nueva categoría</label>
+          <input id="createCategory" class="form-control" placeholder="Escribe la categoría">
         </div>
         <div class="row g-2 mt-2">
           <div class="col-8">
@@ -2108,6 +2133,9 @@ const recipeCollapses = document.querySelectorAll('.recipe-collapse');
 const createUnitSelect = document.getElementById('createUnitSelect');
 const createUnitOther = document.getElementById('createUnitOther');
 const createUnitCustomWrap = document.getElementById('createUnitCustomWrap');
+const createCategorySelect = document.getElementById('createCategorySelect');
+const createCategory = document.getElementById('createCategory');
+const createCategoryCustomWrap = document.getElementById('createCategoryCustomWrap');
 const replicateReport = {
     title: document.getElementById('replicateReportTitle'),
     message: document.getElementById('replicateReportMessage'),
@@ -2286,7 +2314,15 @@ function openFinalCreate(recipeIdx) {
     if (customUnit) {
         customUnit.value = '';
     }
-    document.getElementById('createCategory').value = 'Insumos';
+    if (createCategorySelect) {
+        createCategorySelect.value = 'Insumos';
+    }
+    if (createCategoryCustomWrap) {
+        createCategoryCustomWrap.classList.add('d-none');
+    }
+    if (createCategory) {
+        createCategory.value = '';
+    }
     pickerMode = {
         type: 'create_final',
         recipe: recipeIdx,
@@ -2652,14 +2688,25 @@ document.getElementById('saveNewFinalBtn').addEventListener('click', async () =>
     if (unit === 'otro') {
         unit = (document.getElementById('createUnitOther')?.value || '').trim();
     }
-    const category = (document.getElementById('createCategory').value || 'Insumos').trim();
-
     if (!name) {
         alert('Ingrese nombre');
         return;
     }
     if (!unit) {
         alert('Seleccione o escriba la unidad de medida');
+        return;
+    }
+
+    let category = 'Insumos';
+    if (createCategorySelect) {
+        if (createCategorySelect.value === '__custom__') {
+            category = (createCategory?.value || '').trim();
+        } else {
+            category = (createCategorySelect.value || 'Insumos').trim();
+        }
+    }
+    if (!category) {
+        alert('Seleccione o ingrese una categoría');
         return;
     }
 
@@ -2696,6 +2743,21 @@ if (createUnitSelect) {
         } else {
             createUnitCustomWrap.classList.add('d-none');
             createUnitOther.value = '';
+        }
+    });
+}
+
+if (createCategorySelect) {
+    createCategorySelect.addEventListener('change', () => {
+        if (!createCategoryCustomWrap || !createCategory) {
+            return;
+        }
+        if (createCategorySelect.value === '__custom__') {
+            createCategoryCustomWrap.classList.remove('d-none');
+            createCategory.focus();
+        } else {
+            createCategoryCustomWrap.classList.add('d-none');
+            createCategory.value = '';
         }
     });
 }
