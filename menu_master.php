@@ -39,6 +39,7 @@ $menuCategories = [
         ["icon" => "fa-file-import", "name" => "Importar Excel", "url" => "pos_import.php"],
         ["icon" => "fa-file-export", "name" => "Exportar Datos", "url" => "pos_export.php"],
         ["icon" => "fa-pencil-square", "name" => "Editor WEB", "url" => "web_manager.php"],
+        ["icon" => "fa-blender", "name" => "Importar Fórmulas (Excel)", "url" => "importar_recetas_palweb_ok.php"],
         ["icon" => "fa-cog", "name" => "Produccion", "url" => "pos_production.php"],        
         
     ],
