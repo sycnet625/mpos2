@@ -1465,6 +1465,21 @@ foreach ($drafts as $draft) {
 $currentFileLabel = $selectedFileLabel !== '' ? $selectedFileLabel : (is_file($file) ? basename((string)$file) : 'Sin archivo');
 $hasUploadedFile = isset($_SESSION['recipe_import_file']) && is_string($_SESSION['recipe_import_file']) && is_file($_SESSION['recipe_import_file']);
 $isParsingReady = (bool)(!$isCli && is_file($file) && $uploadNoticeType !== 'danger');
+$allowedPerPage = [10, 20, 50, 100];
+$perPage = (int)($_GET['per_page'] ?? 20);
+if (!in_array($perPage, $allowedPerPage, true)) {
+    $perPage = 20;
+}
+$page = max(1, (int)($_GET['page'] ?? 1));
+$totalRecipes = count($drafts);
+$totalPages = max(1, (int)ceil($totalRecipes / max(1, $perPage)));
+if ($page > $totalPages) {
+    $page = $totalPages;
+}
+$pageOffset = ($page - 1) * $perPage;
+$pagedDrafts = array_slice($drafts, $pageOffset, $perPage);
+$pageFrom = $totalRecipes > 0 ? ($pageOffset + 1) : 0;
+$pageTo = min($pageOffset + $perPage, $totalRecipes);
 
 $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
 
@@ -1567,6 +1582,15 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
         .similarity-line + .similarity-line {
             margin-top: 2px;
         }
+        .floating-import-btn {
+            position: fixed;
+            left: 16px;
+            bottom: 16px;
+            z-index: 1080;
+            border-radius: 999px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, .25);
+            padding: 10px 16px;
+        }
     </style>
 </head>
 <body>
@@ -1582,6 +1606,9 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
         <div>
             <a href="dashboard.php" class="btn btn-outline-secondary btn-sm me-2" title="Menú principal">
                 <i class="fas fa-home me-1"></i> Inicio
+            </a>
+            <a href="main_menu.php" class="btn btn-outline-info btn-sm me-2" title="Main menu">
+                <i class="fas fa-th-large me-1"></i> Main Menu
             </a>
             <button class="btn btn-outline-primary" id="openReload" <?php echo $isParsingReady ? '' : 'disabled'; ?>>Reanalizar</button>
         </div>
@@ -1647,13 +1674,39 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
         </div>
     <?php endif; ?>
 
-    <div class="mb-3">
-        <button class="btn btn-success" id="applySelected" <?php echo $token !== '' ? '' : 'disabled'; ?>>Importar recetas aprobadas</button>
-        <span id="applyStatus" class="ms-2 text-muted"></span>
+    <div class="row g-2 mb-3 align-items-center">
+        <div class="col-12 col-md-3">
+            <label class="form-label mb-0">Registros por página</label>
+            <select id="perPageSelect" class="form-select form-select-sm">
+                <?php foreach ($allowedPerPage as $v): ?>
+                    <option value="<?php echo (int)$v; ?>" <?php echo $perPage === $v ? 'selected' : ''; ?>><?php echo (int)$v; ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-12 col-md-9">
+            <div class="d-flex justify-content-md-end align-items-center flex-wrap gap-2">
+                <span class="text-muted small">Página <?php echo (int)$page; ?> de <?php echo (int)$totalPages; ?> · Mostrando <?php echo (int)$pageFrom; ?> - <?php echo (int)$pageTo; ?> de <?php echo (int)$totalRecipes; ?></span>
+                <a class="btn btn-outline-secondary btn-sm <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page - 1]); ?>">Anterior</a>
+                <a class="btn btn-outline-secondary btn-sm <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page + 1]); ?>">Siguiente</a>
+            </div>
+            <span id="applyStatus" class="small text-muted ms-md-2"></span>
+        </div>
+    </div>
+
+    <div class="d-flex justify-content-center mb-2">
+        <?php for ($p = 1; $p <= $totalPages; $p++): ?>
+            <a
+                class="btn btn-sm btn-<?php echo $p === $page ? 'primary' : 'outline-secondary'; ?> me-1"
+                href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $p]); ?>"
+            >
+                <?php echo (int)$p; ?>
+            </a>
+        <?php endfor; ?>
     </div>
 
     <div id="recipesWrap" class="row g-2">
-        <?php foreach ($drafts as $i => $draft):
+        <?php foreach ($pagedDrafts as $localIdx => $draft):
+            $i = $pageOffset + $localIdx;
             $final = $draft['final_product'];
             $finalCode = $final['code'] ?? '';
             $finalNeeds = (bool)($final['needs_manual'] ?? false);
@@ -1815,6 +1868,10 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
         <?php endforeach; ?>
     </div>
 </div>
+
+<button id="applySelected" class="btn btn-success floating-import-btn" type="button" <?php echo $token !== '' ? '' : 'disabled'; ?>>
+    <i class="fas fa-file-import me-1"></i> Importar recetas aprobadas
+</button>
 
 <div class="modal fade" id="searchPickerModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -2020,6 +2077,17 @@ queryInput.addEventListener('input', () => {
         searchProducts(q);
     }, 220);
 });
+
+const perPageSelect = document.getElementById('perPageSelect');
+if (perPageSelect) {
+    perPageSelect.addEventListener('change', () => {
+        const val = parseInt(perPageSelect.value || '20', 10);
+        const params = new URLSearchParams(window.location.search);
+        params.set('per_page', String(isNaN(val) ? 20 : val));
+        params.set('page', '1');
+        window.location.href = 'importar_recetas_palweb_ok.php?' + params.toString();
+    });
+}
 
 document.getElementById('saveNewFinalBtn').addEventListener('click', async () => {
     const name = (document.getElementById('createName').value || '').trim();
