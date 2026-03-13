@@ -2022,7 +2022,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
         </div>
         <div class="mt-2">
         <label class="form-label">Categoría</label>
-          <input id="createCategory" class="form-control" value="Elaborado">
+          <input id="createCategory" class="form-control" value="Insumos">
         </div>
         <div class="row g-2 mt-2">
           <div class="col-8">
@@ -2286,7 +2286,7 @@ function openFinalCreate(recipeIdx) {
     if (customUnit) {
         customUnit.value = '';
     }
-    document.getElementById('createCategory').value = 'Elaborado';
+    document.getElementById('createCategory').value = 'Insumos';
     pickerMode = {
         type: 'create_final',
         recipe: recipeIdx,
@@ -2652,7 +2652,7 @@ document.getElementById('saveNewFinalBtn').addEventListener('click', async () =>
     if (unit === 'otro') {
         unit = (document.getElementById('createUnitOther')?.value || '').trim();
     }
-    const category = (document.getElementById('createCategory').value || 'Elaborado').trim();
+    const category = (document.getElementById('createCategory').value || 'Insumos').trim();
 
     if (!name) {
         alert('Ingrese nombre');
