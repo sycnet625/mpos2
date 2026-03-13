@@ -36,7 +36,14 @@ if (!$isCli) {
     }
 
     foreach ($uploadDirCandidates as $candidate) {
+        if ($candidate === '') {
+            continue;
+        }
+        $parent = dirname($candidate);
         if (!is_dir($candidate)) {
+            if (!is_dir($parent) || !is_writable($parent)) {
+                continue;
+            }
             if (!@mkdir($candidate, 0755, true) && !is_dir($candidate)) {
                 continue;
             }
