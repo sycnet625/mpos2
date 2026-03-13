@@ -241,33 +241,67 @@ function scoreTokens(array $leftTokens, array $rightTokens): float
     return max($containment, ($jaccard * 0.7) + ($containment * 0.3));
 }
 
-function scoreProductSimilarity(array $product, string $rawName): float
+function explainProductSimilarity(array $product, string $rawName): array
 {
     $targetNorm = normalizeSearchText($rawName);
     $targetFingerprint = buildNameFingerprint($rawName);
     $targetCompact = compactName($rawName);
     $targetTokens = tokenizeName($rawName);
     if ($targetNorm === '') {
-        return 0.0;
+        return [
+            'score' => 0.0,
+            'token_score' => 0.0,
+            'compact_score' => 0.0,
+            'excel_tokens' => [],
+            'product_tokens' => [],
+            'common_tokens' => [],
+            'reason' => 'texto_vacio',
+        ];
     }
 
     $nameNorm = (string)($product['_search_norm'] ?? normalizeSearchText((string)($product['nombre'] ?? '')));
     $fingerprint = (string)($product['_search_fingerprint'] ?? buildNameFingerprint((string)($product['nombre'] ?? '')));
     $compact = (string)($product['_search_compact'] ?? compactName((string)($product['nombre'] ?? '')));
     $tokens = (array)($product['_search_tokens'] ?? tokenizeName((string)($product['nombre'] ?? '')));
+    $commonTokens = array_values(array_intersect($targetTokens, $tokens));
+
+    $reason = 'similaridad';
+    $tokenScore = 0.0;
+    $compactScore = 0.0;
+    $finalScore = 0.0;
 
     if ($targetNorm === $nameNorm || ($targetFingerprint !== '' && $targetFingerprint === $fingerprint)) {
-        return 1.0;
+        $reason = $targetNorm === $nameNorm ? 'exacto' : 'frase';
+        $tokenScore = 1.0;
+        $compactScore = 1.0;
+        $finalScore = 1.0;
+    } else {
+        $tokenScore = scoreTokens($targetTokens, $tokens);
+        $compactScore = compareCompactStrings($targetCompact, $compact);
+
+        if ($targetCompact !== '' && $compact !== '' && (str_contains($compact, $targetCompact) || str_contains($targetCompact, $compact))) {
+            $compactScore = max($compactScore, 0.92);
+            $reason = 'contencion';
+        }
+
+        $finalScore = max($tokenScore, ($tokenScore * 0.65) + ($compactScore * 0.35), $compactScore);
     }
 
-    $tokenScore = scoreTokens($targetTokens, $tokens);
-    $compactScore = compareCompactStrings($targetCompact, $compact);
+    return [
+        'score' => round($finalScore, 4),
+        'token_score' => round($tokenScore, 4),
+        'compact_score' => round($compactScore, 4),
+        'excel_tokens' => $targetTokens,
+        'product_tokens' => $tokens,
+        'common_tokens' => $commonTokens,
+        'reason' => $reason,
+    ];
+}
 
-    if ($targetCompact !== '' && $compact !== '' && (str_contains($compact, $targetCompact) || str_contains($targetCompact, $compact))) {
-        $compactScore = max($compactScore, 0.92);
-    }
-
-    return max($tokenScore, ($tokenScore * 0.65) + ($compactScore * 0.35), $compactScore);
+function scoreProductSimilarity(array $product, string $rawName): float
+{
+    $explanation = explainProductSimilarity($product, $rawName);
+    return floatval($explanation['score'] ?? 0.0);
 }
 
 function publicProductSuggestion(array $product): array
@@ -281,6 +315,7 @@ function publicProductSuggestion(array $product): array
         'categoria' => (string)($product['categoria'] ?? ''),
         'image' => productImage((string)$product['codigo']),
         'score' => round(floatval($product['_score'] ?? 0), 3),
+        'why' => is_array($product['_why'] ?? null) ? $product['_why'] : null,
     ];
 }
 
@@ -419,11 +454,13 @@ function findSuggestedProducts(array $productsList, string $rawName, int $limit 
 
     $scored = [];
     foreach ($productsList as $product) {
-        $score = scoreProductSimilarity($product, $raw);
+        $why = explainProductSimilarity($product, $raw);
+        $score = floatval($why['score'] ?? 0);
         if ($score < $minScore) {
             continue;
         }
         $product['_score'] = $score;
+        $product['_why'] = $why;
         $scored[] = $product;
     }
 
@@ -455,6 +492,15 @@ function resolveProductByNameOrCode(
         $match = $productsByCode[$raw];
         $match['_match_mode'] = 'codigo';
         $match['_match_score'] = 1.0;
+        $match['_match_why'] = [
+            'score' => 1.0,
+            'token_score' => 1.0,
+            'compact_score' => 1.0,
+            'excel_tokens' => tokenizeName($raw),
+            'product_tokens' => (array)($match['_search_tokens'] ?? tokenizeName((string)($match['nombre'] ?? ''))),
+            'common_tokens' => (array)($match['_search_tokens'] ?? tokenizeName((string)($match['nombre'] ?? ''))),
+            'reason' => 'codigo',
+        ];
         return $match;
     }
 
@@ -463,6 +509,7 @@ function resolveProductByNameOrCode(
         $match = $productsByNorm[$norm];
         $match['_match_mode'] = 'exacto';
         $match['_match_score'] = 1.0;
+        $match['_match_why'] = explainProductSimilarity($match, $raw);
         return $match;
     }
 
@@ -471,6 +518,7 @@ function resolveProductByNameOrCode(
         $match = $productsByFingerprint[$fingerprint];
         $match['_match_mode'] = 'frase';
         $match['_match_score'] = 0.99;
+        $match['_match_why'] = explainProductSimilarity($match, $raw);
         return $match;
     }
 
@@ -485,6 +533,7 @@ function resolveProductByNameOrCode(
     if ($bestScore >= 0.93 && ($bestScore - $secondScore) >= 0.08) {
         $best['_match_mode'] = 'similar';
         $best['_match_score'] = $bestScore;
+        $best['_match_why'] = is_array($best['_why'] ?? null) ? $best['_why'] : explainProductSimilarity($best, $raw);
         return $best;
     }
 
@@ -732,6 +781,7 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
                 'resolved_cost' => $resolved['costo'] ?? null,
                 'resolved_mode' => (string)($match['_match_mode'] ?? ''),
                 'resolved_score' => isset($match['_match_score']) ? round(floatval($match['_match_score']), 3) : null,
+                'resolved_why' => is_array($match['_match_why'] ?? null) ? $match['_match_why'] : null,
                 'suggestions' => $suggestions,
                 'needs_manual' => $resolvedCode === null,
             ];
@@ -820,6 +870,7 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
                 'resolved_cost' => isset($finalMatch['costo']) ? floatval($finalMatch['costo']) : null,
                 'resolved_mode' => (string)($finalMatch['_match_mode'] ?? ''),
                 'resolved_score' => isset($finalMatch['_match_score']) ? round(floatval($finalMatch['_match_score']), 3) : null,
+                'resolved_why' => is_array($finalMatch['_match_why'] ?? null) ? $finalMatch['_match_why'] : null,
                 'suggestions' => $finalSuggestions,
                 'needs_manual' => $finalCode === null,
                 'unit' => 'u',
@@ -1422,6 +1473,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
     <meta charset="utf-8">
     <title>Importar recetas desde Excel (interactivo)</title>
     <link rel="stylesheet" href="assets/css/bootstrap.min.css">
+    <link rel="stylesheet" href="assets/css/all.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -1478,6 +1530,41 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             border-color: #0d6efd;
             color: #0d6efd;
         }
+        .similarity-details {
+            margin-top: 6px;
+        }
+        .similarity-details summary {
+            cursor: pointer;
+            color: #0d6efd;
+            font-size: .8rem;
+            user-select: none;
+            list-style: none;
+        }
+        .similarity-details summary::-webkit-details-marker {
+            display: none;
+        }
+        .similarity-details summary::before {
+            content: '+ ';
+            font-weight: 700;
+        }
+        .similarity-details[open] summary::before {
+            content: '- ';
+        }
+        .similarity-panel {
+            margin-top: 6px;
+            padding: 8px 10px;
+            border: 1px dashed #cbd5e1;
+            border-radius: 8px;
+            background: #f8fafc;
+            font-size: .8rem;
+            color: #475569;
+        }
+        .similarity-panel strong {
+            color: #0f172a;
+        }
+        .similarity-line + .similarity-line {
+            margin-top: 2px;
+        }
     </style>
 </head>
 <body>
@@ -1491,6 +1578,9 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             <?php endif; ?>
         </div>
         <div>
+            <a href="dashboard.php" class="btn btn-outline-secondary btn-sm me-2" title="Menú principal">
+                <i class="fas fa-home me-1"></i> Inicio
+            </a>
             <button class="btn btn-outline-primary" id="openReload" <?php echo $isParsingReady ? '' : 'disabled'; ?>>Reanalizar</button>
         </div>
     </div>
@@ -1604,17 +1694,41 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                 <div class="small text-muted mt-2">Sugerencias parecidas:</div>
                                 <div class="d-flex flex-wrap gap-1 mt-1">
                                     <?php foreach ((array)$final['suggestions'] as $suggestion): ?>
-                                        <button
-                                            type="button"
-                                            class="suggestion-chip"
-                                            onclick="pickSuggestedProduct(<?php echo $i; ?>, null, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
-                                        >
-                                            <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
-                                        </button>
+                                        <div>
+                                            <button
+                                                type="button"
+                                                class="suggestion-chip"
+                                                onclick="pickSuggestedProduct(<?php echo $i; ?>, null, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                            >
+                                                <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
+                                            </button>
+                                            <?php if (!empty($suggestion['why']) && is_array($suggestion['why'])): ?>
+                                                <details class="similarity-details">
+                                                    <summary>Ver por que</summary>
+                                                    <div class="similarity-panel">
+                                                        <div class="similarity-line"><strong>Score:</strong> <?php echo number_format((float)($suggestion['why']['score'] ?? 0), 2); ?> | <strong>Motivo:</strong> <?php echo htmlspecialchars((string)($suggestion['why']['reason'] ?? 'similaridad')); ?></div>
+                                                        <div class="similarity-line"><strong>Coinciden:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['common_tokens'] ?? [])) ?: 'sin tokens comunes'); ?></div>
+                                                        <div class="similarity-line"><strong>Excel:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['excel_tokens'] ?? []))); ?></div>
+                                                        <div class="similarity-line"><strong>BD:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['product_tokens'] ?? []))); ?></div>
+                                                    </div>
+                                                </details>
+                                            <?php endif; ?>
+                                        </div>
                                     <?php endforeach; ?>
                                 </div>
                             <?php elseif ($finalNeeds): ?>
                                 <div class="small text-danger mt-2">Sin parecido claro. El sistema necesita que el usuario seleccione el producto correcto.</div>
+                            <?php endif; ?>
+                            <?php if (!$finalNeeds && !empty($final['resolved_why']) && is_array($final['resolved_why']) && !in_array($final['resolved_mode'], ['exacto', 'codigo'], true)): ?>
+                                <details class="similarity-details">
+                                    <summary>Ver por que</summary>
+                                    <div class="similarity-panel">
+                                        <div class="similarity-line"><strong>Por que se parecio:</strong> score <?php echo number_format((float)($final['resolved_why']['score'] ?? 0), 2); ?> | <?php echo htmlspecialchars((string)($final['resolved_why']['reason'] ?? 'similaridad')); ?></div>
+                                        <div class="similarity-line"><strong>Coinciden:</strong> <?php echo htmlspecialchars(implode(', ', (array)($final['resolved_why']['common_tokens'] ?? [])) ?: 'sin tokens comunes'); ?></div>
+                                        <div class="similarity-line"><strong>Excel:</strong> <?php echo htmlspecialchars(implode(', ', (array)($final['resolved_why']['excel_tokens'] ?? []))); ?></div>
+                                        <div class="similarity-line"><strong>BD:</strong> <?php echo htmlspecialchars(implode(', ', (array)($final['resolved_why']['product_tokens'] ?? []))); ?></div>
+                                    </div>
+                                </details>
                             <?php endif; ?>
                         </div>
                         <div class="small text-muted">Costo lote: <strong><?php echo number_format((float)$draft['cost_total'], 2); ?></strong> · Costo unitario: <strong><?php echo number_format((float)$draft['cost_unit'], 2); ?></strong> · Venta sugerida: <strong><?php echo number_format((float)$draft['sale_price'], 2); ?></strong></div>
@@ -1637,16 +1751,40 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                             <?php if (!$needsManual && !empty($it['resolved_mode']) && !in_array($it['resolved_mode'], ['exacto', 'codigo'], true)): ?>
                                                 <div class="small text-info">Auto reconocido por similitud: <?php echo htmlspecialchars((string)$it['resolved_mode']); ?> <?php echo number_format((float)($it['resolved_score'] ?? 0), 2); ?></div>
                                             <?php endif; ?>
+                                            <?php if (!$needsManual && !empty($it['resolved_why']) && is_array($it['resolved_why']) && !in_array($it['resolved_mode'], ['exacto', 'codigo'], true)): ?>
+                                                <details class="similarity-details">
+                                                    <summary>Ver por que</summary>
+                                                    <div class="similarity-panel">
+                                                        <div class="similarity-line"><strong>Por que se parecio:</strong> score <?php echo number_format((float)($it['resolved_why']['score'] ?? 0), 2); ?> | <?php echo htmlspecialchars((string)($it['resolved_why']['reason'] ?? 'similaridad')); ?></div>
+                                                        <div class="similarity-line"><strong>Coinciden:</strong> <?php echo htmlspecialchars(implode(', ', (array)($it['resolved_why']['common_tokens'] ?? [])) ?: 'sin tokens comunes'); ?></div>
+                                                        <div class="similarity-line"><strong>Excel:</strong> <?php echo htmlspecialchars(implode(', ', (array)($it['resolved_why']['excel_tokens'] ?? []))); ?></div>
+                                                        <div class="similarity-line"><strong>BD:</strong> <?php echo htmlspecialchars(implode(', ', (array)($it['resolved_why']['product_tokens'] ?? []))); ?></div>
+                                                    </div>
+                                                </details>
+                                            <?php endif; ?>
                                             <?php if ($needsManual && !empty($it['suggestions'])): ?>
                                                 <div class="d-flex flex-wrap gap-1 mt-1">
                                                     <?php foreach ((array)$it['suggestions'] as $suggestion): ?>
-                                                        <button
-                                                            type="button"
-                                                            class="suggestion-chip"
-                                                            onclick="pickSuggestedProduct(<?php echo $i; ?>, <?php echo $j; ?>, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
-                                                        >
-                                                            <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
-                                                        </button>
+                                                        <div>
+                                                            <button
+                                                                type="button"
+                                                                class="suggestion-chip"
+                                                                onclick="pickSuggestedProduct(<?php echo $i; ?>, <?php echo $j; ?>, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                                            >
+                                                                <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
+                                                            </button>
+                                                            <?php if (!empty($suggestion['why']) && is_array($suggestion['why'])): ?>
+                                                                <details class="similarity-details">
+                                                                    <summary>Ver por que</summary>
+                                                                    <div class="similarity-panel">
+                                                                        <div class="similarity-line"><strong>Score:</strong> <?php echo number_format((float)($suggestion['why']['score'] ?? 0), 2); ?> | <strong>Motivo:</strong> <?php echo htmlspecialchars((string)($suggestion['why']['reason'] ?? 'similaridad')); ?></div>
+                                                                        <div class="similarity-line"><strong>Coinciden:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['common_tokens'] ?? [])) ?: 'sin tokens comunes'); ?></div>
+                                                                        <div class="similarity-line"><strong>Excel:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['excel_tokens'] ?? []))); ?></div>
+                                                                        <div class="similarity-line"><strong>BD:</strong> <?php echo htmlspecialchars(implode(', ', (array)($suggestion['why']['product_tokens'] ?? []))); ?></div>
+                                                                    </div>
+                                                                </details>
+                                                            <?php endif; ?>
+                                                        </div>
                                                     <?php endforeach; ?>
                                                 </div>
                                             <?php elseif ($needsManual): ?>
