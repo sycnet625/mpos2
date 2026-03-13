@@ -1472,21 +1472,26 @@ foreach ($drafts as $draft) {
 $currentFileLabel = $selectedFileLabel !== '' ? $selectedFileLabel : (is_file($file) ? basename((string)$file) : 'Sin archivo');
 $hasUploadedFile = isset($_SESSION['recipe_import_file']) && is_string($_SESSION['recipe_import_file']) && is_file($_SESSION['recipe_import_file']);
 $isParsingReady = (bool)(!$isCli && is_file($file) && $uploadNoticeType !== 'danger');
-$allowedPerPage = [10, 20, 50, 100];
-$perPage = (int)($_GET['per_page'] ?? 10);
-if (!in_array($perPage, $allowedPerPage, true)) {
+$allowedPerPage = [10, 20, 50, 100, 0];
+$rawPerPage = (int)($_GET['per_page'] ?? 10);
+if ($rawPerPage === 0) {
+    $perPage = 0;
+} elseif (in_array($rawPerPage, [10, 20, 50, 100], true)) {
+    $perPage = $rawPerPage;
+} else {
     $perPage = 10;
 }
 $page = max(1, (int)($_GET['page'] ?? 1));
 $totalRecipes = count($drafts);
-$totalPages = max(1, (int)ceil($totalRecipes / max(1, $perPage)));
+$isAll = ($perPage === 0);
+$totalPages = $isAll ? 1 : max(1, (int)ceil($totalRecipes / max(1, $perPage)));
 if ($page > $totalPages) {
     $page = $totalPages;
 }
-$pageOffset = ($page - 1) * $perPage;
-$pagedDrafts = array_slice($drafts, $pageOffset, $perPage);
+$pageOffset = $isAll ? 0 : (($page - 1) * $perPage);
+$pagedDrafts = $isAll ? $drafts : array_slice($drafts, $pageOffset, $perPage);
 $pageFrom = $totalRecipes > 0 ? ($pageOffset + 1) : 0;
-$pageTo = min($pageOffset + $perPage, $totalRecipes);
+$pageTo = $isAll ? $totalRecipes : min($pageOffset + $perPage, $totalRecipes);
 
 $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
 
@@ -1686,21 +1691,32 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             <label class="form-label mb-0">Registros por página</label>
             <select id="perPageSelect" class="form-select form-select-sm">
                 <?php foreach ($allowedPerPage as $v): ?>
-                    <option value="<?php echo (int)$v; ?>" <?php echo $perPage === $v ? 'selected' : ''; ?>><?php echo (int)$v; ?></option>
+                    <option value="<?php echo (int)$v; ?>" <?php echo $perPage === $v ? 'selected' : ''; ?>>
+                        <?php echo $v === 0 ? 'Todas' : (int)$v; ?>
+                    </option>
                 <?php endforeach; ?>
             </select>
         </div>
         <div class="col-12 col-md-9">
             <div class="d-flex justify-content-md-end align-items-center flex-wrap gap-2">
-                <span class="text-muted small">Página <?php echo (int)$page; ?> de <?php echo (int)$totalPages; ?> · Mostrando <?php echo (int)$pageFrom; ?> - <?php echo (int)$pageTo; ?> de <?php echo (int)$totalRecipes; ?></span>
-                <a class="btn btn-outline-secondary btn-sm <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page - 1]); ?>">Anterior</a>
-                <a class="btn btn-outline-secondary btn-sm <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page + 1]); ?>">Siguiente</a>
+                <span class="text-muted small">
+                    <?php if ($isAll): ?>
+                        Mostrando todo: <?php echo (int)$pageFrom; ?> - <?php echo (int)$pageTo; ?> de <?php echo (int)$totalRecipes; ?>
+                    <?php else: ?>
+                        Página <?php echo (int)$page; ?> de <?php echo (int)$totalPages; ?> · Mostrando <?php echo (int)$pageFrom; ?> - <?php echo (int)$pageTo; ?> de <?php echo (int)$totalRecipes; ?>
+                    <?php endif; ?>
+                </span>
+                <?php if (!$isAll): ?>
+                    <a class="btn btn-outline-secondary btn-sm <?php echo $page <= 1 ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page - 1]); ?>">Anterior</a>
+                    <a class="btn btn-outline-secondary btn-sm <?php echo $page >= $totalPages ? 'disabled' : ''; ?>" href="<?php echo $token === '' ? '#' : 'importar_recetas_palweb_ok.php?' . http_build_query(['per_page' => $perPage, 'page' => $page + 1]); ?>">Siguiente</a>
+                <?php endif; ?>
                 <button type="button" class="btn btn-outline-secondary btn-sm" id="toggleCardsBtn">Expandir todas</button>
             </div>
             <span id="applyStatus" class="small text-muted ms-md-2"></span>
         </div>
     </div>
 
+    <?php if (!$isAll): ?>
     <div class="d-flex justify-content-center mb-2">
         <?php for ($p = 1; $p <= $totalPages; $p++): ?>
             <a
@@ -1711,6 +1727,7 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             </a>
         <?php endfor; ?>
     </div>
+    <?php endif; ?>
 
     <div id="recipesWrap" class="row g-2">
         <?php foreach ($pagedDrafts as $localIdx => $draft):
