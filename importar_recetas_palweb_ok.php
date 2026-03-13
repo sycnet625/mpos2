@@ -1180,6 +1180,9 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
             $price = floatval($in['price'] ?? 0);
             $unit = trim((string)($in['unit'] ?? 'u'));
             $cat = trim((string)($in['category'] ?? 'Insumos'));
+            if ($cat === '') {
+                $cat = 'Insumos';
+            }
             $code = trim((string)($in['code'] ?? '')) ?: generateCode($name, $productsByCode, $pdo, $EMP_ID);
 
             [$isElab, $isMp] = deriveFlags($cat, true);
