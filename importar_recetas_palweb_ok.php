@@ -142,6 +142,164 @@ function normalizeName(string $name): string
     return mb_strtolower(trim($name), 'UTF-8');
 }
 
+function stripAccents(string $value): string
+{
+    $map = [
+        'a' => ['á', 'à', 'ä', 'â', 'ã', 'å'],
+        'e' => ['é', 'è', 'ë', 'ê'],
+        'i' => ['í', 'ì', 'ï', 'î'],
+        'o' => ['ó', 'ò', 'ö', 'ô', 'õ'],
+        'u' => ['ú', 'ù', 'ü', 'û'],
+        'n' => ['ñ'],
+        'c' => ['ç'],
+    ];
+    foreach ($map as $to => $chars) {
+        $value = str_replace($chars, $to, $value);
+    }
+    return $value;
+}
+
+function normalizeSearchText(string $name): string
+{
+    $name = normalizeName($name);
+    $name = stripAccents($name);
+    $name = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $name) ?? $name;
+    $name = preg_replace('/\s+/', ' ', $name) ?? $name;
+    return trim($name);
+}
+
+function normalizeToken(string $token): string
+{
+    $token = normalizeSearchText($token);
+    if ($token === '') {
+        return '';
+    }
+    $stopWords = [
+        'de', 'del', 'la', 'las', 'el', 'los', 'y', 'e', 'con', 'sin', 'para', 'por', 'en', 'al',
+        'un', 'una', 'unos', 'unas',
+    ];
+    if (in_array($token, $stopWords, true)) {
+        return '';
+    }
+    if (mb_strlen($token, 'UTF-8') > 4 && preg_match('/(es|s)$/u', $token)) {
+        $trimmed = preg_replace('/(es|s)$/u', '', $token) ?? $token;
+        if (mb_strlen($trimmed, 'UTF-8') >= 3) {
+            $token = $trimmed;
+        }
+    }
+    return $token;
+}
+
+function tokenizeName(string $name): array
+{
+    $tokens = preg_split('/\s+/', normalizeSearchText($name)) ?: [];
+    $out = [];
+    foreach ($tokens as $token) {
+        $normalized = normalizeToken($token);
+        if ($normalized !== '') {
+            $out[$normalized] = true;
+        }
+    }
+    $result = array_keys($out);
+    sort($result, SORT_STRING);
+    return $result;
+}
+
+function buildNameFingerprint(string $name): string
+{
+    return implode(' ', tokenizeName($name));
+}
+
+function compactName(string $name): string
+{
+    return str_replace(' ', '', normalizeSearchText($name));
+}
+
+function compareCompactStrings(string $left, string $right): float
+{
+    if ($left === '' || $right === '') {
+        return 0.0;
+    }
+    if ($left === $right) {
+        return 1.0;
+    }
+    similar_text($left, $right, $percent);
+    return max(0.0, min(1.0, $percent / 100.0));
+}
+
+function scoreTokens(array $leftTokens, array $rightTokens): float
+{
+    if (count($leftTokens) === 0 || count($rightTokens) === 0) {
+        return 0.0;
+    }
+    $leftMap = array_fill_keys($leftTokens, true);
+    $rightMap = array_fill_keys($rightTokens, true);
+    $intersection = count(array_intersect_key($leftMap, $rightMap));
+    $union = count($leftMap + $rightMap);
+    $containment = $intersection / max(1, min(count($leftTokens), count($rightTokens)));
+    $jaccard = $intersection / max(1, $union);
+    return max($containment, ($jaccard * 0.7) + ($containment * 0.3));
+}
+
+function scoreProductSimilarity(array $product, string $rawName): float
+{
+    $targetNorm = normalizeSearchText($rawName);
+    $targetFingerprint = buildNameFingerprint($rawName);
+    $targetCompact = compactName($rawName);
+    $targetTokens = tokenizeName($rawName);
+    if ($targetNorm === '') {
+        return 0.0;
+    }
+
+    $nameNorm = (string)($product['_search_norm'] ?? normalizeSearchText((string)($product['nombre'] ?? '')));
+    $fingerprint = (string)($product['_search_fingerprint'] ?? buildNameFingerprint((string)($product['nombre'] ?? '')));
+    $compact = (string)($product['_search_compact'] ?? compactName((string)($product['nombre'] ?? '')));
+    $tokens = (array)($product['_search_tokens'] ?? tokenizeName((string)($product['nombre'] ?? '')));
+
+    if ($targetNorm === $nameNorm || ($targetFingerprint !== '' && $targetFingerprint === $fingerprint)) {
+        return 1.0;
+    }
+
+    $tokenScore = scoreTokens($targetTokens, $tokens);
+    $compactScore = compareCompactStrings($targetCompact, $compact);
+
+    if ($targetCompact !== '' && $compact !== '' && (str_contains($compact, $targetCompact) || str_contains($targetCompact, $compact))) {
+        $compactScore = max($compactScore, 0.92);
+    }
+
+    return max($tokenScore, ($tokenScore * 0.65) + ($compactScore * 0.35), $compactScore);
+}
+
+function publicProductSuggestion(array $product): array
+{
+    return [
+        'codigo' => (string)$product['codigo'],
+        'nombre' => (string)$product['nombre'],
+        'precio' => floatval($product['precio'] ?? 0),
+        'costo' => floatval($product['costo'] ?? 0),
+        'unidad' => (string)($product['unidad_medida'] ?? ''),
+        'categoria' => (string)($product['categoria'] ?? ''),
+        'image' => productImage((string)$product['codigo']),
+        'score' => round(floatval($product['_score'] ?? 0), 3),
+    ];
+}
+
+function hasExactProductConflict(array $productsByNorm, array $productsByFingerprint, array $productsByCode, string $name, ?string $code = null): bool
+{
+    $normalized = normalizeName($name);
+    $fingerprint = buildNameFingerprint($name);
+    if ($code !== null && $code !== '' && isset($productsByCode[$code])) {
+        return true;
+    }
+    if ($normalized !== '' && isset($productsByNorm[$normalized])) {
+        return true;
+    }
+    if ($fingerprint !== '' && isset($productsByFingerprint[$fingerprint])) {
+        return true;
+    }
+    return false;
+}
+
 function cleanIngredientName(string $name): string
 {
     $name = trim($name);
@@ -252,7 +410,41 @@ function generateCode(string $name, array &$productsByCode, PDO $pdo, int $empId
     }
 }
 
-function resolveProductByNameOrCode(array $productsByNorm, array $productsByCode, string $rawName): ?array
+function findSuggestedProducts(array $productsList, string $rawName, int $limit = 5, float $minScore = 0.55): array
+{
+    $raw = trim($rawName);
+    if ($raw === '') {
+        return [];
+    }
+
+    $scored = [];
+    foreach ($productsList as $product) {
+        $score = scoreProductSimilarity($product, $raw);
+        if ($score < $minScore) {
+            continue;
+        }
+        $product['_score'] = $score;
+        $scored[] = $product;
+    }
+
+    usort($scored, static function (array $left, array $right): int {
+        $scoreCmp = ($right['_score'] ?? 0) <=> ($left['_score'] ?? 0);
+        if ($scoreCmp !== 0) {
+            return $scoreCmp;
+        }
+        return strcmp((string)($left['nombre'] ?? ''), (string)($right['nombre'] ?? ''));
+    });
+
+    return array_slice($scored, 0, $limit);
+}
+
+function resolveProductByNameOrCode(
+    array $productsByNorm,
+    array $productsByCode,
+    array $productsByFingerprint,
+    array $productsList,
+    string $rawName
+): ?array
 {
     $raw = trim($rawName);
     if ($raw === '') {
@@ -260,11 +452,43 @@ function resolveProductByNameOrCode(array $productsByNorm, array $productsByCode
     }
 
     if (isset($productsByCode[$raw])) {
-        return $productsByCode[$raw];
+        $match = $productsByCode[$raw];
+        $match['_match_mode'] = 'codigo';
+        $match['_match_score'] = 1.0;
+        return $match;
     }
 
     $norm = normalizeName(cleanIngredientName($raw));
-    return $productsByNorm[$norm] ?? null;
+    if (isset($productsByNorm[$norm])) {
+        $match = $productsByNorm[$norm];
+        $match['_match_mode'] = 'exacto';
+        $match['_match_score'] = 1.0;
+        return $match;
+    }
+
+    $fingerprint = buildNameFingerprint($raw);
+    if ($fingerprint !== '' && isset($productsByFingerprint[$fingerprint])) {
+        $match = $productsByFingerprint[$fingerprint];
+        $match['_match_mode'] = 'frase';
+        $match['_match_score'] = 0.99;
+        return $match;
+    }
+
+    $suggestions = findSuggestedProducts($productsList, $raw, 2, 0.78);
+    if (count($suggestions) === 0) {
+        return null;
+    }
+
+    $best = $suggestions[0];
+    $secondScore = isset($suggestions[1]['_score']) ? floatval($suggestions[1]['_score']) : 0.0;
+    $bestScore = floatval($best['_score'] ?? 0);
+    if ($bestScore >= 0.93 && ($bestScore - $secondScore) >= 0.08) {
+        $best['_match_mode'] = 'similar';
+        $best['_match_score'] = $bestScore;
+        return $best;
+    }
+
+    return null;
 }
 
 function productImage(string $code): string
@@ -302,20 +526,41 @@ function loadProducts(PDO $pdo, int $empId): array
                                       FROM productos WHERE id_empresa = ?');
     $stmtAllProducts->execute([$empId]);
     $productsByNorm = [];
+    $productsByFingerprint = [];
     $productsByCode = [];
+    $productsList = [];
     foreach ($stmtAllProducts->fetchAll(PDO::FETCH_ASSOC) as $p) {
         $norm = normalizeName((string)$p['nombre']);
+        $fingerprint = buildNameFingerprint((string)$p['nombre']);
+        $p['_search_norm'] = normalizeSearchText((string)$p['nombre']);
+        $p['_search_tokens'] = tokenizeName((string)$p['nombre']);
+        $p['_search_fingerprint'] = $fingerprint;
+        $p['_search_compact'] = compactName((string)$p['nombre']);
         if (!isset($productsByNorm[$norm])) {
             $productsByNorm[$norm] = $p;
         }
+        if ($fingerprint !== '' && !isset($productsByFingerprint[$fingerprint])) {
+            $productsByFingerprint[$fingerprint] = $p;
+        }
         $productsByCode[$p['codigo']] = $p;
+        $productsList[] = $p;
     }
 
-    return ['byNorm' => $productsByNorm, 'byCode' => $productsByCode];
+    return ['byNorm' => $productsByNorm, 'byFingerprint' => $productsByFingerprint, 'byCode' => $productsByCode, 'list' => $productsList];
 }
 
 function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $productsByCode, PDO $pdo, int $empId): array
 {
+    $loadedProductsMeta = [
+        'byFingerprint' => [],
+        'list' => array_values($productsByCode),
+    ];
+    if (isset($GLOBALS['recipe_import_loaded_products']) && is_array($GLOBALS['recipe_import_loaded_products'])) {
+        $loadedProductsMeta = array_merge($loadedProductsMeta, $GLOBALS['recipe_import_loaded_products']);
+    }
+    $productsByFingerprint = (array)($loadedProductsMeta['byFingerprint'] ?? []);
+    $productsList = (array)($loadedProductsMeta['list'] ?? []);
+
     $stmtFindRecipe = $pdo->prepare('SELECT id FROM recetas_cabecera WHERE nombre_receta = ? LIMIT 1');
 
     $stats = [
@@ -360,7 +605,7 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
             }
             $unit = trim((string)$insumosSheet->getCell($colUnit . $row)->getValue());
             $cat = trim((string)$insumosSheet->getCell($colCat . $row)->getValue());
-            $match = resolveProductByNameOrCode($productsByNorm, $productsByCode, $name);
+            $match = resolveProductByNameOrCode($productsByNorm, $productsByCode, $productsByFingerprint, $productsList, $name);
             if ($match) {
                 $stats['insumos_matched']++;
             } else {
@@ -449,7 +694,11 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
             $unitCell = $colUnit ? (string)$ws->getCell($colUnit . $r)->getCalculatedValue() : '';
             $unit = inferUnit($nameRaw, $unitCell);
             $lineCost = $colCost ? parseNum($ws->getCell($colCost . $r)->getCalculatedValue()) : null;
-            $match = resolveProductByNameOrCode($productsByNorm, $productsByCode, $nameRaw);
+            $match = resolveProductByNameOrCode($productsByNorm, $productsByCode, $productsByFingerprint, $productsList, $nameRaw);
+            $suggestions = [];
+            if (!$match) {
+                $suggestions = array_map('publicProductSuggestion', findSuggestedProducts($productsList, $nameRaw));
+            }
 
             $resolvedCode = null;
             $resolved = null;
@@ -481,6 +730,9 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
                 'resolved_name' => $resolved['nombre'] ?? null,
                 'resolved_price' => $resolved['precio'] ?? null,
                 'resolved_cost' => $resolved['costo'] ?? null,
+                'resolved_mode' => (string)($match['_match_mode'] ?? ''),
+                'resolved_score' => isset($match['_match_score']) ? round(floatval($match['_match_score']), 3) : null,
+                'suggestions' => $suggestions,
                 'needs_manual' => $resolvedCode === null,
             ];
 
@@ -542,8 +794,12 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
         }
         $costUnit = ($units > 0) ? ($costTotal / $units) : $costTotal;
 
-        $finalMatch = resolveProductByNameOrCode($productsByNorm, $productsByCode, $recipeName);
+        $finalMatch = resolveProductByNameOrCode($productsByNorm, $productsByCode, $productsByFingerprint, $productsList, $recipeName);
         $finalCode = is_array($finalMatch) ? (string)$finalMatch['codigo'] : null;
+        $finalSuggestions = [];
+        if (!$finalMatch) {
+            $finalSuggestions = array_map('publicProductSuggestion', findSuggestedProducts($productsList, $recipeName));
+        }
 
         $stmtFindRecipe->execute([$recipeName]);
         $existingRecipeId = $stmtFindRecipe->fetchColumn();
@@ -562,6 +818,9 @@ function parseDrafts(Spreadsheet $spreadsheet, array $productsByNorm, array $pro
                 'resolved_name' => $finalMatch['nombre'] ?? null,
                 'resolved_price' => isset($finalMatch['precio']) ? floatval($finalMatch['precio']) : null,
                 'resolved_cost' => isset($finalMatch['costo']) ? floatval($finalMatch['costo']) : null,
+                'resolved_mode' => (string)($finalMatch['_match_mode'] ?? ''),
+                'resolved_score' => isset($finalMatch['_match_score']) ? round(floatval($finalMatch['_match_score']), 3) : null,
+                'suggestions' => $finalSuggestions,
                 'needs_manual' => $finalCode === null,
                 'unit' => 'u',
             ],
@@ -850,8 +1109,10 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
             $loaded = loadProducts($pdo, $EMP_ID);
             $productsByCode = &$loaded['byCode'];
             $productsByNorm = &$loaded['byNorm'];
+            $productsByFingerprint = &$loaded['byFingerprint'];
+            $productsList = &$loaded['list'];
 
-            if (resolveProductByNameOrCode($productsByNorm, $productsByCode, $name)) {
+            if (hasExactProductConflict($productsByNorm, $productsByFingerprint, $productsByCode, $name, trim((string)($in['code'] ?? '')))) {
                 jsonOut(['status' => 'error', 'msg' => 'Ya existe un producto con ese nombre o código']);
             }
 
@@ -939,6 +1200,7 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
         $loaded = loadProducts($pdo, $EMP_ID);
         $productsByCode = $loaded['byCode'];
         $productsByNorm = $loaded['byNorm'];
+        $GLOBALS['recipe_import_loaded_products'] = $loaded;
 
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
@@ -1017,6 +1279,7 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
         $loadedProducts = loadProducts($pdo, $EMP_ID);
         $productsByNorm = $loadedProducts['byNorm'];
         $productsByCode = $loadedProducts['byCode'];
+        $GLOBALS['recipe_import_loaded_products'] = $loadedProducts;
 
         try {
             $spreadsheet = loadRecipeSpreadsheet($file);
@@ -1202,6 +1465,19 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
             border-radius: 8px;
             border: 1px solid #d6dce5;
         }
+        .suggestion-chip {
+            border: 1px solid #cfd8e3;
+            background: #f8fafc;
+            color: #1f2937;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: .8rem;
+            cursor: pointer;
+        }
+        .suggestion-chip:hover {
+            border-color: #0d6efd;
+            color: #0d6efd;
+        }
     </style>
 </head>
 <body>
@@ -1311,13 +1587,34 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                     <div class="card-body">
                         <div class="mb-2">
                             <strong>Producto final:</strong>
-                            <span id="finalLabel-<?php echo $i; ?>"><?php echo htmlspecialchars($finalCode === '' ? 'Pendiente asignar' : $finalCode . ' - ' . ($final['resolved_name'] ?? 'Producto encontrado')); ?></span>
+                            <span id="finalLabel-<?php echo $i; ?>"><?php echo htmlspecialchars($finalCode === '' ? 'Pendiente asignar' : $finalCode . ' - ' . ($final['resolved_name'] ?? $final['name'] ?? 'Producto encontrado')); ?></span>
+                            <?php if (!empty($final['resolved_mode']) && !in_array($final['resolved_mode'], ['exacto', 'codigo'], true)): ?>
+                                <span class="badge text-bg-info ms-1">
+                                    <?php echo htmlspecialchars('Auto: ' . $final['resolved_mode'] . ' ' . number_format((float)($final['resolved_score'] ?? 0), 2)); ?>
+                                </span>
+                            <?php endif; ?>
                             <input type="hidden" id="finalCode-<?php echo $i; ?>" value="<?php echo htmlspecialchars($finalCode); ?>">
                             <button type="button" class="btn btn-sm btn-outline-primary ms-2" onclick="openProductPicker(<?php echo $i; ?>, null)">Seleccionar</button>
                             <?php if ($finalNeeds): ?>
                                 <button type="button" class="btn btn-sm btn-outline-success ms-1" onclick="openFinalCreate(<?php echo $i; ?>)">Crear nuevo</button>
                             <?php else: ?>
                                 <button type="button" class="btn btn-sm btn-outline-secondary ms-1" onclick="openProductPicker(<?php echo $i; ?>, null)">Cambiar</button>
+                            <?php endif; ?>
+                            <?php if ($finalNeeds && !empty($final['suggestions'])): ?>
+                                <div class="small text-muted mt-2">Sugerencias parecidas:</div>
+                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                    <?php foreach ((array)$final['suggestions'] as $suggestion): ?>
+                                        <button
+                                            type="button"
+                                            class="suggestion-chip"
+                                            onclick="pickSuggestedProduct(<?php echo $i; ?>, null, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                        >
+                                            <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
+                                        </button>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php elseif ($finalNeeds): ?>
+                                <div class="small text-danger mt-2">Sin parecido claro. El sistema necesita que el usuario seleccione el producto correcto.</div>
                             <?php endif; ?>
                         </div>
                         <div class="small text-muted">Costo lote: <strong><?php echo number_format((float)$draft['cost_total'], 2); ?></strong> · Costo unitario: <strong><?php echo number_format((float)$draft['cost_unit'], 2); ?></strong> · Venta sugerida: <strong><?php echo number_format((float)$draft['sale_price'], 2); ?></strong></div>
@@ -1330,13 +1627,31 @@ $bootstrapJs = 'assets/js/bootstrap.bundle.min.js';
                                     $current = trim((string)($it['resolved_code'] ?? ''));
                                     $display = $current === ''
                                         ? 'Pendiente asignar: ' . $it['name']
-                                        : $current . ' · ' . $it['name'];
+                                        : $current . ' · ' . ($it['resolved_name'] ?? $it['name']);
                                 ?>
                                     <div class="ingredient-row" data-recipe="<?php echo $i; ?>" data-index="<?php echo $j; ?>">
                                         <div>
                                             <div class="small text-muted"><?php echo number_format((float)$it['qty'], 3); ?> <?php echo htmlspecialchars($it['unit']); ?></div>
                                             <div class="text-nowrap"><?php echo htmlspecialchars($it['name']); ?></div>
                                             <div id="ingLabel-<?php echo $i; ?>-<?php echo $j; ?>" class="small <?php echo $needsManual ? 'text-danger' : 'text-success'; ?>"><?php echo htmlspecialchars($display); ?></div>
+                                            <?php if (!$needsManual && !empty($it['resolved_mode']) && !in_array($it['resolved_mode'], ['exacto', 'codigo'], true)): ?>
+                                                <div class="small text-info">Auto reconocido por similitud: <?php echo htmlspecialchars((string)$it['resolved_mode']); ?> <?php echo number_format((float)($it['resolved_score'] ?? 0), 2); ?></div>
+                                            <?php endif; ?>
+                                            <?php if ($needsManual && !empty($it['suggestions'])): ?>
+                                                <div class="d-flex flex-wrap gap-1 mt-1">
+                                                    <?php foreach ((array)$it['suggestions'] as $suggestion): ?>
+                                                        <button
+                                                            type="button"
+                                                            class="suggestion-chip"
+                                                            onclick="pickSuggestedProduct(<?php echo $i; ?>, <?php echo $j; ?>, <?php echo json_encode((string)$suggestion['codigo']); ?>, <?php echo json_encode((string)$suggestion['nombre']); ?>)"
+                                                        >
+                                                            <?php echo htmlspecialchars($suggestion['codigo'] . ' · ' . $suggestion['nombre'] . ' · ' . number_format((float)($suggestion['score'] ?? 0), 2)); ?>
+                                                        </button>
+                                                    <?php endforeach; ?>
+                                                </div>
+                                            <?php elseif ($needsManual): ?>
+                                                <div class="small text-danger mt-1">No se encontró un parecido confiable. Selección manual requerida.</div>
+                                            <?php endif; ?>
                                         </div>
                                         <div>
                                             <button type="button" class="btn btn-sm btn-outline-primary" onclick="openProductPicker(<?php echo $i; ?>, <?php echo $j; ?>)">
@@ -1450,6 +1765,14 @@ function setIngredientLabel(recipeIdx, ingIdx, code, name) {
     label.textContent = code + ' · ' + name;
     label.classList.remove('text-danger');
     label.classList.add('text-success');
+}
+
+function pickSuggestedProduct(recipeIdx, ingredientIdx, code, name) {
+    if (ingredientIdx === null || ingredientIdx === undefined) {
+        setFinalLabel(recipeIdx, code, name);
+        return;
+    }
+    setIngredientLabel(recipeIdx, ingredientIdx, code, name);
 }
 
 function openProductPicker(recipeIdx, ingredientIdx) {
