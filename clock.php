@@ -54,6 +54,8 @@
       --clock-border: #143314;
       --clock-text: #00e676;
       --clock-glow: rgba(0, 230, 118, 0.50);
+      --glow-color: rgba(0, 230, 118, 0.55);
+      --glow-shadow: none;
       --date-text: #87d4a5;
       --weather-text: #b7f3ce;
       --font-main: "Courier New", "Lucida Console", monospace;
@@ -133,6 +135,7 @@
       flex-wrap: nowrap;
       transform: translate(var(--clock-offset-x), var(--clock-offset-y));
       transition: transform 1.2s ease, filter 0.6s ease;
+      filter: var(--glow-shadow);
     }
     #clockLine.blink-colon .sep { opacity: 0.2; }
     #clockLine.colorful {
@@ -145,7 +148,7 @@
       color: transparent;
       -webkit-background-clip: text;
       background-clip: text;
-      text-shadow: none;
+      text-shadow: var(--time-shadow);
       animation: var(--color-flow-animation);
     }
     #clockLine.colorful .ampm {
@@ -155,7 +158,7 @@
       background-clip: text;
       background-size: var(--color-fill-size);
       background-attachment: var(--color-fill-attachment);
-      text-shadow: none;
+      text-shadow: var(--time-shadow);
       animation: var(--color-flow-animation);
     }
 
@@ -338,7 +341,7 @@
       letter-spacing: 0;
       gap: 0.08em;
       align-items: center;
-      text-shadow: none;
+      text-shadow: var(--time-shadow);
     }
 
     .flip-clock {
@@ -457,7 +460,7 @@
       color: transparent;
       -webkit-background-clip: text;
       background-clip: text;
-      text-shadow: none;
+      text-shadow: var(--time-shadow);
       animation: var(--color-flow-animation);
     }
 
@@ -691,6 +694,11 @@
       </div>
       <div class="row"><label for="shadowColor">Color sombra</label><input id="shadowColor" type="color" value="#00e676"></div>
       <div class="row"><label for="shadowStrength">Grosor sombra</label><input id="shadowStrength" type="range" min="0" max="24" step="1" value="8"></div>
+      <div class="switch-row"><label for="glowMode">Glow alrededor de la hora</label>
+        <label class="switch"><input id="glowMode" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="glowColor">Color glow</label><input id="glowColor" type="color" value="#00e676"></div>
+      <div class="row"><label for="glowStrength">Grosor glow</label><input id="glowStrength" type="range" min="0" max="40" step="1" value="12"></div>
       <div class="switch-row"><label for="ampmToggle">Formato AM/PM</label>
         <label class="switch"><input id="ampmToggle" type="checkbox" checked><span class="switch-slider"></span></label>
       </div>
@@ -779,6 +787,9 @@
       shadowMode: true,
       shadowColor: "#00e676",
       shadowStrength: "8",
+      glowMode: false,
+      glowColor: "#00e676",
+      glowStrength: "12",
       timeSize: "13",
       metaSize: "1.7",
       spacing: "0.14",
@@ -894,6 +905,9 @@
         shadowMode: $("#shadowMode").checked,
         shadowColor: $("#shadowColor").value,
         shadowStrength: $("#shadowStrength").value,
+        glowMode: $("#glowMode").checked,
+        glowColor: $("#glowColor").value,
+        glowStrength: $("#glowStrength").value,
         timeSize: $("#timeSize").value,
         metaSize: $("#metaSize").value,
         spacing: $("#spacing").value,
@@ -928,6 +942,9 @@
       $("#shadowMode").checked = !!s.shadowMode;
       $("#shadowColor").value = s.shadowColor;
       $("#shadowStrength").value = s.shadowStrength;
+      $("#glowMode").checked = !!s.glowMode;
+      $("#glowColor").value = s.glowColor;
+      $("#glowStrength").value = s.glowStrength;
       $("#timeSize").value = s.timeSize;
       $("#metaSize").value = s.metaSize;
       $("#spacing").value = s.spacing;
@@ -1059,10 +1076,18 @@
       root.style.setProperty("--letter-spacing", `${parseFloat(s.spacing)}em`);
       const shadowBlur = `${parseFloat(s.shadowStrength || 0)}px`;
       const shadowColor = hexToRgba(s.shadowColor || s.clockText, 0.82);
+      const glowBlur = `${Math.max(0, parseFloat(s.glowStrength || 0))}px`;
+      const glowColor = hexToRgba(s.glowColor || s.shadowColor || s.clockText, 0.75);
+      const glowBlurValue = Math.max(0, parseFloat(s.glowStrength || 0));
+      const glowGlow = (Number(s.glowMode) && glowBlurValue > 0)
+        ? `0 0 ${glowBlur} ${glowColor}, 0 0 ${glowBlurValue * 2}px ${glowColor}`
+        : "none";
       root.style.setProperty("--shadow-color", shadowColor);
       root.style.setProperty("--shadow-blur", shadowBlur);
       root.style.setProperty("--time-shadow", s.shadowMode ? `0 0 ${shadowBlur} ${shadowColor}, 0 0 calc(${shadowBlur} * 2) ${shadowColor}` : "none");
       root.style.setProperty("--segment-shadow", s.shadowMode ? `drop-shadow(0 0 ${shadowBlur} ${shadowColor})` : "none");
+      root.style.setProperty("--glow-color", glowColor);
+      root.style.setProperty("--glow-shadow", glowGlow);
       root.style.setProperty("--clock-offset-x", "0px");
       root.style.setProperty("--clock-offset-y", "0px");
       applyColorStyle(s.colorStyle || DEFAULTS.colorStyle, s.clockText);
