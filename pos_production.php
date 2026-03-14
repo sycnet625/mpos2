@@ -149,6 +149,12 @@ try {
                                     <input type="text" class="form-control form-control-sm" v-model="searchRecipeByIngredient" placeholder="🔍 Filtrar por producto dentro de la receta">
                                 </div>
                             </div>
+                            <div class="mt-2 d-flex flex-wrap align-items-center gap-2" v-if="hasRecipeFilters">
+                                <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">
+                                    Filtros activos
+                                </span>
+                                <button class="btn btn-outline-secondary btn-sm" @click="clearRecipeFilters">Limpiar filtros</button>
+                            </div>
                         </div>
                         <div class="table-responsive" style="max-height: 450px;">
                             <table class="table table-hover align-middle mb-0">
@@ -642,6 +648,9 @@ try {
                 const selected = this.selectedRecipes.map(id => String(id));
                 return this.filteredRecetas.length > 0 && this.filteredRecetas.every(r => selected.includes(String(r.id)));
             },
+            hasRecipeFilters() {
+                return this.searchRecipeByName.trim() !== '' || this.searchRecipeByIngredient.trim() !== '';
+            },
             formCostoLote() { 
                 if (!this.form.ingredientes) return 0;
                 return this.form.ingredientes.reduce((a, i) => a + (i.cant * i.costo_base), 0); 
@@ -669,6 +678,10 @@ try {
                     .toLowerCase()
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '');
+            },
+            clearRecipeFilters() {
+                this.searchRecipeByName = '';
+                this.searchRecipeByIngredient = '';
             },
             async api(action, body = {}) {
                 try {
