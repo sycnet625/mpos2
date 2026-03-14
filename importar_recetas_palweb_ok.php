@@ -2856,5 +2856,8 @@ document.getElementById('applySelected').addEventListener('click', () => applySe
 
 document.getElementById('openReload').addEventListener('click', () => location.reload());
 </script>
+<?php if (!$isCli): ?>
+    <?php include_once __DIR__ . '/menu_master.php'; ?>
+<?php endif; ?>
 </body>
 </html>
