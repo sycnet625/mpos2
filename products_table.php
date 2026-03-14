@@ -1707,7 +1707,9 @@ async function applyBulkAction() {
     if(selected.length === 0) return showToast("⚠️ Selecciona productos.");
 
     if (action === 'print_labels') {
-        const url = `print_labels.php?skus=${selected.join(',')}`;
+        const copies = prompt('Cantidad de copias por producto (1-10):', '1');
+        const copiesInt = Math.min(Math.max(parseInt(copies || '1', 10), 1), 10);
+        const url = `print_labels.php?skus=${selected.join(',')}&copies=${copiesInt}`;
         window.open(url, 'Etiquetas', 'width=800,height=600');
         return;
     }

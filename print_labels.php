@@ -25,6 +25,12 @@ function label_sanitize_skus(?string $raw): array {
 }
 
 $rawSkus = $_GET['skus'] ?? '';
+$rawCopies = $_GET['copies'] ?? '1';
+$copies = (int)$rawCopies;
+if (!is_numeric($rawCopies) || $copies <= 0) {
+    $copies = 1;
+}
+if ($copies > 20) $copies = 20;
 $selectedSkus = label_sanitize_skus($rawSkus);
 $items = [];
 
@@ -209,7 +215,7 @@ $invalidCount = count($selectedSkus) - count($items);
 <div class="toolbar no-print">
     <div>
         <div class="title">📦 Etiquetas de productos</div>
-        <div class="small">Suc: <?php echo $SUC_ID; ?> | Alm: <?php echo $ALM_ID; ?> | Total: <?php echo count($items); ?> etiqueta(s)</div>
+        <div class="small">Suc: <?php echo $SUC_ID; ?> | Alm: <?php echo $ALM_ID; ?> | Total: <?php echo count($items) * $copies; ?> etiqueta(s) | Copias por SKU: <?php echo (int)$copies; ?></div>
     </div>
     <div>
         <button class="btn btn-sm btn-outline-secondary" onclick="window.close()">Cerrar</button>
@@ -231,6 +237,7 @@ $invalidCount = count($selectedSkus) - count($items);
     <div class="sheet">
         <div class="grid">
             <?php foreach ($items as $row): ?>
+                <?php for ($i = 0; $i < $copies; $i++): ?>
                 <?php
                 $sku = (string)$row['codigo'];
                 $name = (string)$row['nombre'];
@@ -260,6 +267,7 @@ $invalidCount = count($selectedSkus) - count($items);
                         <div class="qr-box">Código: <?php echo htmlspecialchars($sku, ENT_QUOTES, 'UTF-8'); ?></div>
                     </div>
                 </div>
+                <?php endfor; ?>
             <?php endforeach; ?>
         </div>
         <?php if ($invalidCount > 0): ?>
