@@ -15,6 +15,20 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $localPath = __DIR__ . '/assets/product_images/';
 
+function ptable_dir_is_really_writable(string $path): bool {
+    if (!is_dir($path)) {
+        if (!@mkdir($path, 0775, true) && !is_dir($path)) {
+            return false;
+        }
+    }
+    $probe = rtrim($path, '/') . '/.writetest_' . uniqid('', true);
+    $ok = @file_put_contents($probe, '1') !== false;
+    if ($ok) {
+        @unlink($probe);
+    }
+    return $ok;
+}
+
 const PRODUCT_AUDIT_ACTIONS = [
     'PRODUCTO_WEB_CHANGED',
     'PRODUCTO_POS_CHANGED',
@@ -69,9 +83,10 @@ function ptable_image_meta(string $code): array {
     $bases = [
         __DIR__ . '/assets/product_images/' . $safe,
         dirname(__DIR__) . '/assets/product_images/' . $safe,
+        '/tmp/palweb_product_images/' . $safe,
     ];
     foreach ($bases as $base) {
-        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png'] as $ext) {
             $f = $base . $ext;
             if (file_exists($f)) return [true, (int)filemtime($f)];
         }
@@ -384,11 +399,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
             imagedestroy($src);
 
-            if (!is_dir($localPath) && !@mkdir($localPath, 0775, true)) {
-                throw new Exception("No se pudo crear la carpeta de imágenes.");
-            }
-            if (!is_writable($localPath)) {
-                throw new Exception("La carpeta de imágenes no tiene permisos de escritura.");
+            if (!ptable_dir_is_really_writable($localPath)) {
+                throw new Exception("La carpeta de imágenes no tiene permisos de escritura. Ruta: " . $localPath);
             }
 
             $base = $localPath . $code;

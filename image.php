@@ -20,6 +20,7 @@ if (!preg_match('/^[A-Za-z0-9_.-]+$/', $safeCode)) {
 $bases     = [
     __DIR__ . '/assets/product_images/' . $safeCode,
     dirname(__DIR__) . '/assets/product_images/' . $safeCode,
+    '/tmp/palweb_product_images/' . $safeCode,
 ];
 $accept    = $_SERVER['HTTP_ACCEPT'] ?? '';
 $supAvif   = str_contains($accept, 'image/avif');
