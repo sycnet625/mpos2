@@ -15,7 +15,13 @@ try {
     // Recetas (Cabecera + Precio Venta Actual del Producto Final)
     $recetas = $pdo->query("SELECT r.*, 
                             COALESCE(p.nombre, 'Producto Borrado') as nombre_producto_final, 
-                            COALESCE(p.precio, 0) as precio_venta 
+                            COALESCE(p.precio, 0) as precio_venta,
+                            COALESCE((
+                                SELECT GROUP_CONCAT(TRIM(COALESCE(pp.nombre, 'Sin nombre')) ORDER BY pp.nombre SEPARATOR '|')
+                                FROM recetas_detalle rd
+                                JOIN productos pp ON rd.id_ingrediente = pp.codigo
+                                WHERE rd.id_receta = r.id
+                            ), '') as ingredientes_texto
                             FROM recetas_cabecera r 
                             LEFT JOIN productos p ON r.id_producto_final = p.codigo 
                             ORDER BY r.nombre_receta ASC")->fetchAll(PDO::FETCH_ASSOC);
@@ -134,14 +140,24 @@ try {
                                 <button class="btn btn-outline-success btn-sm" @click="exportCSV"><i class="fas fa-file-excel me-1"></i> Excel</button>
                             </div>
                         </div>
+                        <div class="card-body border-top">
+                            <div class="row g-2">
+                                <div class="col-lg-6">
+                                    <input type="text" class="form-control form-control-sm" v-model="searchRecipeByName" placeholder="🔍 Buscar por nombre de receta">
+                                </div>
+                                <div class="col-lg-6">
+                                    <input type="text" class="form-control form-control-sm" v-model="searchRecipeByIngredient" placeholder="🔍 Filtrar por producto dentro de la receta">
+                                </div>
+                            </div>
+                        </div>
                         <div class="table-responsive" style="max-height: 450px;">
                             <table class="table table-hover align-middle mb-0">
                                 <thead class="bg-light sticky-top shadow-sm">
                                     <tr>
                                         <th style="width: 40px;" class="text-center">
-                                            <input type="checkbox" class="form-check-input cursor-pointer" 
-                                                   :checked="recetas.length > 0 && selectedRecipes.length === recetas.length" 
-                                                   @click.stop="toggleSelectAll">
+                                <input type="checkbox" class="form-check-input cursor-pointer" 
+                                       :checked="filteredRecetas.length > 0 && allFilteredRecipesSelected" 
+                                       @click.stop="toggleSelectAll">
                                         </th>
                                         <th>Nombre Receta</th>
                                         <th>Producto Final (Output)</th>
@@ -152,7 +168,7 @@ try {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr v-for="r in recetas" :key="r.id" :class="{'selected-row': selectedRecipe && selectedRecipe.id === r.id}" @click="selectRecipe(r)">
+                                    <tr v-for="r in filteredRecetas" :key="r.id" :class="{'selected-row': selectedRecipe && selectedRecipe.id === r.id}" @click="selectRecipe(r)">
                                         <td class="text-center" @click.stop>
                                             <input type="checkbox" class="form-check-input cursor-pointer" :value="r.id" v-model="selectedRecipes">
                                         </td>
@@ -173,7 +189,7 @@ try {
                                             </div>
                                         </td>
                                     </tr>
-                                    <tr v-if="recetas.length === 0">
+                                    <tr v-if="filteredRecetas.length === 0">
                                         <td colspan="7" class="text-center py-5 text-muted">No hay recetas. Crea una nueva.</td>
                                     </tr>
                                 </tbody>
@@ -581,6 +597,8 @@ try {
             recetas: recetasInit, selectedRecipe: null, details: [], pendingReservations: [], history: [], reports: null,
             historyFilter: { start: '<?php echo date('Y-m-d', strtotime('-7 days')); ?>', end: '<?php echo date('Y-m-d'); ?>' },
             form: { id: null, nombre_receta: '', id_producto_final: '', unidades: 1, descripcion: '', ingredientes: [] },
+            searchRecipeByName: '',
+            searchRecipeByIngredient: '',
             searchFinal: '', filteredFinales: [], selectedFinalName: '',
             searchIng: '', filteredIngs: [], tempIng: null, ingCant: 1,
             // Modo de creación de receta
@@ -592,6 +610,31 @@ try {
             selectedRecipes: [],
         },
         computed: {
+            filteredRecetas() {
+                const queryNombre = this.normalizeText(this.searchRecipeByName).trim();
+                const queryIngrediente = this.normalizeText(this.searchRecipeByIngredient).trim();
+
+                if (!queryNombre && !queryIngrediente) {
+                    return this.recetas;
+                }
+
+                return this.recetas.filter(r => {
+                    const nombre = this.normalizeText(r.nombre_receta);
+                    const ingredientes = this.normalizeText(r.ingredientes_texto || '');
+
+                    if (queryNombre && nombre.indexOf(queryNombre) === -1) {
+                        return false;
+                    }
+                    if (queryIngrediente && ingredientes.indexOf(queryIngrediente) === -1) {
+                        return false;
+                    }
+                    return true;
+                });
+            },
+            allFilteredRecipesSelected() {
+                const selected = this.selectedRecipes.map(id => String(id));
+                return this.filteredRecetas.length > 0 && this.filteredRecetas.every(r => selected.includes(String(r.id)));
+            },
             formCostoLote() { 
                 if (!this.form.ingredientes) return 0;
                 return this.form.ingredientes.reduce((a, i) => a + (i.cant * i.costo_base), 0); 
@@ -613,6 +656,13 @@ try {
             }
         },
         methods: {
+            normalizeText(v) {
+                return (v || '')
+                    .toString()
+                    .toLowerCase()
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '');
+            },
             async api(action, body = {}) {
                 try {
                     const res = await fetch(`production_api.php?action=${action}`, { method: 'POST', body: JSON.stringify(body) });
@@ -623,11 +673,20 @@ try {
             
             // --- NUEVO: GESTIÓN DE SELECCIÓN MÚLTIPLE ---
             toggleSelectAll() {
-                if (this.selectedRecipes.length === this.recetas.length) {
-                    this.selectedRecipes = [];
-                } else {
-                    this.selectedRecipes = this.recetas.map(r => r.id);
+                const filteredIds = this.filteredRecetas.map(r => r.id);
+                if (filteredIds.length === 0) {
+                    return;
                 }
+
+                const allSelected = this.allFilteredRecipesSelected;
+                if (allSelected) {
+                    this.selectedRecipes = this.selectedRecipes.filter(id => filteredIds.indexOf(Number(id)) === -1);
+                    return;
+                }
+
+                const nextSelection = new Set(this.selectedRecipes);
+                filteredIds.forEach(id => nextSelection.add(id));
+                this.selectedRecipes = Array.from(nextSelection);
             },
             printConsolidatedReport() {
                 if (this.selectedRecipes.length === 0) return;
