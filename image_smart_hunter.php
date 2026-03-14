@@ -205,8 +205,7 @@ function searchBingImageCandidates(string $query, string $siteDomain, string $re
     $cands = [];
     if (preg_match_all($regex, $html, $matches)) {
         foreach (array_slice(array_unique($matches[0]), 0, 8) as $url) {
-            $cleanUrl = html_entity_decode((string)$url, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            $cleanUrl = preg_replace('/[\"\\\'].*$/', '', $cleanUrl);
+            $cleanUrl = normalizeCandidateImageUrl((string)$url);
             addCandidates($cands, $cleanUrl, $source, $query, $score);
         }
     }
@@ -223,6 +222,24 @@ function hasAnyVariant(string $base): bool {
 function toSafeQuery(string $term): string {
     $term = trim((string)$term);
     return $term !== '' ? $term : 'producto';
+}
+
+function normalizeCandidateImageUrl(string $url): string {
+    $cleanUrl = html_entity_decode(trim($url), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    if ($cleanUrl === '') {
+        return '';
+    }
+
+    if (strpos($cleanUrl, '//') === 0) {
+        $cleanUrl = 'https:' . $cleanUrl;
+    }
+
+    $cleanUrl = preg_replace('/[\"\\\'].*$/', '', $cleanUrl);
+    $cleanUrl = preg_replace('/[\\s<>{}\\]\\[,].*$/', '', $cleanUrl);
+    $cleanUrl = preg_replace('/(?:&quot;|&#34;|\\\\u0026quot;).*/i', '', $cleanUrl);
+    $cleanUrl = preg_replace('/(?:\\\\u0026|\\\\u003c|\\\\u003e).*/i', '', $cleanUrl);
+    $cleanUrl = preg_replace('/\?x-oss-process=.*$/i', '', $cleanUrl);
+    return trim((string)$cleanUrl);
 }
 
 function detectImageExtension(string $url, string $contentType = ''): string {
@@ -358,9 +375,10 @@ function searchAliExpressCandidates(string $query): array {
 
     $searchUrl = 'https://www.aliexpress.com/wholesale?' . http_build_query(['SearchText' => $query]);
     $html = httpGet($searchUrl, 12)['body'] ?? '';
-    if (preg_match_all('~https://[^"\'\\s<>]*(?:alicdn\\.com|aliexpress-media\\.com)[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
-        foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
-            addCandidates($cands, $img, 'AliExpress', $query, 58);
+    if ($html !== '' && preg_match_all('~(?:https?:)?//[^"\'\\s<>]*(?:ae-pic-[^.]+\\.aliexpress-media\\.com|aliexpress-media\\.com|alicdn\\.com)[^"\'\\s<>]+(?:jpg|jpeg|png|webp|avif)(?:_[^"\'\\s<>]*)?~i', $html, $m)) {
+        foreach (array_slice(array_unique($m[0]), 0, 12) as $img) {
+            $cleanUrl = normalizeCandidateImageUrl((string)$img);
+            addCandidates($cands, $cleanUrl, 'AliExpress', $query, 64);
         }
     }
     if (!empty($cands)) {
@@ -370,7 +388,7 @@ function searchAliExpressCandidates(string $query): array {
     $bing = searchBingImageCandidates(
         $query,
         'aliexpress.com',
-        '~https://[^"\'\\s<>]*(?:alicdn\\.com|aliexpress-media\\.com)[^"\'\\s<>]+~i',
+        '~(?:https?:)?//[^"\'\\s<>]*(?:ae-pic-[^.]+\\.aliexpress-media\\.com|aliexpress-media\\.com|alicdn\\.com)[^"\'\\s<>]+~i',
         'AliExpress/Bing',
         54
     );
@@ -383,25 +401,21 @@ function searchAliExpressCandidates(string $query): array {
 function searchElYerroMenuCandidates(string $query): array {
     $query = toSafeQuery($query);
     $cands = [];
-
-    $sources = [
-        'https://elyerromenu.com/',
-        'https://elyerromenu.com/?q=' . rawurlencode($query),
-        'https://elyerromenu.com/?search=' . rawurlencode($query),
-    ];
-
-    foreach ($sources as $url) {
-        $html = httpGet($url, 14)['body'] ?? '';
-        if ($html === '') {
-            continue;
+    $searchUrl = 'https://elyerromenu.com/l/search/' . rawurlencode($query);
+    $html = httpGet($searchUrl, 16)['body'] ?? '';
+    if ($html !== '') {
+        if (preg_match_all('~<a[^>]+href="https://elyerromenu\\.com/[^"]+"[^>]*class="[^"]*text-left[^"]*"[^>]*>.*?<img src="(https://img[12]\\.elyerromenu\\.com/images/[^"]+\\.(?:jpg|jpeg|png|webp|avif))"[^>]*>.*?<div class="text-md font-semibold leading-relaxed">\\s*([^<]+)~is', $html, $m, PREG_SET_ORDER)) {
+            foreach (array_slice($m, 0, 8) as $row) {
+                $img = html_entity_decode(trim((string)($row[1] ?? '')), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+                $title = trim(html_entity_decode((string)($row[2] ?? $query), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+                addCandidates($cands, $img, 'El Yerro Menu', $title !== '' ? $title : $query, 64);
+            }
         }
-
-        if (preg_match_all('~https://img[12]\\.elyerromenu\\.com/images/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)~i', $html, $m)) {
+        if (empty($cands) && preg_match_all('~https://img[12]\\.elyerromenu\\.com/images/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)~i', $html, $m)) {
             foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
                 addCandidates($cands, $img, 'El Yerro Menu', $query, 61);
             }
         }
-
         if (!empty($cands)) {
             return array_values($cands);
         }
