@@ -1,6 +1,7 @@
 <?php
-// ARCHIVO: products_table.php v3.2 (CON FUENTE ROBOTO EN PRECIO)
+// ARCHIVO: products_table.php v3.2 (CON ORDENAMIENTO POR COLUMNAS)
 ini_set('display_errors', 0);
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 require_once 'db.php';
 require_once 'pos_audit.php'; 
 
@@ -12,7 +13,55 @@ require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
-$localPath = '/var/www/assets/product_images/'; 
+$localPath = __DIR__ . '/assets/product_images/';
+
+function ptable_get_actor(): string {
+    if (!empty($_SESSION['admin_user'])) return (string)$_SESSION['admin_user'];
+    if (!empty($_SESSION['admin_name'])) return (string)$_SESSION['admin_name'];
+    if (!empty($_SESSION['user_name'])) return (string)$_SESSION['user_name'];
+    if (!empty($_SESSION['user'])) return (string)$_SESSION['user'];
+    if (!empty($_SESSION['user_id'])) return (string)$_SESSION['user_id'];
+    return 'admin';
+}
+
+function ptable_next_product_code(PDO $pdo, int $empId, int $sucId): string {
+    $prefix = str_repeat((string)$sucId, 2);
+    $lenPrefix = strlen($prefix);
+    $stmt = $pdo->prepare(
+        "SELECT MAX(CAST(SUBSTRING(codigo, :len + 1) AS UNSIGNED)) AS max_seq
+         FROM productos
+         WHERE id_empresa = :emp AND codigo LIKE CONCAT(:prefix, '%')"
+    );
+    $stmt->execute([':len' => $lenPrefix, ':emp' => $empId, ':prefix' => $prefix]);
+    $next = (int)$stmt->fetchColumn();
+    $seq = $next > 0 ? $next + 1 : 1;
+    $attempt = 0;
+    while (true) {
+        $candidate = $prefix . str_pad((string)$seq, 4, '0', STR_PAD_LEFT);
+        $check = $pdo->prepare("SELECT 1 FROM productos WHERE codigo = ? AND id_empresa = ?");
+        $check->execute([$candidate, $empId]);
+        if (!$check->fetchColumn()) return $candidate;
+        $seq++;
+        $attempt++;
+        if ($attempt > 200) return $prefix . '_' . time() . '_' . mt_rand(100, 999);
+    }
+}
+
+function ptable_image_meta(string $code): array {
+    $safe = trim($code);
+    if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) return [false, 0];
+    $bases = [
+        __DIR__ . '/assets/product_images/' . $safe,
+        dirname(__DIR__) . '/assets/product_images/' . $safe,
+    ];
+    foreach ($bases as $base) {
+        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+            $f = $base . $ext;
+            if (file_exists($f)) return [true, (int)filemtime($f)];
+        }
+    }
+    return [false, 0];
+}
 
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)
@@ -22,8 +71,9 @@ function renderProductRows($rows, $localPath) {
     if(empty($rows)): ?>
         <tr><td colspan="11" class="text-center py-5 text-muted">No se encontraron productos.</td></tr>
     <?php else: 
-        foreach($rows as $p): 
-            $hasImg = file_exists($localPath . $p['codigo'] . '.jpg'); 
+        foreach($rows as $p):
+            [$hasImg, $mtime] = ptable_image_meta((string)$p['codigo']);
+            $imgV = $mtime ? '&v=' . $mtime : '';
             $stock = floatval($p['stock_total']);
             $isActive = intval($p['activo'] ?? 1);
             $rowClass = $isActive ? '' : 'row-inactive';
@@ -31,7 +81,7 @@ function renderProductRows($rows, $localPath) {
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.$p['codigo'] : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
+        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
         <td class="small font-monospace"><?php echo $p['codigo']; ?></td>
         <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;">
             <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
@@ -39,28 +89,47 @@ function renderProductRows($rows, $localPath) {
                 <?php if($p['es_materia_prima']): ?><span class="emoji-span" title="Materia Prima">🧱</span><?php endif; ?>
                 <?php if($p['es_servicio']): ?><span class="emoji-span" title="Servicio">🛠️</span><?php endif; ?>
                 <?php if($p['es_cocina']): ?><span class="emoji-span" title="Cocina">👨‍🍳</span><?php endif; ?>
+                <?php if($p['es_reservable'] ?? false): ?><span class="emoji-span" title="Reservable (sin stock)">📅</span><?php endif; ?>
                 <?php if(!$isActive): ?><span class="badge bg-danger text-white border ms-1" style="font-size:0.6rem;">INACTIVO</span><?php endif; ?>
             </div>
         </td>
         <td class="text-center">
-            <div class="form-check form-switch d-flex justify-content-center">
+            <div class="form-check form-switch d-flex justify-content-center" title="Visible en tienda web">
                 <input class="form-check-input" type="checkbox" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
+            </div>
+            <div class="form-check form-switch d-flex justify-content-center align-items-center mt-1" title="Aceptar reservas sin stock">
+                <input class="form-check-input" type="checkbox" style="<?php echo ($p['es_reservable'] ?? 0) ? 'background-color:#f59e0b;border-color:#d97706;' : ''; ?>"
+                       onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)"
+                       <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
+                <span class="ms-1" style="font-size:0.6rem; line-height:1; color:#9ca3af;">📅</span>
             </div>
         </td>
         <td class="small text-muted"><?php echo $p['categoria']; ?></td>
         
-        <td class="text-center editable-cell" data-sku="<?php echo $p['codigo']; ?>" data-field="stock" data-value="<?php echo $stock; ?>">
-            <span class="badge badge-stock <?php echo ($stock <= 0) ? 'bg-danger' : 'bg-success-subtle text-success'; ?>"><?php echo number_format($stock, 1); ?></span>
+        <td class="text-center">
+            <div class="d-flex align-items-center justify-content-center">
+                <button class="btn btn-sm btn-outline-warning border-0 me-1 p-0 px-1 no-print" style="font-size: 0.7rem;" 
+                        onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')" title="Ajustar Stock">
+                    <i class="fas fa-tools"></i>
+                </button>
+                <div class="editable-cell flex-grow-1" data-sku="<?php echo $p['codigo']; ?>" data-field="stock" data-value="<?php echo $stock; ?>">
+                    <span class="badge badge-stock <?php echo ($stock <= 0) ? 'bg-danger' : 'bg-success-subtle text-success'; ?>"><?php echo number_format($stock, 1); ?></span>
+                </div>
+            </div>
         </td>
         
-        <td class="text-end price-style editable-cell" data-sku="<?php echo $p['codigo']; ?>" data-field="price" data-value="<?php echo $p['precio']; ?>">
+        <td class="text-end fw-bold editable-cell" data-sku="<?php echo $p['codigo']; ?>" data-field="price" data-value="<?php echo $p['precio']; ?>">
             $<?php echo number_format($p['precio'], 2); ?>
             <i class="fas fa-history history-btn" onclick="showHistory('<?php echo $p['codigo']; ?>')"></i>
         </td>
+        <td class="text-end">$<?php echo number_format($p['precio_mayorista'], 2); ?></td>
         
         <td class="text-end fw-bold text-success bg-light">$<?php echo number_format($p['ganancia_neta'], 2); ?></td>
         <td class="text-center no-print">
-            <div class="btn-group">
+        <div class="btn-group">
+                <button class="btn btn-outline-secondary btn-action" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar">
+                    <i class="fas fa-clone"></i>
+                </button>
                 <button class="btn btn-outline-primary btn-action" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit"></i></button>
                 <a href="pos_shrinkage.php?prefill_sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-danger btn-action" title="Merma"><i class="fas fa-trash-alt"></i></a>
             </div>
@@ -80,52 +149,194 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // EDICIÓN RÁPIDA (INLINE EDIT)
     if (isset($_POST['action']) && $_POST['action'] === 'inline_edit') {
         try {
-            $sku = $_POST['sku'];
-            $field = $_POST['field']; // 'price' o 'stock'
-            $value = floatval($_POST['value']);
-            
+            $sku = trim((string)($_POST['sku'] ?? ''));
+            $field = $_POST['field'] ?? '';
+            $rawValue = trim((string)($_POST['value'] ?? ''));
+
+            if (!$sku) throw new Exception('SKU vacío.');
+            if (!in_array($field, ['price', 'stock'], true)) throw new Exception('Campo inválido.');
+            if ($rawValue === '' || !is_numeric($rawValue)) throw new Exception('Valor inválido.');
+
+            $newValue = round((float)$rawValue, 2);
+            $actor = ptable_get_actor();
+
             if ($field === 'price') {
-                $stmt = $pdo->prepare("UPDATE productos SET precio = ? WHERE codigo = ? AND id_empresa = ?");
-                $stmt->execute([$value, $sku, $EMP_ID]);
-                log_audit($pdo, 'PRECIO_UPDATE', $_SESSION['user_id'] ?? 'Admin', ['sku'=>$sku, 'nuevo_precio'=>$value]);
-                echo json_encode(['status'=>'success', 'msg'=>'Precio actualizado']);
-            } elseif ($field === 'stock') {
-                $chk = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-                $chk->execute([$sku, $ALM_ID]);
-                if ($chk->fetch()) {
-                    $stmt = $pdo->prepare("UPDATE stock_almacen SET cantidad = ? WHERE id_producto = ? AND id_almacen = ?");
-                    $stmt->execute([$value, $sku, $ALM_ID]);
-                } else {
-                    $stmt = $pdo->prepare("INSERT INTO stock_almacen (id_producto, id_almacen, cantidad) VALUES (?, ?, ?)");
-                    $stmt->execute([$sku, $ALM_ID, $value]);
+                if ($newValue < 0) throw new Exception('Precio inválido.');
+                $stmtOld = $pdo->prepare("SELECT precio FROM productos WHERE codigo = ? AND id_empresa = ?");
+                $stmtOld->execute([$sku, $EMP_ID]);
+                $oldValue = $stmtOld->fetchColumn();
+                if ($oldValue === false) throw new Exception('Producto no encontrado.');
+                if ((float)$oldValue === $newValue) {
+                    echo json_encode(['status' => 'success', 'msg' => 'Sin cambios']);
+                    exit;
                 }
-                log_audit($pdo, 'STOCK_AJUSTE_INLINE', $_SESSION['user_id'] ?? 'Admin', ['sku'=>$sku, 'nuevo_stock'=>$value]);
-                echo json_encode(['status'=>'success', 'msg'=>'Stock ajustado']);
+
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare("UPDATE productos SET precio = ? WHERE codigo = ? AND id_empresa = ?");
+                $stmt->execute([$newValue, $sku, $EMP_ID]);
+                log_audit($pdo, 'PRECIO_UPDATE', $actor, [
+                    'sku' => $sku,
+                    'precio_anterior' => (float)$oldValue,
+                    'precio_nuevo' => $newValue
+                ]);
+                if ($pdo->inTransaction()) $pdo->commit();
+                echo json_encode(['status' => 'success', 'msg' => 'Precio actualizado']);
+                exit;
             }
-        } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+            $stmtCheck = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+            $stmtCheck->execute([$sku, $ALM_ID]);
+            if ($stmtCheck->fetch() !== false) {
+                $stmt = $pdo->prepare("UPDATE stock_almacen SET cantidad = ? WHERE id_producto = ? AND id_almacen = ?");
+                $stmt->execute([$newValue, $sku, $ALM_ID]);
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO stock_almacen (id_producto, id_almacen, id_sucursal, cantidad) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$sku, $ALM_ID, $SUC_ID, $newValue]);
+            }
+
+            log_audit($pdo, 'STOCK_AJUSTE_INLINE', $actor, ['sku' => $sku, 'nuevo_stock' => $newValue, 'almacen' => $ALM_ID]);
+            echo json_encode(['status' => 'success', 'msg' => 'Stock actualizado']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
         exit;
     }
 
-    // SUBIDA DE IMAGEN
+    // CLONAR PRODUCTO DESDE LISTA
+    if (isset($_POST['action']) && $_POST['action'] === 'clone_product') {
+        try {
+            $sku = trim((string)($_POST['sku'] ?? ''));
+            if (!$sku) throw new Exception('SKU origen vacío.');
+
+            $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+
+            $stmt = $pdo->prepare("
+                INSERT INTO productos (
+                    codigo, id_empresa, nombre, precio, costo, precio_mayorista, activo, version_row,
+                    categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                    unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                    es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                    uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                )
+                SELECT
+                    ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                    categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                    unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                    es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                    NULL, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                FROM productos
+                WHERE codigo = ? AND id_empresa = ?
+            ");
+            $stmt->execute([$newSku, $sku, $EMP_ID]);
+
+            if ($stmt->rowCount() < 1) throw new Exception('No se pudo clonar el producto.');
+
+            log_audit($pdo, 'PRODUCTO_CLONADO', ptable_get_actor(), [
+                'sku_origen' => $sku,
+                'sku_nuevo' => $newSku
+            ]);
+            echo json_encode(['status' => 'success', 'new_sku' => $newSku, 'msg' => 'Producto clonado']);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // AJUSTE DE KARDEX MANUAL
+    if (isset($_POST['action']) && $_POST['action'] === 'kardex_adj') {
+        try {
+            require_once 'kardex_engine.php';
+            $sku = $_POST['sku'];
+            $qty = floatval($_POST['qty']);
+            $type = $_POST['type']; // 'IN' o 'OUT'
+            $note = $_POST['note'];
+            
+            if ($type === 'OUT') $qty = -$qty;
+
+            // Registrar en Kardex usando el engine
+            KardexEngine::registrarMovimiento($pdo, $sku, $ALM_ID, $qty, 'AJUSTE_INTERNO', $note, null, $SUC_ID);
+            
+            if ($pdo->inTransaction()) $pdo->commit();
+
+            log_audit($pdo, 'STOCK_AJUSTE_KARDEX', $_SESSION['user_id'] ?? 'Admin', ['sku'=>$sku, 'qty'=>$qty, 'note'=>$note]);
+            echo json_encode(['status'=>'success']);
+        } catch (Exception $e) { 
+            if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); 
+        }
+        exit;
+    }
+
+    // SUBIDA DE IMAGEN — guarda en .jpg, .webp y .avif
     if (isset($_FILES['new_photo'])) {
         try {
-            $code = $_POST['prod_code'] ?? '';
+            $code = trim((string)($_POST['prod_code'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) {
+                throw new Exception("Código de producto inválido.");
+            }
             if (!$code) throw new Exception("Código ausente.");
             $file = $_FILES['new_photo'];
             if ($file['error'] !== UPLOAD_ERR_OK) throw new Exception("Error subida.");
             $imgData = file_get_contents($file['tmp_name']);
             $src = @imagecreatefromstring($imgData);
-            if (!$src) throw new Exception("Imagen corrupta.");
-            $width = imagesx($src); $height = imagesy($src);
-            $size = min($width, $height);
-            $x = ($width - $size) / 2; $y = ($height - $size) / 2;
-            $dest = imagecreatetruecolor(200, 200);
-            imagecopyresampled($dest, $src, 0, 0, $x, $y, 200, 200, $size, $size);
-            if (!is_dir($localPath)) @mkdir($localPath, 0777, true);
-            imagejpeg($dest, $localPath . $code . '.jpg', 85);
-            imagedestroy($src); imagedestroy($dest);
+            if (!$src) throw new Exception("Imagen inválida o formato no soportado.");
+
+            // Recorte cuadrado centrado → 800×800 (master) y 200×200 (thumb)
+            $width  = imagesx($src);
+            $height = imagesy($src);
+            $size   = min($width, $height);
+            $x      = (int)(($width  - $size) / 2);
+            $y      = (int)(($height - $size) / 2);
+
+            // ── Master 800 px ─────────────────────────────────────────────────
+            $master = imagecreatetruecolor(800, 800);
+            imagefill($master, 0, 0, imagecolorallocate($master, 255, 255, 255));
+            imagecopyresampled($master, $src, 0, 0, $x, $y, 800, 800, $size, $size);
+
+            // ── Thumb 200 px ──────────────────────────────────────────────────
+            $thumb = imagecreatetruecolor(200, 200);
+            imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255));
+            imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
+            imagedestroy($src);
+
+            if (!is_dir($localPath) && !@mkdir($localPath, 0775, true)) {
+                throw new Exception("No se pudo crear la carpeta de imágenes.");
+            }
+            if (!is_writable($localPath)) {
+                throw new Exception("La carpeta de imágenes no tiene permisos de escritura.");
+            }
+
+            $base = $localPath . $code;
+
+            // Eliminar archivos anteriores para evitar que formatos de mayor
+            // prioridad (avif > webp > jpg) en image.php sirvan versiones viejas.
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
+                if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+
+            // JPEG — compatibilidad universal (baseline)
+            if (!imagejpeg($master, $base . '.jpg', 85))
+                throw new Exception("No se pudo guardar el .jpg.");
+
+            // WebP — soporte amplio, ~30 % más ligero que JPEG
+            if (function_exists('imagewebp'))
+                imagewebp($master, $base . '.webp', 82);
+
+            // AVIF — soporte moderno, ~50 % más ligero que JPEG
+            if (function_exists('imageavif'))
+                imageavif($master, $base . '.avif', 60, 6);
+
+            // Thumbs (para cards pequeñas si se necesitan en el futuro)
+            imagejpeg($thumb,  $base . '_thumb.jpg',  80);
+            if (function_exists('imagewebp')) imagewebp($thumb, $base . '_thumb.webp', 78);
+
+            imagedestroy($master);
+            imagedestroy($thumb);
+
             echo json_encode(['status' => 'success']);
-        } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
         exit;
     }
 
@@ -136,8 +347,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $val = intval($_POST['val']);
             $stmt = $pdo->prepare("UPDATE productos SET es_web = ? WHERE codigo = ? AND id_empresa = ?");
             $stmt->execute([$val, $sku, $EMP_ID]);
-            echo json_encode(['status'=>'success']); 
+            echo json_encode(['status'=>'success']);
         } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        exit;
+    }
+
+    // TOGGLE RESERVABLE
+    if (isset($_POST['action']) && $_POST['action'] === 'toggle_reservable') {
+        try {
+            $sku = $_POST['sku'];
+            $val = intval($_POST['val']);
+            $stmt = $pdo->prepare("UPDATE productos SET es_reservable = ? WHERE codigo = ? AND id_empresa = ?");
+            $stmt->execute([$val, $sku, $EMP_ID]);
+            echo json_encode(['status'=>'success']);
+        } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        exit;
+    }
+
+    // ELIMINAR IMAGEN EXTRA
+    if (isset($_POST['action']) && $_POST['action'] === 'delete_extra_img') {
+        try {
+            $sku  = $_POST['sku']  ?? '';
+            $slot = $_POST['slot'] ?? '';
+            if (!$sku) throw new Exception("SKU ausente.");
+            if (!in_array($slot, ['extra1', 'extra2'])) throw new Exception("Slot inválido.");
+            $base = $localPath . $sku . '_' . $slot;
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
+                if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+            echo json_encode(['status' => 'success']);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
         exit;
     }
 
@@ -153,6 +394,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             switch ($action) {
                 case 'web_on': $sql = "UPDATE productos SET es_web = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'web_off': $sql = "UPDATE productos SET es_web = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'reservable_on': $sql = "UPDATE productos SET es_reservable = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'reservable_off': $sql = "UPDATE productos SET es_reservable = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'pos_on': $sql = "UPDATE productos SET es_pos = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'pos_off': $sql = "UPDATE productos SET es_pos = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'active_on': $sql = "UPDATE productos SET activo = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'active_off': $sql = "UPDATE productos SET activo = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'change_cat':
@@ -160,12 +405,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $sql = "UPDATE productos SET categoria = ? WHERE codigo IN ($inQuery) AND id_empresa = ?";
                     array_unshift($params, $newCat);
                     break;
+                case 'set_stock_min':
+                    if (!isset($_POST['new_stock_min_val']) || $_POST['new_stock_min_val'] === '' || !is_numeric($_POST['new_stock_min_val'])) {
+                        throw new Exception("Valor de stock mínimo inválido.");
+                    }
+                    $newStockMin = round((float)$_POST['new_stock_min_val'], 2);
+                    $sql = "UPDATE productos SET stock_minimo = ? WHERE codigo IN ($inQuery) AND id_empresa = ?";
+                    array_unshift($params, $newStockMin);
+                    break;
+                case 'clone_selected':
+                    $created = [];
+                    $pdo->beginTransaction();
+                    $stmtClone = $pdo->prepare("
+                        INSERT INTO productos (
+                            codigo, id_empresa, nombre, precio, costo, precio_mayorista, activo, version_row,
+                            categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                            unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                            es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                            uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                        )
+                        SELECT
+                            ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                            categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                            unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                            es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                            NULL, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                        FROM productos
+                        WHERE codigo = ? AND id_empresa = ?
+                    ");
+
+                    foreach ($skus as $sku) {
+                        $src = trim((string)$sku);
+                        if ($src === '') continue;
+                        $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+                        $stmtClone->execute([$newSku, $src, $EMP_ID]);
+                        if ($stmtClone->rowCount() < 1) throw new Exception("No se pudo clonar SKU $src.");
+                        $created[] = $newSku;
+                        log_audit($pdo, 'PRODUCTO_CLONADO', ptable_get_actor(), [
+                            'sku_origen' => $src,
+                            'sku_nuevo' => $newSku,
+                            'modo' => 'bulk'
+                        ]);
+                    }
+                    $pdo->commit();
+                    echo json_encode(['status' => 'success', 'mode' => 'clone', 'count' => count($created), 'created' => $created]);
+                    exit;
                 default: throw new Exception("Acción inválida.");
             }
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             echo json_encode(['status'=>'success', 'count'=>count($skus)]); 
-        } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+        }
         exit;
     }
 }
@@ -173,16 +466,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ---------------------------------------------------------
 // 4. API: HISTORIAL (GET)
 // ---------------------------------------------------------
-if (isset($_GET['action']) && $_GET['action'] === 'get_history') {
+if (isset($_GET['action'])) {
     header('Content-Type: application/json');
-    $sku = $_GET['sku'];
-    try {
-        $stmt = $pdo->prepare("SELECT fecha, usuario, detalles FROM pos_audit WHERE tipo = 'PRECIO_UPDATE' AND detalles LIKE ? ORDER BY fecha DESC LIMIT 10");
-        $stmt->execute(['%"sku":"'.$sku.' "%']);
-        $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        echo json_encode($logs);
-    } catch(Exception $e) { echo json_encode([]); }
-    exit;
+    $action = $_GET['action'];
+
+    if ($action === 'get_history') {
+        $sku = $_GET['sku'];
+        try {
+            $stmt = $pdo->prepare("
+                SELECT created_at AS fecha, usuario, datos
+                FROM auditoria_pos
+                WHERE accion = 'PRECIO_UPDATE'
+                  AND (JSON_UNQUOTE(JSON_EXTRACT(datos, '$.sku')) = ? OR datos LIKE ?)
+                ORDER BY created_at DESC
+                LIMIT 10
+            ");
+            $stmt->execute([$sku, '%\"sku\":\"'.$sku.'\"%']);
+            $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            echo json_encode($logs);
+        } catch(Exception $e) { echo json_encode([]); }
+        exit;
+    }
+
+    if ($action === 'get_full_active_list') {
+        try {
+            $sql = "SELECT p.codigo, p.nombre, p.categoria, 
+                    (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = :alm) as stock_total
+                    FROM productos p 
+                    WHERE p.id_empresa = :emp AND p.activo = 1 
+                    ORDER BY p.categoria ASC, p.nombre ASC";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([':emp' => $EMP_ID, ':alm' => $ALM_ID]);
+            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        } catch(Exception $e) { echo json_encode([]); }
+        exit;
+    }
 }
 
 // ---------------------------------------------------------
@@ -198,14 +516,19 @@ $filterStockRange = $_GET['stock_range'] ?? '';
 $onlyLatest  = isset($_GET['latest']);
 $onlyProd    = isset($_GET['only_prod']);
 
-// Paginación
+// Paginación y Ordenamiento
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
 if ($page < 1) $page = 1;
 $offset = ($page - 1) * $limit;
 
+// Validación de ordenamiento para evitar SQL Injection
+$allowedSorts = ['codigo', 'nombre', 'categoria', 'stock_total', 'precio', 'ganancia_neta'];
 $sort = $_GET['sort'] ?? 'nombre';
-$dir  = $_GET['dir'] ?? 'ASC';
+if (!in_array($sort, $allowedSorts)) $sort = 'nombre';
+
+$dir = strtoupper($_GET['dir'] ?? 'ASC');
+if ($dir !== 'ASC' && $dir !== 'DESC') $dir = 'ASC';
 
 // WHERE
 $whereClauses = ["p.id_empresa = $EMP_ID"];
@@ -239,7 +562,7 @@ if ($filterStockRange !== '') {
 // QUERY DATOS
 $sqlBase = "SELECT p.*, 
             (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $ALM_ID) as stock_total,
-            (p.precio - p.costo) as ganancia_neta
+            (p.precio - p.costo) as ganancia_neta, p.precio_mayorista
             FROM productos p 
             WHERE $whereSQL 
             $havingClause";
@@ -286,19 +609,9 @@ if ($isAjax) {
         .badge-stock { padding: 5px 10px; border-radius: 15px; font-weight: 700; font-size: 0.8rem; }
         .context-badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1); }
         .row-inactive { background-color: #fff5f5 !important; opacity: 0.8; }
-        
         .editable-cell { position: relative; cursor: cell; transition: background 0.2s; }
         .editable-cell:hover { background-color: #eef2ff; }
         .editable-cell:hover::after { content: '✎'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #3b82f6; font-size: 0.8rem; opacity: 0.5; }
-        
-        /* ESTILO ESPECÍFICO PARA EL PRECIO */
-        .price-style {
-            font-family: 'Roboto', sans-serif;
-            font-size: 1.15rem; /* Un poco más grande */
-            font-weight: 700;
-            color: #0f172a;
-        }
-
         .history-btn { font-size: 0.7rem; color: #64748b; cursor: pointer; margin-left: 5px; }
         .history-btn:hover { color: #3b82f6; }
         @media print { .no-print { display: none !important; } }
@@ -321,6 +634,9 @@ if ($isAjax) {
     </div>
     <div>
         <a href="inventory_report.php" class="btn btn-info btn-sm px-3 fw-bold me-2 text-white"><i class="fas fa-chart-pie me-1"></i> Informe</a>
+        <button onclick="forceImageCacheReset()" class="btn btn-outline-light btn-sm px-3 fw-bold me-2" title="Limpia caché de imágenes y recarga miniaturas">
+            <i class="fas fa-broom me-1"></i> Limpiar caché imágenes
+        </button>
         <button onclick="printInventoryCount()" class="btn btn-warning btn-sm px-3 fw-bold me-2 text-dark"><i class="fas fa-clipboard-list me-1"></i> Conteo</button>
         <button onclick="printTable()" class="btn btn-light btn-sm px-3 fw-bold me-2"><i class="fas fa-print me-1"></i> Lista</button>
         <a href="dashboard.php" class="btn btn-primary btn-sm px-3 fw-bold"><i class="fas fa-home"></i></a>
@@ -356,6 +672,7 @@ if ($isAjax) {
             <div class="col-md-2 text-end">
                 <button type="submit" class="btn btn-dark btn-sm fw-bold w-100"><i class="fas fa-filter"></i> Filtrar</button>
                 <button type="button" class="btn btn-success btn-sm w-100 mt-1" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
+                <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-1" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
             </div>
         </form>
         
@@ -369,14 +686,22 @@ if ($isAjax) {
                 <option value="print_labels">🏷️ Imprimir Etiquetas</option>
                 <option value="web_on">🌐 Activar en WEB</option>
                 <option value="web_off">🚫 Ocultar de WEB</option>
+                <option value="reservable_on">📅 Activar Reservable</option>
+                <option value="reservable_off">📅 Desactivar Reservable</option>
+                <option value="pos_on">🧾 Mostrar en POS</option>
+                <option value="pos_off">🧾 Ocultar en POS</option>
                 <option value="active_on">✅ Activar Producto</option>
                 <option value="active_off">❌ Desactivar Producto</option>
+                <option value="set_stock_min">📌 Cambiar Stock Mínimo</option>
                 <option value="change_cat">📂 Cambiar Categoría</option>
+                <option value="clone_selected">📑 Clonar Seleccionados</option>
             </select>
-            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" placeholder="Nueva Categoría" style="max-width: 150px;">
+            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría" style="max-width: 150px;">
+            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="Stock mínimo" style="max-width: 150px;">
+            <datalist id="bulk_cat_list"></datalist>
             <button class="btn btn-secondary btn-sm" onclick="applyBulkAction()">Aplicar</button>
             <div class="ms-auto text-muted small">
-                Total: <strong id="totalCountDisplay"><?php echo $totalProducts; ?></strong> | Pág <span id="currentPageDisplay"><?php echo $page; ?></span>
+                <strong id="selectedCount">0 sel</strong> | Total: <strong id="totalCountDisplay"><?php echo $totalProducts; ?></strong> | Pág <span id="currentPageDisplay"><?php echo $page; ?></span>
             </div>
         </div>
     </div>
@@ -389,13 +714,18 @@ if ($isAjax) {
                         <th class="no-print" style="width: 30px;">#</th>
                         <th class="text-center no-print" style="width: 50px;">Hist</th>
                         <th class="ps-2 no-print" style="width: 60px;">Img</th>
-                        <th>SKU</th>
-                        <th>Producto</th>
-                        <th class="text-center" style="width: 80px;">Web</th>
-                        <th>Categoría</th>
-                        <th class="text-center">Stock</th>
-                        <th class="text-end">Venta</th>
-                        <th class="text-end bg-light">Utilidad</th>
+                        
+                        <th onclick="sortBy('codigo')" style="cursor:pointer">SKU <i id="icon_codigo" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="sortBy('nombre')" style="cursor:pointer">Producto <i id="icon_nombre" class="fas fa-sort-up text-primary small"></i></th>
+                        
+                        <th class="text-center" style="width: 80px;" title="Web visible / 📅 Reservable sin stock">Web / 📅</th>
+                        
+                        <th onclick="sortBy('categoria')" style="cursor:pointer">Categoría <i id="icon_categoria" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="sortBy('stock_total')" style="cursor:pointer" class="text-center">Stock <i id="icon_stock_total" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="sortBy('precio')" style="cursor:pointer" class="text-end">Venta <i id="icon_precio" class="fas fa-sort text-muted small"></i></th>
+                        <th class="text-end">Mayorista</th>
+                        <th onclick="sortBy('ganancia_neta')" style="cursor:pointer" class="text-end bg-light">Utilidad <i id="icon_ganancia_neta" class="fas fa-sort text-muted small"></i></th>
+                        
                         <th class="text-center no-print" style="width: 50px;">Acción</th>
                     </tr>
                 </thead>
@@ -421,7 +751,8 @@ if ($isAjax) {
     </nav>
 </div>
 
-<input type="file" id="fileInput" accept="image/jpeg, image/webp" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="fileInput"       accept="image/jpeg, image/webp, image/png" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="editorFileInput" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
 
 <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -449,15 +780,101 @@ if ($isAjax) {
     </div>
 </div>
 
+<!-- MODAL AJUSTE KARDEX -->
+<div class="modal fade" id="kardexAdjModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> AJUSTE DE KARDEX</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="alert alert-warning border-warning">
+                    <i class="fas fa-info-circle me-2"></i> <strong>ADVERTENCIA:</strong> Esta acción forzará el stock del producto. Use esto solo para correcciones excepcionales de inventario.
+                </div>
+                
+                <h6 class="fw-bold mb-3" id="adjProdName">---</h6>
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Tipo de Movimiento:</label>
+                    <select class="form-select" id="adjType">
+                        <option value="IN">➕ Entrada (Suma al stock)</option>
+                        <option value="OUT">➖ Salida (Resta del stock)</option>
+                    </select>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Cantidad:</label>
+                    <input type="number" class="form-control form-control-lg fw-bold" id="adjQty" placeholder="0.00" step="0.01" min="0.01">
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Motivo / Observación:</label>
+                    <textarea class="form-control" id="adjNote" rows="2" placeholder="Ej: Ajuste de inventario físico, error de ingreso..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-danger px-4 fw-bold" onclick="processKardexAdj()">EJECUTAR AJUSTE</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
+// --- AJUSTE DE KARDEX ---
+let adjSku = '';
+function openKardexAdj(sku, nombre) {
+    if(!confirm("¡PELIGRO! Ajustar el kardex manualmente puede causar discrepancias contables. ¿Está seguro de que desea continuar?")) return;
+    adjSku = sku;
+    document.getElementById('adjProdName').innerText = nombre;
+    document.getElementById('adjQty').value = '';
+    document.getElementById('adjNote').value = '';
+    new bootstrap.Modal(document.getElementById('kardexAdjModal')).show();
+}
+
+async function processKardexAdj() {
+    const qty = parseFloat(document.getElementById('adjQty').value);
+    const type = document.getElementById('adjType').value;
+    const note = document.getElementById('adjNote').value;
+
+    if(!qty || qty <= 0) return alert("Ingrese una cantidad válida");
+    if(!note) return alert("Ingrese el motivo del ajuste");
+
+    try {
+        const formData = new FormData();
+        formData.append('action', 'kardex_adj');
+        formData.append('sku', adjSku);
+        formData.append('qty', qty);
+        formData.append('type', type);
+        formData.append('note', note);
+
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+
+        if(data.status === 'success') {
+            bootstrap.Modal.getInstance(document.getElementById('kardexAdjModal')).hide();
+            showToast('Ajuste realizado correctamente');
+            loadData(currentPage);
+        } else {
+            alert("Error: " + data.msg);
+        }
+    } catch(e) { alert("Error de conexión"); }
+}
+
+function showToast(msg) {
+    // Implementación básica si no existe un toast global
+    alert(msg);
+}
+
 // VARIABLES GLOBALES
 let currentPage = 1;
 let currentCode = '';
-// Variable para imprimir (solo página actual por ahora para simplificar)
-const jsProds = []; // (Opcional: Si quieres imprimir todo desde JS, necesitarías cargarlo aparte)
+let currentSort = 'nombre';
+let currentDir = 'ASC';
 
-// --- 1. CARGA AJAX ---
+// --- 1. CARGA AJAX CON ORDENAMIENTO ---
 async function loadData(page) {
     currentPage = page;
     const limit = document.getElementById('f_limit').value;
@@ -466,7 +883,7 @@ async function loadData(page) {
     const status = document.getElementById('f_status').value;
     const stockRange = document.getElementById('f_stock').value;
 
-    const url = `products_table.php?ajax_load=1&page=${page}&limit=${limit}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}`;
+    const url = `products_table.php?ajax_load=1&page=${page}&limit=${limit}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}`;
     
     document.getElementById('tableBody').style.opacity = '0.5';
     
@@ -483,8 +900,33 @@ async function loadData(page) {
         
         document.getElementById('tableBody').style.opacity = '1';
         initInlineEdit();
+        updateSortIcons();
         
     } catch(e) { console.error(e); alert('Error cargando datos'); }
+}
+
+function sortBy(field) {
+    if (currentSort === field) {
+        currentDir = (currentDir === 'ASC') ? 'DESC' : 'ASC';
+    } else {
+        currentSort = field;
+        currentDir = 'ASC';
+    }
+    loadData(1);
+}
+
+function updateSortIcons() {
+    // Resetear todos
+    document.querySelectorAll('.fa-sort, .fa-sort-up, .fa-sort-down').forEach(i => {
+        if (i.id.startsWith('icon_')) {
+            i.className = 'fas fa-sort text-muted small';
+        }
+    });
+    // Activar el actual
+    const activeIcon = document.getElementById('icon_' + currentSort);
+    if (activeIcon) {
+        activeIcon.className = `fas fa-sort-${currentDir === 'ASC' ? 'up' : 'down'} text-primary small`;
+    }
 }
 
 function renderPagination(curr, total) {
@@ -522,10 +964,14 @@ function initInlineEdit() {
     });
 }
 
+function parseLogPayload(raw) {
+    if (typeof raw !== 'string' || !raw) return {};
+    try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+}
+
 async function saveInline(cell, sku, field, newVal, oldVal) {
     if(newVal == oldVal) { 
         cell.innerHTML = field==='price' ? '$'+parseFloat(newVal).toFixed(2) : parseFloat(newVal).toFixed(1);
-        if(field === 'price') cell.innerHTML += ` <i class="fas fa-history history-btn" onclick="showHistory('${sku}')"></i>`;
         return; 
     }
     
@@ -562,7 +1008,12 @@ async function showHistory(sku) {
         const res = await fetch(`products_table.php?action=get_history&sku=${sku}`);
         const logs = await res.json();
         if(logs.length === 0) list.innerHTML = '<li class="list-group-item text-muted">Sin cambios recientes.</li>';
-        else list.innerHTML = logs.map(l => `<li class="list-group-item"><div class="fw-bold">${l.fecha}</div><div class="text-muted small">Por: ${l.usuario}</div></li>`).join('');
+        else list.innerHTML = logs.map(l => {
+            const data = parseLogPayload(l.datos);
+            const prev = data.precio_anterior !== undefined ? `$${Number(data.precio_anterior).toFixed(2)}` : '—';
+            const next = data.precio_nuevo !== undefined ? `$${Number(data.precio_nuevo).toFixed(2)}` : '—';
+            return `<li class="list-group-item"><div class="fw-bold">${l.fecha}</div><div class="text-muted small">Por: ${l.usuario}</div><div class="small">Precio: ${prev} → ${next}</div></li>`;
+        }).join('');
     } catch(e) { list.innerHTML = '<li class="list-group-item text-danger">Error cargando.</li>'; }
 }
 
@@ -571,13 +1022,27 @@ const checks = document.querySelectorAll('.bulk-check');
 const selectAll = document.getElementById('selectAll');
 if(selectAll) selectAll.addEventListener('change', function() { document.querySelectorAll('.bulk-check').forEach(c => c.checked = this.checked); updateCount(); });
 document.addEventListener('change', e => { if(e.target.classList.contains('bulk-check')) updateCount(); });
-function updateCount() { document.getElementById('selectedCount').innerText = document.querySelectorAll('.bulk-check:checked').length + ' sel'; }
+function updateCount() { 
+    const selected = document.querySelectorAll('.bulk-check:checked').length;
+    const el = document.getElementById('selectedCount');
+    if (el) el.innerText = selected + ' sel'; 
+}
 
 const bulkSelect = document.getElementById('bulkActionSelect');
 if(bulkSelect) {
     bulkSelect.addEventListener('change', function() {
         const catInput = document.getElementById('bulkCatInput');
-        if(this.value === 'change_cat') catInput.classList.remove('d-none'); else catInput.classList.add('d-none');
+        const stockInput = document.getElementById('bulkStockMinInput');
+        if(this.value === 'change_cat') {
+            catInput.classList.remove('d-none');
+            stockInput.classList.add('d-none');
+        } else if(this.value === 'set_stock_min') {
+            catInput.classList.add('d-none');
+            stockInput.classList.remove('d-none');
+        } else {
+            catInput.classList.add('d-none');
+            stockInput.classList.add('d-none');
+        }
     });
 }
 
@@ -598,12 +1063,130 @@ async function applyBulkAction() {
     formData.append('bulk_action', action);
     formData.append('skus', JSON.stringify(selected));
     if(action === 'change_cat') formData.append('new_cat_val', document.getElementById('bulkCatInput').value);
+    if(action === 'set_stock_min') {
+        const val = document.getElementById('bulkStockMinInput').value;
+        if(val === '') return alert('Ingrese el stock mínimo.');
+        formData.append('new_stock_min_val', val);
+    }
+    if(action === 'clone_selected') {
+        if(!confirm(`¿Clonar ${selected.length} productos como copias?`)) return;
+    }
 
     try {
         const res = await fetch('products_table.php', { method: 'POST', body: formData });
         const data = await res.json();
-        if(data.status === 'success') { alert("✅ Listo"); loadData(currentPage); } else alert("❌ Error: " + data.msg);
+        if(data.status === 'success') {
+            if(data.mode === 'clone') alert(`✅ ${data.count} productos clonados.`);
+            else alert("✅ Listo");
+            loadData(currentPage);
+        } else {
+            alert("❌ Error: " + data.msg);
+        }
     } catch(e) { alert("Error conexión"); }
+}
+
+async function cloneProduct(sku) {
+    if (!confirm(`¿Clonar este producto (${sku})?`)) return;
+    try {
+        const formData = new FormData();
+        formData.append('action', 'clone_product');
+        formData.append('sku', sku);
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(`✅ Producto clonado con SKU ${data.new_sku}`);
+            loadData(currentPage);
+        } else {
+            alert("❌ Error: " + data.msg);
+        }
+    } catch (e) { alert("❌ Error de conexión."); }
+}
+
+// --- IMÁGENES DEL EDITOR ---
+let _editorSlot = '', _editorSku = '';
+
+function triggerEditorImg(sku, slot) {
+    _editorSku  = sku;
+    _editorSlot = slot;
+    document.getElementById('editorFileInput').click();
+}
+
+async function handleEditorUpload() {
+    const input = document.getElementById('editorFileInput');
+    const file  = input.files[0];
+    if (!file) return;
+    input.value = '';
+
+    const prodCode = (_editorSlot === 'main') ? _editorSku : _editorSku + '_' + _editorSlot;
+    const formData = new FormData();
+    formData.append('new_photo', file);
+    formData.append('prod_code', prodCode);
+
+    const imgEl = document.getElementById('img_' + _editorSlot);
+    if (imgEl) imgEl.style.opacity = '0.4';
+
+    try {
+        const res  = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            if (imgEl) {
+                imgEl.src = `image.php?code=${encodeURIComponent(prodCode)}&t=${Date.now()}`;
+                imgEl.style.opacity = '1';
+            }
+            const btnWrap = document.getElementById('btnWrap_' + _editorSlot);
+            if (btnWrap) {
+                const firstBtn = btnWrap.querySelector('button');
+                if (firstBtn) firstBtn.innerHTML = '<i class="fas fa-camera me-1"></i> Cambiar';
+                if (_editorSlot !== 'main' && !btnWrap.querySelector('.btn-outline-danger')) {
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'btn btn-sm btn-outline-danger';
+                    delBtn.title = 'Eliminar imagen';
+                    delBtn.innerHTML = '<i class="fas fa-trash"></i>';
+                    const slot = _editorSlot, sku = _editorSku;
+                    delBtn.onclick = () => deleteEditorImg(sku, slot);
+                    btnWrap.appendChild(delBtn);
+                }
+            }
+            // Refrescar miniatura de la tabla si es imagen principal
+            if (_editorSlot === 'main') {
+                const tableImg = document.querySelector(`.prod-img-table[data-code="${_editorSku}"]`);
+                if (tableImg) tableImg.src = `image.php?code=${encodeURIComponent(_editorSku)}&t=${Date.now()}`;
+            }
+        } else {
+            if (imgEl) imgEl.style.opacity = '1';
+            alert('Error al guardar imagen: ' + (data.msg || 'desconocido'));
+        }
+    } catch (e) {
+        if (imgEl) imgEl.style.opacity = '1';
+        alert('Error de conexión al subir imagen.');
+    }
+}
+
+async function deleteEditorImg(sku, slot) {
+    const label = slot === 'extra1' ? 'Extra 1' : 'Extra 2';
+    if (!confirm(`¿Eliminar imagen ${label} del producto?`)) return;
+
+    const formData = new FormData();
+    formData.append('action', 'delete_extra_img');
+    formData.append('sku',    sku);
+    formData.append('slot',   slot);
+
+    try {
+        const res  = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            const imgEl = document.getElementById('img_' + slot);
+            if (imgEl) imgEl.src = `image.php?code=${encodeURIComponent(sku + '_' + slot)}&t=${Date.now()}`;
+            const btnWrap = document.getElementById('btnWrap_' + slot);
+            if (btnWrap) btnWrap.innerHTML =
+                `<button type="button" class="btn btn-sm btn-outline-primary" onclick="triggerEditorImg('${sku}','${slot}')"><i class="fas fa-upload me-1"></i> Subir</button>`;
+        } else {
+            alert('Error al eliminar imagen: ' + (data.msg || 'desconocido'));
+        }
+    } catch (e) {
+        alert('Error de conexión al eliminar imagen.');
+    }
 }
 
 // --- VARIOS ---
@@ -614,9 +1197,20 @@ function uploadPhoto() {
     const formData = new FormData();
     formData.append('new_photo', file);
     formData.append('prod_code', currentCode);
-    fetch('products_table.php', { method: 'POST', body: formData }).then(r => r.json()).then(res => {
-        if(res.status==='success') location.reload(); else alert('Error: ' + res.msg);
-    });
+    // Resetear el input para que el mismo archivo se pueda subir de nuevo
+    document.getElementById('fileInput').value = '';
+    fetch('products_table.php', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(res => {
+            if(res.status === 'success') {
+                // Actualizar la imagen en la tabla con cache-buster (sin recargar página)
+                const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
+                if(img) img.src = `image.php?code=${encodeURIComponent(currentCode)}&t=${Date.now()}`;
+            } else {
+                alert('Error al guardar imagen: ' + res.msg);
+            }
+        })
+        .catch(e => alert('Error de conexión: ' + e.message));
 }
 async function toggleWeb(sku, checkbox) {
     const val = checkbox.checked ? 1 : 0;
@@ -628,6 +1222,25 @@ async function toggleWeb(sku, checkbox) {
         const res = await fetch('products_table.php', { method: 'POST', body: formData });
         const data = await res.json();
         if(data.status !== 'success') { checkbox.checked = !checkbox.checked; alert("Error: " + data.msg); }
+    } catch(e) { checkbox.checked = !checkbox.checked; }
+}
+
+async function toggleReservable(sku, checkbox) {
+    const val = checkbox.checked ? 1 : 0;
+    const formData = new FormData();
+    formData.append('action', 'toggle_reservable');
+    formData.append('sku', sku);
+    formData.append('val', val);
+    try {
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            checkbox.style.backgroundColor = val ? '#f59e0b' : '';
+            checkbox.style.borderColor     = val ? '#d97706' : '';
+        } else {
+            checkbox.checked = !checkbox.checked;
+            alert("Error: " + data.msg);
+        }
     } catch(e) { checkbox.checked = !checkbox.checked; }
 }
 
@@ -655,21 +1268,149 @@ function executeScripts(html) {
 window.reloadTable = function() { loadData(currentPage); }
 function productoCreadoExito(nuevoProducto) { loadData(1); }
 
-// Imprimir conteo (Nota: Imprime lo que se ve en pantalla para ser consistente con filtros)
-function printInventoryCount() {
-    window.print();
+// Imprimir conteo (Listado para conteo manual ordenado por categoría y nombre)
+async function printInventoryCount() {
+    const res = await fetch('products_table.php?action=get_full_active_list');
+    const products = await res.json();
+    
+    let html = `
+    <html>
+    <head>
+        <title>Listado de Conteo - ${new Date().toLocaleDateString()}</title>
+        <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            body { padding: 20px; font-size: 12px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #ccc; padding: 6px; }
+            th { background: #f0f0f0; }
+            .cat-header { background: #e9ecef; font-weight: bold; font-size: 14px; }
+            .real-col { width: 100px; }
+            @media print { .no-print { display: none; } }
+        </style>
+    </head>
+    <body>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h4>HOJA DE CONTEO FÍSICO - INVENTARIO</h4>
+            <div class="text-end">Fecha: ${new Date().toLocaleString()}</div>
+        </div>
+        
+        <table class="table table-bordered">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th class="text-center">Stock Sistema</th>
+                    <th class="real-col text-center">EXISTENCIA REAL</th>
+                </tr>
+            </thead>
+            <tbody>`;
+            
+    let currentCat = '';
+    products.forEach(p => {
+        if (p.categoria !== currentCat) {
+            currentCat = p.categoria;
+            html += `<tr class="cat-header"><td colspan="4"><i class="fas fa-folder me-2"></i> CATEGORÍA: ${currentCat}</td></tr>`;
+        }
+        html += `
+            <tr>
+                <td class="font-monospace">${p.codigo}</td>
+                <td>${p.nombre}</td>
+                <td class="text-center fw-bold">${parseFloat(p.stock_total).toFixed(1)}</td>
+                <td class="real-col">_________________</td>
+            </tr>`;
+    });
+    
+    html += `
+            </tbody>
+        </table>
+        <div class="mt-4 no-print text-center">
+            <button onclick="window.print()" class="btn btn-primary btn-lg px-5">IMPRIMIR AHORA</button>
+        </div>
+
+</body>
+    </html>`;
+    
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
 }
 function printTable() {
     window.print();
 }
 
+async function forceImageCacheReset() {
+    if (!confirm('Se limpiará la caché local de imágenes y se recargará la tabla. ¿Continuar?')) return;
+    let deleted = 0;
+    try {
+        if ('caches' in window) {
+            const cacheNames = await caches.keys();
+            for (const cacheName of cacheNames) {
+                const cache = await caches.open(cacheName);
+                const requests = await cache.keys();
+                for (const req of requests) {
+                    const u = req.url || '';
+                    if (
+                        u.includes('/image.php?') ||
+                        u.includes('/assets/product_images/') ||
+                        u.includes('via.placeholder.com/50?text=IMG')
+                    ) {
+                        if (await cache.delete(req)) deleted++;
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('No se pudo limpiar Cache Storage', e);
+    }
+
+    const bust = Date.now();
+    try {
+        document.querySelectorAll('img.prod-img-table').forEach(img => {
+            const code = img.dataset.code || '';
+            if (!code) return;
+            img.src = `image.php?code=${encodeURIComponent(code)}&t=${bust}`;
+        });
+    } catch (e) {
+        console.warn('No se pudieron refrescar miniaturas', e);
+    }
+
+    await loadData(currentPage);
+    alert(`Caché de imágenes limpiada. Elementos eliminados: ${deleted}`);
+}
+
 // Inicializar
-document.addEventListener('DOMContentLoaded', initInlineEdit);
+document.addEventListener('DOMContentLoaded', function() {
+    initInlineEdit();
+    updateCount();
+    // Marcar el ícono por defecto (Nombre ASC)
+    updateSortIcons();
+    // Cargar categorías
+    reloadCategorySelects();
+});
+
+async function reloadCategorySelects() {
+    try {
+        const res = await fetch('categories_api.php');
+        const cats = await res.json();
+        const datalist = document.getElementById('bulk_cat_list');
+        if (datalist) {
+            datalist.innerHTML = '';
+            cats.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.nombre;
+                datalist.appendChild(opt);
+            });
+        }
+        if (typeof loadCategoriesQP === 'function') {
+            loadCategoriesQP();
+        }
+    } catch(e) { console.error("Error recargando categorías", e); }
+}
 </script>
 
 
 <?php include_once 'pos_newprod.php'; ?>
+<?php include_once 'modal_categories.php'; ?>
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

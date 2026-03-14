@@ -1,6 +1,7 @@
 <?php
 // ARCHIVO: products_table.php v3.2 (CON ORDENAMIENTO POR COLUMNAS)
 ini_set('display_errors', 0);
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 require_once 'db.php';
 require_once 'pos_audit.php'; 
 
@@ -13,6 +14,38 @@ $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $localPath = __DIR__ . '/assets/product_images/';
+
+function ptable_get_actor(): string {
+    if (!empty($_SESSION['admin_user'])) return (string)$_SESSION['admin_user'];
+    if (!empty($_SESSION['admin_name'])) return (string)$_SESSION['admin_name'];
+    if (!empty($_SESSION['user_name'])) return (string)$_SESSION['user_name'];
+    if (!empty($_SESSION['user'])) return (string)$_SESSION['user'];
+    if (!empty($_SESSION['user_id'])) return (string)$_SESSION['user_id'];
+    return 'admin';
+}
+
+function ptable_next_product_code(PDO $pdo, int $empId, int $sucId): string {
+    $prefix = str_repeat((string)$sucId, 2);
+    $lenPrefix = strlen($prefix);
+    $stmt = $pdo->prepare(
+        "SELECT MAX(CAST(SUBSTRING(codigo, :len + 1) AS UNSIGNED)) AS max_seq
+         FROM productos
+         WHERE id_empresa = :emp AND codigo LIKE CONCAT(:prefix, '%')"
+    );
+    $stmt->execute([':len' => $lenPrefix, ':emp' => $empId, ':prefix' => $prefix]);
+    $next = (int)$stmt->fetchColumn();
+    $seq = $next > 0 ? $next + 1 : 1;
+    $attempt = 0;
+    while (true) {
+        $candidate = $prefix . str_pad((string)$seq, 4, '0', STR_PAD_LEFT);
+        $check = $pdo->prepare("SELECT 1 FROM productos WHERE codigo = ? AND id_empresa = ?");
+        $check->execute([$candidate, $empId]);
+        if (!$check->fetchColumn()) return $candidate;
+        $seq++;
+        $attempt++;
+        if ($attempt > 200) return $prefix . '_' . time() . '_' . mt_rand(100, 999);
+    }
+}
 
 function ptable_image_meta(string $code): array {
     $safe = trim($code);
@@ -93,7 +126,10 @@ function renderProductRows($rows, $localPath) {
         
         <td class="text-end fw-bold text-success bg-light">$<?php echo number_format($p['ganancia_neta'], 2); ?></td>
         <td class="text-center no-print">
-            <div class="btn-group">
+        <div class="btn-group">
+                <button class="btn btn-outline-secondary btn-action" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar">
+                    <i class="fas fa-clone"></i>
+                </button>
                 <button class="btn btn-outline-primary btn-action" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit"></i></button>
                 <a href="pos_shrinkage.php?prefill_sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-danger btn-action" title="Merma"><i class="fas fa-trash-alt"></i></a>
             </div>
@@ -112,7 +148,98 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // EDICIÓN RÁPIDA (INLINE EDIT)
     if (isset($_POST['action']) && $_POST['action'] === 'inline_edit') {
-        // ... (existing code)
+        try {
+            $sku = trim((string)($_POST['sku'] ?? ''));
+            $field = $_POST['field'] ?? '';
+            $rawValue = trim((string)($_POST['value'] ?? ''));
+
+            if (!$sku) throw new Exception('SKU vacío.');
+            if (!in_array($field, ['price', 'stock'], true)) throw new Exception('Campo inválido.');
+            if ($rawValue === '' || !is_numeric($rawValue)) throw new Exception('Valor inválido.');
+
+            $newValue = round((float)$rawValue, 2);
+            $actor = ptable_get_actor();
+
+            if ($field === 'price') {
+                if ($newValue < 0) throw new Exception('Precio inválido.');
+                $stmtOld = $pdo->prepare("SELECT precio FROM productos WHERE codigo = ? AND id_empresa = ?");
+                $stmtOld->execute([$sku, $EMP_ID]);
+                $oldValue = $stmtOld->fetchColumn();
+                if ($oldValue === false) throw new Exception('Producto no encontrado.');
+                if ((float)$oldValue === $newValue) {
+                    echo json_encode(['status' => 'success', 'msg' => 'Sin cambios']);
+                    exit;
+                }
+
+                $pdo->beginTransaction();
+                $stmt = $pdo->prepare("UPDATE productos SET precio = ? WHERE codigo = ? AND id_empresa = ?");
+                $stmt->execute([$newValue, $sku, $EMP_ID]);
+                log_audit($pdo, 'PRECIO_UPDATE', $actor, [
+                    'sku' => $sku,
+                    'precio_anterior' => (float)$oldValue,
+                    'precio_nuevo' => $newValue
+                ]);
+                if ($pdo->inTransaction()) $pdo->commit();
+                echo json_encode(['status' => 'success', 'msg' => 'Precio actualizado']);
+                exit;
+            }
+            $stmtCheck = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+            $stmtCheck->execute([$sku, $ALM_ID]);
+            if ($stmtCheck->fetch() !== false) {
+                $stmt = $pdo->prepare("UPDATE stock_almacen SET cantidad = ? WHERE id_producto = ? AND id_almacen = ?");
+                $stmt->execute([$newValue, $sku, $ALM_ID]);
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO stock_almacen (id_producto, id_almacen, id_sucursal, cantidad) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$sku, $ALM_ID, $SUC_ID, $newValue]);
+            }
+
+            log_audit($pdo, 'STOCK_AJUSTE_INLINE', $actor, ['sku' => $sku, 'nuevo_stock' => $newValue, 'almacen' => $ALM_ID]);
+            echo json_encode(['status' => 'success', 'msg' => 'Stock actualizado']);
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    // CLONAR PRODUCTO DESDE LISTA
+    if (isset($_POST['action']) && $_POST['action'] === 'clone_product') {
+        try {
+            $sku = trim((string)($_POST['sku'] ?? ''));
+            if (!$sku) throw new Exception('SKU origen vacío.');
+
+            $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+
+            $stmt = $pdo->prepare("
+                INSERT INTO productos (
+                    codigo, id_empresa, nombre, precio, costo, precio_mayorista, activo, version_row,
+                    categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                    unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                    es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                    uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                )
+                SELECT
+                    ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                    categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                    unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                    es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                    NULL, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                FROM productos
+                WHERE codigo = ? AND id_empresa = ?
+            ");
+            $stmt->execute([$newSku, $sku, $EMP_ID]);
+
+            if ($stmt->rowCount() < 1) throw new Exception('No se pudo clonar el producto.');
+
+            log_audit($pdo, 'PRODUCTO_CLONADO', ptable_get_actor(), [
+                'sku_origen' => $sku,
+                'sku_nuevo' => $newSku
+            ]);
+            echo json_encode(['status' => 'success', 'new_sku' => $newSku, 'msg' => 'Producto clonado']);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
+        exit;
     }
 
     // AJUSTE DE KARDEX MANUAL
@@ -267,6 +394,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             switch ($action) {
                 case 'web_on': $sql = "UPDATE productos SET es_web = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'web_off': $sql = "UPDATE productos SET es_web = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'reservable_on': $sql = "UPDATE productos SET es_reservable = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'reservable_off': $sql = "UPDATE productos SET es_reservable = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'pos_on': $sql = "UPDATE productos SET es_pos = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
+                case 'pos_off': $sql = "UPDATE productos SET es_pos = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'active_on': $sql = "UPDATE productos SET activo = 1 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'active_off': $sql = "UPDATE productos SET activo = 0 WHERE codigo IN ($inQuery) AND id_empresa = ?"; break;
                 case 'change_cat':
@@ -274,12 +405,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $sql = "UPDATE productos SET categoria = ? WHERE codigo IN ($inQuery) AND id_empresa = ?";
                     array_unshift($params, $newCat);
                     break;
+                case 'set_stock_min':
+                    if (!isset($_POST['new_stock_min_val']) || $_POST['new_stock_min_val'] === '' || !is_numeric($_POST['new_stock_min_val'])) {
+                        throw new Exception("Valor de stock mínimo inválido.");
+                    }
+                    $newStockMin = round((float)$_POST['new_stock_min_val'], 2);
+                    $sql = "UPDATE productos SET stock_minimo = ? WHERE codigo IN ($inQuery) AND id_empresa = ?";
+                    array_unshift($params, $newStockMin);
+                    break;
+                case 'clone_selected':
+                    $created = [];
+                    $pdo->beginTransaction();
+                    $stmtClone = $pdo->prepare("
+                        INSERT INTO productos (
+                            codigo, id_empresa, nombre, precio, costo, precio_mayorista, activo, version_row,
+                            categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                            unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                            es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                            uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                        )
+                        SELECT
+                            ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                            categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
+                            unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
+                            es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
+                            NULL, etiqueta_web, etiqueta_color, precio_oferta, favorito
+                        FROM productos
+                        WHERE codigo = ? AND id_empresa = ?
+                    ");
+
+                    foreach ($skus as $sku) {
+                        $src = trim((string)$sku);
+                        if ($src === '') continue;
+                        $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+                        $stmtClone->execute([$newSku, $src, $EMP_ID]);
+                        if ($stmtClone->rowCount() < 1) throw new Exception("No se pudo clonar SKU $src.");
+                        $created[] = $newSku;
+                        log_audit($pdo, 'PRODUCTO_CLONADO', ptable_get_actor(), [
+                            'sku_origen' => $src,
+                            'sku_nuevo' => $newSku,
+                            'modo' => 'bulk'
+                        ]);
+                    }
+                    $pdo->commit();
+                    echo json_encode(['status' => 'success', 'mode' => 'clone', 'count' => count($created), 'created' => $created]);
+                    exit;
                 default: throw new Exception("Acción inválida.");
             }
             $stmt = $pdo->prepare($sql);
             $stmt->execute($params);
             echo json_encode(['status'=>'success', 'count'=>count($skus)]); 
-        } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch (Exception $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+        }
         exit;
     }
 }
@@ -294,8 +473,15 @@ if (isset($_GET['action'])) {
     if ($action === 'get_history') {
         $sku = $_GET['sku'];
         try {
-            $stmt = $pdo->prepare("SELECT fecha, usuario, detalles FROM pos_audit WHERE tipo = 'PRECIO_UPDATE' AND detalles LIKE ? ORDER BY fecha DESC LIMIT 10");
-            $stmt->execute(['%"sku":"'.$sku.' "%']);
+            $stmt = $pdo->prepare("
+                SELECT created_at AS fecha, usuario, datos
+                FROM auditoria_pos
+                WHERE accion = 'PRECIO_UPDATE'
+                  AND (JSON_UNQUOTE(JSON_EXTRACT(datos, '$.sku')) = ? OR datos LIKE ?)
+                ORDER BY created_at DESC
+                LIMIT 10
+            ");
+            $stmt->execute([$sku, '%\"sku\":\"'.$sku.'\"%']);
             $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode($logs);
         } catch(Exception $e) { echo json_encode([]); }
@@ -500,15 +686,22 @@ if ($isAjax) {
                 <option value="print_labels">🏷️ Imprimir Etiquetas</option>
                 <option value="web_on">🌐 Activar en WEB</option>
                 <option value="web_off">🚫 Ocultar de WEB</option>
+                <option value="reservable_on">📅 Activar Reservable</option>
+                <option value="reservable_off">📅 Desactivar Reservable</option>
+                <option value="pos_on">🧾 Mostrar en POS</option>
+                <option value="pos_off">🧾 Ocultar en POS</option>
                 <option value="active_on">✅ Activar Producto</option>
                 <option value="active_off">❌ Desactivar Producto</option>
+                <option value="set_stock_min">📌 Cambiar Stock Mínimo</option>
                 <option value="change_cat">📂 Cambiar Categoría</option>
+                <option value="clone_selected">📑 Clonar Seleccionados</option>
             </select>
             <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría" style="max-width: 150px;">
+            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="Stock mínimo" style="max-width: 150px;">
             <datalist id="bulk_cat_list"></datalist>
             <button class="btn btn-secondary btn-sm" onclick="applyBulkAction()">Aplicar</button>
             <div class="ms-auto text-muted small">
-                Total: <strong id="totalCountDisplay"><?php echo $totalProducts; ?></strong> | Pág <span id="currentPageDisplay"><?php echo $page; ?></span>
+                <strong id="selectedCount">0 sel</strong> | Total: <strong id="totalCountDisplay"><?php echo $totalProducts; ?></strong> | Pág <span id="currentPageDisplay"><?php echo $page; ?></span>
             </div>
         </div>
     </div>
@@ -771,6 +964,11 @@ function initInlineEdit() {
     });
 }
 
+function parseLogPayload(raw) {
+    if (typeof raw !== 'string' || !raw) return {};
+    try { return JSON.parse(raw) || {}; } catch (e) { return {}; }
+}
+
 async function saveInline(cell, sku, field, newVal, oldVal) {
     if(newVal == oldVal) { 
         cell.innerHTML = field==='price' ? '$'+parseFloat(newVal).toFixed(2) : parseFloat(newVal).toFixed(1);
@@ -810,7 +1008,12 @@ async function showHistory(sku) {
         const res = await fetch(`products_table.php?action=get_history&sku=${sku}`);
         const logs = await res.json();
         if(logs.length === 0) list.innerHTML = '<li class="list-group-item text-muted">Sin cambios recientes.</li>';
-        else list.innerHTML = logs.map(l => `<li class="list-group-item"><div class="fw-bold">${l.fecha}</div><div class="text-muted small">Por: ${l.usuario}</div></li>`).join('');
+        else list.innerHTML = logs.map(l => {
+            const data = parseLogPayload(l.datos);
+            const prev = data.precio_anterior !== undefined ? `$${Number(data.precio_anterior).toFixed(2)}` : '—';
+            const next = data.precio_nuevo !== undefined ? `$${Number(data.precio_nuevo).toFixed(2)}` : '—';
+            return `<li class="list-group-item"><div class="fw-bold">${l.fecha}</div><div class="text-muted small">Por: ${l.usuario}</div><div class="small">Precio: ${prev} → ${next}</div></li>`;
+        }).join('');
     } catch(e) { list.innerHTML = '<li class="list-group-item text-danger">Error cargando.</li>'; }
 }
 
@@ -819,13 +1022,27 @@ const checks = document.querySelectorAll('.bulk-check');
 const selectAll = document.getElementById('selectAll');
 if(selectAll) selectAll.addEventListener('change', function() { document.querySelectorAll('.bulk-check').forEach(c => c.checked = this.checked); updateCount(); });
 document.addEventListener('change', e => { if(e.target.classList.contains('bulk-check')) updateCount(); });
-function updateCount() { document.getElementById('selectedCount').innerText = document.querySelectorAll('.bulk-check:checked').length + ' sel'; }
+function updateCount() { 
+    const selected = document.querySelectorAll('.bulk-check:checked').length;
+    const el = document.getElementById('selectedCount');
+    if (el) el.innerText = selected + ' sel'; 
+}
 
 const bulkSelect = document.getElementById('bulkActionSelect');
 if(bulkSelect) {
     bulkSelect.addEventListener('change', function() {
         const catInput = document.getElementById('bulkCatInput');
-        if(this.value === 'change_cat') catInput.classList.remove('d-none'); else catInput.classList.add('d-none');
+        const stockInput = document.getElementById('bulkStockMinInput');
+        if(this.value === 'change_cat') {
+            catInput.classList.remove('d-none');
+            stockInput.classList.add('d-none');
+        } else if(this.value === 'set_stock_min') {
+            catInput.classList.add('d-none');
+            stockInput.classList.remove('d-none');
+        } else {
+            catInput.classList.add('d-none');
+            stockInput.classList.add('d-none');
+        }
     });
 }
 
@@ -846,12 +1063,43 @@ async function applyBulkAction() {
     formData.append('bulk_action', action);
     formData.append('skus', JSON.stringify(selected));
     if(action === 'change_cat') formData.append('new_cat_val', document.getElementById('bulkCatInput').value);
+    if(action === 'set_stock_min') {
+        const val = document.getElementById('bulkStockMinInput').value;
+        if(val === '') return alert('Ingrese el stock mínimo.');
+        formData.append('new_stock_min_val', val);
+    }
+    if(action === 'clone_selected') {
+        if(!confirm(`¿Clonar ${selected.length} productos como copias?`)) return;
+    }
 
     try {
         const res = await fetch('products_table.php', { method: 'POST', body: formData });
         const data = await res.json();
-        if(data.status === 'success') { alert("✅ Listo"); loadData(currentPage); } else alert("❌ Error: " + data.msg);
+        if(data.status === 'success') {
+            if(data.mode === 'clone') alert(`✅ ${data.count} productos clonados.`);
+            else alert("✅ Listo");
+            loadData(currentPage);
+        } else {
+            alert("❌ Error: " + data.msg);
+        }
     } catch(e) { alert("Error conexión"); }
+}
+
+async function cloneProduct(sku) {
+    if (!confirm(`¿Clonar este producto (${sku})?`)) return;
+    try {
+        const formData = new FormData();
+        formData.append('action', 'clone_product');
+        formData.append('sku', sku);
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            alert(`✅ Producto clonado con SKU ${data.new_sku}`);
+            loadData(currentPage);
+        } else {
+            alert("❌ Error: " + data.msg);
+        }
+    } catch (e) { alert("❌ Error de conexión."); }
 }
 
 // --- IMÁGENES DEL EDITOR ---
@@ -1133,6 +1381,7 @@ async function forceImageCacheReset() {
 // Inicializar
 document.addEventListener('DOMContentLoaded', function() {
     initInlineEdit();
+    updateCount();
     // Marcar el ícono por defecto (Nombre ASC)
     updateSortIcons();
     // Cargar categorías
