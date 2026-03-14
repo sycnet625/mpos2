@@ -76,20 +76,60 @@ function safeProductId(string $id): string {
 }
 
 function httpGet(string $url, int $timeout = 15): array {
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_MAXREDIRS => 4,
-        CURLOPT_TIMEOUT => $timeout,
-        CURLOPT_CONNECTTIMEOUT => 8,
-        CURLOPT_SSL_VERIFYPEER => false,
-        CURLOPT_SSL_VERIFYHOST => false,
-        CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; PalWebImageHunter/1.0)',
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 4,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_ENCODING => '',
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; PalWebImageHunter/1.0)',
+            CURLOPT_HTTPHEADER => [
+                'Accept: application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language: es-ES,es;q=0.9,en;q=0.8',
+                'Cache-Control: no-cache',
+            ],
+        ]);
+        $body = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return ['code' => $code, 'body' => (string)($body ?: ''), 'url' => $url];
+    }
+
+    $context = stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'timeout' => $timeout,
+            'ignore_errors' => true,
+            'follow_location' => 1,
+            'max_redirects' => 4,
+            'header' => implode("\r\n", [
+                'User-Agent: Mozilla/5.0 (compatible; PalWebImageHunter/1.0)',
+                'Accept: application/json,text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language: es-ES,es;q=0.9,en;q=0.8',
+                'Cache-Control: no-cache',
+                'Connection: close',
+            ]),
+        ],
+        'ssl' => [
+            'verify_peer' => false,
+            'verify_peer_name' => false,
+        ],
     ]);
-    $body = curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+
+    $body = @file_get_contents($url, false, $context);
+    $headers = $http_response_header ?? [];
+    $code = 0;
+    foreach ($headers as $headerLine) {
+        if (preg_match('#^HTTP/\S+\s+(\d{3})#', $headerLine, $m)) {
+            $code = (int)$m[1];
+        }
+    }
 
     return ['code' => $code, 'body' => (string)($body ?: ''), 'url' => $url];
 }
@@ -125,6 +165,31 @@ function addCandidates(array &$bucket, string $url, string $source, string $titl
     ];
 
     if (count($bucket) >= $max) return;
+}
+
+function searchBingImageCandidates(string $query, string $siteDomain, string $regex, string $source, int $score = 54): array {
+    $query = trim($query);
+    if ($query === '' || $siteDomain === '' || $regex === '') {
+        return [];
+    }
+
+    $searchUrl = 'https://www.bing.com/images/search?' . http_build_query([
+        'q' => 'site:' . $siteDomain . ' ' . $query,
+    ]);
+    $html = httpGet($searchUrl, 14)['body'] ?? '';
+    if ($html === '') {
+        return [];
+    }
+
+    $cands = [];
+    if (preg_match_all($regex, $html, $matches)) {
+        foreach (array_slice(array_unique($matches[0]), 0, 8) as $url) {
+            $cleanUrl = html_entity_decode((string)$url, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $cleanUrl = preg_replace('/[\"\\\'].*$/', '', $cleanUrl);
+            addCandidates($cands, $cleanUrl, $source, $query, $score);
+        }
+    }
+    return array_values($cands);
 }
 
 function hasAnyVariant(string $base): bool {
@@ -189,7 +254,7 @@ function searchWikipediaCandidates(string $query): array {
             'action' => 'query',
             'format' => 'json',
             'prop' => 'pageimages',
-            'piprop' => 'original',
+            'piprop' => 'thumbnail|original',
             'pithumbsize' => 1200,
             'titles' => $title,
             'origin' => '*'
@@ -200,7 +265,7 @@ function searchWikipediaCandidates(string $query): array {
         $pages = $imgData['query']['pages'];
         if (!is_array($pages)) continue;
         foreach ($pages as $pg) {
-            $thumb = $pg['thumbnail']['source'] ?? null;
+            $thumb = $pg['original']['source'] ?? ($pg['thumbnail']['source'] ?? null);
             if (!is_string($thumb)) continue;
             $score = 62 + ($idx * 6);
             if (stripos(mb_strtolower($title), mb_strtolower($query)) !== false) $score += 25;
@@ -256,6 +321,9 @@ function searchOpenFoodFactsCandidates(string $query, string $sku = ''): array {
             if (!empty($product['image_front_url'])) addCandidates($cands, $product['image_front_url'], 'OpenFoodFacts', (string)$label . ' (código)', 96);
             if (!empty($product['image_url'])) addCandidates($cands, $product['image_url'], 'OpenFoodFacts', (string)$label . ' (código)', 92);
         }
+        if (!empty($cands)) {
+            return array_values($cands);
+        }
     }
 
     $search = 'https://world.openfoodfacts.org/cgi/search.pl?' . http_build_query([
@@ -266,11 +334,10 @@ function searchOpenFoodFactsCandidates(string $query, string $sku = ''): array {
         'fields' => 'code,product_name,image_front_url,image_url',
     ]);
     $json = httpGetJson($search, 15);
-    if (!$json || empty($json['products']) || !is_array($json['Products']) && !is_array($json['products'])) {
+    $products = $json['products'] ?? $json['Products'] ?? null;
+    if (!$json || !is_array($products) || $products === []) {
         return array_values($cands);
     }
-
-    $products = $json['products'] ?? $json['Products'];
     foreach (array_slice($products, 0, 8) as $item) {
         $name = $item['product_name'] ?? $query;
         if (!empty($item['image_front_url'])) addCandidates($cands, $item['image_front_url'], 'OpenFoodFacts', (string)$name, 84);
@@ -308,6 +375,20 @@ function searchWalmartCandidates(string $query): array {
     if (preg_match_all('~https://[^"\'\\s<>]*i5\\.walmartimages\\.com/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
         foreach (array_slice(array_unique($m[0]), 0, 8) as $img) addCandidates($cands, $img, 'Walmart', $query, 58);
     }
+    if (!empty($cands)) {
+        return array_values($cands);
+    }
+
+    $bing = searchBingImageCandidates(
+        $query,
+        'walmart.com',
+        '~https://i5\\.walmartimages\\.com/[^"\'\\s<>]+~i',
+        'Walmart/Bing',
+        55
+    );
+    foreach ($bing as $cand) {
+        addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+    }
     return array_values($cands);
 }
 
@@ -333,10 +414,25 @@ function searchAmazonCandidates(string $query): array {
 
     $search = 'https://www.amazon.com/s?' . http_build_query(['k' => $query]);
     $html = httpGet($search, 12)['body'] ?? '';
-    if (!$html) return [];
+    if ($html) {
+        if (preg_match_all('~https://[^"\'\\s<>]*m\\.media-amazon\\.com/images/I/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
+            foreach (array_slice(array_unique($m[0]), 0, 6) as $img) addCandidates($cands, $img, 'Amazon', $query, 56);
+        }
+    }
 
-    if (preg_match_all('~https://[^"\'\\s<>]*m\\.media-amazon\\.com/images/I/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
-        foreach (array_slice(array_unique($m[0]), 0, 6) as $img) addCandidates($cands, $img, 'Amazon', $query, 56);
+    if (!empty($cands)) {
+        return array_values($cands);
+    }
+
+    $bing = searchBingImageCandidates(
+        $query,
+        'amazon.com',
+        '~https://m\\.media-amazon\\.com/images/I/[^"\'\\s<>]+~i',
+        'Amazon/Bing',
+        53
+    );
+    foreach ($bing as $cand) {
+        addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
     }
     return array_values($cands);
 }
@@ -346,12 +442,35 @@ function searchBySkuCandidates(string $sku): array {
     $cands = [];
     if ($sku === '') return [];
 
-    $fromWiki = searchWikipediaCandidates("{$sku} producto");
-    foreach ($fromWiki as $c) addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score'] - 10);
+    // El barcode exacto es la fuente primaria para búsqueda por SKU.
     $fromOpen = searchOpenFoodFactsCandidates($sku, $sku);
-    foreach ($fromOpen as $c) addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    foreach ($fromOpen as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+    if (!empty($cands)) {
+        return array_values($cands);
+    }
+
+    $fromWalmart = searchWalmartCandidates($sku);
+    foreach ($fromWalmart as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+
+    $fromAmazon = searchAmazonCandidates($sku);
+    foreach ($fromAmazon as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+
+    $fromWiki = searchWikipediaCandidates("{$sku} producto");
+    foreach ($fromWiki as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score'] - 10);
+    }
+
     $fromDB = searchDbpediaCandidates($sku);
-    foreach ($fromDB as $c) addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    foreach ($fromDB as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+
     return array_values($cands);
 }
 
