@@ -6,3 +6,4 @@ wa_web_bridge/.cache/
 
 # Local database backups
 backups/*.sql
+marinero/
