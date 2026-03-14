@@ -21,11 +21,43 @@ $EMP_ID = intval($config['id_empresa']);
 // DB
 try { require_once 'db.php'; } catch (Exception $e) { die("Error DB"); }
 
-if (!is_dir($localImgPath)) {
-    @mkdir($localImgPath, 0775, true);
+function image_filler_is_writable_dir(string $path): bool {
+    if (!is_dir($path)) {
+        if (!@mkdir($path, 0775, true) && !is_dir($path)) return false;
+    }
+    if (!is_writable($path)) {
+        return false;
+    }
+    return true;
 }
-if (!is_dir($localImgPath) || !is_writable($localImgPath)) {
-    die("Error: la carpeta de imágenes no existe o no es escribible: $localImgPath");
+
+function image_filler_pick_dir(array $candidates): array {
+    foreach ($candidates as $path) {
+        if (image_filler_is_writable_dir($path)) {
+            return [$path, "ok"];
+        }
+    }
+    return [trim($candidates[0]), "unwritable"];
+}
+
+$candidatePaths = [
+    __DIR__ . '/assets/product_images/',
+    dirname(__DIR__) . '/assets/product_images/',
+    '/tmp/palweb_product_images/'
+];
+[$resolvedImagePath, $statusPath] = image_filler_pick_dir($candidatePaths);
+define('IMAGE_FILLER_DIR_STATUS', $statusPath);
+define('IMAGE_FILLER_DIR_ACTIVE', $resolvedImagePath);
+
+if (!is_dir($resolvedImagePath) || !is_writable($resolvedImagePath)) {
+    die("Error: No fue posible obtener una carpeta de imágenes escribible. Revisadas: " . implode(', ', $candidatePaths));
+}
+
+$localImgPath = rtrim($resolvedImagePath, '/');
+$localImgPath .= '/';
+
+if ($statusPath !== "ok") {
+    error_log("image_filler.php: no se pudo usar {$candidatePaths[0]}, usando fallback {$localImgPath}");
 }
 
 ?>
@@ -45,7 +77,11 @@ if (!is_dir($localImgPath) || !is_writable($localImgPath)) {
 </head>
 <body>
 <h1>📸 Buscador Pexels (Stock Photos)</h1>
-<p>Buscando fotos profesionales para tus productos...</p>
+    <p>Buscando fotos profesionales para tus productos...</p>
+    <p style="font-size:0.9rem;opacity:.8;">Carpeta activa: <strong><?php echo htmlspecialchars(IMAGE_FILLER_DIR_ACTIVE, ENT_QUOTES, 'UTF-8'); ?></strong></p>
+    <?php if (IMAGE_FILLER_DIR_STATUS !== 'ok'): ?>
+      <p style="font-size:0.9rem;color:#f1c40f;">Se usó fallback por permisos (origen no escribible).</p>
+    <?php endif; ?>
 <hr>
 
 <?php
