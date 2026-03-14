@@ -75,7 +75,31 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
             <div id="waWebStatus" class="small text-muted mt-2">Estado: pendiente de apertura</div>
           </div>
           <form id="f" class="row g-2">
-            <div class="col-12 form-check form-switch mb-1"><input class="form-check-input" id="enabled" type="checkbox"><label class="form-check-label" for="enabled">Habilitar BOT</label></div>
+            <div class="col-12">
+              <div class="form-check form-switch mb-1">
+                <input class="form-check-input" id="enabled" type="checkbox">
+                <label class="form-check-label" for="enabled">Habilitar autorespuesta BOT</label>
+              </div>
+              <div class="small text-muted">Si lo apagas manualmente, el bot no respondera. Las campañas siguen funcionando.</div>
+            </div>
+            <div class="col-md-6">
+              <div class="form-check form-switch mb-1">
+                <input class="form-check-input" id="auto_schedule_enabled" type="checkbox">
+                <label class="form-check-label" for="auto_schedule_enabled">Apagado automatico por horario</label>
+              </div>
+              <div class="small text-muted">Hora Habana. Dentro de la franja se apaga la autorespuesta; fuera de ella se activa sola si el switch principal esta encendido.</div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Apagar desde</label>
+              <input id="auto_off_start" type="time" class="form-control" value="07:00">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Apagar hasta</label>
+              <input id="auto_off_end" type="time" class="form-control" value="20:00">
+            </div>
+            <div class="col-12">
+              <div id="botAutoStatus" class="small rounded border px-3 py-2" style="background:#f8fafc;color:#334155">Estado de autorespuesta: cargando...</div>
+            </div>
             <div class="col-md-6">
               <label class="form-label">Modo de conexión</label>
               <select id="wa_mode" class="form-select">
@@ -532,8 +556,35 @@ function applyModeUI(){
   wa_phone_number_id.disabled = !isMeta;
   wa_access_token.disabled = !isMeta;
 }
-async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');bot_tone.value=(c.bot_tone||'muy_cercano');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();renderBotTonePreview();}
-async function saveCfg(ev){ev.preventDefault();const d=await p(API+'?action=save_config',{enabled:enabled.checked?1:0,wa_mode:wa_mode.value,bot_tone:bot_tone.value,verify_token:verify_token.value.trim(),wa_phone_number_id:wa_phone_number_id.value.trim(),wa_access_token:wa_access_token.value.trim(),business_name:business_name.value.trim(),welcome_message:welcome_message.value.trim(),menu_intro:menu_intro.value.trim(),no_match_message:no_match_message.value.trim()});if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
+function renderAutoReplyState(state){
+  const box=document.getElementById('botAutoStatus');
+  if(!box) return;
+  const s=state||{};
+  const active=Number(s.effective_enabled||0)===1;
+  box.style.background=active?'#ecfdf5':'#fff7ed';
+  box.style.borderColor=active?'#86efac':'#fdba74';
+  box.style.color=active?'#166534':'#9a3412';
+  box.textContent='Estado de autorespuesta: ' + (s.reason||'Sin datos');
+}
+function botAutoPayload(){
+  return {
+    enabled:enabled.checked?1:0,
+    auto_schedule_enabled:auto_schedule_enabled.checked?1:0,
+    auto_off_start:(auto_off_start.value||'07:00'),
+    auto_off_end:(auto_off_end.value||'20:00')
+  };
+}
+async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;auto_schedule_enabled.checked=Number(c.auto_schedule_enabled)===1;auto_off_start.value=c.auto_off_start||'07:00';auto_off_end.value=c.auto_off_end||'20:00';wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');bot_tone.value=(c.bot_tone||'muy_cercano');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();renderBotTonePreview();renderAutoReplyState(c.auto_reply_state||{});}
+async function saveCfg(ev){ev.preventDefault();const payload=botAutoPayload();payload.wa_mode=wa_mode.value;payload.bot_tone=bot_tone.value;payload.verify_token=verify_token.value.trim();payload.wa_phone_number_id=wa_phone_number_id.value.trim();payload.wa_access_token=wa_access_token.value.trim();payload.business_name=business_name.value.trim();payload.welcome_message=welcome_message.value.trim();payload.menu_intro=menu_intro.value.trim();payload.no_match_message=no_match_message.value.trim();const d=await p(API+'?action=save_config',payload);if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
+async function saveAutoReplyConfig(msg){
+  const d=await p(API+'?action=save_config',botAutoPayload());
+  if(d.status==='success'){
+    if(msg) a('success',msg);
+    await loadCfg();
+  } else {
+    a('danger',d.msg||'error');
+  }
+}
 async function loadStats(){const d=await g(API+'?action=stats');if(d.status!=='success')return;s1.textContent=d.stats.sessions||0;s2.textContent=d.stats.msgs_today||0;s3.textContent=d.stats.orders_today||0;s4.textContent='$'+Number(d.stats.sales_today||0).toFixed(2)}
 async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td class="small">${esc(r.wa_name||'-')}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
@@ -1179,6 +1230,10 @@ function openWhatsAppWeb(){
 document.getElementById('f').addEventListener('submit',saveCfg);
 wa_mode.addEventListener('change',applyModeUI);
 bot_tone.addEventListener('change',renderBotTonePreview);
+enabled.addEventListener('change',()=>saveAutoReplyConfig(enabled.checked?'Autorespuesta activada':'Autorespuesta desactivada'));
+auto_schedule_enabled.addEventListener('change',()=>saveAutoReplyConfig(auto_schedule_enabled.checked?'Horario automatico activado':'Horario automatico desactivado'));
+auto_off_start.addEventListener('change',()=>saveAutoReplyConfig('Horario de apagado actualizado'));
+auto_off_end.addEventListener('change',()=>saveAutoReplyConfig('Horario de apagado actualizado'));
 tname.addEventListener('input',renderBotTonePreview);
 document.getElementById('conversationSearch').addEventListener('input',renderConversations);
 document.querySelectorAll('[data-conv-filter]').forEach(btn=>btn.addEventListener('click',()=>{

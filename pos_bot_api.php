@@ -225,6 +225,9 @@ function bot_ensure_tables(PDO $pdo): void {
     $pdo->exec("CREATE TABLE IF NOT EXISTS pos_bot_config (
         id TINYINT PRIMARY KEY DEFAULT 1,
         enabled TINYINT(1) NOT NULL DEFAULT 0,
+        auto_schedule_enabled TINYINT(1) NOT NULL DEFAULT 1,
+        auto_off_start CHAR(5) NOT NULL DEFAULT '07:00',
+        auto_off_end CHAR(5) NOT NULL DEFAULT '20:00',
         wa_mode ENUM('web','meta_api') NOT NULL DEFAULT 'web',
         bot_tone ENUM('premium','popular_cubano','formal_comercial','muy_cercano') NOT NULL DEFAULT 'muy_cercano',
         verify_token VARCHAR(120) DEFAULT NULL,
@@ -273,16 +276,72 @@ function bot_ensure_tables(PDO $pdo): void {
     if (!bot_has_column($pdo, 'pos_bot_config', 'wa_mode')) {
         $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN wa_mode ENUM('web','meta_api') NOT NULL DEFAULT 'web' AFTER enabled");
     }
+    if (!bot_has_column($pdo, 'pos_bot_config', 'auto_schedule_enabled')) {
+        $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN auto_schedule_enabled TINYINT(1) NOT NULL DEFAULT 1 AFTER enabled");
+    }
+    if (!bot_has_column($pdo, 'pos_bot_config', 'auto_off_start')) {
+        $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN auto_off_start CHAR(5) NOT NULL DEFAULT '07:00' AFTER auto_schedule_enabled");
+    }
+    if (!bot_has_column($pdo, 'pos_bot_config', 'auto_off_end')) {
+        $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN auto_off_end CHAR(5) NOT NULL DEFAULT '20:00' AFTER auto_off_start");
+    }
     if (!bot_has_column($pdo, 'pos_bot_config', 'bot_tone')) {
         $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN bot_tone ENUM('premium','popular_cubano','formal_comercial','muy_cercano') NOT NULL DEFAULT 'muy_cercano' AFTER wa_mode");
     }
     $pdo->exec("UPDATE pos_bot_config SET wa_mode='web' WHERE wa_mode IS NULL OR wa_mode=''");
     $pdo->exec("UPDATE pos_bot_config SET bot_tone='muy_cercano' WHERE bot_tone IS NULL OR bot_tone=''");
+    $pdo->exec("UPDATE pos_bot_config SET auto_off_start='07:00' WHERE auto_off_start IS NULL OR auto_off_start=''");
+    $pdo->exec("UPDATE pos_bot_config SET auto_off_end='20:00' WHERE auto_off_end IS NULL OR auto_off_end=''");
 }
 
 function bot_cfg(PDO $pdo): array {
     $c = $pdo->query("SELECT * FROM pos_bot_config WHERE id=1")->fetch(PDO::FETCH_ASSOC);
     return $c ?: [];
+}
+
+function bot_valid_time_hhmm(string $value, string $fallback): string {
+    $value = substr(trim($value), 0, 5);
+    return preg_match('/^\d{2}:\d{2}$/', $value) ? $value : $fallback;
+}
+
+function bot_time_in_range(string $current, string $start, string $end): bool {
+    if ($start === $end) {
+        return true;
+    }
+    if ($start < $end) {
+        return $current >= $start && $current < $end;
+    }
+    return $current >= $start || $current < $end;
+}
+
+function bot_autoreply_state(array $cfg, string $timezone = 'America/Havana'): array {
+    $manualEnabled = !empty($cfg['enabled']);
+    $scheduleEnabled = !empty($cfg['auto_schedule_enabled']);
+    $start = bot_valid_time_hhmm((string)($cfg['auto_off_start'] ?? '07:00'), '07:00');
+    $end = bot_valid_time_hhmm((string)($cfg['auto_off_end'] ?? '20:00'), '20:00');
+    $tz = new DateTimeZone($timezone);
+    $now = new DateTimeImmutable('now', $tz);
+    $current = $now->format('H:i');
+    $mutedBySchedule = $scheduleEnabled && bot_time_in_range($current, $start, $end);
+    $effectiveEnabled = $manualEnabled && !$mutedBySchedule;
+    $reason = $effectiveEnabled ? 'Autorepuesta activa.' : 'Autorepuesta desactivada manualmente.';
+    if ($manualEnabled && $mutedBySchedule) {
+        $reason = "Autorepuesta en apagado automatico de {$start} a {$end} (hora Habana).";
+    } elseif ($manualEnabled && $scheduleEnabled && !$mutedBySchedule) {
+        $reason = "Autorepuesta activa fuera de la franja {$start} a {$end} (hora Habana).";
+    }
+    return [
+        'manual_enabled' => $manualEnabled ? 1 : 0,
+        'schedule_enabled' => $scheduleEnabled ? 1 : 0,
+        'auto_off_start' => $start,
+        'auto_off_end' => $end,
+        'timezone' => $timezone,
+        'now_havana' => $now->format('Y-m-d H:i:s'),
+        'now_havana_hm' => $current,
+        'muted_by_schedule' => $mutedBySchedule ? 1 : 0,
+        'effective_enabled' => $effectiveEnabled ? 1 : 0,
+        'reason' => $reason,
+    ];
 }
 
 function bot_log(PDO $pdo, string $wa, string $dir, string $txt, string $type='text'): void {
@@ -2003,6 +2062,10 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='get_config') {
     $safe = $cfg;
     $safe['wa_mode'] = in_array((string)($safe['wa_mode'] ?? ''), ['web','meta_api'], true) ? $safe['wa_mode'] : 'web';
     $safe['bot_tone'] = in_array((string)($safe['bot_tone'] ?? ''), ['premium','popular_cubano','formal_comercial','muy_cercano'], true) ? $safe['bot_tone'] : 'muy_cercano';
+    $safe['auto_schedule_enabled'] = !empty($safe['auto_schedule_enabled']) ? 1 : 0;
+    $safe['auto_off_start'] = bot_valid_time_hhmm((string)($safe['auto_off_start'] ?? '07:00'), '07:00');
+    $safe['auto_off_end'] = bot_valid_time_hhmm((string)($safe['auto_off_end'] ?? '20:00'), '20:00');
+    $safe['auto_reply_state'] = bot_autoreply_state($safe);
     if (!empty($safe['wa_access_token'])) $safe['wa_access_token'] = '************';
     echo json_encode(['status'=>'success','config'=>$safe]); exit;
 }
@@ -2018,9 +2081,15 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='save_config') {
     }
     $botTone = (string)($in['bot_tone'] ?? $cfg['bot_tone'] ?? 'muy_cercano');
     if (!in_array($botTone, ['premium','popular_cubano','formal_comercial','muy_cercano'], true)) $botTone = 'muy_cercano';
-    $st = $pdo->prepare("UPDATE pos_bot_config SET enabled=?,wa_mode=?,bot_tone=?,verify_token=?,wa_phone_number_id=?,wa_access_token=?,business_name=?,welcome_message=?,menu_intro=?,no_match_message=? WHERE id=1");
+    $autoScheduleEnabled = !empty($in['auto_schedule_enabled']) ? 1 : 0;
+    $autoOffStart = bot_valid_time_hhmm((string)($in['auto_off_start'] ?? $cfg['auto_off_start'] ?? '07:00'), '07:00');
+    $autoOffEnd = bot_valid_time_hhmm((string)($in['auto_off_end'] ?? $cfg['auto_off_end'] ?? '20:00'), '20:00');
+    $st = $pdo->prepare("UPDATE pos_bot_config SET enabled=?,auto_schedule_enabled=?,auto_off_start=?,auto_off_end=?,wa_mode=?,bot_tone=?,verify_token=?,wa_phone_number_id=?,wa_access_token=?,business_name=?,welcome_message=?,menu_intro=?,no_match_message=? WHERE id=1");
     $st->execute([
         !empty($in['enabled']) ? 1 : 0,
+        $autoScheduleEnabled,
+        $autoOffStart,
+        $autoOffEnd,
         $waMode,
         $botTone,
         substr(trim((string)($in['verify_token'] ?? $cfg['verify_token'] ?? 'palweb_bot_verify')),0,120),
@@ -2767,6 +2836,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='test_incoming') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $replyState = bot_autoreply_state($cfg);
+    if (empty($replyState['effective_enabled'])) {
+        echo json_encode(['status'=>'ok','msg'=>$replyState['reason'],'responses'=>[]]); exit;
+    }
     $wa = preg_replace('/\D+/', '', (string)($in['wa_user_id'] ?? '5350000000'));
     $name = trim((string)($in['wa_name'] ?? 'Cliente Test'));
     $text = trim((string)($in['text'] ?? 'MENU'));
@@ -2783,8 +2856,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='web_incoming') {
         http_response_code(403);
         echo json_encode(['status'=>'error','msg'=>'invalid token']); exit;
     }
-    if (empty($cfg['enabled'])) {
-        echo json_encode(['status'=>'ok','msg'=>'bot disabled','responses'=>[]]); exit;
+    $replyState = bot_autoreply_state($cfg);
+    if (empty($replyState['effective_enabled'])) {
+        echo json_encode(['status'=>'ok','msg'=>$replyState['reason'],'responses'=>[]]); exit;
     }
     if (($cfg['wa_mode'] ?? 'web') !== 'web') {
         echo json_encode(['status'=>'ok','msg'=>'wa_mode is not web','responses'=>[]]); exit;
@@ -2809,7 +2883,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='web_incoming') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST') {
-    if (empty($cfg['enabled'])) { echo json_encode(['status'=>'ok','msg'=>'bot disabled']); exit; }
+    $replyState = bot_autoreply_state($cfg);
+    if (empty($replyState['effective_enabled'])) { echo json_encode(['status'=>'ok','msg'=>$replyState['reason']]); exit; }
     $payload = json_decode(file_get_contents('php://input'), true) ?: [];
     foreach (($payload['entry'] ?? []) as $entry) {
         foreach (($entry['changes'] ?? []) as $chg) {
