@@ -29,6 +29,37 @@ function ptable_dir_is_really_writable(string $path): bool {
     return $ok;
 }
 
+function ptable_detect_upload_image_extension(string $tmpPath, string $originalName = ''): string {
+    $mime = '';
+    if (function_exists('getimagesize')) {
+        $info = @getimagesize($tmpPath);
+        if (is_array($info) && !empty($info['mime'])) {
+            $mime = strtolower((string)$info['mime']);
+        }
+    }
+    if ($mime === '' && function_exists('mime_content_type')) {
+        $mime = strtolower((string)@mime_content_type($tmpPath));
+    }
+
+    $map = [
+        'image/jpeg' => '.jpg',
+        'image/jpg'  => '.jpg',
+        'image/png'  => '.png',
+        'image/webp' => '.webp',
+        'image/avif' => '.avif',
+    ];
+    if (isset($map[$mime])) {
+        return $map[$mime];
+    }
+
+    $nameExt = strtolower((string)pathinfo($originalName, PATHINFO_EXTENSION));
+    if (in_array($nameExt, ['jpg', 'jpeg', 'png', 'webp', 'avif'], true)) {
+        return $nameExt === 'jpeg' ? '.jpg' : '.' . $nameExt;
+    }
+
+    return '';
+}
+
 const PRODUCT_AUDIT_ACTIONS = [
     'PRODUCTO_WEB_CHANGED',
     'PRODUCTO_POS_CHANGED',
@@ -378,6 +409,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $file = $_FILES['new_photo'];
             if ($file['error'] !== UPLOAD_ERR_OK) throw new Exception("Error subida.");
             $imgData = file_get_contents($file['tmp_name']);
+            if ($imgData === false || $imgData === '') {
+                throw new Exception("No se pudo leer la imagen subida.");
+            }
+
+            if (!ptable_dir_is_really_writable($localPath)) {
+                throw new Exception("La carpeta de imágenes no tiene permisos de escritura. Ruta: " . $localPath);
+            }
+
+            $base = $localPath . $code;
+
+            // Eliminar archivos anteriores para evitar que formatos de mayor
+            // prioridad (avif > webp > jpg) en image.php sirvan versiones viejas.
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
+                if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+
+            if (!function_exists('imagecreatefromstring') || !function_exists('imagecreatetruecolor')) {
+                $ext = ptable_detect_upload_image_extension($file['tmp_name'], (string)($file['name'] ?? ''));
+                if (!in_array($ext, ['.jpg', '.png', '.webp', '.avif'], true)) {
+                    throw new Exception("Formato no soportado sin GD. Instale php-gd o suba JPG, PNG o WebP.");
+                }
+                if (@file_put_contents($base . $ext, $imgData) === false) {
+                    throw new Exception("No se pudo guardar la imagen en disco.");
+                }
+                echo json_encode(['status' => 'success', 'mode' => 'original']);
+                exit;
+            }
+
             $src = @imagecreatefromstring($imgData);
             if (!$src) throw new Exception("Imagen inválida o formato no soportado.");
 
@@ -399,38 +458,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
             imagedestroy($src);
 
-            if (!ptable_dir_is_really_writable($localPath)) {
-                throw new Exception("La carpeta de imágenes no tiene permisos de escritura. Ruta: " . $localPath);
-            }
-
-            $base = $localPath . $code;
-
-            // Eliminar archivos anteriores para evitar que formatos de mayor
-            // prioridad (avif > webp > jpg) en image.php sirvan versiones viejas.
-            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
-                if (file_exists($base . $ext)) @unlink($base . $ext);
-            }
-
-            // JPEG — compatibilidad universal (baseline)
-            if (!imagejpeg($master, $base . '.jpg', 85))
+            if (!imagejpeg($master, $base . '.jpg', 85)) {
                 throw new Exception("No se pudo guardar el .jpg.");
+            }
 
-            // WebP — soporte amplio, ~30 % más ligero que JPEG
-            if (function_exists('imagewebp'))
+            if (function_exists('imagewebp')) {
                 imagewebp($master, $base . '.webp', 82);
+            }
 
-            // AVIF — soporte moderno, ~50 % más ligero que JPEG
-            if (function_exists('imageavif'))
+            if (function_exists('imageavif')) {
                 imageavif($master, $base . '.avif', 60, 6);
+            }
 
-            // Thumbs (para cards pequeñas si se necesitan en el futuro)
             imagejpeg($thumb,  $base . '_thumb.jpg',  80);
             if (function_exists('imagewebp')) imagewebp($thumb, $base . '_thumb.webp', 78);
 
             imagedestroy($master);
             imagedestroy($thumb);
 
-            echo json_encode(['status' => 'success']);
+            echo json_encode(['status' => 'success', 'mode' => 'processed']);
         } catch (Exception $e) {
             echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
         }
@@ -493,7 +539,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$sku) throw new Exception("SKU ausente.");
             if (!in_array($slot, ['extra1', 'extra2'])) throw new Exception("Slot inválido.");
             $base = $localPath . $sku . '_' . $slot;
-            foreach (['.avif', '.webp', '.jpg', '.jpeg', '_thumb.avif', '_thumb.webp', '_thumb.jpg'] as $ext) {
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
                 if (file_exists($base . $ext)) @unlink($base . $ext);
             }
             echo json_encode(['status' => 'success']);
