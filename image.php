@@ -40,6 +40,7 @@ if ($supAvif) $tryExts[] = ['.avif', 'image/avif'];
 if ($supWebp) $tryExts[] = ['.webp', 'image/webp'];
 $tryExts[] = ['.jpg', 'image/jpeg'];
 $tryExts[] = ['.jpeg', 'image/jpeg'];
+$tryExts[] = ['.png', 'image/png'];
 
 foreach ($bases as $base) {
     foreach ($tryExts as [$ext, $extMime]) {
@@ -91,9 +92,19 @@ function sendConditionalCacheHeaders(string $path, string $mime): bool {
 
 // ── Thumbnail (redimensionado a 200 px de ancho) ──────────────────────────────
 if ($thumb) {
+    if (!function_exists('imagecreatetruecolor')) {
+        if (sendConditionalCacheHeaders($path, $mime)) {
+            exit;
+        }
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        exit;
+    }
+
     $image = match($mime) {
         'image/avif' => imagecreatefromavif($path),
         'image/webp' => imagecreatefromwebp($path),
+        'image/png'  => imagecreatefrompng($path),
         default      => imagecreatefromjpeg($path),
     };
 
@@ -114,6 +125,7 @@ if ($thumb) {
     match($mime) {
         'image/avif' => imageavif($thumb_img, null, 60, 6),
         'image/webp' => imagewebp($thumb_img, null, 82),
+        'image/png'  => imagepng($thumb_img),
         default      => imagejpeg($thumb_img, null, 85),
     };
 

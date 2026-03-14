@@ -42,6 +42,7 @@ function pickImageDir(array $candidates): array {
     '/tmp/palweb_product_images/'
 ]);
 $IMAGE_DIR .= '/';
+$GD_AVAILABLE = extension_loaded('gd') && function_exists('imagecreatefromstring');
 
 if (!is_dir($IMAGE_DIR) || !is_writable($IMAGE_DIR)) {
     http_response_code(500);
@@ -96,9 +97,16 @@ function httpGet(string $url, int $timeout = 15): array {
         ]);
         $body = curl_exec($ch);
         $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $contentType = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
         curl_close($ch);
 
-        return ['code' => $code, 'body' => (string)($body ?: ''), 'url' => $url];
+        return [
+            'code' => $code,
+            'body' => (string)($body ?: ''),
+            'url' => $url,
+            'headers' => [],
+            'content_type' => $contentType,
+        ];
     }
 
     $context = stream_context_create([
@@ -131,7 +139,20 @@ function httpGet(string $url, int $timeout = 15): array {
         }
     }
 
-    return ['code' => $code, 'body' => (string)($body ?: ''), 'url' => $url];
+    $contentType = '';
+    foreach ($headers as $headerLine) {
+        if (stripos($headerLine, 'Content-Type:') === 0) {
+            $contentType = trim(substr($headerLine, strlen('Content-Type:')));
+        }
+    }
+
+    return [
+        'code' => $code,
+        'body' => (string)($body ?: ''),
+        'url' => $url,
+        'headers' => $headers,
+        'content_type' => $contentType,
+    ];
 }
 
 function httpGetJson(string $url, int $timeout = 15): ?array {
@@ -193,7 +214,7 @@ function searchBingImageCandidates(string $query, string $siteDomain, string $re
 }
 
 function hasAnyVariant(string $base): bool {
-    foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
+    foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png'] as $ext) {
         if (file_exists($base . $ext)) return true;
     }
     return false;
@@ -202,6 +223,27 @@ function hasAnyVariant(string $base): bool {
 function toSafeQuery(string $term): string {
     $term = trim((string)$term);
     return $term !== '' ? $term : 'producto';
+}
+
+function detectImageExtension(string $url, string $contentType = ''): string {
+    $contentType = strtolower(trim(explode(';', $contentType)[0] ?? ''));
+    $map = [
+        'image/jpeg' => '.jpg',
+        'image/jpg' => '.jpg',
+        'image/webp' => '.webp',
+        'image/avif' => '.avif',
+        'image/png' => '.png',
+    ];
+    if (isset($map[$contentType])) {
+        return $map[$contentType];
+    }
+
+    $path = parse_url($url, PHP_URL_PATH) ?: '';
+    $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    if (in_array($ext, ['jpg', 'jpeg', 'webp', 'avif', 'png'], true)) {
+        return $ext === 'jpeg' ? '.jpeg' : '.' . $ext;
+    }
+    return '';
 }
 
 function downloadImageToBasePath(string $url, string $basePath): bool {
@@ -216,7 +258,14 @@ function downloadImageToBasePath(string $url, string $basePath): bool {
     $res = httpGet($url, 20);
     if ($res['code'] < 200 || $res['code'] >= 300 || $res['body'] === '') return false;
 
-    if (!function_exists('imagecreatefromstring')) return false;
+    if (!function_exists('imagecreatefromstring')) {
+        $ext = detectImageExtension($url, (string)($res['content_type'] ?? ''));
+        if (!in_array($ext, ['.jpg', '.jpeg', '.webp', '.avif', '.png'], true)) {
+            return false;
+        }
+        return @file_put_contents($basePath . $ext, $res['body']) !== false;
+    }
+
     $im = @imagecreatefromstring($res['body']);
     if ($im === false) return false;
 
@@ -275,73 +324,98 @@ function searchWikipediaCandidates(string $query): array {
     return array_values($base);
 }
 
-function searchDbpediaCandidates(string $query): array {
+function searchTargetCandidates(string $query): array {
     $query = toSafeQuery($query);
-    $needle = mb_strtolower(preg_replace('/\s+/', ' ', $query));
-    $escaped = str_replace("'", "\\'", $needle);
-    $sparql = <<<SPARQL
-PREFIX dbo: <http://dbpedia.org/ontology/>
-PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?item ?thumbnail ?label WHERE {
-  ?item rdfs:label ?label .
-  FILTER(LANG(?label) = "en")
-  FILTER(CONTAINS(LCASE(STR(?label)), "{$escaped}"))
-  ?item dbo:thumbnail ?thumbnail .
-}
-LIMIT 10
-SPARQL;
-
-    $url = 'https://dbpedia.org/sparql?' . http_build_query([
-        'query' => $sparql,
-        'format' => 'json'
-    ]);
-    $json = httpGetJson($url, 12);
-    if (!$json || empty($json['results']['bindings']) || !is_array($json['results']['bindings'])) return [];
-
     $cands = [];
-    foreach (array_slice($json['results']['bindings'], 0, 8) as $row) {
-        $img = $row['thumbnail']['value'] ?? null;
-        $name = $row['label']['value'] ?? '';
-        if (!is_string($img)) continue;
-        addCandidates($cands, $img, 'DBpedia', is_string($name) ? $name : 'DBpedia', 60);
+
+    $searchUrl = 'https://www.target.com/s?' . http_build_query(['searchTerm' => $query]);
+    $html = httpGet($searchUrl, 12)['body'] ?? '';
+    if (preg_match_all('~https://target\\.scene7\\.com/is/image/Target/[^"\'\\s<>]+~i', $html, $m)) {
+        foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
+            addCandidates($cands, $img, 'Target', $query, 60);
+        }
+    }
+    if (!empty($cands)) {
+        return array_values($cands);
+    }
+
+    $bing = searchBingImageCandidates(
+        $query,
+        'target.com',
+        '~https://target\\.scene7\\.com/is/image/Target/[^"\'\\s<>]+~i',
+        'Target/Bing',
+        56
+    );
+    foreach ($bing as $cand) {
+        addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
     }
     return array_values($cands);
 }
 
-function searchOpenFoodFactsCandidates(string $query, string $sku = ''): array {
+function searchAliExpressCandidates(string $query): array {
     $query = toSafeQuery($query);
     $cands = [];
 
-    if ($sku !== '') {
-        $exact = 'https://world.openfoodfacts.org/api/v2/product/' . rawurlencode($sku) . '.json?fields=code,product_name,image_front_url,image_url,image_front_small_url';
-        $data = httpGetJson($exact, 12);
-        if ($data && (($data['status'] ?? 0) == 1)) {
-            $product = $data['product'] ?? [];
-            $label = $product['product_name'] ?? $query;
-            if (!empty($product['image_front_url'])) addCandidates($cands, $product['image_front_url'], 'OpenFoodFacts', (string)$label . ' (código)', 96);
-            if (!empty($product['image_url'])) addCandidates($cands, $product['image_url'], 'OpenFoodFacts', (string)$label . ' (código)', 92);
+    $searchUrl = 'https://www.aliexpress.com/wholesale?' . http_build_query(['SearchText' => $query]);
+    $html = httpGet($searchUrl, 12)['body'] ?? '';
+    if (preg_match_all('~https://[^"\'\\s<>]*(?:alicdn\\.com|aliexpress-media\\.com)[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
+        foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
+            addCandidates($cands, $img, 'AliExpress', $query, 58);
         }
+    }
+    if (!empty($cands)) {
+        return array_values($cands);
+    }
+
+    $bing = searchBingImageCandidates(
+        $query,
+        'aliexpress.com',
+        '~https://[^"\'\\s<>]*(?:alicdn\\.com|aliexpress-media\\.com)[^"\'\\s<>]+~i',
+        'AliExpress/Bing',
+        54
+    );
+    foreach ($bing as $cand) {
+        addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+    }
+    return array_values($cands);
+}
+
+function searchElYerroMenuCandidates(string $query): array {
+    $query = toSafeQuery($query);
+    $cands = [];
+
+    $sources = [
+        'https://elyerromenu.com/',
+        'https://elyerromenu.com/?q=' . rawurlencode($query),
+        'https://elyerromenu.com/?search=' . rawurlencode($query),
+    ];
+
+    foreach ($sources as $url) {
+        $html = httpGet($url, 14)['body'] ?? '';
+        if ($html === '') {
+            continue;
+        }
+
+        if (preg_match_all('~https://img[12]\\.elyerromenu\\.com/images/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)~i', $html, $m)) {
+            foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
+                addCandidates($cands, $img, 'El Yerro Menu', $query, 61);
+            }
+        }
+
         if (!empty($cands)) {
             return array_values($cands);
         }
     }
 
-    $search = 'https://world.openfoodfacts.org/cgi/search.pl?' . http_build_query([
-        'search_terms' => $query,
-        'search_simple' => 1,
-        'json' => 1,
-        'page_size' => 8,
-        'fields' => 'code,product_name,image_front_url,image_url',
-    ]);
-    $json = httpGetJson($search, 15);
-    $products = $json['products'] ?? $json['Products'] ?? null;
-    if (!$json || !is_array($products) || $products === []) {
-        return array_values($cands);
-    }
-    foreach (array_slice($products, 0, 8) as $item) {
-        $name = $item['product_name'] ?? $query;
-        if (!empty($item['image_front_url'])) addCandidates($cands, $item['image_front_url'], 'OpenFoodFacts', (string)$name, 84);
-        if (!empty($item['image_url'])) addCandidates($cands, $item['image_url'], 'OpenFoodFacts', (string)$name, 80);
+    $bing = searchBingImageCandidates(
+        $query,
+        'elyerromenu.com',
+        '~https://img[12]\\.elyerromenu\\.com/images/[^"\'\\s<>]+~i',
+        'El Yerro Menu/Bing',
+        58
+    );
+    foreach ($bing as $cand) {
+        addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
     }
     return array_values($cands);
 }
@@ -442,17 +516,16 @@ function searchBySkuCandidates(string $sku): array {
     $cands = [];
     if ($sku === '') return [];
 
-    // El barcode exacto es la fuente primaria para búsqueda por SKU.
-    $fromOpen = searchOpenFoodFactsCandidates($sku, $sku);
-    foreach ($fromOpen as $c) {
+    $fromWalmart = searchWalmartCandidates($sku);
+    foreach ($fromWalmart as $c) {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
     if (!empty($cands)) {
         return array_values($cands);
     }
 
-    $fromWalmart = searchWalmartCandidates($sku);
-    foreach ($fromWalmart as $c) {
+    $fromTarget = searchTargetCandidates($sku);
+    foreach ($fromTarget as $c) {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
 
@@ -461,14 +534,19 @@ function searchBySkuCandidates(string $sku): array {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
 
+    $fromElYerro = searchElYerroMenuCandidates($sku);
+    foreach ($fromElYerro as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+
+    $fromAliExpress = searchAliExpressCandidates($sku);
+    foreach ($fromAliExpress as $c) {
+        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
+    }
+
     $fromWiki = searchWikipediaCandidates("{$sku} producto");
     foreach ($fromWiki as $c) {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score'] - 10);
-    }
-
-    $fromDB = searchDbpediaCandidates($sku);
-    foreach ($fromDB as $c) {
-        addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
 
     return array_values($cands);
@@ -476,8 +554,9 @@ function searchBySkuCandidates(string $sku): array {
 
 $providerByName = [
     'wikipedia' => 'searchWikipediaCandidates',
-    'dbpedia'   => 'searchDbpediaCandidates',
-    'open_food_facts' => 'searchOpenFoodFactsCandidates',
+    'target'    => 'searchTargetCandidates',
+    'aliexpress' => 'searchAliExpressCandidates',
+    'elyerromenu' => 'searchElYerroMenuCandidates',
     'walmart'   => 'searchWalmartCandidates',
     'amazon'    => 'searchAmazonCandidates',
     'sku'       => 'searchBySkuCandidates',
@@ -498,9 +577,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!isset($providerByName[$provider])) jsonOut(['status' => 'error', 'msg' => 'Proveedor inválido']);
         if ($productId === '') jsonOut(['status' => 'error', 'msg' => 'ID de producto inválido']);
 
-        if ($provider === 'open_food_facts') {
-            $cands = searchOpenFoodFactsCandidates($query, $sku);
-        } elseif ($provider === 'sku') {
+        if ($provider === 'sku') {
             $cands = searchBySkuCandidates($sku !== '' ? $sku : $query);
         } else {
             $cands = $providerByName[$provider]($query);
@@ -551,8 +628,9 @@ foreach ($productos as $p) {
 
 $providers = [
     ['key' => 'wikipedia', 'label' => 'Wikipedia'],
-    ['key' => 'dbpedia', 'label' => 'DBpedia'],
-    ['key' => 'open_food_facts', 'label' => 'Open Food Facts'],
+    ['key' => 'target', 'label' => 'Target'],
+    ['key' => 'aliexpress', 'label' => 'AliExpress (China)'],
+    ['key' => 'elyerromenu', 'label' => 'El Yerro Menu'],
     ['key' => 'walmart', 'label' => 'Walmart'],
     ['key' => 'amazon', 'label' => 'Amazon'],
     ['key' => 'sku', 'label' => 'SKU'],
@@ -589,6 +667,19 @@ $providers = [
 </head>
 <body>
 <div class="container" style="max-width:1220px;">
+    <?php if (!$GD_AVAILABLE): ?>
+        <div class="alert alert-warning border-warning shadow-sm">
+            <div class="fw-bold mb-1"><i class="fas fa-triangle-exclamation"></i> Extensión GD no disponible en PHP</div>
+            <div class="small mb-2">
+                El módulo puede guardar imágenes originales, pero no podrá convertirlas ni generar variantes optimizadas desde PHP mientras falte GD.
+            </div>
+            <div class="small">
+                En Ubuntu instala GD con:
+                <code>sudo apt-get update && sudo apt-get install php-gd</code>
+                y luego reinicia Apache o PHP-FPM.
+            </div>
+        </div>
+    <?php endif; ?>
     <div class="stat-card">
         <div class="topbar">
             <div>
@@ -600,8 +691,6 @@ $providers = [
                 <button class="btn btn-outline-secondary btn-sm" type="button" id="btnReload" onclick="window.location.reload()">
                     <i class="fas fa-sync-alt"></i> Recargar
                 </button>
-                <a class="btn btn-outline-primary btn-sm" href="image_hunter.php"><i class="fas fa-images"></i> Google Hunter</a>
-                <a class="btn btn-outline-dark btn-sm" href="image_filler.php"><i class="fas fa-magic"></i> Pexels Filler</a>
             </div>
         </div>
 
@@ -610,8 +699,9 @@ $providers = [
             <p class="mb-2"><strong>Acciones rápidas por proveedor:</strong></p>
             <div class="provider-row">
                 <button class="btn btn-success btn-sm" onclick="runProviderAll('wikipedia')"><i class="fas fa-book"></i> Auto Wikipedia</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('dbpedia')"><i class="fas fa-network-wired"></i> Auto DBpedia</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('open_food_facts')"><i class="fas fa-lemon"></i> Auto OpenFood</button>
+                <button class="btn btn-success btn-sm" onclick="runProviderAll('target')"><i class="fas fa-bullseye"></i> Auto Target</button>
+                <button class="btn btn-success btn-sm" onclick="runProviderAll('aliexpress')"><i class="fas fa-globe-asia"></i> Auto AliExpress</button>
+                <button class="btn btn-success btn-sm" onclick="runProviderAll('elyerromenu')"><i class="fas fa-store"></i> Auto El Yerro</button>
                 <button class="btn btn-success btn-sm" onclick="runProviderAll('walmart')"><i class="fab fa-wikipedia-w"></i> Auto Walmart</button>
                 <button class="btn btn-success btn-sm" onclick="runProviderAll('amazon')"><i class="fab fa-amazon"></i> Auto Amazon</button>
                 <button class="btn btn-primary btn-sm" onclick="runProviderAll('sku')"><i class="fas fa-barcode"></i> Auto por SKU</button>
