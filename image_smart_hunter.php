@@ -13,6 +13,8 @@ header('Content-Type: text/html; charset=utf-8');
 require_once 'db.php';
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa'] ?? 1);
+const PRIMARY_IMAGE_DIR = __DIR__ . '/assets/product_images/';
+const TEMP_IMAGE_DIR = '/tmp/palweb_product_images/';
 
 function isWritableDir(string $path): bool {
     if (!is_dir($path)) {
@@ -25,23 +27,50 @@ function isWritableDir(string $path): bool {
     return (bool)$ok;
 }
 
-function pickImageDir(array $candidates): array {
-    foreach ($candidates as $path) {
-        if (isWritableDir($path)) {
-            return [rtrim($path, '/'), 'ok'];
+function syncTempImagesToPrimary(string $tempDir, string $primaryDir): array {
+    $result = ['moved' => 0, 'errors' => []];
+    if (!is_dir($tempDir) || !is_dir($primaryDir)) {
+        return $result;
+    }
+
+    $files = @scandir($tempDir);
+    if (!is_array($files)) {
+        return $result;
+    }
+
+    foreach ($files as $file) {
+        if ($file === '.' || $file === '..') {
+            continue;
+        }
+        if (!preg_match('/^[A-Za-z0-9_.-]+\.(?:jpg|jpeg|png|webp|avif)$/i', $file)) {
+            continue;
+        }
+        $source = rtrim($tempDir, '/') . '/' . $file;
+        $target = rtrim($primaryDir, '/') . '/' . $file;
+        if (!is_file($source)) {
+            continue;
+        }
+        if (@copy($source, $target)) {
+            @unlink($source);
+            $result['moved']++;
+        } else {
+            $result['errors'][] = $file;
         }
     }
-    $fallback = '/tmp/palweb_product_images';
-    if (isWritableDir($fallback)) return [$fallback, 'fallback'];
-    return [rtrim($candidates[0], '/'), 'unwritable'];
+    return $result;
 }
 
-[$IMAGE_DIR, $IMAGE_DIR_STATUS] = pickImageDir([
-    __DIR__ . '/assets/product_images/',
-    dirname(__DIR__) . '/assets/product_images/',
-    '/tmp/palweb_product_images/'
-]);
-$IMAGE_DIR .= '/';
+$IMAGE_DIR = rtrim(PRIMARY_IMAGE_DIR, '/') . '/';
+$IMAGE_DIR_STATUS = isWritableDir($IMAGE_DIR) ? 'ok' : 'unwritable';
+$TEMP_IMAGE_COUNT = 0;
+$TEMP_SYNC_RESULT = ['moved' => 0, 'errors' => []];
+$tempFiles = is_dir(TEMP_IMAGE_DIR) ? glob(rtrim(TEMP_IMAGE_DIR, '/') . '/*.{jpg,jpeg,png,webp,avif}', GLOB_BRACE) : [];
+$TEMP_IMAGE_COUNT = is_array($tempFiles) ? count($tempFiles) : 0;
+if ($IMAGE_DIR_STATUS === 'ok' && $TEMP_IMAGE_COUNT > 0) {
+    $TEMP_SYNC_RESULT = syncTempImagesToPrimary(TEMP_IMAGE_DIR, $IMAGE_DIR);
+    $tempFiles = is_dir(TEMP_IMAGE_DIR) ? glob(rtrim(TEMP_IMAGE_DIR, '/') . '/*.{jpg,jpeg,png,webp,avif}', GLOB_BRACE) : [];
+    $TEMP_IMAGE_COUNT = is_array($tempFiles) ? count($tempFiles) : 0;
+}
 $GD_AVAILABLE = extension_loaded('gd') && function_exists('imagecreatefromstring');
 
 if (!is_dir($IMAGE_DIR) || !is_writable($IMAGE_DIR)) {
@@ -610,12 +639,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $imgUrl = sanitizeImageUrl((string)($input['url'] ?? ''));
         if ($productId === '') jsonOut(['status' => 'error', 'msg' => 'ID de producto inválido']);
         if ($imgUrl === '') jsonOut(['status' => 'error', 'msg' => 'URL inválida']);
+        if ($IMAGE_DIR_STATUS !== 'ok') {
+            jsonOut(['status' => 'error', 'msg' => 'La carpeta principal no es escribible: ' . $IMAGE_DIR . '. Corrija permisos.']);
+        }
 
         $dest = $IMAGE_DIR . $productId;
         if (downloadImageToBasePath($imgUrl, $dest)) {
-            jsonOut(['status' => 'success', 'msg' => 'Imagen aprobada y guardada']);
+            jsonOut(['status' => 'success', 'msg' => 'Imagen aprobada y guardada en ' . $IMAGE_DIR]);
         }
-        jsonOut(['status' => 'error', 'msg' => 'No se pudo descargar ni guardar la imagen']);
+        jsonOut(['status' => 'error', 'msg' => 'No se pudo descargar ni guardar la imagen en ' . $IMAGE_DIR . '. Revise permisos o formato.']);
     }
 
     jsonOut(['status' => 'error', 'msg' => 'Acción no soportada']);
@@ -694,12 +726,32 @@ $providers = [
             </div>
         </div>
     <?php endif; ?>
+    <?php if ($IMAGE_DIR_STATUS !== 'ok'): ?>
+        <div class="alert alert-danger border-danger shadow-sm">
+            <div class="fw-bold mb-1"><i class="fas fa-circle-exclamation"></i> Carpeta principal no escribible</div>
+            <div class="small mb-1">Las imágenes deben guardarse en <code><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></code>.</div>
+            <div class="small">Corrija permisos de esa ruta. El módulo ya no usa <code>/tmp/palweb_product_images/</code> como destino silencioso.</div>
+        </div>
+    <?php endif; ?>
+    <?php if ($TEMP_SYNC_RESULT['moved'] > 0): ?>
+        <div class="alert alert-info border-info shadow-sm">
+            <div class="fw-bold mb-1"><i class="fas fa-folder-open"></i> Imágenes migradas desde /tmp</div>
+            <div class="small">Se copiaron <strong><?php echo (int)$TEMP_SYNC_RESULT['moved']; ?></strong> imágenes desde <code>/tmp/palweb_product_images/</code> hacia <code><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></code>.</div>
+        </div>
+    <?php endif; ?>
+    <?php if ($TEMP_IMAGE_COUNT > 0 && $IMAGE_DIR_STATUS !== 'ok'): ?>
+        <div class="alert alert-warning border-warning shadow-sm">
+            <div class="fw-bold mb-1"><i class="fas fa-triangle-exclamation"></i> Imágenes pendientes en /tmp</div>
+            <div class="small">Quedan <strong><?php echo (int)$TEMP_IMAGE_COUNT; ?></strong> imágenes en <code>/tmp/palweb_product_images/</code> sin copiar porque la carpeta principal no es escribible.</div>
+        </div>
+    <?php endif; ?>
     <div class="stat-card">
         <div class="topbar">
             <div>
                 <h3 class="mb-1">🔍 Buscador Inteligente de Imágenes</h3>
                 <p class="small text-muted m-0">Productos sin imagen: <strong><?php echo count($sinImagen); ?></strong></p>
                 <p class="small text-muted m-0">Carpeta de salida: <strong><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                <p class="small text-muted m-0">Pendientes en /tmp: <strong><?php echo (int)$TEMP_IMAGE_COUNT; ?></strong></p>
             </div>
             <div>
                 <button class="btn btn-outline-secondary btn-sm" type="button" id="btnReload" onclick="window.location.reload()">
