@@ -190,7 +190,14 @@ try {
                                         </td>
                                     </tr>
                                     <tr v-if="filteredRecetas.length === 0">
-                                        <td colspan="7" class="text-center py-5 text-muted">No hay recetas. Crea una nueva.</td>
+                                        <td colspan="7" class="text-center py-5 text-muted">
+                                            <template v-if="searchRecipeByName || searchRecipeByIngredient">
+                                                No hay recetas que coincidan con los filtros.
+                                            </template>
+                                            <template v-else>
+                                                No hay recetas. Crea una nueva.
+                                            </template>
+                                        </td>
                                     </tr>
                                 </tbody>
                             </table>
