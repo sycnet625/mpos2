@@ -55,7 +55,7 @@
       --clock-text: #00e676;
       --clock-glow: rgba(0, 230, 118, 0.50);
       --glow-color: rgba(0, 230, 118, 0.55);
-      --glow-shadow: none;
+      --line-filter: none;
       --date-text: #87d4a5;
       --weather-text: #b7f3ce;
       --font-main: "Courier New", "Lucida Console", monospace;
@@ -64,7 +64,7 @@
       --letter-spacing: 0.14em;
       --panel-bg: rgba(0, 0, 0, 0.90);
       --panel-border: #174117;
-      --time-shadow: 0 0 8px var(--clock-text), 0 0 18px var(--clock-glow);
+      --time-shadow: 2px 4px 6px rgba(0, 0, 0, 0.45);
       --rainbow-gradient: linear-gradient(270deg, #ff004c, #ff7a00, #ffe600, #00d26a, #00b7ff, #6c5cff, #ff00c8);
       --color-fill: var(--rainbow-gradient);
       --color-fill-size: 140vw 100%;
@@ -135,7 +135,7 @@
       flex-wrap: nowrap;
       transform: translate(var(--clock-offset-x), var(--clock-offset-y));
       transition: transform 1.2s ease, filter 0.6s ease;
-      filter: var(--glow-shadow);
+      filter: var(--line-filter);
     }
     #clockLine.blink-colon .sep { opacity: 0.2; }
     #clockLine.colorful {
@@ -1074,20 +1074,26 @@
       root.style.setProperty("--time-size", `clamp(3rem, 16vw, ${parseFloat(s.timeSize)}rem)`);
       root.style.setProperty("--meta-size", `clamp(0.85rem, 2.2vw, ${parseFloat(s.metaSize)}rem)`);
       root.style.setProperty("--letter-spacing", `${parseFloat(s.spacing)}em`);
-      const shadowBlur = `${parseFloat(s.shadowStrength || 0)}px`;
-      const shadowColor = hexToRgba(s.shadowColor || s.clockText, 0.82);
-      const glowBlur = `${Math.max(0, parseFloat(s.glowStrength || 0))}px`;
-      const glowColor = hexToRgba(s.glowColor || s.shadowColor || s.clockText, 0.75);
+      const shadowStrengthValue = Math.max(0, parseFloat(s.shadowStrength || 0));
+      const shadowBlur = `${shadowStrengthValue}px`;
+      const shadowTextBlur = `${Math.max(1, shadowStrengthValue * 0.72).toFixed(2)}px`;
+      const shadowOffsetX = `${Math.max(0, shadowStrengthValue * 0.12).toFixed(2)}px`;
+      const shadowOffsetY = `${Math.max(1, shadowStrengthValue * 0.34).toFixed(2)}px`;
+      const shadowColor = hexToRgba(s.shadowColor || s.clockText, 0.48);
       const glowBlurValue = Math.max(0, parseFloat(s.glowStrength || 0));
-      const glowGlow = (Number(s.glowMode) && glowBlurValue > 0)
-        ? `0 0 ${glowBlur} ${glowColor}, 0 0 ${glowBlurValue * 2}px ${glowColor}`
-        : "none";
+      const glowBlur = `${glowBlurValue}px`;
+      const glowColor = hexToRgba(s.glowColor || s.shadowColor || s.clockText, 0.88);
+      const lineFilters = [];
+      if (Number(s.glowMode) && glowBlurValue > 0) {
+        lineFilters.push(`drop-shadow(0 0 ${glowBlur} ${glowColor})`);
+        lineFilters.push(`drop-shadow(0 0 ${(glowBlurValue * 1.9).toFixed(2)}px ${hexToRgba(s.glowColor || s.shadowColor || s.clockText, 0.55)})`);
+      }
       root.style.setProperty("--shadow-color", shadowColor);
       root.style.setProperty("--shadow-blur", shadowBlur);
-      root.style.setProperty("--time-shadow", s.shadowMode ? `0 0 ${shadowBlur} ${shadowColor}, 0 0 calc(${shadowBlur} * 2) ${shadowColor}` : "none");
-      root.style.setProperty("--segment-shadow", s.shadowMode ? `drop-shadow(0 0 ${shadowBlur} ${shadowColor})` : "none");
+      root.style.setProperty("--time-shadow", s.shadowMode && shadowStrengthValue > 0 ? `${shadowOffsetX} ${shadowOffsetY} ${shadowTextBlur} ${shadowColor}` : "none");
+      root.style.setProperty("--segment-shadow", s.shadowMode && shadowStrengthValue > 0 ? `drop-shadow(${shadowOffsetX} ${shadowOffsetY} ${Math.max(1, shadowStrengthValue * 0.82).toFixed(2)}px ${shadowColor})` : "none");
       root.style.setProperty("--glow-color", glowColor);
-      root.style.setProperty("--glow-shadow", glowGlow);
+      root.style.setProperty("--line-filter", lineFilters.length ? lineFilters.join(" ") : "none");
       root.style.setProperty("--clock-offset-x", "0px");
       root.style.setProperty("--clock-offset-y", "0px");
       applyColorStyle(s.colorStyle || DEFAULTS.colorStyle, s.clockText);
