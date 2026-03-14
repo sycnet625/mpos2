@@ -72,6 +72,7 @@ $menuCategories = [
         ["icon" => "fa-calculator", "name" => "Convertir Unidades", "url" => "#", "onclick" => "openUnitConverter()"],
         ["icon" => "fa-tint", "name" => "Imagen filler", "url" => "image_filler.php"],
         ["icon" => "fa-file-image", "name" => "Imagen Google", "url" => "image_hunter.php"],
+        ["icon" => "fa-search-plus", "name" => "Buscador Inteligente", "url" => "image_smart_hunter.php"],
     ],
     "🎨 Temas / Skins" => [
         ["icon" => "fa-sun", "name" => "Claro (Original)", "url" => "#", "onclick" => "setTheme('light')"],
