@@ -8,10 +8,33 @@ require_once 'db.php';
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
-$localPath = __DIR__ . '/assets/product_images/';
 
-if (!is_dir($localPath)) {
-    @mkdir($localPath, 0775, true);
+function ih_is_writable_dir(string $path): bool {
+    if (!is_dir($path)) {
+        if (!@mkdir($path, 0775, true) && !is_dir($path)) return false;
+    }
+    return is_writable($path);
+}
+
+function ih_pick_dir(array $candidates): array {
+    foreach ($candidates as $path) {
+        if (ih_is_writable_dir($path)) {
+            return [$path, 'ok'];
+        }
+    }
+    return [trim($candidates[0]), 'fallback_unwritable'];
+}
+
+$candidateDirs = [
+    __DIR__ . '/assets/product_images/',
+    dirname(__DIR__) . '/assets/product_images/',
+    '/tmp/palweb_product_images/'
+];
+[$localPath, $localPathStatus] = ih_pick_dir($candidateDirs);
+$localPath = rtrim($localPath, '/') . '/';
+if (!is_dir($localPath) || !is_writable($localPath)) {
+    http_response_code(500);
+    die('Error: no se encontró una carpeta de imágenes escribible. Revisadas: ' . implode(', ', $candidateDirs));
 }
 
 function hasAnyImageVariant(string $basePath): bool {
@@ -210,6 +233,12 @@ foreach ($todos as $p) {
 <body>
 
 <div class="container" style="max-width: 900px;">
+    <div class="alert alert-secondary small">
+        Carpeta activa para imágenes: <strong><?php echo htmlspecialchars($localPath, ENT_QUOTES, 'UTF-8'); ?></strong>
+        <?php if ($localPathStatus !== 'ok'): ?>
+            <span class="text-warning">(se usó fallback por permisos)</span>
+        <?php endif; ?>
+    </div>
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h3 class="fw-bold text-primary"><i class="fas fa-camera-retro"></i> Cazador de Imágenes</h3>
