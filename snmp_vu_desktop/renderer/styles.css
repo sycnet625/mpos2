@@ -19,6 +19,10 @@ body {
   align-items: center;
   margin-bottom: 12px;
 }
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
 .eyebrow {
   color: #7ea7d9;
   text-transform: uppercase;
@@ -42,6 +46,14 @@ h1, h2 {
   background: #153149;
   color: #fff;
   box-shadow: 0 8px 20px rgba(0,0,0,.25);
+}
+.update-banner {
+  margin-top: 6px;
+  font-size: .8rem;
+  color: #8fb0d6;
+}
+.update-banner.available {
+  color: #ffd27a;
 }
 .gauges {
   display: grid;

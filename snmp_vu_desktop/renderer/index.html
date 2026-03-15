@@ -10,10 +10,14 @@
   <div id="mainView" class="main-view">
     <div class="toolbar">
       <div>
-        <div class="eyebrow">Local SNMP Gadget</div>
+        <div class="eyebrow">PalWeb Local SNMP Gadget</div>
         <h1>5 VU Analogicos</h1>
+        <div id="updateBanner" class="update-banner">Version local</div>
       </div>
-      <button class="gear-btn" id="openConfigBtn" title="Configuracion">⚙</button>
+      <div class="toolbar-actions">
+        <button class="gear-btn" id="checkUpdateBtn" title="Buscar actualizacion">⟳</button>
+        <button class="gear-btn" id="openConfigBtn" title="Configuracion">⚙</button>
+      </div>
     </div>
     <div id="gauges" class="gauges"></div>
   </div>

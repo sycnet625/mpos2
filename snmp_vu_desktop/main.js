@@ -1,10 +1,16 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
+const https = require('https');
+const http = require('http');
 const { execFile } = require('child_process');
 const Store = require('electron-store');
 const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
+const APP_VERSION = app.getVersion();
+const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
+const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
+const UPDATE_URL = 'https://www.palweb.net/apk/snmp-vu-monitor-update.json';
 const store = new Store({
   name: 'snmp-vu-monitor',
   defaults: {
@@ -66,7 +72,8 @@ function createMainWindow() {
     minWidth: 400,
     minHeight: 760,
     autoHideMenuBar: true,
-    title: 'SNMP VU Monitor',
+    title: 'PalWeb SNMP VU',
+    icon: APP_ICON,
     backgroundColor: '#08111f',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -88,7 +95,8 @@ function createConfigWindow() {
     parent: mainWindow,
     modal: true,
     autoHideMenuBar: true,
-    title: 'Configuracion SNMP VU',
+    title: 'Configuracion PalWeb SNMP VU',
+    icon: APP_ICON,
     backgroundColor: '#e7edf4',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -101,6 +109,44 @@ function createConfigWindow() {
     configWindow = null;
   });
   configWindow.loadFile(path.join(__dirname, 'renderer', 'config.html'));
+}
+
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n || '0', 10));
+  const pb = String(b || '').split('.').map((n) => parseInt(n || '0', 10));
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = pa[i] || 0;
+    const bv = pb[i] || 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const client = url.startsWith('https://') ? https : http;
+    client.get(url, (res) => {
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        fetchJson(res.headers.location).then(resolve).catch(reject);
+        return;
+      }
+      if (res.statusCode !== 200) {
+        reject(new Error(`HTTP ${res.statusCode || 0}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } catch (err) {
+          reject(err);
+        }
+      });
+    }).on('error', reject);
+  });
 }
 
 function pingHost(ip) {
@@ -244,6 +290,33 @@ ipcMain.handle('config:open', async () => {
 });
 ipcMain.handle('snmp:poll', async () => pollItems());
 ipcMain.handle('snmp:walk', async (_event, item) => snmpWalk(item));
+ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, updateUrl: UPDATE_URL }));
+ipcMain.handle('update:check', async () => {
+  try {
+    const meta = await fetchJson(UPDATE_URL);
+    const latest = String(meta.version || '');
+    return {
+      status: 'success',
+      currentVersion: APP_VERSION,
+      latestVersion: latest,
+      updateAvailable: latest !== '' && compareVersions(latest, APP_VERSION) > 0,
+      exeUrl: meta.exe_url || '',
+      zipUrl: meta.zip_url || '',
+      notes: meta.notes || ''
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      currentVersion: APP_VERSION,
+      msg: error.message || 'No se pudo comprobar actualizacion'
+    };
+  }
+});
+ipcMain.handle('update:open-download', async (_event, url) => {
+  if (!url) return { status: 'error', msg: 'URL vacia' };
+  await shell.openExternal(url);
+  return { status: 'success' };
+});
 
 app.whenReady().then(() => {
   createMainWindow();

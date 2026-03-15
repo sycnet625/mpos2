@@ -1,8 +1,9 @@
 {
   "name": "snmp-vu-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop Windows gadget with 5 analog SNMP traffic gauges",
   "main": "main.js",
+  "author": "PalWeb",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
@@ -10,14 +11,16 @@
   },
   "build": {
     "appId": "net.palweb.snmpvu",
-    "productName": "SNMP VU Monitor",
+    "productName": "PalWeb SNMP VU",
     "files": [
       "main.js",
       "preload.js",
       "renderer/**/*",
+      "assets/**/*",
       "package.json"
     ],
     "win": {
+      "icon": "assets/icon.ico",
       "signAndEditExecutable": false,
       "verifyUpdateCodeSignature": false,
       "target": [

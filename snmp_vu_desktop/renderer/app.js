@@ -7,6 +7,7 @@ const presets = {
 
 let configCache = null;
 let pollTimer = null;
+let updateInfo = null;
 
 function angleFromPercent(percent) {
   return -135 + (Math.max(0, Math.min(100, percent)) * 270 / 100);
@@ -91,6 +92,31 @@ async function pollLoop() {
     pollTimer = setTimeout(pollLoop, result.refreshMs || 3000);
   } else {
     pollTimer = setTimeout(pollLoop, 3000);
+  }
+}
+
+function setUpdateBanner(text, available = false) {
+  const el = document.getElementById('updateBanner');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('available', available);
+}
+
+async function checkForUpdates(openIfAvailable = false) {
+  const meta = await window.snmpVuApi.getMeta();
+  const result = await window.snmpVuApi.checkUpdate();
+  if (result.status !== 'success') {
+    setUpdateBanner(`Version ${meta.version} | sin acceso a updates`, false);
+    return;
+  }
+  updateInfo = result;
+  if (result.updateAvailable) {
+    setUpdateBanner(`Nueva version ${result.latestVersion} disponible`, true);
+    if (openIfAvailable && result.exeUrl) {
+      await window.snmpVuApi.openDownload(result.exeUrl);
+    }
+  } else {
+    setUpdateBanner(`Version ${result.currentVersion} actualizada`, false);
   }
 }
 
@@ -193,10 +219,19 @@ function bindConfigEvents() {
 async function bootMain() {
   configCache = await window.snmpVuApi.getConfig();
   renderMain(configCache.items);
+  const meta = await window.snmpVuApi.getMeta();
+  setUpdateBanner(`Version ${meta.version}`, false);
   const openBtn = document.getElementById('openConfigBtn');
   if (openBtn) {
     openBtn.addEventListener('click', () => window.snmpVuApi.openConfig());
   }
+  const updateBtn = document.getElementById('checkUpdateBtn');
+  if (updateBtn) {
+    updateBtn.addEventListener('click', async () => {
+      await checkForUpdates(true);
+    });
+  }
+  checkForUpdates(false);
   pollLoop();
 }
 
