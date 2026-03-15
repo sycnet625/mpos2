@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.171500';
+const APP_BUILD = '20260315.172400';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -414,31 +414,33 @@ function snmpWalk(item) {
 }
 
 function calculateMbps(item, raw, now) {
+  const mode = item.mode === 'auto' ? 'counter_bits' : item.mode;
+  let calcMode = mode;
   if (item.mode === 'direct_mbps') {
-    return Math.max(0, raw);
+    return { value: Math.max(0, raw), calcMode: 'direct_mbps' };
   }
   if (item.mode === 'direct_bps') {
-    return Math.max(0, (raw / 8) / 1000000);
+    return { value: Math.max(0, (raw / 8) / 1000000), calcMode: 'direct_bps' };
   }
   const prev = previousState.get(item.label);
   previousState.set(item.label, { raw, ts: now });
-  if ((item.mode === 'counter_bits' || item.mode === 'counter_bytes') && raw > 0 && raw <= rateThresholdFor(item)) {
+  if ((mode === 'counter_bits' || mode === 'counter_bytes') && raw > 0 && raw <= rateThresholdFor(item)) {
     if (!prev || raw < prev.raw) {
-      if (item.mode === 'counter_bits') {
-        return Math.max(0, (raw / 8) / 1000000);
+      if (mode === 'counter_bits') {
+        return { value: Math.max(0, (raw / 8) / 1000000), calcMode: 'auto_direct_bps' };
       }
-      return Math.max(0, raw / 1000000);
+      return { value: Math.max(0, raw / 1000000), calcMode: 'auto_direct_bytes' };
     }
   }
   if (!prev || now <= prev.ts || raw < prev.raw) {
-    return 0;
+    return { value: 0, calcMode };
   }
   const delta = raw - prev.raw;
   const seconds = Math.max(1, (now - prev.ts) / 1000);
-  if (item.mode === 'counter_bits') {
-    return Math.max(0, ((delta / seconds) / 8) / 1000000);
+  if (mode === 'counter_bits') {
+    return { value: Math.max(0, ((delta / seconds) / 8) / 1000000), calcMode };
   }
-  return Math.max(0, (delta / seconds) / 1000000);
+  return { value: Math.max(0, (delta / seconds) / 1000000), calcMode };
 }
 
 function fetchJsonWithFallback(urls, index = 0) {
@@ -509,6 +511,7 @@ async function pollItems() {
       mbps: 0,
       percent: 0,
       raw: null,
+      calcMode: item.mode,
       pingOk: ping.ok,
       pingMs: ping.ms,
       pingColor,
@@ -523,11 +526,13 @@ async function pollItems() {
     if (!snmpRes.ok) {
       return { ...base, msg: snmpRes.msg };
     }
-                    const mbps = calculateMbps(item, snmpRes.raw, now);
+                    const calc = calculateMbps(item, snmpRes.raw, now);
+                    const mbps = calc.value;
                     return {
                         ...base,
                         raw: snmpRes.raw,
                         mbps,
+                        calcMode: calc.calcMode,
                         percent: Math.max(0, Math.min(100, (mbps / Math.max(1, item.scaleMbps)) * 100)),
                         msg: 'OK'
                     };
@@ -559,6 +564,12 @@ ipcMain.handle('window:apply-dock', async (_event, mode) => {
 ipcMain.handle('window:close', async () => {
   app.quit();
   return { status: 'success' };
+});
+ipcMain.handle('calc:reset', async (_event, label) => {
+  if (label) {
+    previousState.delete(label);
+  }
+  return { status: 'success', label };
 });
 ipcMain.handle('config:export', async (_event, payload) => {
   const selected = await dialog.showSaveDialog(configWindow || mainWindow, {

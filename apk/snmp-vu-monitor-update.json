@@ -1,8 +1,8 @@
 {
   "product": "PalWeb SNMP VU",
-  "version": "1.0.8",
-  "build": "20260315.171500",
+  "version": "1.0.9",
+  "build": "20260315.172400",
   "exe_url": "https://www.palweb.net/apk/snmp-vu-monitor.exe",
   "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-  "notes": "Build 1.0.8 con ventana gadget sin bordes, controles a la izquierda, cierre rapido y mejor heuristica para mostrar MB/s cuando el OID devuelve tasa directa."
+  "notes": "Build 1.0.9 con modo auto detectar, indicador visible del metodo de calculo y boton por instrumento para reiniciar el calculo y el historial."
 }

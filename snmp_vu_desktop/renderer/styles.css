@@ -352,6 +352,14 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.dial-calc {
+  text-align: center;
+  color: #f8d47d;
+  font-size: .48rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .dial-history {
   text-align: center;
   color: #b7cbe3;
@@ -360,6 +368,20 @@ h1 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.mini-btn {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(17, 35, 54, .9);
+  color: #dce9fb;
+  font-size: .55rem;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 .config-shell {
   background: #e4ebf2;

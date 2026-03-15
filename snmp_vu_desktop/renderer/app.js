@@ -1,13 +1,13 @@
 const presets = {
-  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'counter_bits', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'counter_bits', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m2_lan_in: { label: 'Nano M2 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m2_wlan_out: { label: 'Nano M2 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.31.1.1.1' },
-  nano_m5_lan_in: { label: 'Nano M5 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 150, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m5_wlan_out: { label: 'Nano M5 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bits', scaleMbps: 150, walkOid: '1.3.6.1.2.1.31.1.1.1' }
+  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'auto', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'auto', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'auto', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'auto', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m2_lan_in: { label: 'Nano M2 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m2_wlan_out: { label: 'Nano M2 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'auto', scaleMbps: 100, walkOid: '1.3.6.1.2.1.31.1.1.1' },
+  nano_m5_lan_in: { label: 'Nano M5 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 150, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m5_wlan_out: { label: 'Nano M5 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'auto', scaleMbps: 150, walkOid: '1.3.6.1.2.1.31.1.1.1' }
 };
 
 let configCache = null;
@@ -55,7 +55,7 @@ function defaultConfig() {
       version: '2c',
       oid: '',
       walkOid: '1.3.6.1.2.1.2.2.1',
-      mode: 'counter_bits',
+      mode: 'auto',
       scaleMbps: index < 4 ? 100 : 300,
       pingIp: '',
       alarmEnabled: false
@@ -136,7 +136,9 @@ function renderMain(items) {
       </div>
       <div class="dial-wrap">${gaugeSvg(index)}</div>
       <div class="dial-status" id="status-${index}">Esperando datos...</div>
+      <div class="dial-calc" id="calc-${index}">calc auto</div>
       <div class="dial-history" id="history-${index}">min - | avg - | max -</div>
+      <button class="mini-btn" data-reset="${index}" title="Reset calculo">R</button>
     </div>
   `).join('');
 }
@@ -160,6 +162,7 @@ function updateMain(items) {
     const led = document.getElementById(`led-${index}`);
     const value = document.getElementById(`value-${index}`);
     const status = document.getElementById(`status-${index}`);
+    const calc = document.getElementById(`calc-${index}`);
     const history = document.getElementById(`history-${index}`);
     const stats = updateHistory(index, item.mbps || 0);
     if (needle) {
@@ -174,6 +177,7 @@ function updateMain(items) {
     }
     if (value) value.textContent = Number(item.mbps || 0).toFixed(2);
     if (status) status.textContent = item.enabled ? `${item.msg} | raw ${item.raw ?? '-'} | ping ${item.pingMs ?? '-'} ms` : 'Desactivado';
+    if (calc) calc.textContent = `calc ${item.calcMode || '-'}`;
     if (history) history.textContent = `min ${stats.min.toFixed(2)} | avg ${stats.avg.toFixed(2)} | max ${stats.max.toFixed(2)}`;
   });
   updateAlarm(items);
@@ -299,6 +303,19 @@ async function bootMain() {
     });
   }
   checkForUpdates(false);
+  document.querySelectorAll('[data-reset]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const index = Number(btn.getAttribute('data-reset'));
+      const item = configCache && Array.isArray(configCache.items) ? configCache.items[index] : null;
+      if (!item) return;
+      historyState.delete(String(index));
+      await window.snmpVuApi.resetCalc(item.label);
+      const calc = document.getElementById(`calc-${index}`);
+      const hist = document.getElementById(`history-${index}`);
+      if (calc) calc.textContent = 'calc reset';
+      if (hist) hist.textContent = 'min - | avg - | max -';
+    });
+  });
   pollLoop();
 }
 
@@ -384,6 +401,7 @@ function configBox(item, index) {
       <input class="text-input" id="oid_${index}" value="${item.oid}">
       <label class="field-label">Modo</label>
       <select class="select-input" id="mode_${index}">
+        <option value="auto" ${item.mode === 'auto' ? 'selected' : ''}>Auto detectar</option>
         <option value="counter_bytes" ${item.mode === 'counter_bytes' ? 'selected' : ''}>Contador bytes</option>
         <option value="counter_bits" ${item.mode === 'counter_bits' ? 'selected' : ''}>Contador bits</option>
         <option value="direct_bps" ${item.mode === 'direct_bps' ? 'selected' : ''}>Valor directo bps</option>
