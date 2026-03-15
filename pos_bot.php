@@ -217,21 +217,29 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     <div class="row g-3">
       <div class="col-lg-5">
         <div class="card">
-          <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
-            <span>Destinos de promoción</span>
-            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoChats()"><i class="fas fa-sync"></i></button>
-          </div>
-          <div class="card-body">
-            <div class="small text-muted mb-2">Se leen chats y grupos desde WhatsApp Web del bridge conectado.</div>
-            <div id="promoChatsWrap" style="max-height:320px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
-              <div class="text-muted small">Sin datos aún.</div>
+            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+              <span>Destinos de promoción</span>
+              <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoChats()"><i class="fas fa-sync"></i></button>
             </div>
-            <div class="mt-2">
-              <button class="btn btn-sm btn-outline-primary" type="button" onclick="selectAllPromoChats(true)">Marcar todo</button>
-              <button class="btn btn-sm btn-outline-secondary" type="button" onclick="selectAllPromoChats(false)">Limpiar</button>
+            <div class="card-body">
+              <div class="small text-muted mb-2">Se leen chats y grupos desde WhatsApp Web del bridge conectado.</div>
+              <div class="d-flex gap-2 mb-2">
+                <button class="btn btn-sm btn-outline-primary" type="button" title="Marcar todos los grupos" onclick="selectAllPromoChats(true)">
+                  <i class="fas fa-check-double"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-secondary" type="button" title="Desmarcar todos los grupos" onclick="selectAllPromoChats(false)">
+                  <i class="fas fa-eraser"></i>
+                </button>
+                <button id="promoGroupsOnlyBtn" class="btn btn-sm btn-outline-info" type="button" title="Seleccionar solo grupos" onclick="togglePromoGroupsOnly()">
+                  <i class="fas fa-users"></i>
+                </button>
+              </div>
+              <div id="promoSelectionSummary" class="small text-muted mb-2">0 chats · 0 grupos seleccionados</div>
+              <div id="promoChatsWrap" style="max-height:320px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
+                <div class="text-muted small">Sin datos aún.</div>
+              </div>
             </div>
           </div>
-        </div>
       </div>
 
       <div class="col-lg-7">
@@ -797,7 +805,7 @@ function renderPromoChats(){
   if(!w) return;
   if(!promoChats.length){w.innerHTML='<div class="text-muted small">Sin chats detectados aún. Verifica estado listo y refresca.</div>';renderMyGroupOptions();return;}
   w.innerHTML=promoChats.map((c,i)=>`<label class="d-flex align-items-center gap-2 py-1 border-bottom small">
-      <input type="checkbox" class="form-check-input promo-chat" data-idx="${i}">
+      <input type="checkbox" class="form-check-input promo-chat" data-idx="${i}" data-group="${Number(c.is_group||0)}">
       <span class="badge ${c.is_group?'bg-primary':'bg-secondary'}">${c.is_group?'Grupo':'Chat'}</span>
       <span>${esc(c.name||c.id)}</span>
       <span class="text-muted ms-auto">${esc(c.id)}</span>
@@ -926,7 +934,69 @@ function targetsToText(targets){
   return arr.map(t=>String(t.name||t.id||'')).filter(Boolean).join(' | ');
 }
 function selectAllPromoChats(v){
-  document.querySelectorAll('.promo-chat').forEach(x=>x.checked=!!v);
+  if (__promoGroupsOnlyMode) {
+    __promoGroupsOnlyMode = false;
+    const btn = document.getElementById('promoGroupsOnlyBtn');
+    if (btn) {
+      btn.classList.add('btn-outline-info');
+      btn.classList.remove('btn-info','text-white');
+      btn.title = 'Seleccionar solo grupos';
+    }
+  }
+  document.querySelectorAll('.promo-chat[data-group="1"]').forEach(x=>x.checked=!!v);
+  updatePromoSelectionSummary();
+}
+let __promoGroupsOnlyMode = false;
+function togglePromoGroupsOnly(){
+  __promoGroupsOnlyMode = !__promoGroupsOnlyMode;
+  const btn = document.getElementById('promoGroupsOnlyBtn');
+  const target = document.querySelectorAll('.promo-chat');
+  if (__promoGroupsOnlyMode) {
+    target.forEach(x=>{x.checked = String(x.dataset.group || '0') === '1';});
+    if (btn) {
+      btn.classList.remove('btn-outline-info');
+      btn.classList.add('btn-info','text-white');
+      btn.title = 'Desactivar solo grupos';
+    }
+  } else {
+    updatePromoSelectionSummary();
+    if (btn) {
+      btn.classList.add('btn-outline-info');
+      btn.classList.remove('btn-info','text-white');
+      btn.title = 'Seleccionar solo grupos';
+    }
+    return;
+  }
+  updatePromoSelectionSummary();
+}
+function updatePromoSelectionSummary(){
+  const checks = Array.from(document.querySelectorAll('.promo-chat'));
+  const total = checks.length;
+  const groupsSel = checks.filter(x => String(x.dataset.group || '0') === '1' && x.checked).length;
+  const chatsSel = checks.filter(x => x.checked).length;
+  const el = document.getElementById('promoSelectionSummary');
+  if (el) el.textContent = `${chatsSel} chats · ${groupsSel} grupos seleccionados`;
+}
+
+document.addEventListener('change', function(e){
+  if (e.target && e.target.classList && e.target.classList.contains('promo-chat')) {
+    if (__promoGroupsOnlyMode) {
+      __promoGroupsOnlyMode = false;
+      const btn = document.getElementById('promoGroupsOnlyBtn');
+      if (btn) {
+        btn.classList.add('btn-outline-info');
+        btn.classList.remove('btn-info','text-white');
+        btn.title = 'Seleccionar solo grupos';
+      }
+    }
+    updatePromoSelectionSummary();
+  }
+});
+
+const _renderPromoChatsOrig = renderPromoChats;
+function renderPromoChats(){
+  _renderPromoChatsOrig();
+  updatePromoSelectionSummary();
 }
 function renderPromoProducts(){
   const w=document.getElementById('promoProductsWrap');
