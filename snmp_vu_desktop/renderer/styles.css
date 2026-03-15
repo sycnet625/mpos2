@@ -1,4 +1,58 @@
 * { box-sizing: border-box; }
+:root {
+  --app-glow: rgba(64,145,255,.22);
+  --app-bg-top: #07111d;
+  --app-bg-mid: #08131f;
+  --app-bg-bottom: #050b13;
+  --card-top: rgba(19,31,49,.98);
+  --card-bottom: rgba(8,16,27,1);
+  --card-border: rgba(159,183,210,.24);
+  --title-color: #dbe9fb;
+  --meta-color: #7d93af;
+  --value-color: #eef4ff;
+  --frame-fill: rgba(8,18,31,.84);
+  --frame-stroke: rgba(210,226,246,.2);
+  --needle: #ff6f61;
+  --plate-top: #f6fbff;
+  --plate-mid: #d9e4ef;
+  --plate-bottom: #b6c5d6;
+}
+body[data-theme="amber_lab"] {
+  --app-glow: rgba(255,181,72,.2);
+  --app-bg-top: #161109;
+  --app-bg-mid: #19140b;
+  --app-bg-bottom: #090603;
+  --card-top: rgba(47,34,19,.98);
+  --card-bottom: rgba(22,16,9,1);
+  --card-border: rgba(255,203,137,.22);
+  --title-color: #ffe6bd;
+  --meta-color: #c39f6b;
+  --value-color: #fff2de;
+  --frame-fill: rgba(37,23,10,.9);
+  --frame-stroke: rgba(255,216,168,.22);
+  --needle: #ff9a3c;
+  --plate-top: #fff4d8;
+  --plate-mid: #f0d3a0;
+  --plate-bottom: #d3aa71;
+}
+body[data-theme="green_radar"] {
+  --app-glow: rgba(54,255,150,.18);
+  --app-bg-top: #08150f;
+  --app-bg-mid: #08140f;
+  --app-bg-bottom: #030907;
+  --card-top: rgba(13,39,28,.98);
+  --card-bottom: rgba(7,20,15,1);
+  --card-border: rgba(125,242,185,.18);
+  --title-color: #d6ffe8;
+  --meta-color: #79c6a0;
+  --value-color: #ecfff4;
+  --frame-fill: rgba(8,28,19,.88);
+  --frame-stroke: rgba(174,255,219,.18);
+  --needle: #41f0a0;
+  --plate-top: #ecfff6;
+  --plate-mid: #c7e8d5;
+  --plate-bottom: #95bea8;
+}
 body {
   margin: 0;
   font-family: "Segoe UI", Tahoma, sans-serif;
@@ -6,8 +60,8 @@ body {
 }
 .app-shell {
   background:
-    radial-gradient(circle at top, rgba(64,145,255,.22), transparent 30%),
-    linear-gradient(180deg, #07111d 0%, #08131f 55%, #050b13 100%);
+    radial-gradient(circle at top, var(--app-glow), transparent 30%),
+    linear-gradient(180deg, var(--app-bg-top) 0%, var(--app-bg-mid) 55%, var(--app-bg-bottom) 100%);
   min-height: 100vh;
 }
 .main-view {
@@ -120,8 +174,8 @@ h1 {
 .gauge-card {
   position: relative;
   background:
-    linear-gradient(180deg, rgba(19,31,49,.98), rgba(8,16,27,1));
-  border: 1px solid rgba(159,183,210,.24);
+    linear-gradient(180deg, var(--card-top), var(--card-bottom));
+  border: 1px solid var(--card-border);
   border-radius: 10px;
   padding: 8px 8px 7px;
   box-shadow: 0 10px 18px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.03);
@@ -161,11 +215,11 @@ h1 {
   text-transform: uppercase;
   letter-spacing: .12em;
   font-size: .58rem;
-  color: #dbe9fb;
+  color: var(--title-color);
   font-weight: 800;
 }
 .gauge-meta {
-  color: #7d93af;
+  color: var(--meta-color);
   font-size: .62rem;
 }
 .gauge-value {
@@ -175,6 +229,7 @@ h1 {
   display: block;
   font-size: .96rem;
   line-height: 1;
+  color: var(--value-color);
 }
 .gauge-value span {
   color: #a5bbd5;
@@ -189,8 +244,8 @@ h1 {
   display: block;
 }
 .dial-frame {
-  fill: rgba(8,18,31,.84);
-  stroke: rgba(210,226,246,.2);
+  fill: var(--frame-fill);
+  stroke: var(--frame-stroke);
   stroke-width: 2;
 }
 .dial-plate {
@@ -223,7 +278,7 @@ h1 {
   filter: blur(2px);
 }
 .dial-needle {
-  stroke: #ff6f61;
+  stroke: var(--needle);
   stroke-width: 3;
   stroke-linecap: round;
   transform-origin: 150px 118px;
@@ -292,6 +347,9 @@ h1 {
 }
 .small-input {
   width: 110px;
+}
+.medium-input {
+  width: 160px;
 }
 .switch-line {
   display: flex;

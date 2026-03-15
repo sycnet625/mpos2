@@ -14,7 +14,14 @@
         <h2>SNMP VU Monitor</h2>
       </div>
       <div class="config-actions">
+        <select id="themeSelect" class="select-input medium-input">
+          <option value="blue_ice">Tema Azul</option>
+          <option value="amber_lab">Tema Ambar</option>
+          <option value="green_radar">Tema Verde</option>
+        </select>
         <input id="refreshMs" type="number" min="1000" step="500" class="text-input small-input">
+        <button id="importConfigBtn" class="secondary-btn">Importar</button>
+        <button id="exportConfigBtn" class="secondary-btn">Exportar</button>
         <button id="saveConfigBtn" class="primary-btn">Guardar</button>
       </div>
     </div>

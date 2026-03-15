@@ -1,14 +1,15 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron');
 const path = require('path');
 const https = require('https');
 const http = require('http');
 const { execFile } = require('child_process');
+const fs = require('fs');
 const Store = require('electron-store');
 const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.133527';
+const APP_BUILD = '20260315.135300';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -19,6 +20,7 @@ const store = new Store({
   name: 'snmp-vu-monitor',
   defaults: {
     refreshMs: 3000,
+    theme: 'blue_ice',
     items: Array.from({ length: 5 }, (_, idx) => ({
       enabled: idx === 0,
       label: `VU ${idx + 1}`,
@@ -31,7 +33,11 @@ const store = new Store({
       scaleMbps: idx < 4 ? 100 : 300,
       pingIp: '192.168.88.1',
       alarmEnabled: false
-    }))
+    })),
+    windowState: {
+      main: { width: 240, height: 980 },
+      config: { width: 980, height: 820 }
+    }
   }
 });
 
@@ -49,6 +55,13 @@ function getConfig() {
   const cfg = store.get(CONFIG_KEY);
   if (!cfg.items || !Array.isArray(cfg.items)) {
     return store.store;
+  }
+  cfg.theme = cfg.theme || 'blue_ice';
+  if (!cfg.windowState || typeof cfg.windowState !== 'object') {
+    cfg.windowState = {
+      main: { width: 240, height: 980 },
+      config: { width: 980, height: 820 }
+    };
   }
   cfg.items = Array.from({ length: 5 }, (_, idx) => ({
     enabled: !!(cfg.items[idx] && cfg.items[idx].enabled),
@@ -68,14 +81,62 @@ function getConfig() {
 }
 
 function setConfig(nextConfig) {
-  store.set(CONFIG_KEY, nextConfig);
+  const current = getConfig();
+  store.set(CONFIG_KEY, {
+    ...current,
+    ...nextConfig,
+    windowState: current.windowState || nextConfig.windowState
+  });
   return getConfig();
 }
 
+function boundsVisible(bounds) {
+  const displays = screen.getAllDisplays();
+  return displays.some((display) => {
+    const area = display.workArea;
+    return bounds.x >= area.x - bounds.width
+      && bounds.y >= area.y - bounds.height
+      && bounds.x <= area.x + area.width
+      && bounds.y <= area.y + area.height;
+  });
+}
+
+function getWindowState(kind, defaults) {
+  const cfg = getConfig();
+  const state = (cfg.windowState && cfg.windowState[kind]) || {};
+  const next = {
+    width: Number(state.width || defaults.width),
+    height: Number(state.height || defaults.height)
+  };
+  if (Number.isFinite(state.x) && Number.isFinite(state.y)) {
+    next.x = Number(state.x);
+    next.y = Number(state.y);
+  }
+  if (typeof next.x === 'number' && typeof next.y === 'number' && !boundsVisible(next)) {
+    delete next.x;
+    delete next.y;
+  }
+  return next;
+}
+
+function saveWindowState(kind, win) {
+  if (!win || win.isDestroyed()) return;
+  const bounds = win.getBounds();
+  const cfg = getConfig();
+  cfg.windowState = cfg.windowState || {};
+  cfg.windowState[kind] = {
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height
+  };
+  store.set(CONFIG_KEY, cfg);
+}
+
 function createMainWindow() {
+  const state = getWindowState('main', { width: 240, height: 980 });
   mainWindow = new BrowserWindow({
-    width: 240,
-    height: 980,
+    ...state,
     minWidth: 220,
     minHeight: 760,
     alwaysOnTop: true,
@@ -90,6 +151,9 @@ function createMainWindow() {
     }
   });
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  ['move', 'resize'].forEach((eventName) => {
+    mainWindow.on(eventName, () => saveWindowState('main', mainWindow));
+  });
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
@@ -98,9 +162,9 @@ function createConfigWindow() {
     configWindow.focus();
     return;
   }
+  const state = getWindowState('config', { width: 980, height: 820 });
   configWindow = new BrowserWindow({
-    width: 980,
-    height: 820,
+    ...state,
     parent: mainWindow,
     modal: true,
     autoHideMenuBar: true,
@@ -116,6 +180,9 @@ function createConfigWindow() {
   });
   configWindow.on('closed', () => {
     configWindow = null;
+  });
+  ['move', 'resize'].forEach((eventName) => {
+    configWindow.on(eventName, () => saveWindowState('config', configWindow));
   });
   configWindow.loadFile(path.join(__dirname, 'renderer', 'config.html'));
 }
@@ -335,6 +402,31 @@ ipcMain.handle('config:open', async () => {
 ipcMain.handle('snmp:poll', async () => pollItems());
 ipcMain.handle('snmp:walk', async (_event, item) => snmpWalk(item));
 ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, build: APP_BUILD, updateUrl: UPDATE_URLS[0] }));
+ipcMain.handle('config:export', async (_event, payload) => {
+  const selected = await dialog.showSaveDialog(configWindow || mainWindow, {
+    title: 'Exportar perfil SNMP',
+    defaultPath: `palweb-snmp-vu-${APP_VERSION}.json`,
+    filters: [{ name: 'JSON', extensions: ['json'] }]
+  });
+  if (selected.canceled || !selected.filePath) {
+    return { status: 'cancelled' };
+  }
+  fs.writeFileSync(selected.filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  return { status: 'success', filePath: selected.filePath };
+});
+ipcMain.handle('config:import', async () => {
+  const selected = await dialog.showOpenDialog(configWindow || mainWindow, {
+    title: 'Importar perfil SNMP',
+    filters: [{ name: 'JSON', extensions: ['json'] }],
+    properties: ['openFile']
+  });
+  if (selected.canceled || !selected.filePaths || !selected.filePaths[0]) {
+    return { status: 'cancelled' };
+  }
+  const text = fs.readFileSync(selected.filePaths[0], 'utf8');
+  const parsed = JSON.parse(text);
+  return { status: 'success', filePath: selected.filePaths[0], config: parsed };
+});
 ipcMain.handle('update:check', async () => {
   try {
     const meta = await fetchJsonWithFallback(UPDATE_URLS);

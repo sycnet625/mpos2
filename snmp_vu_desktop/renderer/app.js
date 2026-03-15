@@ -41,6 +41,7 @@ function apiReady() {
 function defaultConfig() {
   return {
     refreshMs: 3000,
+    theme: 'blue_ice',
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: true,
       label: `VU ${index + 1}`,
@@ -55,6 +56,10 @@ function defaultConfig() {
       alarmEnabled: false
     }))
   };
+}
+
+function applyTheme(theme) {
+  document.body.setAttribute('data-theme', theme || 'blue_ice');
 }
 
 function angleFromPercent(percent) {
@@ -80,9 +85,9 @@ function gaugeSvg(index) {
     <svg class="dial-svg" viewBox="0 0 300 160" aria-hidden="true">
       <defs>
         <linearGradient id="dialPlate" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#f6fbff"></stop>
-          <stop offset="55%" stop-color="#d9e4ef"></stop>
-          <stop offset="100%" stop-color="#b6c5d6"></stop>
+          <stop offset="0%" style="stop-color:var(--plate-top)"></stop>
+          <stop offset="55%" style="stop-color:var(--plate-mid)"></stop>
+          <stop offset="100%" style="stop-color:var(--plate-bottom)"></stop>
         </linearGradient>
         <linearGradient id="dialGlass" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stop-color="rgba(255,255,255,.62)"></stop>
@@ -226,6 +231,7 @@ async function bootMain() {
     configCache = bootstrap;
   }
   renderMain(configCache.items);
+  applyTheme(configCache.theme);
   try {
     const meta = await window.snmpVuApi.getMeta();
     setBuildBadge(`v${meta.version} #${meta.build || '-'}`);
@@ -267,7 +273,9 @@ async function bootConfig() {
   } catch (error) {
     configCache = defaultConfig();
   }
+  applyTheme(configCache.theme);
   document.getElementById('refreshMs').value = configCache.refreshMs;
+  document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
   document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
   debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
   debugSet('dbgConfigBtn', 'modal');
@@ -352,6 +360,7 @@ function configBox(item, index) {
 function readConfigFromForm() {
   return {
     refreshMs: Number(document.getElementById('refreshMs').value || 3000),
+    theme: document.getElementById('themeSelect').value || 'blue_ice',
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: document.getElementById(`enabled_${index}`).checked,
       label: document.getElementById(`label_${index}`).value,
@@ -369,6 +378,10 @@ function readConfigFromForm() {
 }
 
 function bindConfigEvents() {
+  const themeSelect = document.getElementById('themeSelect');
+  if (themeSelect) {
+    themeSelect.onchange = () => applyTheme(themeSelect.value);
+  }
   document.querySelectorAll('[id^="preset_"]').forEach((select) => {
     select.addEventListener('change', () => {
       const index = Number(select.id.split('_')[1]);
@@ -392,12 +405,40 @@ function bindConfigEvents() {
       debugLog('walk', { index, ok: result.ok });
     });
   });
+  const exportBtn = document.getElementById('exportConfigBtn');
+  if (exportBtn) {
+    exportBtn.onclick = async () => {
+      const result = await window.snmpVuApi.exportConfig(readConfigFromForm());
+      debugLog('export', result);
+    };
+  }
+  const importBtn = document.getElementById('importConfigBtn');
+  if (importBtn) {
+    importBtn.onclick = async () => {
+      const result = await window.snmpVuApi.importConfig();
+      if (!result || result.status !== 'success' || !result.config) {
+        debugLog('import', result || { status: 'cancelled' });
+        return;
+      }
+      configCache = {
+        ...defaultConfig(),
+        ...result.config,
+        theme: result.config.theme || 'blue_ice'
+      };
+      document.getElementById('refreshMs').value = configCache.refreshMs;
+      document.getElementById('themeSelect').value = configCache.theme;
+      document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
+      applyTheme(configCache.theme);
+      bindConfigEvents();
+      debugLog('import ok', { filePath: result.filePath });
+    };
+  }
   const saveBtn = document.getElementById('saveConfigBtn');
   if (saveBtn) {
-    saveBtn.addEventListener('click', async () => {
+    saveBtn.onclick = async () => {
       await window.snmpVuApi.saveConfig(readConfigFromForm());
       window.close();
-    });
+    };
   }
 }
 
