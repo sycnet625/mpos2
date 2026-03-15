@@ -811,6 +811,7 @@ function renderPromoChats(){
       <span class="text-muted ms-auto">${esc(c.id)}</span>
     </label>`).join('');
   renderMyGroupOptions();
+  updatePromoSelectionSummary();
 }
 async function loadPromoChats(){
   const d=await g(API+'?action=promo_chats');
@@ -993,11 +994,6 @@ document.addEventListener('change', function(e){
   }
 });
 
-const _renderPromoChatsOrig = renderPromoChats;
-function renderPromoChats(){
-  _renderPromoChatsOrig();
-  updatePromoSelectionSummary();
-}
 function renderPromoProducts(){
   const w=document.getElementById('promoProductsWrap');
   if(!w) return;
