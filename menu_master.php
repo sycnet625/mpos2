@@ -73,6 +73,7 @@ $menuCategories = [
     "🧮 Herramientas" => [
         ["icon" => "fa-calculator", "name" => "Convertir Unidades", "url" => "#", "onclick" => "openUnitConverter()"],
         ["icon" => "fa-search-plus", "name" => "Buscador Inteligente", "url" => "image_smart_hunter.php"],
+        ["icon" => "fa-tachometer-alt", "name" => "SNMP VU Monitor", "url" => "snmp_vu_monitor.php"],
     ],
     "🎨 Temas / Skins" => [
         ["icon" => "fa-sun", "name" => "Claro (Original)", "url" => "#", "onclick" => "setTheme('light')"],
