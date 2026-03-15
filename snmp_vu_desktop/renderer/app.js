@@ -8,6 +8,26 @@ const presets = {
 let configCache = null;
 let pollTimer = null;
 let updateInfo = null;
+let debugLines = [];
+
+function debugSet(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function setBuildBadge(text) {
+  const el = document.getElementById('buildBadge');
+  if (el) el.textContent = text;
+}
+
+function debugLog(message, data = null) {
+  const stamp = new Date().toLocaleTimeString();
+  const line = data === null ? `[${stamp}] ${message}` : `[${stamp}] ${message} | ${JSON.stringify(data)}`;
+  debugLines.unshift(line);
+  debugLines = debugLines.slice(0, 20);
+  const el = document.getElementById('debugLog');
+  if (el) el.textContent = debugLines.join('\n');
+}
 
 function apiReady() {
   return typeof window.snmpVuApi === 'object' && window.snmpVuApi !== null;
@@ -111,11 +131,15 @@ async function pollLoop() {
     const result = await window.snmpVuApi.poll();
     if (result && result.status === 'success') {
       updateMain(result.items);
+      debugSet('dbgPoll', `ok ${new Date().toLocaleTimeString()}`);
+      debugLog('poll ok', { items: (result.items || []).length, refreshMs: result.refreshMs || 3000 });
       if (pollTimer) clearTimeout(pollTimer);
       pollTimer = setTimeout(pollLoop, result.refreshMs || 3000);
       return;
     }
   } catch (error) {
+    debugSet('dbgPoll', 'error');
+    debugLog('poll error', { message: error && error.message ? error.message : String(error) });
     setUpdateBanner('Error local del monitor', true);
   }
   if (pollTimer) clearTimeout(pollTimer);
@@ -147,14 +171,30 @@ async function checkForUpdates(openIfAvailable = false) {
       setUpdateBanner(`Version ${result.currentVersion} actualizada`, false);
     }
   } catch (error) {
+    debugLog('update error', { message: error && error.message ? error.message : String(error) });
     setUpdateBanner('Updates no disponibles', false);
+  }
+}
+
+async function runSelfTest() {
+  if (!apiReady()) {
+    debugLog('self test', { api: false });
+    return;
+  }
+  try {
+    const result = await window.snmpVuApi.selfTest();
+    debugLog('self test', result);
+  } catch (error) {
+    debugLog('self test error', { message: error && error.message ? error.message : String(error) });
   }
 }
 
 async function bootMain() {
   const bootstrap = defaultConfig();
   renderMain(bootstrap.items);
+  debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
   if (!apiReady()) {
+    debugLog('preload missing');
     setUpdateBanner('Error UI: preload/API no disponible', true);
     return;
   }
@@ -169,26 +209,38 @@ async function bootMain() {
   renderMain(configCache.items);
   try {
     const meta = await window.snmpVuApi.getMeta();
+    setBuildBadge(`v${meta.version} #${meta.build || '-'}`);
     setUpdateBanner(`Version ${meta.version}`, false);
   } catch (error) {
+    setBuildBadge('build ?');
     setUpdateBanner('Version local', false);
   }
   const openBtn = document.getElementById('openConfigBtn');
+  debugSet('dbgConfigBtn', openBtn ? 'found' : 'missing');
   if (openBtn) {
     openBtn.addEventListener('click', async () => {
       try {
         await window.snmpVuApi.openConfig();
+        debugLog('config open requested');
       } catch (error) {
+        debugLog('config open error', { message: error && error.message ? error.message : String(error) });
         setUpdateBanner('No se pudo abrir configuracion', true);
       }
     });
   }
   const updateBtn = document.getElementById('checkUpdateBtn');
+  debugSet('dbgUpdateBtn', updateBtn ? 'found' : 'missing');
   if (updateBtn) {
     updateBtn.addEventListener('click', async () => {
+      debugLog('manual update check');
       await checkForUpdates(true);
     });
   }
+  const selfTestBtn = document.getElementById('selfTestBtn');
+  if (selfTestBtn) {
+    selfTestBtn.addEventListener('click', runSelfTest);
+  }
+  debugLog('boot main start');
   checkForUpdates(false);
   pollLoop();
 }
@@ -212,11 +264,13 @@ async function bootConfig() {
 }
 
 window.addEventListener('error', (event) => {
+  debugLog('window error', { message: event.message, source: event.filename, line: event.lineno });
   setUpdateBanner(`Error UI: ${event.message}`, true);
 });
 
 window.addEventListener('unhandledrejection', (event) => {
   const text = event.reason && event.reason.message ? event.reason.message : 'Promise rechazada';
+  debugLog('promise rejection', { message: text });
   setUpdateBanner(`Error UI: ${text}`, true);
 });
 

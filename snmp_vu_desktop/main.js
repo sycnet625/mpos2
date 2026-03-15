@@ -8,6 +8,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
+const APP_BUILD = '20260315.040510';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URL = 'https://www.palweb.net/apk/snmp-vu-monitor-update.json';
@@ -290,7 +291,7 @@ ipcMain.handle('config:open', async () => {
 });
 ipcMain.handle('snmp:poll', async () => pollItems());
 ipcMain.handle('snmp:walk', async (_event, item) => snmpWalk(item));
-ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, updateUrl: UPDATE_URL }));
+ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, build: APP_BUILD, updateUrl: UPDATE_URL }));
 ipcMain.handle('update:check', async () => {
   try {
     const meta = await fetchJson(UPDATE_URL);
