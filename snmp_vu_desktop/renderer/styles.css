@@ -11,38 +11,44 @@ body {
   min-height: 100vh;
 }
 .main-view {
-  padding: 18px;
+  padding: 8px;
 }
 .toolbar {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
+  align-items: flex-start;
+  margin-bottom: 8px;
 }
 .toolbar-actions {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
 .eyebrow {
   color: #7ea7d9;
   text-transform: uppercase;
   letter-spacing: .14em;
-  font-size: .72rem;
+  font-size: .6rem;
   font-weight: 700;
 }
 h1, h2 {
   margin: 2px 0 0;
   font-weight: 800;
 }
+h1 {
+  font-size: .94rem;
+  line-height: 1.15;
+}
 .build-badge {
   display: inline-block;
-  margin-left: 10px;
-  padding: 4px 9px;
+  margin-left: 0;
+  margin-top: 4px;
+  padding: 3px 7px;
   border-radius: 999px;
   background: rgba(126,167,217,.14);
   color: #b9d4f1;
-  font-size: .64em;
-  vertical-align: middle;
+  font-size: .56em;
+  vertical-align: top;
   letter-spacing: .04em;
 }
 .gear-btn, .primary-btn, .secondary-btn {
@@ -51,16 +57,16 @@ h1, h2 {
   cursor: pointer;
 }
 .gear-btn {
-  width: 42px;
-  height: 42px;
-  font-size: 1.2rem;
+  width: 34px;
+  height: 34px;
+  font-size: 1rem;
   background: #153149;
   color: #fff;
   box-shadow: 0 8px 20px rgba(0,0,0,.25);
 }
 .update-banner {
-  margin-top: 6px;
-  font-size: .8rem;
+  margin-top: 4px;
+  font-size: .68rem;
   color: #8fb0d6;
 }
 .update-banner.available {
@@ -109,72 +115,95 @@ h1, h2 {
 }
 .gauges {
   display: grid;
-  gap: 14px;
+  gap: 8px;
 }
 .gauge-card {
   position: relative;
-  background: linear-gradient(180deg, rgba(14,26,43,.95), rgba(10,18,30,.98));
-  border: 1px solid rgba(126,167,217,.16);
-  border-radius: 26px;
-  padding: 18px 18px 14px;
-  box-shadow: 0 14px 34px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.03);
+  background:
+    linear-gradient(180deg, rgba(19,31,49,.98), rgba(8,16,27,1));
+  border: 1px solid rgba(159,183,210,.24);
+  border-radius: 10px;
+  padding: 8px 8px 7px;
+  box-shadow: 0 10px 18px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.gauge-card::before {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: 7px;
+  border: 1px solid rgba(213,227,246,.12);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.04) 22%, transparent 58%),
+    radial-gradient(circle at 18% 6%, rgba(255,255,255,.22), transparent 34%);
+  pointer-events: none;
 }
 .gauge-led {
   position: absolute;
-  top: 16px;
-  left: 16px;
-  width: 12px;
-  height: 12px;
+  top: 9px;
+  left: 9px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
-  box-shadow: 0 0 14px currentColor;
+  box-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
 }
 .gauge-led.green { color: #32d669; background: #32d669; }
+.gauge-led.yellow { color: #facc15; background: #facc15; }
+.gauge-led.orange { color: #fb923c; background: #fb923c; }
 .gauge-led.red { color: #fb4f63; background: #fb4f63; }
 .gauge-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding-left: 22px;
+  padding-left: 16px;
+  gap: 6px;
 }
 .gauge-title {
   text-transform: uppercase;
   letter-spacing: .12em;
-  font-size: .8rem;
+  font-size: .58rem;
   color: #dbe9fb;
   font-weight: 800;
 }
 .gauge-meta {
   color: #7d93af;
-  font-size: .78rem;
+  font-size: .62rem;
 }
 .gauge-value {
   text-align: right;
 }
 .gauge-value strong {
   display: block;
-  font-size: 1.75rem;
+  font-size: .96rem;
   line-height: 1;
 }
 .gauge-value span {
   color: #a5bbd5;
-  font-size: .84rem;
+  font-size: .62rem;
 }
 .dial-wrap {
-  margin-top: 8px;
+  margin-top: 4px;
 }
 .dial-svg {
   width: 100%;
-  height: 150px;
+  height: 78px;
   display: block;
+}
+.dial-frame {
+  fill: rgba(8,18,31,.84);
+  stroke: rgba(210,226,246,.2);
+  stroke-width: 2;
 }
 .dial-plate {
   fill: url(#dialPlate);
-  stroke: rgba(255,255,255,.08);
+  stroke: rgba(255,255,255,.18);
   stroke-width: 2;
+}
+.dial-glass {
+  fill: url(#dialGlass);
 }
 .dial-tick {
   stroke: rgba(229,240,255,.6);
-  stroke-width: 2;
+  stroke-width: 1.8;
   stroke-linecap: round;
 }
 .dial-tick.hot {
@@ -182,16 +211,24 @@ h1, h2 {
 }
 .dial-label {
   fill: #c9d8eb;
-  font-size: 10px;
+  font-size: 8px;
   font-weight: 700;
+}
+.dial-needle-shadow {
+  stroke: rgba(8, 10, 14, .7);
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform-origin: 150px 120px;
+  transition: transform .6s cubic-bezier(.2,.8,.2,1);
+  filter: blur(2px);
 }
 .dial-needle {
   stroke: #ff6f61;
-  stroke-width: 4;
+  stroke-width: 3;
   stroke-linecap: round;
-  transform-origin: 150px 122px;
+  transform-origin: 150px 118px;
   transition: transform .6s cubic-bezier(.2,.8,.2,1);
-  filter: drop-shadow(0 0 8px rgba(255,111,97,.35));
+  filter: drop-shadow(0 4px 4px rgba(0,0,0,.65)) drop-shadow(0 0 6px rgba(255,111,97,.3));
 }
 .dial-cap {
   fill: #dfe8f7;
@@ -201,7 +238,8 @@ h1, h2 {
 .dial-status {
   text-align: center;
   color: #88a0bb;
-  font-size: .82rem;
+  font-size: .58rem;
+  min-height: 28px;
 }
 .config-shell {
   background: #e4ebf2;
@@ -259,6 +297,16 @@ h1, h2 {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.inline-label {
+  margin: 0;
+}
+.alarm-switch {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: #eef4fa;
+  border: 1px solid #d9e3ef;
 }
 .walk-panel {
   margin-top: 16px;

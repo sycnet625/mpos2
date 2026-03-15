@@ -8,10 +8,13 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.040510';
+const APP_BUILD = '20260315.133527';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
-const UPDATE_URL = 'https://www.palweb.net/apk/snmp-vu-monitor-update.json';
+const UPDATE_URLS = [
+  'https://www.palweb.net/apk/snmp-vu-monitor-update.json',
+  'https://shop.palweb.net/apk/snmp-vu-monitor-update.json'
+];
 const store = new Store({
   name: 'snmp-vu-monitor',
   defaults: {
@@ -26,7 +29,8 @@ const store = new Store({
       walkOid: '1.3.6.1.2.1.2.2.1',
       mode: 'counter_bytes',
       scaleMbps: idx < 4 ? 100 : 300,
-      pingIp: '192.168.88.1'
+      pingIp: '192.168.88.1',
+      alarmEnabled: false
     }))
   }
 });
@@ -34,6 +38,7 @@ const store = new Store({
 let mainWindow;
 let configWindow;
 const previousState = new Map();
+const pingState = new Map();
 
 function versionToSnmp(version) {
   if (version === '1') return snmp.Version1;
@@ -55,7 +60,8 @@ function getConfig() {
     walkOid: (cfg.items[idx] && cfg.items[idx].walkOid) || '1.3.6.1.2.1.2.2.1',
     mode: (cfg.items[idx] && cfg.items[idx].mode) || 'counter_bytes',
     scaleMbps: Number((cfg.items[idx] && cfg.items[idx].scaleMbps) || 100),
-    pingIp: (cfg.items[idx] && cfg.items[idx].pingIp) || ''
+    pingIp: (cfg.items[idx] && cfg.items[idx].pingIp) || '',
+    alarmEnabled: !!(cfg.items[idx] && cfg.items[idx].alarmEnabled)
   }));
   cfg.refreshMs = Math.max(1000, Number(cfg.refreshMs || 3000));
   return cfg;
@@ -68,12 +74,13 @@ function setConfig(nextConfig) {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 860,
+    width: 240,
     height: 980,
-    minWidth: 720,
+    minWidth: 220,
     minHeight: 760,
+    alwaysOnTop: true,
     autoHideMenuBar: true,
-    title: 'PalWeb SNMP VU',
+    title: `PalWeb SNMP VU v${APP_VERSION} #${APP_BUILD}`,
     icon: APP_ICON,
     backgroundColor: '#08111f',
     webPreferences: {
@@ -82,6 +89,7 @@ function createMainWindow() {
       nodeIntegration: false
     }
   });
+  mainWindow.setAlwaysOnTop(true, 'screen-saver');
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
@@ -96,7 +104,7 @@ function createConfigWindow() {
     parent: mainWindow,
     modal: true,
     autoHideMenuBar: true,
-    title: 'Configuracion PalWeb SNMP VU',
+    title: `Configuracion PalWeb SNMP VU v${APP_VERSION} #${APP_BUILD}`,
     icon: APP_ICON,
     backgroundColor: '#e7edf4',
     webPreferences: {
@@ -147,19 +155,6 @@ function fetchJson(url) {
         }
       });
     }).on('error', reject);
-  });
-}
-
-function pingHost(ip) {
-  return new Promise((resolve) => {
-    if (!ip) {
-      resolve(false);
-      return;
-    }
-    const args = process.platform === 'win32' ? ['-n', '1', '-w', '1000', ip] : ['-c', '1', '-W', '1', ip];
-    execFile('ping', args, { timeout: 2000 }, (error) => {
-      resolve(!error);
-    });
   });
 }
 
@@ -233,7 +228,7 @@ function calculateMbps(item, raw, now) {
     return Math.max(0, raw);
   }
   if (item.mode === 'direct_bps') {
-    return Math.max(0, raw / 1000000);
+    return Math.max(0, (raw / 8) / 1000000);
   }
   const prev = previousState.get(item.label);
   previousState.set(item.label, { raw, ts: now });
@@ -243,16 +238,61 @@ function calculateMbps(item, raw, now) {
   const delta = raw - prev.raw;
   const seconds = Math.max(1, (now - prev.ts) / 1000);
   if (item.mode === 'counter_bits') {
-    return Math.max(0, (delta / seconds) / 1000000);
+    return Math.max(0, ((delta / seconds) / 8) / 1000000);
   }
-  return Math.max(0, ((delta / seconds) * 8) / 1000000);
+  return Math.max(0, (delta / seconds) / 1000000);
+}
+
+function fetchJsonWithFallback(urls, index = 0) {
+  if (index >= urls.length) {
+    return Promise.reject(new Error('No se pudo acceder a ningun endpoint de updates'));
+  }
+  return fetchJson(urls[index]).catch(() => fetchJsonWithFallback(urls, index + 1));
+}
+
+function pingHost(ip) {
+  return new Promise((resolve) => {
+    if (!ip) {
+      resolve({ ok: false, ms: null });
+      return;
+    }
+    const args = process.platform === 'win32' ? ['-n', '1', '-w', '1000', ip] : ['-c', '1', '-W', '1', ip];
+    execFile('ping', args, { timeout: 2500 }, (error, stdout = '', stderr = '') => {
+      const text = `${stdout}\n${stderr}`;
+      const match = text.match(/time[=<]?\s*([0-9]+(?:[.,][0-9]+)?)\s*ms/i);
+      const ms = match ? Number(String(match[1]).replace(',', '.')) : null;
+      resolve({ ok: !error, ms });
+    });
+  });
+}
+
+function pingColorFor(itemKey, ms, ok) {
+  const prev = pingState.get(itemKey) || { orangeStreak: 0 };
+  let orangeStreak = prev.orangeStreak || 0;
+  let color = 'red';
+  if (ok && ms !== null && ms < 100) {
+    color = 'green';
+    orangeStreak = 0;
+  } else if (ok && ms !== null && ms < 300) {
+    color = 'yellow';
+    orangeStreak = 0;
+  } else if (ok && ms !== null && ms <= 900) {
+    orangeStreak += 1;
+    color = 'orange';
+  } else {
+    orangeStreak += 1;
+    color = orangeStreak >= 4 ? 'red' : 'orange';
+  }
+  pingState.set(itemKey, { orangeStreak });
+  return color;
 }
 
 async function pollItems() {
   const cfg = getConfig();
   const now = Date.now();
   const items = await Promise.all(cfg.items.map(async (item, index) => {
-    const pingOk = await pingHost(item.pingIp);
+    const ping = await pingHost(item.pingIp);
+    const pingColor = pingColorFor(`${index}:${item.label}`, ping.ms, ping.ok);
     const base = {
       index,
       label: item.label,
@@ -260,9 +300,12 @@ async function pollItems() {
       mbps: 0,
       percent: 0,
       raw: null,
-      pingOk,
+      pingOk: ping.ok,
+      pingMs: ping.ms,
+      pingColor,
       msg: item.enabled ? 'Sin datos' : 'Desactivado',
-      scaleMbps: item.scaleMbps
+      scaleMbps: item.scaleMbps,
+      alarmEnabled: !!item.alarmEnabled
     };
     if (!item.enabled) {
       return base;
@@ -271,14 +314,14 @@ async function pollItems() {
     if (!snmpRes.ok) {
       return { ...base, msg: snmpRes.msg };
     }
-    const mbps = calculateMbps(item, snmpRes.raw, now);
-    return {
-      ...base,
-      raw: snmpRes.raw,
-      mbps,
-      percent: Math.max(0, Math.min(100, (mbps / Math.max(1, item.scaleMbps)) * 100)),
-      msg: 'OK'
-    };
+                    const mbps = calculateMbps(item, snmpRes.raw, now);
+                    return {
+                        ...base,
+                        raw: snmpRes.raw,
+                        mbps,
+                        percent: Math.max(0, Math.min(100, (mbps / Math.max(1, item.scaleMbps)) * 100)),
+                        msg: 'OK'
+                    };
   }));
   return { status: 'success', items, refreshMs: cfg.refreshMs };
 }
@@ -291,10 +334,10 @@ ipcMain.handle('config:open', async () => {
 });
 ipcMain.handle('snmp:poll', async () => pollItems());
 ipcMain.handle('snmp:walk', async (_event, item) => snmpWalk(item));
-ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, build: APP_BUILD, updateUrl: UPDATE_URL }));
+ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, build: APP_BUILD, updateUrl: UPDATE_URLS[0] }));
 ipcMain.handle('update:check', async () => {
   try {
-    const meta = await fetchJson(UPDATE_URL);
+    const meta = await fetchJsonWithFallback(UPDATE_URLS);
     const latest = String(meta.version || '');
     return {
       status: 'success',

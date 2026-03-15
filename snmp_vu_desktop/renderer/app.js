@@ -1,7 +1,12 @@
 const presets = {
   mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
   mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'counter_bytes', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'counter_bytes', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
   nano_m2_lan_in: { label: 'Nano M2 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m2_wlan_out: { label: 'Nano M2 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.31.1.1.1' },
+  nano_m5_lan_in: { label: 'Nano M5 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 150, walkOid: '1.3.6.1.2.1.2.2.1' },
   nano_m5_wlan_out: { label: 'Nano M5 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bytes', scaleMbps: 150, walkOid: '1.3.6.1.2.1.31.1.1.1' }
 };
 
@@ -46,7 +51,8 @@ function defaultConfig() {
       walkOid: '1.3.6.1.2.1.2.2.1',
       mode: 'counter_bytes',
       scaleMbps: index < 4 ? 100 : 300,
-      pingIp: ''
+      pingIp: '',
+      alarmEnabled: false
     }))
   };
 }
@@ -58,13 +64,13 @@ function angleFromPercent(percent) {
 function gaugeSvg(index) {
   const ticks = Array.from({ length: 9 }, (_, i) => {
     const angle = (-135 + i * 33.75) * (Math.PI / 180);
-    const x1 = 150 + Math.cos(angle) * 92;
-    const y1 = 122 + Math.sin(angle) * 92;
+    const x1 = 150 + Math.cos(angle) * 90;
+    const y1 = 120 + Math.sin(angle) * 90;
     const x2 = 150 + Math.cos(angle) * 108;
-    const y2 = 122 + Math.sin(angle) * 108;
+    const y2 = 120 + Math.sin(angle) * 108;
     const hot = i > 6 ? 'hot' : '';
-    const lx = 150 + Math.cos(angle) * 72;
-    const ly = 126 + Math.sin(angle) * 72;
+    const lx = 150 + Math.cos(angle) * 68;
+    const ly = 124 + Math.sin(angle) * 68;
     return `
       <line class="dial-tick ${hot}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>
       <text class="dial-label" x="${lx}" y="${ly}" text-anchor="middle">${i * 12.5}</text>
@@ -74,14 +80,23 @@ function gaugeSvg(index) {
     <svg class="dial-svg" viewBox="0 0 300 160" aria-hidden="true">
       <defs>
         <linearGradient id="dialPlate" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#f5f8fc"></stop>
-          <stop offset="100%" stop-color="#cad6e5"></stop>
+          <stop offset="0%" stop-color="#f6fbff"></stop>
+          <stop offset="55%" stop-color="#d9e4ef"></stop>
+          <stop offset="100%" stop-color="#b6c5d6"></stop>
+        </linearGradient>
+        <linearGradient id="dialGlass" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="rgba(255,255,255,.62)"></stop>
+          <stop offset="32%" stop-color="rgba(255,255,255,.16)"></stop>
+          <stop offset="100%" stop-color="rgba(255,255,255,0)"></stop>
         </linearGradient>
       </defs>
+      <rect class="dial-frame" x="18" y="20" rx="16" ry="16" width="264" height="122"></rect>
       <path class="dial-plate" d="M40,128 C54,48 246,48 260,128 L260,136 L40,136 Z"></path>
+      <path class="dial-glass" d="M40,128 C54,48 246,48 260,128 L260,136 L40,136 Z"></path>
       ${ticks}
-      <line class="dial-needle" id="needle-${index}" x1="150" y1="122" x2="74" y2="122"></line>
-      <circle class="dial-cap" cx="150" cy="122" r="10"></circle>
+      <line class="dial-needle-shadow" id="needle-shadow-${index}" x1="150" y1="120" x2="78" y2="120"></line>
+      <line class="dial-needle" id="needle-${index}" x1="150" y1="118" x2="78" y2="118"></line>
+      <circle class="dial-cap" cx="150" cy="120" r="11"></circle>
     </svg>
   `;
 }
@@ -95,11 +110,11 @@ function renderMain(items) {
       <div class="gauge-head">
         <div>
           <div class="gauge-title">${item.label}</div>
-          <div class="gauge-meta">Escala ${Number(item.scaleMbps).toFixed(0)} Mb/s</div>
+          <div class="gauge-meta">Escala ${Number(item.scaleMbps).toFixed(0)} MB/s</div>
         </div>
         <div class="gauge-value">
           <strong id="value-${index}">0.00</strong>
-          <span>Mb/s</span>
+          <span>MB/s</span>
         </div>
       </div>
       <div class="dial-wrap">${gaugeSvg(index)}</div>
@@ -111,19 +126,24 @@ function renderMain(items) {
 function updateMain(items) {
   items.forEach((item, index) => {
     const needle = document.getElementById(`needle-${index}`);
+    const needleShadow = document.getElementById(`needle-shadow-${index}`);
     const led = document.getElementById(`led-${index}`);
     const value = document.getElementById(`value-${index}`);
     const status = document.getElementById(`status-${index}`);
     if (needle) {
       needle.style.transform = `rotate(${angleFromPercent(item.percent)}deg)`;
     }
+    if (needleShadow) {
+      needleShadow.style.transform = `rotate(${angleFromPercent(item.percent)}deg)`;
+    }
     if (led) {
-      led.classList.toggle('green', !!item.pingOk);
-      led.classList.toggle('red', !item.pingOk);
+      ['green', 'yellow', 'orange', 'red'].forEach((cls) => led.classList.remove(cls));
+      led.classList.add(item.pingColor || (item.pingOk ? 'green' : 'red'));
     }
     if (value) value.textContent = Number(item.mbps || 0).toFixed(2);
-    if (status) status.textContent = item.enabled ? `${item.msg} | raw ${item.raw ?? '-'} | ping ${item.pingOk ? 'OK' : 'FAIL'}` : 'Desactivado';
+    if (status) status.textContent = item.enabled ? `${item.msg} | raw ${item.raw ?? '-'} | ping ${item.pingMs ?? '-'} ms` : 'Desactivado';
   });
+  updateAlarm(items);
 }
 
 async function pollLoop() {
@@ -158,7 +178,8 @@ async function checkForUpdates(openIfAvailable = false) {
     const meta = await window.snmpVuApi.getMeta();
     const result = await window.snmpVuApi.checkUpdate();
     if (result.status !== 'success') {
-      setUpdateBanner(`Version ${meta.version} | sin acceso a updates`, false);
+      setUpdateBanner(`Version ${meta.version} | updates: ${result.msg || 'sin acceso'}`, false);
+      debugLog('update unavailable', result);
       return;
     }
     updateInfo = result;
@@ -192,9 +213,7 @@ async function runSelfTest() {
 async function bootMain() {
   const bootstrap = defaultConfig();
   renderMain(bootstrap.items);
-  debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
   if (!apiReady()) {
-    debugLog('preload missing');
     setUpdateBanner('Error UI: preload/API no disponible', true);
     return;
   }
@@ -216,31 +235,21 @@ async function bootMain() {
     setUpdateBanner('Version local', false);
   }
   const openBtn = document.getElementById('openConfigBtn');
-  debugSet('dbgConfigBtn', openBtn ? 'found' : 'missing');
   if (openBtn) {
     openBtn.addEventListener('click', async () => {
       try {
         await window.snmpVuApi.openConfig();
-        debugLog('config open requested');
       } catch (error) {
-        debugLog('config open error', { message: error && error.message ? error.message : String(error) });
         setUpdateBanner('No se pudo abrir configuracion', true);
       }
     });
   }
   const updateBtn = document.getElementById('checkUpdateBtn');
-  debugSet('dbgUpdateBtn', updateBtn ? 'found' : 'missing');
   if (updateBtn) {
     updateBtn.addEventListener('click', async () => {
-      debugLog('manual update check');
       await checkForUpdates(true);
     });
   }
-  const selfTestBtn = document.getElementById('selfTestBtn');
-  if (selfTestBtn) {
-    selfTestBtn.addEventListener('click', runSelfTest);
-  }
-  debugLog('boot main start');
   checkForUpdates(false);
   pollLoop();
 }
@@ -260,6 +269,11 @@ async function bootConfig() {
   }
   document.getElementById('refreshMs').value = configCache.refreshMs;
   document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
+  debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
+  debugSet('dbgConfigBtn', 'modal');
+  debugSet('dbgUpdateBtn', 'main');
+  const selfTestBtn = document.getElementById('selfTestBtn');
+  if (selfTestBtn) selfTestBtn.addEventListener('click', runSelfTest);
   bindConfigEvents();
 }
 
@@ -292,7 +306,12 @@ function configBox(item, index) {
         <option value="">Sin preset</option>
         <option value="mikrotik_ether1_in">MikroTik ether1 IN</option>
         <option value="mikrotik_ether1_out">MikroTik ether1 OUT</option>
+        <option value="mikrotik_wlan1_in">MikroTik wlan1 IN</option>
+        <option value="mikrotik_bridge_in">MikroTik bridge IN</option>
+        <option value="mikrotik_pppoe_out">MikroTik PPPoE/WAN OUT</option>
         <option value="nano_m2_lan_in">NanoStation M2 LAN IN</option>
+        <option value="nano_m2_wlan_out">NanoStation M2 WLAN OUT</option>
+        <option value="nano_m5_lan_in">NanoStation M5 LAN IN</option>
         <option value="nano_m5_wlan_out">NanoStation M5 WLAN OUT</option>
       </select>
       <label class="field-label">Etiqueta</label>
@@ -313,12 +332,16 @@ function configBox(item, index) {
         <option value="counter_bytes" ${item.mode === 'counter_bytes' ? 'selected' : ''}>Contador bytes</option>
         <option value="counter_bits" ${item.mode === 'counter_bits' ? 'selected' : ''}>Contador bits</option>
         <option value="direct_bps" ${item.mode === 'direct_bps' ? 'selected' : ''}>Valor directo bps</option>
-        <option value="direct_mbps" ${item.mode === 'direct_mbps' ? 'selected' : ''}>Valor directo Mb/s</option>
+        <option value="direct_mbps" ${item.mode === 'direct_mbps' ? 'selected' : ''}>Valor directo MB/s</option>
       </select>
-      <label class="field-label">Escala Mb/s</label>
+      <label class="field-label">Escala MB/s</label>
       <input class="text-input" type="number" min="1" step="0.1" id="scale_${index}" value="${item.scaleMbps}">
       <label class="field-label">IP Ping</label>
       <input class="text-input" id="ping_${index}" value="${item.pingIp}">
+      <div class="switch-line alarm-switch">
+        <input type="checkbox" id="alarm_${index}" ${item.alarmEnabled ? 'checked' : ''}>
+        <label class="field-label inline-label" for="alarm_${index}">Alarma sonora si el ping queda en rojo</label>
+      </div>
       <label class="field-label">OID walk</label>
       <input class="text-input" id="walk_${index}" value="${item.walkOid}">
       <button class="secondary-btn" data-walk="${index}">SNMP walk</button>
@@ -339,7 +362,8 @@ function readConfigFromForm() {
       walkOid: document.getElementById(`walk_${index}`).value,
       mode: document.getElementById(`mode_${index}`).value,
       scaleMbps: Number(document.getElementById(`scale_${index}`).value || 100),
-      pingIp: document.getElementById(`ping_${index}`).value
+      pingIp: document.getElementById(`ping_${index}`).value,
+      alarmEnabled: document.getElementById(`alarm_${index}`).checked
     }))
   };
 }
@@ -365,6 +389,7 @@ function bindConfigEvents() {
       output.textContent = 'Ejecutando...';
       const result = await window.snmpVuApi.walk(item);
       output.textContent = result.ok ? result.output : (result.msg || 'Error');
+      debugLog('walk', { index, ok: result.ok });
     });
   });
   const saveBtn = document.getElementById('saveConfigBtn');
@@ -374,4 +399,37 @@ function bindConfigEvents() {
       window.close();
     });
   }
+}
+
+let audioCtx = null;
+let alarmTimer = null;
+let alarmPhase = 0;
+function updateAlarm(items) {
+  const shouldAlarm = (items || []).some((item) => item.enabled && item.alarmEnabled && item.pingColor === 'red');
+  if (!shouldAlarm) {
+    if (alarmTimer) {
+      clearInterval(alarmTimer);
+      alarmTimer = null;
+    }
+    alarmPhase = 0;
+    return;
+  }
+  if (alarmTimer) return;
+  alarmTimer = setInterval(() => {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = alarmPhase % 2 === 0 ? 'sawtooth' : 'square';
+      osc.frequency.setValueAtTime(alarmPhase % 2 === 0 ? 780 : 1180, audioCtx.currentTime);
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.18, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.42);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.42);
+      alarmPhase += 1;
+    } catch (e) {}
+  }, 460);
 }

@@ -40,5 +40,6 @@ contextBridge.exposeInMainWorld('snmpVuApi', {
       result.details.poll = error && error.message ? error.message : String(error);
     }
     return result;
-  }
+  },
+  isMainWindow: !process.argv.includes('--config-window')
 });
