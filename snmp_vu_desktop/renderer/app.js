@@ -46,6 +46,7 @@ function defaultConfig() {
     dockMode: 'none',
     trayEnabled: true,
     windowOpacity: 1,
+    mainWidth: 192,
     savedProfiles: [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: true,
@@ -72,6 +73,13 @@ function applyOpacity(opacity) {
   document.documentElement.style.setProperty('--window-alpha', safe.toFixed(2));
   const valueEl = document.getElementById('windowOpacityValue');
   if (valueEl) valueEl.textContent = `${Math.round(safe * 100)}%`;
+}
+
+function applyMainWidth(width) {
+  const safe = Math.max(140, Math.min(420, Number(width || 192)));
+  document.documentElement.style.setProperty('--main-width', `${safe}px`);
+  const valueEl = document.getElementById('mainWidthValue');
+  if (valueEl) valueEl.textContent = `${safe}px`;
 }
 
 function angleFromPercent(percent) {
@@ -272,6 +280,7 @@ async function bootMain() {
   renderMain(configCache.items);
   applyTheme(configCache.theme);
   applyOpacity(configCache.windowOpacity || 1);
+  applyMainWidth(configCache.mainWidth || 192);
   try {
     const meta = await window.snmpVuApi.getMeta();
     setBuildBadge(`v${meta.version} #${meta.build || '-'}`);
@@ -334,10 +343,12 @@ async function bootConfig() {
   }
   applyTheme(configCache.theme);
   applyOpacity(configCache.windowOpacity || 1);
+  applyMainWidth(configCache.mainWidth || 192);
   document.getElementById('refreshMs').value = configCache.refreshMs;
   document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
   document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
   document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+  document.getElementById('mainWidthRange').value = Math.max(140, Math.min(420, Number(configCache.mainWidth || 192)));
   document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
   document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
   document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
@@ -429,6 +440,7 @@ function readConfigFromForm() {
     dockMode: document.getElementById('dockModeSelect').value || 'none',
     trayEnabled: document.getElementById('trayEnabled').checked,
     windowOpacity: Number(document.getElementById('windowOpacityRange').value || 100) / 100,
+    mainWidth: Number(document.getElementById('mainWidthRange').value || 192),
     savedProfiles: Array.isArray(configCache && configCache.savedProfiles) ? configCache.savedProfiles : [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: document.getElementById(`enabled_${index}`).checked,
@@ -454,6 +466,10 @@ function bindConfigEvents() {
   const opacityRange = document.getElementById('windowOpacityRange');
   if (opacityRange) {
     opacityRange.oninput = () => applyOpacity(Number(opacityRange.value || 100) / 100);
+  }
+  const mainWidthRange = document.getElementById('mainWidthRange');
+  if (mainWidthRange) {
+    mainWidthRange.oninput = () => applyMainWidth(Number(mainWidthRange.value || 192));
   }
   const dockModeSelect = document.getElementById('dockModeSelect');
   if (dockModeSelect) {
@@ -508,11 +524,13 @@ function bindConfigEvents() {
       document.getElementById('themeSelect').value = configCache.theme;
       document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
       document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+      document.getElementById('mainWidthRange').value = Math.max(140, Math.min(420, Number(configCache.mainWidth || 192)));
       document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
       document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
       document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
       applyTheme(configCache.theme);
       applyOpacity(configCache.windowOpacity || 1);
+      applyMainWidth(configCache.mainWidth || 192);
       bindConfigEvents();
       debugLog('import ok', { filePath: result.filePath });
     };
@@ -561,10 +579,12 @@ function bindConfigEvents() {
       document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
       document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
       document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+      document.getElementById('mainWidthRange').value = Math.max(140, Math.min(420, Number(configCache.mainWidth || 192)));
       document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
       document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
       applyTheme(configCache.theme);
       applyOpacity(configCache.windowOpacity || 1);
+      applyMainWidth(configCache.mainWidth || 192);
       bindConfigEvents();
       await window.snmpVuApi.saveConfig({
         ...readConfigFromForm(),

@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.172400';
+const APP_BUILD = '20260315.180500';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -24,6 +24,7 @@ const store = new Store({
     dockMode: 'none',
     trayEnabled: true,
     windowOpacity: 1,
+    mainWidth: 192,
     savedProfiles: [],
     items: Array.from({ length: 5 }, (_, idx) => ({
       enabled: idx === 0,
@@ -33,7 +34,7 @@ const store = new Store({
       version: '2c',
       oid: '',
       walkOid: '1.3.6.1.2.1.2.2.1',
-      mode: 'counter_bits',
+      mode: 'auto',
       scaleMbps: idx < 4 ? 100 : 300,
       pingIp: '192.168.88.1',
       alarmEnabled: false
@@ -53,10 +54,15 @@ const pingState = new Map();
 
 function rateThresholdFor(item) {
   const scale = Math.max(1, Number(item.scaleMbps || 100));
-  if (item.mode === 'counter_bytes') {
+  const mode = inferTrafficMode(item);
+  if (mode === 'counter_bytes') {
     return scale * 1000000 * 3;
   }
   return scale * 8 * 1000000 * 3;
+}
+
+function clampMainWidth(value) {
+  return Math.max(140, Math.min(420, Number(value || 192)));
 }
 
 function versionToSnmp(version) {
@@ -73,6 +79,7 @@ function getConfig() {
   cfg.dockMode = cfg.dockMode || 'none';
   cfg.trayEnabled = cfg.trayEnabled !== false;
   cfg.windowOpacity = Math.max(0.45, Math.min(1, Number(cfg.windowOpacity || 1)));
+  cfg.mainWidth = clampMainWidth(cfg.mainWidth || 192);
   cfg.savedProfiles = Array.isArray(cfg.savedProfiles) ? cfg.savedProfiles : [];
   if (!cfg.windowState || typeof cfg.windowState !== 'object') {
     cfg.windowState = {
@@ -88,7 +95,7 @@ function getConfig() {
     version: (cfg.items[idx] && cfg.items[idx].version) || '2c',
     oid: (cfg.items[idx] && cfg.items[idx].oid) || '',
     walkOid: (cfg.items[idx] && cfg.items[idx].walkOid) || '1.3.6.1.2.1.2.2.1',
-    mode: (cfg.items[idx] && cfg.items[idx].mode) || 'counter_bits',
+    mode: (cfg.items[idx] && cfg.items[idx].mode) || 'auto',
     scaleMbps: Number((cfg.items[idx] && cfg.items[idx].scaleMbps) || 100),
     pingIp: (cfg.items[idx] && cfg.items[idx].pingIp) || '',
     alarmEnabled: !!(cfg.items[idx] && cfg.items[idx].alarmEnabled)
@@ -134,7 +141,7 @@ function getWindowState(kind, defaults) {
     delete next.y;
   }
   if (kind === 'main') {
-    next.width = 192;
+    next.width = clampMainWidth(cfg.mainWidth || defaults.width);
   }
   return next;
 }
@@ -157,8 +164,8 @@ function createMainWindow() {
   const state = getWindowState('main', { width: 192, height: 980 });
   mainWindow = new BrowserWindow({
     ...state,
-    minWidth: 192,
-    maxWidth: 192,
+    minWidth: 140,
+    maxWidth: 420,
     minHeight: 760,
     alwaysOnTop: true,
     frame: false,
@@ -259,6 +266,11 @@ function trayColorFromPercent(percent) {
 function applyWindowVisuals() {
   const cfg = getConfig();
   if (mainWindow && !mainWindow.isDestroyed()) {
+    const bounds = mainWindow.getBounds();
+    const width = clampMainWidth(cfg.mainWidth);
+    if (bounds.width !== width) {
+      mainWindow.setSize(width, bounds.height);
+    }
     mainWindow.setOpacity(cfg.windowOpacity);
     applyDockMode(mainWindow, cfg.dockMode);
   }
@@ -413,8 +425,37 @@ function snmpWalk(item) {
   });
 }
 
+function inferTrafficMode(item) {
+  if (item.mode && item.mode !== 'auto') {
+    return item.mode;
+  }
+  const oid = String(item.oid || '');
+  const lower = oid.toLowerCase();
+  if (/(^|\.)(10|16)(\.|$)/.test(lower) || /1\.3\.6\.1\.2\.1\.2\.2\.1\.(10|16)\./.test(lower)) {
+    return 'counter_bytes';
+  }
+  if (/1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.(6|10)\./.test(lower)) {
+    return 'counter_bytes';
+  }
+  if (/octet/i.test(lower)) {
+    return 'counter_bytes';
+  }
+  return 'counter_bits';
+}
+
+function counterWrapFor(item, raw) {
+  const oid = String(item.oid || '');
+  if (/1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.(6|10)\./.test(oid)) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  if (raw > 0xffffffff) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+  return 0x100000000;
+}
+
 function calculateMbps(item, raw, now) {
-  const mode = item.mode === 'auto' ? 'counter_bits' : item.mode;
+  const mode = inferTrafficMode(item);
   let calcMode = mode;
   if (item.mode === 'direct_mbps') {
     return { value: Math.max(0, raw), calcMode: 'direct_mbps' };
@@ -433,7 +474,19 @@ function calculateMbps(item, raw, now) {
     }
   }
   if (!prev || now <= prev.ts || raw < prev.raw) {
-    return { value: 0, calcMode };
+    if (!prev || now <= prev.ts) {
+      return { value: 0, calcMode };
+    }
+    const wrap = counterWrapFor(item, raw);
+    if (!wrap || wrap === Number.MAX_SAFE_INTEGER && prev.raw > raw && prev.raw - raw > 0x100000000) {
+      return { value: 0, calcMode: `${calcMode}_reset` };
+    }
+    const delta = (wrap - prev.raw) + raw;
+    const seconds = Math.max(1, (now - prev.ts) / 1000);
+    if (mode === 'counter_bits') {
+      return { value: Math.max(0, ((delta / seconds) / 8) / 1000000), calcMode: `${calcMode}_wrap` };
+    }
+    return { value: Math.max(0, (delta / seconds) / 1000000), calcMode: `${calcMode}_wrap` };
   }
   const delta = raw - prev.raw;
   const seconds = Math.max(1, (now - prev.ts) / 1000);
@@ -511,7 +564,7 @@ async function pollItems() {
       mbps: 0,
       percent: 0,
       raw: null,
-      calcMode: item.mode,
+      calcMode: inferTrafficMode(item),
       pingOk: ping.ok,
       pingMs: ping.ms,
       pingColor,

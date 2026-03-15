@@ -1,8 +1,8 @@
 {
   "product": "PalWeb SNMP VU",
-  "version": "1.0.9",
-  "build": "20260315.172400",
+  "version": "1.0.10",
+  "build": "20260315.180500",
   "exe_url": "https://www.palweb.net/apk/snmp-vu-monitor.exe",
   "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-  "notes": "Build 1.0.9 con modo auto detectar, indicador visible del metodo de calculo y boton por instrumento para reiniciar el calculo y el historial."
+  "notes": "Build 1.0.10 con scroll visible en configuracion, ancho del gadget ajustable y correccion del calculo SNMP para OIDs octets con soporte de wrap en contadores."
 }
