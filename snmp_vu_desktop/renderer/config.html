@@ -19,11 +19,25 @@
           <option value="amber_lab">Tema Ambar</option>
           <option value="green_radar">Tema Verde</option>
         </select>
+        <select id="dockModeSelect" class="select-input medium-input">
+          <option value="none">Dock libre</option>
+          <option value="left">Dock izquierda</option>
+          <option value="right">Dock derecha</option>
+        </select>
         <input id="refreshMs" type="number" min="1000" step="500" class="text-input small-input">
         <button id="importConfigBtn" class="secondary-btn">Importar</button>
         <button id="exportConfigBtn" class="secondary-btn">Exportar</button>
         <button id="saveConfigBtn" class="primary-btn">Guardar</button>
       </div>
+    </div>
+    <div class="profiles-bar">
+      <input id="profileNameInput" class="text-input profile-name-input" placeholder="Nombre del perfil">
+      <button id="saveProfileBtn" class="secondary-btn">Guardar perfil</button>
+      <select id="savedProfilesSelect" class="select-input profile-select">
+        <option value="">Perfiles guardados</option>
+      </select>
+      <button id="loadProfileBtn" class="secondary-btn">Cargar</button>
+      <button id="deleteProfileBtn" class="secondary-btn danger-btn">Eliminar</button>
     </div>
     <div id="configGrid" class="config-grid"></div>
     <div class="walk-panel">

@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.135300';
+const APP_BUILD = '20260315.140210';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -21,6 +21,8 @@ const store = new Store({
   defaults: {
     refreshMs: 3000,
     theme: 'blue_ice',
+    dockMode: 'none',
+    savedProfiles: [],
     items: Array.from({ length: 5 }, (_, idx) => ({
       enabled: idx === 0,
       label: `VU ${idx + 1}`,
@@ -57,6 +59,8 @@ function getConfig() {
     return store.store;
   }
   cfg.theme = cfg.theme || 'blue_ice';
+  cfg.dockMode = cfg.dockMode || 'none';
+  cfg.savedProfiles = Array.isArray(cfg.savedProfiles) ? cfg.savedProfiles : [];
   if (!cfg.windowState || typeof cfg.windowState !== 'object') {
     cfg.windowState = {
       main: { width: 240, height: 980 },
@@ -151,6 +155,7 @@ function createMainWindow() {
     }
   });
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  applyDockMode(mainWindow, getConfig().dockMode);
   ['move', 'resize'].forEach((eventName) => {
     mainWindow.on(eventName, () => saveWindowState('main', mainWindow));
   });
@@ -185,6 +190,20 @@ function createConfigWindow() {
     configWindow.on(eventName, () => saveWindowState('config', configWindow));
   });
   configWindow.loadFile(path.join(__dirname, 'renderer', 'config.html'));
+}
+
+function applyDockMode(win, mode) {
+  if (!win || win.isDestroyed()) return;
+  const display = screen.getDisplayMatching(win.getBounds());
+  const area = display.workArea;
+  const bounds = win.getBounds();
+  if (mode === 'left') {
+    win.setPosition(area.x, area.y);
+    win.setSize(bounds.width, area.height);
+  } else if (mode === 'right') {
+    win.setPosition(area.x + area.width - bounds.width, area.y);
+    win.setSize(bounds.width, area.height);
+  }
 }
 
 function compareVersions(a, b) {
@@ -394,7 +413,11 @@ async function pollItems() {
 }
 
 ipcMain.handle('config:get', async () => getConfig());
-ipcMain.handle('config:set', async (_event, nextConfig) => setConfig(nextConfig));
+ipcMain.handle('config:set', async (_event, nextConfig) => {
+  const saved = setConfig(nextConfig);
+  applyDockMode(mainWindow, saved.dockMode);
+  return saved;
+});
 ipcMain.handle('config:open', async () => {
   createConfigWindow();
   return { status: 'success' };
@@ -402,6 +425,13 @@ ipcMain.handle('config:open', async () => {
 ipcMain.handle('snmp:poll', async () => pollItems());
 ipcMain.handle('snmp:walk', async (_event, item) => snmpWalk(item));
 ipcMain.handle('app:get-meta', async () => ({ version: APP_VERSION, build: APP_BUILD, updateUrl: UPDATE_URLS[0] }));
+ipcMain.handle('window:apply-dock', async (_event, mode) => {
+  const cfg = getConfig();
+  cfg.dockMode = mode || 'none';
+  store.set(CONFIG_KEY, cfg);
+  applyDockMode(mainWindow, cfg.dockMode);
+  return { status: 'success', dockMode: cfg.dockMode };
+});
 ipcMain.handle('config:export', async (_event, payload) => {
   const selected = await dialog.showSaveDialog(configWindow || mainWindow, {
     title: 'Exportar perfil SNMP',

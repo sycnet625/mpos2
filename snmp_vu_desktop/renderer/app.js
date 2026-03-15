@@ -14,6 +14,7 @@ let configCache = null;
 let pollTimer = null;
 let updateInfo = null;
 let debugLines = [];
+const historyState = new Map();
 
 function debugSet(id, value) {
   const el = document.getElementById(id);
@@ -42,6 +43,8 @@ function defaultConfig() {
   return {
     refreshMs: 3000,
     theme: 'blue_ice',
+    dockMode: 'none',
+    savedProfiles: [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: true,
       label: `VU ${index + 1}`,
@@ -124,8 +127,21 @@ function renderMain(items) {
       </div>
       <div class="dial-wrap">${gaugeSvg(index)}</div>
       <div class="dial-status" id="status-${index}">Esperando datos...</div>
+      <div class="dial-history" id="history-${index}">min - | avg - | max -</div>
     </div>
   `).join('');
+}
+
+function updateHistory(index, mbps) {
+  const key = String(index);
+  const next = historyState.get(key) || [];
+  next.push(Number(mbps || 0));
+  while (next.length > 20) next.shift();
+  historyState.set(key, next);
+  const min = Math.min(...next);
+  const max = Math.max(...next);
+  const avg = next.reduce((sum, value) => sum + value, 0) / Math.max(1, next.length);
+  return { min, max, avg, samples: next.length };
 }
 
 function updateMain(items) {
@@ -135,6 +151,8 @@ function updateMain(items) {
     const led = document.getElementById(`led-${index}`);
     const value = document.getElementById(`value-${index}`);
     const status = document.getElementById(`status-${index}`);
+    const history = document.getElementById(`history-${index}`);
+    const stats = updateHistory(index, item.mbps || 0);
     if (needle) {
       needle.style.transform = `rotate(${angleFromPercent(item.percent)}deg)`;
     }
@@ -147,8 +165,16 @@ function updateMain(items) {
     }
     if (value) value.textContent = Number(item.mbps || 0).toFixed(2);
     if (status) status.textContent = item.enabled ? `${item.msg} | raw ${item.raw ?? '-'} | ping ${item.pingMs ?? '-'} ms` : 'Desactivado';
+    if (history) history.textContent = `min ${stats.min.toFixed(2)} | avg ${stats.avg.toFixed(2)} | max ${stats.max.toFixed(2)}`;
   });
   updateAlarm(items);
+}
+
+function profileOptionsHtml(savedProfiles) {
+  const items = Array.isArray(savedProfiles) ? savedProfiles : [];
+  return ['<option value="">Perfiles guardados</option>']
+    .concat(items.map((profile, index) => `<option value="${index}">${profile.name}</option>`))
+    .join('');
 }
 
 async function pollLoop() {
@@ -276,6 +302,8 @@ async function bootConfig() {
   applyTheme(configCache.theme);
   document.getElementById('refreshMs').value = configCache.refreshMs;
   document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
+  document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+  document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
   document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
   debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
   debugSet('dbgConfigBtn', 'modal');
@@ -361,6 +389,8 @@ function readConfigFromForm() {
   return {
     refreshMs: Number(document.getElementById('refreshMs').value || 3000),
     theme: document.getElementById('themeSelect').value || 'blue_ice',
+    dockMode: document.getElementById('dockModeSelect').value || 'none',
+    savedProfiles: Array.isArray(configCache && configCache.savedProfiles) ? configCache.savedProfiles : [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: document.getElementById(`enabled_${index}`).checked,
       label: document.getElementById(`label_${index}`).value,
@@ -381,6 +411,12 @@ function bindConfigEvents() {
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {
     themeSelect.onchange = () => applyTheme(themeSelect.value);
+  }
+  const dockModeSelect = document.getElementById('dockModeSelect');
+  if (dockModeSelect) {
+    dockModeSelect.onchange = async () => {
+      await window.snmpVuApi.applyDock(dockModeSelect.value);
+    };
   }
   document.querySelectorAll('[id^="preset_"]').forEach((select) => {
     select.addEventListener('change', () => {
@@ -427,10 +463,87 @@ function bindConfigEvents() {
       };
       document.getElementById('refreshMs').value = configCache.refreshMs;
       document.getElementById('themeSelect').value = configCache.theme;
+      document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+      document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
       document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
       applyTheme(configCache.theme);
       bindConfigEvents();
       debugLog('import ok', { filePath: result.filePath });
+    };
+  }
+  const saveProfileBtn = document.getElementById('saveProfileBtn');
+  if (saveProfileBtn) {
+    saveProfileBtn.onclick = async () => {
+      const name = (document.getElementById('profileNameInput').value || '').trim();
+      if (!name) {
+        debugLog('profile save', { status: 'error', msg: 'Falta nombre' });
+        return;
+      }
+      const next = readConfigFromForm();
+      const savedProfiles = Array.isArray(configCache.savedProfiles) ? [...configCache.savedProfiles] : [];
+      const index = savedProfiles.findIndex((profile) => profile.name === name);
+      const payload = { name, config: { ...next, savedProfiles } };
+      if (index >= 0) {
+        savedProfiles[index] = payload;
+      } else {
+        savedProfiles.push(payload);
+      }
+      configCache.savedProfiles = savedProfiles;
+      document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(savedProfiles);
+      await window.snmpVuApi.saveConfig({
+        ...readConfigFromForm(),
+        savedProfiles
+      });
+      debugLog('profile save', { status: 'success', name });
+    };
+  }
+  const loadProfileBtn = document.getElementById('loadProfileBtn');
+  if (loadProfileBtn) {
+    loadProfileBtn.onclick = async () => {
+      const index = Number(document.getElementById('savedProfilesSelect').value);
+      const selected = Array.isArray(configCache.savedProfiles) ? configCache.savedProfiles[index] : null;
+      if (!selected || !selected.config) {
+        debugLog('profile load', { status: 'error', msg: 'Perfil no seleccionado' });
+        return;
+      }
+      configCache = {
+        ...defaultConfig(),
+        ...selected.config,
+        savedProfiles: configCache.savedProfiles || []
+      };
+      document.getElementById('refreshMs').value = configCache.refreshMs;
+      document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
+      document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+      document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
+      applyTheme(configCache.theme);
+      bindConfigEvents();
+      await window.snmpVuApi.saveConfig({
+        ...readConfigFromForm(),
+        savedProfiles: configCache.savedProfiles || []
+      });
+      await window.snmpVuApi.applyDock(configCache.dockMode || 'none');
+      debugLog('profile load', { status: 'success', name: selected.name });
+    };
+  }
+  const deleteProfileBtn = document.getElementById('deleteProfileBtn');
+  if (deleteProfileBtn) {
+    deleteProfileBtn.onclick = async () => {
+      const select = document.getElementById('savedProfilesSelect');
+      const index = Number(select.value);
+      const savedProfiles = Array.isArray(configCache.savedProfiles) ? [...configCache.savedProfiles] : [];
+      if (!Number.isFinite(index) || !savedProfiles[index]) {
+        debugLog('profile delete', { status: 'error', msg: 'Perfil no seleccionado' });
+        return;
+      }
+      const removed = savedProfiles.splice(index, 1)[0];
+      configCache.savedProfiles = savedProfiles;
+      select.innerHTML = profileOptionsHtml(savedProfiles);
+      select.value = '';
+      await window.snmpVuApi.saveConfig({
+        ...readConfigFromForm(),
+        savedProfiles
+      });
+      debugLog('profile delete', { status: 'success', name: removed.name });
     };
   }
   const saveBtn = document.getElementById('saveConfigBtn');

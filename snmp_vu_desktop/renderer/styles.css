@@ -110,6 +110,21 @@ h1 {
   border-radius: 14px;
   cursor: pointer;
 }
+.primary-btn, .secondary-btn {
+  padding: 9px 14px;
+}
+.primary-btn {
+  background: #1c5a92;
+  color: #fff;
+}
+.secondary-btn {
+  background: #dbe6f2;
+  color: #16304a;
+}
+.danger-btn {
+  background: #f5d7dc;
+  color: #7b1d2b;
+}
 .gear-btn {
   width: 34px;
   height: 34px;
@@ -294,7 +309,13 @@ h1 {
   text-align: center;
   color: #88a0bb;
   font-size: .58rem;
-  min-height: 28px;
+  min-height: 24px;
+}
+.dial-history {
+  text-align: center;
+  color: #b7cbe3;
+  font-size: .54rem;
+  letter-spacing: .03em;
 }
 .config-shell {
   background: #e4ebf2;
@@ -313,6 +334,20 @@ h1 {
 .config-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+}
+.profiles-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.profile-name-input {
+  width: 220px;
+}
+.profile-select {
+  width: 220px;
 }
 .config-grid {
   display: grid;
