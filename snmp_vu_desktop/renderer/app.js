@@ -292,6 +292,12 @@ async function bootMain() {
       await checkForUpdates(true);
     });
   }
+  const closeBtn = document.getElementById('closeAppBtn');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', async () => {
+      await window.snmpVuApi.closeWindow();
+    });
+  }
   checkForUpdates(false);
   pollLoop();
 }

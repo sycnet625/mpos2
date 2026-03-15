@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.170015';
+const APP_BUILD = '20260315.171500';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -50,6 +50,14 @@ let configWindow;
 let tray;
 const previousState = new Map();
 const pingState = new Map();
+
+function rateThresholdFor(item) {
+  const scale = Math.max(1, Number(item.scaleMbps || 100));
+  if (item.mode === 'counter_bytes') {
+    return scale * 1000000 * 3;
+  }
+  return scale * 8 * 1000000 * 3;
+}
 
 function versionToSnmp(version) {
   if (version === '1') return snmp.Version1;
@@ -153,6 +161,9 @@ function createMainWindow() {
     maxWidth: 192,
     minHeight: 760,
     alwaysOnTop: true,
+    frame: false,
+    thickFrame: false,
+    titleBarStyle: 'hidden',
     autoHideMenuBar: true,
     title: `PalWeb SNMP VU v${APP_VERSION} #${APP_BUILD}`,
     icon: APP_ICON,
@@ -411,6 +422,14 @@ function calculateMbps(item, raw, now) {
   }
   const prev = previousState.get(item.label);
   previousState.set(item.label, { raw, ts: now });
+  if ((item.mode === 'counter_bits' || item.mode === 'counter_bytes') && raw > 0 && raw <= rateThresholdFor(item)) {
+    if (!prev || raw < prev.raw) {
+      if (item.mode === 'counter_bits') {
+        return Math.max(0, (raw / 8) / 1000000);
+      }
+      return Math.max(0, raw / 1000000);
+    }
+  }
   if (!prev || now <= prev.ts || raw < prev.raw) {
     return 0;
   }
@@ -536,6 +555,10 @@ ipcMain.handle('window:apply-dock', async (_event, mode) => {
   store.set(CONFIG_KEY, cfg);
   applyWindowVisuals();
   return { status: 'success', dockMode: cfg.dockMode };
+});
+ipcMain.handle('window:close', async () => {
+  app.quit();
+  return { status: 'success' };
 });
 ipcMain.handle('config:export', async (_event, payload) => {
   const selected = await dialog.showSaveDialog(configWindow || mainWindow, {

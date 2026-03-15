@@ -1,8 +1,8 @@
 {
   "product": "PalWeb SNMP VU",
-  "version": "1.0.7",
-  "build": "20260315.170015",
+  "version": "1.0.8",
+  "build": "20260315.171500",
   "exe_url": "https://www.palweb.net/apk/snmp-vu-monitor.exe",
   "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-  "notes": "Build 1.0.7 con ping robusto para Windows, SNMP walk corregido y portable reducido en tamano."
+  "notes": "Build 1.0.8 con ventana gadget sin bordes, controles a la izquierda, cierre rapido y mejor heuristica para mostrar MB/s cuando el OID devuelve tasa directa."
 }

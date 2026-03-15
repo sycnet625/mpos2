@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('snmpVuApi', {
   exportConfig: (config) => ipcRenderer.invoke('config:export', config),
   importConfig: () => ipcRenderer.invoke('config:import'),
   applyDock: (mode) => ipcRenderer.invoke('window:apply-dock', mode),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
   poll: () => ipcRenderer.invoke('snmp:poll'),
   walk: (item) => ipcRenderer.invoke('snmp:walk', item),
   getMeta: () => ipcRenderer.invoke('app:get-meta'),
