@@ -116,10 +116,13 @@ function ptable_image_meta(string $code): array {
         dirname(__DIR__) . '/assets/product_images/' . $safe,
         '/tmp/palweb_product_images/' . $safe,
     ];
+    $exts = ['.avif', '.webp', '.jpg', '.jpeg', '.png'];
     foreach ($bases as $base) {
-        foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png'] as $ext) {
-            $f = $base . $ext;
-            if (file_exists($f)) return [true, (int)filemtime($f)];
+        foreach ($exts as $ext) {
+            foreach ([$ext, strtoupper($ext)] as $candidateExt) {
+                $f = $base . $candidateExt;
+                if (file_exists($f)) return [true, (int)filemtime($f)];
+            }
         }
     }
     return [false, 0];
@@ -399,7 +402,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // SUBIDA DE IMAGEN — guarda en .jpg, .webp y .avif
-    if (isset($_FILES['new_photo'])) {
+        if (isset($_FILES['new_photo'])) {
         try {
             $code = trim((string)($_POST['prod_code'] ?? ''));
             if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) {
@@ -407,6 +410,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if (!$code) throw new Exception("Código ausente.");
             $file = $_FILES['new_photo'];
+            if (!is_uploaded_file($file['tmp_name'] ?? '')) {
+                throw new Exception("Archivo no recibido correctamente.");
+            }
             if ($file['error'] !== UPLOAD_ERR_OK) throw new Exception("Error subida.");
             $imgData = file_get_contents($file['tmp_name']);
             if ($imgData === false || $imgData === '') {
@@ -463,15 +469,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (function_exists('imagewebp')) {
-                imagewebp($master, $base . '.webp', 82);
+                if (!imagewebp($master, $base . '.webp', 82)) {
+                    throw new Exception("No se pudo guardar el .webp.");
+                }
             }
 
             if (function_exists('imageavif')) {
-                imageavif($master, $base . '.avif', 60, 6);
+                if (!imageavif($master, $base . '.avif', 60, 6)) {
+                    throw new Exception("No se pudo guardar el .avif.");
+                }
             }
 
-            imagejpeg($thumb,  $base . '_thumb.jpg',  80);
-            if (function_exists('imagewebp')) imagewebp($thumb, $base . '_thumb.webp', 78);
+            if (!imagejpeg($thumb,  $base . '_thumb.jpg',  80)) {
+                throw new Exception("No se pudo guardar el thumbnail .jpg.");
+            }
+            if (function_exists('imagewebp')) {
+                if (!imagewebp($thumb, $base . '_thumb.webp', 78)) {
+                    throw new Exception("No se pudo guardar el thumbnail .webp.");
+                }
+            }
 
             imagedestroy($master);
             imagedestroy($thumb);
