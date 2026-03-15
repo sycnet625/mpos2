@@ -15,6 +15,8 @@ require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa'] ?? 1);
 const PRIMARY_IMAGE_DIR = __DIR__ . '/assets/product_images/';
 const TEMP_IMAGE_DIR = '/tmp/palweb_product_images/';
+$FOCUS_CODE = safeProductId((string)($_GET['focus'] ?? ''));
+$AUTORUN_PROVIDER = preg_replace('/[^a-z_]/', '', strtolower((string)($_GET['autorun'] ?? '')));
 
 function isWritableDir(string $path): bool {
     if (!is_dir($path)) {
@@ -661,7 +663,8 @@ $sinImagen = [];
 foreach ($productos as $p) {
     $safeId = safeProductId((string)$p['codigo']);
     if ($safeId === '') continue;
-    if (!hasAnyVariant($IMAGE_DIR . $safeId)) {
+    $matchesFocus = $FOCUS_CODE !== '' && ($safeId === $FOCUS_CODE || (string)$p['codigo'] === $FOCUS_CODE);
+    if ($matchesFocus || !hasAnyVariant($IMAGE_DIR . $safeId)) {
         $sinImagen[] = [
             'codigo' => (string)$p['codigo'],
             'safe' => $safeId,
@@ -670,6 +673,11 @@ foreach ($productos as $p) {
             'descripcion' => (string)($p['descripcion'] ?? ''),
         ];
     }
+}
+if ($FOCUS_CODE !== '') {
+    $sinImagen = array_values(array_filter($sinImagen, static function (array $item) use ($FOCUS_CODE): bool {
+        return ($item['safe'] ?? '') === $FOCUS_CODE || ($item['codigo'] ?? '') === $FOCUS_CODE;
+    }));
 }
 
 $providers = [
@@ -820,6 +828,9 @@ $providers = [
 </div>
 
 <script>
+const FOCUS_CODE = <?php echo json_encode($FOCUS_CODE, JSON_UNESCAPED_UNICODE); ?>;
+const AUTORUN_PROVIDER = <?php echo json_encode($AUTORUN_PROVIDER, JSON_UNESCAPED_UNICODE); ?>;
+
 function escapeHtml(value) {
     const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'};
     return String(value).replace(/[&<>"']/g, function(m){ return map[m]; });
@@ -986,6 +997,19 @@ async function runProviderAll(provider) {
 
     alert('Proceso automático por proveedor completado.');
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (!FOCUS_CODE || !AUTORUN_PROVIDER) return;
+    const safeFocus = String(FOCUS_CODE).replace(/"/g, '\\"');
+    const safeProvider = String(AUTORUN_PROVIDER).replace(/"/g, '\\"');
+    const button = document.querySelector(
+        `.btn-provider[data-code="${safeFocus}"][data-provider="${safeProvider}"]`
+    );
+    if (button) {
+        button.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => searchProvider(button), 250);
+    }
+});
 </script>
 
 <?php include_once 'menu_master.php'; ?>

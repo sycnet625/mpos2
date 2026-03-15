@@ -197,7 +197,7 @@ function renderProductRows($rows, $localPath) {
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="triggerUpload('<?php echo $p['codigo']; ?>')"></td>
+        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"></td>
         <td class="small font-monospace"><?php echo $p['codigo']; ?></td>
         <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;">
             <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
@@ -541,6 +541,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $base = $localPath . $sku . '_' . $slot;
             foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
                 if (file_exists($base . $ext)) @unlink($base . $ext);
+            }
+            echo json_encode(['status' => 'success']);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
+        exit;
+    }
+
+    if (isset($_POST['action']) && $_POST['action'] === 'delete_main_img') {
+        try {
+            $sku = trim((string)($_POST['sku'] ?? ''));
+            if ($sku === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $sku)) {
+                throw new Exception("SKU inválido.");
+            }
+            $base = $localPath . $sku;
+            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
+                if (file_exists($base . $ext)) {
+                    @unlink($base . $ext);
+                }
             }
             echo json_encode(['status' => 'success']);
         } catch (Exception $e) {
@@ -1386,6 +1405,31 @@ if ($isAjax) {
     </div>
 </div>
 
+<div class="modal fade" id="imageSourceModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title"><i class="fas fa-image me-2"></i> Cambiar imagen del producto</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-2">Seleccione cómo quiere cargar la nueva imagen del producto <strong id="imageSourceSkuLabel">-</strong>.</p>
+                <div class="d-grid gap-2">
+                    <button type="button" class="btn btn-outline-primary btn-lg" onclick="chooseLocalImage()">
+                        <i class="fas fa-folder-open me-2"></i> Seleccionar archivo local
+                    </button>
+                    <button type="button" class="btn btn-outline-success btn-lg" onclick="chooseInternetImage()">
+                        <i class="fas fa-globe me-2"></i> Buscar nueva imagen en internet
+                    </button>
+                </div>
+                <div class="small text-muted mt-3">
+                    Si escoge internet, se borrará la imagen actual del producto y se abrirá el buscador inteligente para ese SKU.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- MODAL AJUSTE KARDEX -->
 <div class="modal fade" id="kardexAdjModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-dialog-centered">
@@ -1496,6 +1540,7 @@ function showToast(msg) {
 // VARIABLES GLOBALES
 let currentPage = 1;
 let currentCode = '';
+let imageSourceModalInstance = null;
 let currentSort = 'nombre';
 let currentDir = 'ASC';
 const initialKpi = <?php echo json_encode($kpiData, JSON_UNESCAPED_UNICODE); ?>;
@@ -1905,6 +1950,51 @@ async function deleteEditorImg(sku, slot) {
 }
 
 // --- VARIOS ---
+function openImageSourceModal(code) {
+    currentCode = code;
+    const label = document.getElementById('imageSourceSkuLabel');
+    if (label) label.textContent = code;
+    const modalEl = document.getElementById('imageSourceModal');
+    if (!imageSourceModalInstance && modalEl) {
+        imageSourceModalInstance = new bootstrap.Modal(modalEl);
+    }
+    if (imageSourceModalInstance) {
+        imageSourceModalInstance.show();
+    }
+}
+
+function chooseLocalImage() {
+    if (imageSourceModalInstance) imageSourceModalInstance.hide();
+    document.getElementById('fileInput').click();
+}
+
+async function chooseInternetImage() {
+    if (!currentCode) return;
+    if (imageSourceModalInstance) imageSourceModalInstance.hide();
+
+    try {
+        const formData = new FormData();
+        formData.append('action', 'delete_main_img');
+        formData.append('sku', currentCode);
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status !== 'success') {
+            showToast('❌ Error al preparar búsqueda web: ' + (data.msg || 'desconocido'));
+            return;
+        }
+
+        const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
+        if (img) {
+            img.src = 'assets/img/no-image-50.png?t=' + Date.now();
+        }
+        const targetUrl = `image_smart_hunter.php?focus=${encodeURIComponent(currentCode)}&autorun=sku`;
+        window.open(targetUrl, '_blank');
+        showToast('🌐 Abriendo buscador web para ' + currentCode);
+    } catch (e) {
+        showToast('❌ Error al abrir búsqueda web.');
+    }
+}
+
 function triggerUpload(code) { currentCode = code; document.getElementById('fileInput').click(); }
 function uploadPhoto() {
     const file = document.getElementById('fileInput').files[0];
