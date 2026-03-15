@@ -1,0 +1,220 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, sans-serif;
+  color: #eef4ff;
+}
+.app-shell {
+  background:
+    radial-gradient(circle at top, rgba(64,145,255,.22), transparent 30%),
+    linear-gradient(180deg, #07111d 0%, #08131f 55%, #050b13 100%);
+  min-height: 100vh;
+}
+.main-view {
+  padding: 18px;
+}
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.eyebrow {
+  color: #7ea7d9;
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  font-size: .72rem;
+  font-weight: 700;
+}
+h1, h2 {
+  margin: 2px 0 0;
+  font-weight: 800;
+}
+.gear-btn, .primary-btn, .secondary-btn {
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+}
+.gear-btn {
+  width: 42px;
+  height: 42px;
+  font-size: 1.2rem;
+  background: #153149;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(0,0,0,.25);
+}
+.gauges {
+  display: grid;
+  gap: 14px;
+}
+.gauge-card {
+  position: relative;
+  background: linear-gradient(180deg, rgba(14,26,43,.95), rgba(10,18,30,.98));
+  border: 1px solid rgba(126,167,217,.16);
+  border-radius: 26px;
+  padding: 18px 18px 14px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.03);
+}
+.gauge-led {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 14px currentColor;
+}
+.gauge-led.green { color: #32d669; background: #32d669; }
+.gauge-led.red { color: #fb4f63; background: #fb4f63; }
+.gauge-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-left: 22px;
+}
+.gauge-title {
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  font-size: .8rem;
+  color: #dbe9fb;
+  font-weight: 800;
+}
+.gauge-meta {
+  color: #7d93af;
+  font-size: .78rem;
+}
+.gauge-value {
+  text-align: right;
+}
+.gauge-value strong {
+  display: block;
+  font-size: 1.75rem;
+  line-height: 1;
+}
+.gauge-value span {
+  color: #a5bbd5;
+  font-size: .84rem;
+}
+.dial-wrap {
+  margin-top: 8px;
+}
+.dial-svg {
+  width: 100%;
+  height: 150px;
+  display: block;
+}
+.dial-plate {
+  fill: url(#dialPlate);
+  stroke: rgba(255,255,255,.08);
+  stroke-width: 2;
+}
+.dial-tick {
+  stroke: rgba(229,240,255,.6);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.dial-tick.hot {
+  stroke: #f97316;
+}
+.dial-label {
+  fill: #c9d8eb;
+  font-size: 10px;
+  font-weight: 700;
+}
+.dial-needle {
+  stroke: #ff6f61;
+  stroke-width: 4;
+  stroke-linecap: round;
+  transform-origin: 150px 122px;
+  transition: transform .6s cubic-bezier(.2,.8,.2,1);
+  filter: drop-shadow(0 0 8px rgba(255,111,97,.35));
+}
+.dial-cap {
+  fill: #dfe8f7;
+  stroke: #21344b;
+  stroke-width: 3;
+}
+.dial-status {
+  text-align: center;
+  color: #88a0bb;
+  font-size: .82rem;
+}
+.config-shell {
+  background: #e4ebf2;
+  color: #102031;
+}
+.config-window {
+  padding: 18px;
+}
+.config-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.config-actions {
+  display: flex;
+  gap: 8px;
+}
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.config-box {
+  background: #f9fbfd;
+  border: 1px solid #d2dcea;
+  border-radius: 20px;
+  padding: 14px;
+}
+.config-box h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+.field-label {
+  display: block;
+  margin: 8px 0 4px;
+  font-size: .76rem;
+  font-weight: 700;
+  color: #4b637d;
+  text-transform: uppercase;
+}
+.text-input, .select-input {
+  width: 100%;
+  border: 1px solid #c8d4e2;
+  border-radius: 12px;
+  padding: 9px 11px;
+  font: inherit;
+  background: #fff;
+}
+.small-input {
+  width: 110px;
+}
+.switch-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.walk-panel {
+  margin-top: 16px;
+  background: #0e1725;
+  color: #d8e5f8;
+  border-radius: 18px;
+  padding: 14px;
+}
+.walk-title {
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+#walkOutput {
+  white-space: pre-wrap;
+  margin: 0;
+  min-height: 180px;
+  font-family: Consolas, monospace;
+}
+@media (max-width: 800px) {
+  .config-grid {
+    grid-template-columns: 1fr;
+  }
+}

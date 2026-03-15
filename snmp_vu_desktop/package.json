@@ -1,0 +1,39 @@
+{
+  "name": "snmp-vu-desktop",
+  "version": "1.0.0",
+  "description": "Desktop Windows gadget with 5 analog SNMP traffic gauges",
+  "main": "main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack-win": "electron-builder --win portable"
+  },
+  "build": {
+    "appId": "net.palweb.snmpvu",
+    "productName": "SNMP VU Monitor",
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "verifyUpdateCodeSignature": false,
+      "target": [
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "SNMP-VU-Monitor-${version}.exe"
+    }
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "net-snmp": "^3.12.0"
+  },
+  "devDependencies": {
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3"
+  }
+}
