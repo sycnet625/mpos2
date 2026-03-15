@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, screen, nativeImage, Menu, Tray } = require('electron');
 const path = require('path');
 const https = require('https');
 const http = require('http');
@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.140210';
+const APP_BUILD = '20260315.164210';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -22,6 +22,8 @@ const store = new Store({
     refreshMs: 3000,
     theme: 'blue_ice',
     dockMode: 'none',
+    trayEnabled: true,
+    windowOpacity: 1,
     savedProfiles: [],
     items: Array.from({ length: 5 }, (_, idx) => ({
       enabled: idx === 0,
@@ -31,13 +33,13 @@ const store = new Store({
       version: '2c',
       oid: '',
       walkOid: '1.3.6.1.2.1.2.2.1',
-      mode: 'counter_bytes',
+      mode: 'counter_bits',
       scaleMbps: idx < 4 ? 100 : 300,
       pingIp: '192.168.88.1',
       alarmEnabled: false
     })),
     windowState: {
-      main: { width: 240, height: 980 },
+      main: { width: 192, height: 980 },
       config: { width: 980, height: 820 }
     }
   }
@@ -45,6 +47,7 @@ const store = new Store({
 
 let mainWindow;
 let configWindow;
+let tray;
 const previousState = new Map();
 const pingState = new Map();
 
@@ -60,10 +63,12 @@ function getConfig() {
   }
   cfg.theme = cfg.theme || 'blue_ice';
   cfg.dockMode = cfg.dockMode || 'none';
+  cfg.trayEnabled = cfg.trayEnabled !== false;
+  cfg.windowOpacity = Math.max(0.45, Math.min(1, Number(cfg.windowOpacity || 1)));
   cfg.savedProfiles = Array.isArray(cfg.savedProfiles) ? cfg.savedProfiles : [];
   if (!cfg.windowState || typeof cfg.windowState !== 'object') {
     cfg.windowState = {
-      main: { width: 240, height: 980 },
+      main: { width: 192, height: 980 },
       config: { width: 980, height: 820 }
     };
   }
@@ -75,7 +80,7 @@ function getConfig() {
     version: (cfg.items[idx] && cfg.items[idx].version) || '2c',
     oid: (cfg.items[idx] && cfg.items[idx].oid) || '',
     walkOid: (cfg.items[idx] && cfg.items[idx].walkOid) || '1.3.6.1.2.1.2.2.1',
-    mode: (cfg.items[idx] && cfg.items[idx].mode) || 'counter_bytes',
+    mode: (cfg.items[idx] && cfg.items[idx].mode) || 'counter_bits',
     scaleMbps: Number((cfg.items[idx] && cfg.items[idx].scaleMbps) || 100),
     pingIp: (cfg.items[idx] && cfg.items[idx].pingIp) || '',
     alarmEnabled: !!(cfg.items[idx] && cfg.items[idx].alarmEnabled)
@@ -120,6 +125,9 @@ function getWindowState(kind, defaults) {
     delete next.x;
     delete next.y;
   }
+  if (kind === 'main') {
+    next.width = 192;
+  }
   return next;
 }
 
@@ -138,10 +146,11 @@ function saveWindowState(kind, win) {
 }
 
 function createMainWindow() {
-  const state = getWindowState('main', { width: 240, height: 980 });
+  const state = getWindowState('main', { width: 192, height: 980 });
   mainWindow = new BrowserWindow({
     ...state,
-    minWidth: 220,
+    minWidth: 192,
+    maxWidth: 192,
     minHeight: 760,
     alwaysOnTop: true,
     autoHideMenuBar: true,
@@ -155,6 +164,7 @@ function createMainWindow() {
     }
   });
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
+  mainWindow.setOpacity(getConfig().windowOpacity);
   applyDockMode(mainWindow, getConfig().dockMode);
   ['move', 'resize'].forEach((eventName) => {
     mainWindow.on(eventName, () => saveWindowState('main', mainWindow));
@@ -183,6 +193,7 @@ function createConfigWindow() {
       additionalArguments: ['--config-window']
     }
   });
+  configWindow.setOpacity(getConfig().windowOpacity);
   configWindow.on('closed', () => {
     configWindow = null;
   });
@@ -204,6 +215,73 @@ function applyDockMode(win, mode) {
     win.setPosition(area.x + area.width - bounds.width, area.y);
     win.setSize(bounds.width, area.height);
   }
+}
+
+function createTrayIcon(color, text) {
+  const safeText = String(text || '0').slice(0, 3);
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+      <rect x="4" y="4" width="56" height="56" rx="14" fill="${color}" stroke="#0b1320" stroke-width="4"/>
+      <text x="32" y="42" text-anchor="middle" font-family="Segoe UI, Arial" font-size="24" font-weight="700" fill="#ffffff">${safeText}</text>
+    </svg>`;
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
+}
+
+function trayColorFromPercent(percent) {
+  if (percent >= 100) return '#fb4f63';
+  if (percent >= 85) return '#fb923c';
+  if (percent >= 60) return '#facc15';
+  return '#32d669';
+}
+
+function applyWindowVisuals() {
+  const cfg = getConfig();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setOpacity(cfg.windowOpacity);
+    applyDockMode(mainWindow, cfg.dockMode);
+  }
+  if (configWindow && !configWindow.isDestroyed()) {
+    configWindow.setOpacity(cfg.windowOpacity);
+  }
+  if (!cfg.trayEnabled) {
+    if (tray) {
+      tray.destroy();
+      tray = null;
+    }
+    return;
+  }
+  if (!tray) {
+    tray = new Tray(createTrayIcon('#32d669', '0'));
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Mostrar monitor', click: () => { if (mainWindow && !mainWindow.isDestroyed()) { mainWindow.show(); mainWindow.focus(); } } },
+      { label: 'Configuracion', click: () => createConfigWindow() },
+      { label: 'Salir', click: () => app.quit() }
+    ]));
+    tray.on('click', () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    });
+  }
+}
+
+function updateTray(items) {
+  const cfg = getConfig();
+  if (!cfg.trayEnabled) {
+    applyWindowVisuals();
+    return;
+  }
+  if (!tray) {
+    applyWindowVisuals();
+  }
+  if (!tray) return;
+  const active = Array.isArray(items) ? items : [];
+  const peak = active.reduce((max, item) => Math.max(max, Number(item.percent || 0)), 0);
+  tray.setImage(createTrayIcon(trayColorFromPercent(peak), String(Math.round(peak))));
+  tray.setToolTip(['PalWeb SNMP VU']
+    .concat(active.map((item, index) => `VU${index + 1}: ${Number(item.mbps || 0).toFixed(1)} MB/s | ${Math.round(item.percent || 0)}%`))
+    .join('\n'));
 }
 
 function compareVersions(a, b) {
@@ -409,13 +487,14 @@ async function pollItems() {
                         msg: 'OK'
                     };
   }));
+  updateTray(items);
   return { status: 'success', items, refreshMs: cfg.refreshMs };
 }
 
 ipcMain.handle('config:get', async () => getConfig());
 ipcMain.handle('config:set', async (_event, nextConfig) => {
   const saved = setConfig(nextConfig);
-  applyDockMode(mainWindow, saved.dockMode);
+  applyWindowVisuals();
   return saved;
 });
 ipcMain.handle('config:open', async () => {
@@ -429,7 +508,7 @@ ipcMain.handle('window:apply-dock', async (_event, mode) => {
   const cfg = getConfig();
   cfg.dockMode = mode || 'none';
   store.set(CONFIG_KEY, cfg);
-  applyDockMode(mainWindow, cfg.dockMode);
+  applyWindowVisuals();
   return { status: 'success', dockMode: cfg.dockMode };
 });
 ipcMain.handle('config:export', async (_event, payload) => {
@@ -486,6 +565,7 @@ ipcMain.handle('update:open-download', async (_event, url) => {
 
 app.whenReady().then(() => {
   createMainWindow();
+  applyWindowVisuals();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();

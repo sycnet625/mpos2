@@ -1,8 +1,8 @@
 {
   "product": "PalWeb SNMP VU",
-  "version": "1.0.5",
-  "build": "20260315.140210",
+  "version": "1.0.6",
+  "build": "20260315.164210",
   "exe_url": "https://www.palweb.net/apk/snmp-vu-monitor.exe",
   "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-  "notes": "Build 1.0.5 con perfiles guardados por nombre, dock lateral tipo gadget e historico corto por instrumento con min/avg/max."
+  "notes": "Build 1.0.6 con bandeja de sistema configurable, transparencia persistente, gadget mas estrecho y lectura por defecto en bits convertida a MB/s."
 }

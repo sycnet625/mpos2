@@ -1,5 +1,6 @@
 * { box-sizing: border-box; }
 :root {
+  --window-alpha: 1;
   --app-glow: rgba(64,145,255,.22);
   --app-bg-top: #07111d;
   --app-bg-mid: #08131f;
@@ -63,9 +64,14 @@ body {
     radial-gradient(circle at top, var(--app-glow), transparent 30%),
     linear-gradient(180deg, var(--app-bg-top) 0%, var(--app-bg-mid) 55%, var(--app-bg-bottom) 100%);
   min-height: 100vh;
+  opacity: var(--window-alpha);
+}
+.config-window {
+  opacity: var(--window-alpha);
 }
 .main-view {
   padding: 8px;
+  min-width: 192px;
 }
 .toolbar {
   display: flex;
@@ -335,6 +341,21 @@ h1 {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+.opacity-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f4f8fc;
+  border: 1px solid #d5e0ec;
+  border-radius: 12px;
+  padding: 7px 10px;
+}
+.tray-switch {
+  background: #f4f8fc;
+  border: 1px solid #d5e0ec;
+  border-radius: 12px;
+  padding: 7px 10px;
 }
 .profiles-bar {
   display: flex;

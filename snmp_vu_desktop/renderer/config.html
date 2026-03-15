@@ -24,6 +24,15 @@
           <option value="left">Dock izquierda</option>
           <option value="right">Dock derecha</option>
         </select>
+        <div class="opacity-box">
+          <label class="field-label inline-label" for="windowOpacityRange">Transparencia</label>
+          <input id="windowOpacityRange" type="range" min="45" max="100" step="5" value="100">
+          <span id="windowOpacityValue">100%</span>
+        </div>
+        <label class="switch-line tray-switch">
+          <input id="trayEnabled" type="checkbox" checked>
+          <span class="field-label inline-label">Mostrar icono en bandeja</span>
+        </label>
         <input id="refreshMs" type="number" min="1000" step="500" class="text-input small-input">
         <button id="importConfigBtn" class="secondary-btn">Importar</button>
         <button id="exportConfigBtn" class="secondary-btn">Exportar</button>

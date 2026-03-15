@@ -1,13 +1,13 @@
 const presets = {
-  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'counter_bytes', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
-  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'counter_bytes', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m2_lan_in: { label: 'Nano M2 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m2_wlan_out: { label: 'Nano M2 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bytes', scaleMbps: 100, walkOid: '1.3.6.1.2.1.31.1.1.1' },
-  nano_m5_lan_in: { label: 'Nano M5 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bytes', scaleMbps: 150, walkOid: '1.3.6.1.2.1.2.2.1' },
-  nano_m5_wlan_out: { label: 'Nano M5 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bytes', scaleMbps: 150, walkOid: '1.3.6.1.2.1.31.1.1.1' }
+  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'counter_bits', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
+  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'counter_bits', scaleMbps: 300, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m2_lan_in: { label: 'Nano M2 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m2_wlan_out: { label: 'Nano M2 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bits', scaleMbps: 100, walkOid: '1.3.6.1.2.1.31.1.1.1' },
+  nano_m5_lan_in: { label: 'Nano M5 LAN IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'counter_bits', scaleMbps: 150, walkOid: '1.3.6.1.2.1.2.2.1' },
+  nano_m5_wlan_out: { label: 'Nano M5 WLAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.2', mode: 'counter_bits', scaleMbps: 150, walkOid: '1.3.6.1.2.1.31.1.1.1' }
 };
 
 let configCache = null;
@@ -44,6 +44,8 @@ function defaultConfig() {
     refreshMs: 3000,
     theme: 'blue_ice',
     dockMode: 'none',
+    trayEnabled: true,
+    windowOpacity: 1,
     savedProfiles: [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: true,
@@ -53,7 +55,7 @@ function defaultConfig() {
       version: '2c',
       oid: '',
       walkOid: '1.3.6.1.2.1.2.2.1',
-      mode: 'counter_bytes',
+      mode: 'counter_bits',
       scaleMbps: index < 4 ? 100 : 300,
       pingIp: '',
       alarmEnabled: false
@@ -63,6 +65,13 @@ function defaultConfig() {
 
 function applyTheme(theme) {
   document.body.setAttribute('data-theme', theme || 'blue_ice');
+}
+
+function applyOpacity(opacity) {
+  const safe = Math.max(0.45, Math.min(1, Number(opacity || 1)));
+  document.documentElement.style.setProperty('--window-alpha', safe.toFixed(2));
+  const valueEl = document.getElementById('windowOpacityValue');
+  if (valueEl) valueEl.textContent = `${Math.round(safe * 100)}%`;
 }
 
 function angleFromPercent(percent) {
@@ -258,6 +267,7 @@ async function bootMain() {
   }
   renderMain(configCache.items);
   applyTheme(configCache.theme);
+  applyOpacity(configCache.windowOpacity || 1);
   try {
     const meta = await window.snmpVuApi.getMeta();
     setBuildBadge(`v${meta.version} #${meta.build || '-'}`);
@@ -300,9 +310,12 @@ async function bootConfig() {
     configCache = defaultConfig();
   }
   applyTheme(configCache.theme);
+  applyOpacity(configCache.windowOpacity || 1);
   document.getElementById('refreshMs').value = configCache.refreshMs;
   document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
   document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+  document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+  document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
   document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
   document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
   debugSet('dbgApi', apiReady() ? 'ok' : 'missing');
@@ -390,6 +403,8 @@ function readConfigFromForm() {
     refreshMs: Number(document.getElementById('refreshMs').value || 3000),
     theme: document.getElementById('themeSelect').value || 'blue_ice',
     dockMode: document.getElementById('dockModeSelect').value || 'none',
+    trayEnabled: document.getElementById('trayEnabled').checked,
+    windowOpacity: Number(document.getElementById('windowOpacityRange').value || 100) / 100,
     savedProfiles: Array.isArray(configCache && configCache.savedProfiles) ? configCache.savedProfiles : [],
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: document.getElementById(`enabled_${index}`).checked,
@@ -411,6 +426,10 @@ function bindConfigEvents() {
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {
     themeSelect.onchange = () => applyTheme(themeSelect.value);
+  }
+  const opacityRange = document.getElementById('windowOpacityRange');
+  if (opacityRange) {
+    opacityRange.oninput = () => applyOpacity(Number(opacityRange.value || 100) / 100);
   }
   const dockModeSelect = document.getElementById('dockModeSelect');
   if (dockModeSelect) {
@@ -464,9 +483,12 @@ function bindConfigEvents() {
       document.getElementById('refreshMs').value = configCache.refreshMs;
       document.getElementById('themeSelect').value = configCache.theme;
       document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+      document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+      document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
       document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(configCache.savedProfiles);
       document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
       applyTheme(configCache.theme);
+      applyOpacity(configCache.windowOpacity || 1);
       bindConfigEvents();
       debugLog('import ok', { filePath: result.filePath });
     };
@@ -514,8 +536,11 @@ function bindConfigEvents() {
       document.getElementById('refreshMs').value = configCache.refreshMs;
       document.getElementById('themeSelect').value = configCache.theme || 'blue_ice';
       document.getElementById('dockModeSelect').value = configCache.dockMode || 'none';
+      document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+      document.getElementById('trayEnabled').checked = configCache.trayEnabled !== false;
       document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
       applyTheme(configCache.theme);
+      applyOpacity(configCache.windowOpacity || 1);
       bindConfigEvents();
       await window.snmpVuApi.saveConfig({
         ...readConfigFromForm(),
