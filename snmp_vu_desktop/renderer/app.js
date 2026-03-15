@@ -9,6 +9,24 @@ let configCache = null;
 let pollTimer = null;
 let updateInfo = null;
 
+function defaultConfig() {
+  return {
+    refreshMs: 3000,
+    items: Array.from({ length: 5 }, (_, index) => ({
+      enabled: true,
+      label: `VU ${index + 1}`,
+      host: '',
+      community: 'public',
+      version: '2c',
+      oid: '',
+      walkOid: '1.3.6.1.2.1.2.2.1',
+      mode: 'counter_bytes',
+      scaleMbps: index < 4 ? 100 : 300,
+      pingIp: ''
+    }))
+  };
+}
+
 function angleFromPercent(percent) {
   return -135 + (Math.max(0, Math.min(100, percent)) * 270 / 100);
 }
@@ -85,14 +103,19 @@ function updateMain(items) {
 }
 
 async function pollLoop() {
-  const result = await window.snmpVuApi.poll();
-  if (result && result.status === 'success') {
-    updateMain(result.items);
-    if (pollTimer) clearTimeout(pollTimer);
-    pollTimer = setTimeout(pollLoop, result.refreshMs || 3000);
-  } else {
-    pollTimer = setTimeout(pollLoop, 3000);
+  try {
+    const result = await window.snmpVuApi.poll();
+    if (result && result.status === 'success') {
+      updateMain(result.items);
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(pollLoop, result.refreshMs || 3000);
+      return;
+    }
+  } catch (error) {
+    setUpdateBanner('Error local del monitor', true);
   }
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollLoop, 3000);
 }
 
 function setUpdateBanner(text, available = false) {
@@ -103,21 +126,89 @@ function setUpdateBanner(text, available = false) {
 }
 
 async function checkForUpdates(openIfAvailable = false) {
-  const meta = await window.snmpVuApi.getMeta();
-  const result = await window.snmpVuApi.checkUpdate();
-  if (result.status !== 'success') {
-    setUpdateBanner(`Version ${meta.version} | sin acceso a updates`, false);
-    return;
-  }
-  updateInfo = result;
-  if (result.updateAvailable) {
-    setUpdateBanner(`Nueva version ${result.latestVersion} disponible`, true);
-    if (openIfAvailable && result.exeUrl) {
-      await window.snmpVuApi.openDownload(result.exeUrl);
+  try {
+    const meta = await window.snmpVuApi.getMeta();
+    const result = await window.snmpVuApi.checkUpdate();
+    if (result.status !== 'success') {
+      setUpdateBanner(`Version ${meta.version} | sin acceso a updates`, false);
+      return;
     }
-  } else {
-    setUpdateBanner(`Version ${result.currentVersion} actualizada`, false);
+    updateInfo = result;
+    if (result.updateAvailable) {
+      setUpdateBanner(`Nueva version ${result.latestVersion} disponible`, true);
+      if (openIfAvailable && result.exeUrl) {
+        await window.snmpVuApi.openDownload(result.exeUrl);
+      }
+    } else {
+      setUpdateBanner(`Version ${result.currentVersion} actualizada`, false);
+    }
+  } catch (error) {
+    setUpdateBanner('Updates no disponibles', false);
   }
+}
+
+async function bootMain() {
+  const bootstrap = defaultConfig();
+  renderMain(bootstrap.items);
+  try {
+    configCache = await window.snmpVuApi.getConfig();
+    if (!configCache || !Array.isArray(configCache.items)) {
+      configCache = bootstrap;
+    }
+  } catch (error) {
+    configCache = bootstrap;
+  }
+  renderMain(configCache.items);
+  try {
+    const meta = await window.snmpVuApi.getMeta();
+    setUpdateBanner(`Version ${meta.version}`, false);
+  } catch (error) {
+    setUpdateBanner('Version local', false);
+  }
+  const openBtn = document.getElementById('openConfigBtn');
+  if (openBtn) {
+    openBtn.addEventListener('click', async () => {
+      try {
+        await window.snmpVuApi.openConfig();
+      } catch (error) {
+        setUpdateBanner('No se pudo abrir configuracion', true);
+      }
+    });
+  }
+  const updateBtn = document.getElementById('checkUpdateBtn');
+  if (updateBtn) {
+    updateBtn.addEventListener('click', async () => {
+      await checkForUpdates(true);
+    });
+  }
+  checkForUpdates(false);
+  pollLoop();
+}
+
+async function bootConfig() {
+  try {
+    configCache = await window.snmpVuApi.getConfig();
+  } catch (error) {
+    configCache = defaultConfig();
+  }
+  document.getElementById('refreshMs').value = configCache.refreshMs;
+  document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
+  bindConfigEvents();
+}
+
+window.addEventListener('error', (event) => {
+  setUpdateBanner(`Error UI: ${event.message}`, true);
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const text = event.reason && event.reason.message ? event.reason.message : 'Promise rechazada';
+  setUpdateBanner(`Error UI: ${text}`, true);
+});
+
+if (window.snmpVuApi.isConfigWindow) {
+  bootConfig();
+} else {
+  bootMain();
 }
 
 function configBox(item, index) {
@@ -214,36 +305,4 @@ function bindConfigEvents() {
       window.close();
     });
   }
-}
-
-async function bootMain() {
-  configCache = await window.snmpVuApi.getConfig();
-  renderMain(configCache.items);
-  const meta = await window.snmpVuApi.getMeta();
-  setUpdateBanner(`Version ${meta.version}`, false);
-  const openBtn = document.getElementById('openConfigBtn');
-  if (openBtn) {
-    openBtn.addEventListener('click', () => window.snmpVuApi.openConfig());
-  }
-  const updateBtn = document.getElementById('checkUpdateBtn');
-  if (updateBtn) {
-    updateBtn.addEventListener('click', async () => {
-      await checkForUpdates(true);
-    });
-  }
-  checkForUpdates(false);
-  pollLoop();
-}
-
-async function bootConfig() {
-  configCache = await window.snmpVuApi.getConfig();
-  document.getElementById('refreshMs').value = configCache.refreshMs;
-  document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
-  bindConfigEvents();
-}
-
-if (window.snmpVuApi.isConfigWindow) {
-  bootConfig();
-} else {
-  bootMain();
 }

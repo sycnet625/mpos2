@@ -67,9 +67,9 @@ function setConfig(nextConfig) {
 
 function createMainWindow() {
   mainWindow = new BrowserWindow({
-    width: 460,
+    width: 860,
     height: 980,
-    minWidth: 400,
+    minWidth: 720,
     minHeight: 760,
     autoHideMenuBar: true,
     title: 'PalWeb SNMP VU',
