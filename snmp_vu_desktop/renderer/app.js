@@ -9,6 +9,10 @@ let configCache = null;
 let pollTimer = null;
 let updateInfo = null;
 
+function apiReady() {
+  return typeof window.snmpVuApi === 'object' && window.snmpVuApi !== null;
+}
+
 function defaultConfig() {
   return {
     refreshMs: 3000,
@@ -150,6 +154,10 @@ async function checkForUpdates(openIfAvailable = false) {
 async function bootMain() {
   const bootstrap = defaultConfig();
   renderMain(bootstrap.items);
+  if (!apiReady()) {
+    setUpdateBanner('Error UI: preload/API no disponible', true);
+    return;
+  }
   try {
     configCache = await window.snmpVuApi.getConfig();
     if (!configCache || !Array.isArray(configCache.items)) {
@@ -186,6 +194,13 @@ async function bootMain() {
 }
 
 async function bootConfig() {
+  if (!apiReady()) {
+    const grid = document.getElementById('configGrid');
+    if (grid) {
+      grid.innerHTML = '<div class="config-box"><h3>Error</h3><div>Preload/API no disponible en esta build.</div></div>';
+    }
+    return;
+  }
   try {
     configCache = await window.snmpVuApi.getConfig();
   } catch (error) {
@@ -205,7 +220,7 @@ window.addEventListener('unhandledrejection', (event) => {
   setUpdateBanner(`Error UI: ${text}`, true);
 });
 
-if (window.snmpVuApi.isConfigWindow) {
+if (apiReady() && window.snmpVuApi.isConfigWindow) {
   bootConfig();
 } else {
   bootMain();
