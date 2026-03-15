@@ -9,7 +9,7 @@ const snmp = require('net-snmp');
 
 const CONFIG_KEY = 'config';
 const APP_VERSION = app.getVersion();
-const APP_BUILD = '20260315.164210';
+const APP_BUILD = '20260315.170015';
 const APP_ICON = path.join(__dirname, 'assets', 'icon.png');
 const APP_ICON_ICO = path.join(__dirname, 'assets', 'icon.ico');
 const UPDATE_URLS = [
@@ -203,6 +203,17 @@ function createConfigWindow() {
   configWindow.loadFile(path.join(__dirname, 'renderer', 'config.html'));
 }
 
+function resolvePingCommand() {
+  if (process.platform !== 'win32') {
+    return { cmd: 'ping', args: ['-c', '1', '-W', '1'] };
+  }
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows';
+  return {
+    cmd: path.join(systemRoot, 'System32', 'PING.EXE'),
+    args: ['-n', '1', '-w', '1200']
+  };
+}
+
 function applyDockMode(win, mode) {
   if (!win || win.isDestroyed()) return;
   const display = screen.getDisplayMatching(win.getBounds());
@@ -368,14 +379,18 @@ function snmpWalk(item) {
     }
     const session = snmp.createSession(item.host, item.community, {
       version: versionToSnmp(item.version),
-      timeout: 1200,
-      retries: 0
+      timeout: 2000,
+      retries: 1
     });
     const lines = [];
-    session.subtree(item.walkOid, (varbind) => {
-      if (!snmp.isVarbindError(varbind)) {
+    session.subtree(item.walkOid, 20, (varbinds) => {
+      for (const varbind of (Array.isArray(varbinds) ? varbinds : [])) {
+        if (snmp.isVarbindError(varbind)) {
+          continue;
+        }
         lines.push(`${varbind.oid} = ${varbind.value}`);
       }
+      return false;
     }, (error) => {
       session.close();
       if (error) {
@@ -420,12 +435,23 @@ function pingHost(ip) {
       resolve({ ok: false, ms: null });
       return;
     }
-    const args = process.platform === 'win32' ? ['-n', '1', '-w', '1000', ip] : ['-c', '1', '-W', '1', ip];
-    execFile('ping', args, { timeout: 2500 }, (error, stdout = '', stderr = '') => {
+    const pingInfo = resolvePingCommand();
+    const args = [...pingInfo.args, ip];
+    execFile(pingInfo.cmd, args, { timeout: 3000, windowsHide: true }, (error, stdout = '', stderr = '') => {
       const text = `${stdout}\n${stderr}`;
-      const match = text.match(/time[=<]?\s*([0-9]+(?:[.,][0-9]+)?)\s*ms/i);
-      const ms = match ? Number(String(match[1]).replace(',', '.')) : null;
-      resolve({ ok: !error, ms });
+      const timeMatch = text.match(/(?:time|tiempo)[=<]?\s*([0-9]+(?:[.,][0-9]+)?)\s*ms/i);
+      const avgMatch = text.match(/(?:Average|Media)\s*=\s*([0-9]+(?:[.,][0-9]+)?)ms/i);
+      const fastMatch = /(?:time|tiempo)\s*[=<]\s*1\s*ms/i.test(text);
+      const ttlOk = /ttl[=\s:]/i.test(text);
+      let ms = null;
+      if (timeMatch) {
+        ms = Number(String(timeMatch[1]).replace(',', '.'));
+      } else if (avgMatch) {
+        ms = Number(String(avgMatch[1]).replace(',', '.'));
+      } else if (fastMatch) {
+        ms = 1;
+      }
+      resolve({ ok: !error || ttlOk, ms });
     });
   });
 }

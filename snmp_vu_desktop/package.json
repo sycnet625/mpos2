@@ -1,6 +1,6 @@
 {
   "name": "snmp-vu-desktop",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "Desktop Windows gadget with 5 analog SNMP traffic gauges",
   "main": "main.js",
   "author": "PalWeb",
@@ -12,6 +12,12 @@
   "build": {
     "appId": "net.palweb.snmpvu",
     "productName": "PalWeb SNMP VU",
+    "compression": "maximum",
+    "asar": true,
+    "electronLanguages": [
+      "en-US",
+      "es"
+    ],
     "files": [
       "main.js",
       "preload.js",
