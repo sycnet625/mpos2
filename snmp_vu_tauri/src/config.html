@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuracion PalWeb SNMP VU Tauri</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="config-shell">
+  <div class="config-window">
+    <div class="config-header sticky-top">
+      <div>
+        <div class="eyebrow">Configuracion local</div>
+        <h2>SNMP VU Tauri <span id="buildBadge" class="build-badge">build -</span></h2>
+      </div>
+      <div class="config-actions">
+        <input id="profileNameInput" class="text-input medium-input" placeholder="Nombre perfil">
+        <select id="savedProfilesSelect" class="select-input medium-input">
+          <option value="">Perfiles guardados</option>
+        </select>
+        <button id="exportConfigBtn" class="secondary-btn">Exportar</button>
+        <button id="importConfigBtn" class="secondary-btn">Importar</button>
+        <select id="themeSelect" class="select-input medium-input">
+          <option value="blue_ice">Tema Azul</option>
+          <option value="amber_lab">Tema Ambar</option>
+          <option value="green_radar">Tema Verde</option>
+        </select>
+        <div class="opacity-box">
+          <label class="field-label inline-label" for="windowOpacityRange">Transparencia</label>
+          <input id="windowOpacityRange" type="range" min="45" max="100" step="5" value="100">
+          <span id="windowOpacityValue">100%</span>
+        </div>
+        <div class="opacity-box">
+          <label class="field-label inline-label" for="mainWidthRange">Ancho gadget</label>
+          <input id="mainWidthRange" type="range" min="140" max="420" step="4" value="192">
+          <span id="mainWidthValue">192px</span>
+        </div>
+        <input id="refreshMs" type="number" min="1000" step="500" class="text-input small-input">
+        <button id="saveConfigBtn" class="primary-btn">Guardar</button>
+        <button id="closeConfigBtn" class="secondary-btn">Cerrar</button>
+      </div>
+    </div>
+
+    <div id="configStatus" class="config-status">Cargando configuracion...</div>
+    <div id="configGrid" class="config-grid config-grid-scroll"></div>
+
+    <div class="walk-panel">
+      <div class="walk-title">SNMP walk</div>
+      <pre id="walkOutput">Selecciona un instrumento y ejecuta SNMP walk.</pre>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+</body>
+</html>

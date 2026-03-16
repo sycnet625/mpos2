@@ -1,18 +1,9 @@
 const tauriCore = window.__TAURI__ && window.__TAURI__.core ? window.__TAURI__.core : null;
-const tauriWindow = window.__TAURI__ && window.__TAURI__.window ? window.__TAURI__.window : null;
-
-const presets = {
-  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 100 },
-  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'auto', scaleMbps: 100 },
-  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'auto', scaleMbps: 100 },
-  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'auto', scaleMbps: 300 },
-  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'auto', scaleMbps: 300 }
-};
+const tauriEvent = window.__TAURI__ && window.__TAURI__.event ? window.__TAURI__.event : null;
 
 let pollTimer = null;
 let configCache = null;
 const historyState = new Map();
-let profileList = [];
 let remoteUpdate = null;
 
 function invoke(cmd, args = {}) {
@@ -103,12 +94,6 @@ function applyMainWidth(width) {
   if (valueEl) valueEl.textContent = `${safe}px`;
 }
 
-function profileOptionsHtml(items) {
-  return ['<option value="">Perfiles guardados</option>']
-    .concat((items || []).map((name) => `<option value="${name}">${name}</option>`))
-    .join('');
-}
-
 function angleFromPercent(percent) {
   return -135 + (Math.max(0, Math.min(100, percent)) * 270 / 100);
 }
@@ -169,74 +154,6 @@ function updateMain(items) {
   });
 }
 
-function configBox(item, index) {
-  return `<div class="config-box" data-index="${index}"><div class="switch-line"><input type="checkbox" id="enabled_${index}" ${item.enabled ? 'checked' : ''}><h3>Instrumento ${index + 1}</h3></div><label class="field-label">Preset</label><select class="select-input" id="preset_${index}"><option value="">Sin preset</option><option value="mikrotik_ether1_in">MikroTik ether1 IN</option><option value="mikrotik_ether1_out">MikroTik ether1 OUT</option><option value="mikrotik_wlan1_in">MikroTik wlan1 IN</option><option value="mikrotik_bridge_in">MikroTik bridge IN</option><option value="mikrotik_pppoe_out">MikroTik PPPoE/WAN OUT</option></select><label class="field-label">Etiqueta</label><input class="text-input" id="label_${index}" value="${item.label}"><label class="field-label">Host</label><input class="text-input" id="host_${index}" value="${item.host}"><label class="field-label">Community</label><input class="text-input" id="community_${index}" value="${item.community}"><label class="field-label">Version</label><select class="select-input" id="version_${index}"><option value="2c" ${item.version === '2c' ? 'selected' : ''}>SNMP v2c</option><option value="1" ${item.version === '1' ? 'selected' : ''}>SNMP v1</option></select><label class="field-label">OID</label><input class="text-input" id="oid_${index}" value="${item.oid}"><label class="field-label">Modo</label><select class="select-input" id="mode_${index}"><option value="auto" ${item.mode === 'auto' ? 'selected' : ''}>Auto detectar</option><option value="counter_bytes" ${item.mode === 'counter_bytes' ? 'selected' : ''}>Contador bytes</option><option value="counter_bits" ${item.mode === 'counter_bits' ? 'selected' : ''}>Contador bits</option><option value="direct_bps" ${item.mode === 'direct_bps' ? 'selected' : ''}>Valor directo bps</option><option value="direct_mbps" ${item.mode === 'direct_mbps' ? 'selected' : ''}>Valor directo MB/s</option></select><label class="field-label">Escala MB/s</label><input class="text-input" type="number" min="1" step="0.1" id="scale_${index}" value="${item.scaleMbps}"><label class="field-label">IP Ping</label><input class="text-input" id="ping_${index}" value="${item.pingIp}"><div class="switch-line alarm-switch"><input type="checkbox" id="alarm_${index}" ${item.alarmEnabled ? 'checked' : ''}><label class="field-label inline-label" for="alarm_${index}">Alarma sonora si el ping queda en rojo</label></div><label class="field-label">OID walk</label><input class="text-input" id="walk_${index}" value="${item.walkOid || '1.3.6.1.2.1.2.2.1'}"><button class="secondary-btn" data-walk="${index}">SNMP walk</button></div>`;
-}
-
-function readConfigFromForm() {
-  return {
-    refreshMs: Number(document.getElementById('refreshMs').value || 3000),
-    theme: document.getElementById('themeSelect').value || 'blue_ice',
-    windowOpacity: Number(document.getElementById('windowOpacityRange').value || 100) / 100,
-    mainWidth: Number(document.getElementById('mainWidthRange').value || 192),
-    items: Array.from({ length: 5 }, (_, index) => ({
-      enabled: document.getElementById(`enabled_${index}`).checked,
-      label: document.getElementById(`label_${index}`).value,
-      host: document.getElementById(`host_${index}`).value,
-      community: document.getElementById(`community_${index}`).value,
-      version: document.getElementById(`version_${index}`).value,
-      oid: document.getElementById(`oid_${index}`).value,
-      walkOid: document.getElementById(`walk_${index}`).value,
-      mode: document.getElementById(`mode_${index}`).value,
-      scaleMbps: Number(document.getElementById(`scale_${index}`).value || 100),
-      pingIp: document.getElementById(`ping_${index}`).value,
-      alarmEnabled: document.getElementById(`alarm_${index}`).checked
-    }))
-  };
-}
-
-function bindConfigEvents() {
-  document.querySelectorAll('[id^="preset_"]').forEach((select) => {
-    select.addEventListener('change', () => {
-      const index = Number(select.id.split('_')[1]);
-      const preset = presets[select.value];
-      if (!preset) return;
-      document.getElementById(`label_${index}`).value = preset.label;
-      document.getElementById(`oid_${index}`).value = preset.oid;
-      document.getElementById(`walk_${index}`).value = '1.3.6.1.2.1.2.2.1';
-      document.getElementById(`mode_${index}`).value = preset.mode;
-      document.getElementById(`scale_${index}`).value = preset.scaleMbps;
-    });
-  });
-  document.querySelectorAll('[data-walk]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const index = Number(btn.getAttribute('data-walk'));
-      const item = readConfigFromForm().items[index];
-      const output = document.getElementById('walkOutput');
-      output.textContent = 'Ejecutando...';
-      try {
-        const result = await invoke('snmp_walk', { item });
-        output.textContent = result || 'Sin resultados';
-      } catch (error) {
-        output.textContent = `Error: ${error.message || error}`;
-      }
-    });
-  });
-  document.getElementById('themeSelect').onchange = () => applyTheme(document.getElementById('themeSelect').value);
-  document.getElementById('windowOpacityRange').oninput = () => applyOpacity(Number(document.getElementById('windowOpacityRange').value || 100) / 100);
-  document.getElementById('mainWidthRange').oninput = () => applyMainWidth(Number(document.getElementById('mainWidthRange').value || 192));
-}
-
-function toggleConfig(show) {
-  const modal = document.getElementById('configModal');
-  if (!modal) return;
-  modal.classList.toggle('hidden', !show);
-  if (show) {
-    document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
-    bindConfigEvents();
-  }
-}
-
 async function loadConfig() {
   try {
     configCache = await invoke('get_config');
@@ -247,17 +164,6 @@ async function loadConfig() {
   applyOpacity(configCache.windowOpacity || 1);
   applyMainWidth(configCache.mainWidth || 192);
   renderMain(configCache.items);
-  document.getElementById('refreshMs').value = configCache.refreshMs;
-  document.getElementById('themeSelect').value = configCache.theme;
-  document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
-  document.getElementById('mainWidthRange').value = configCache.mainWidth || 192;
-  try {
-    profileList = await invoke('list_profiles');
-  } catch (_) {
-    profileList = [];
-  }
-  const select = document.getElementById('savedProfilesSelect');
-  if (select) select.innerHTML = profileOptionsHtml(profileList);
 }
 
 async function pollLoop() {
@@ -284,44 +190,12 @@ async function boot() {
   } catch (_) {}
   await loadConfig();
   checkRemoteUpdate(meta);
-  document.getElementById('openConfigBtn').onclick = () => toggleConfig(true);
-  document.getElementById('closeConfigBtn').onclick = () => toggleConfig(false);
-  document.getElementById('configBackdrop').onclick = () => toggleConfig(false);
-  document.getElementById('exportConfigBtn').onclick = async () => {
-    const name = (document.getElementById('profileNameInput').value || '').trim();
-    if (!name) {
-      document.getElementById('updateBanner').textContent = 'Falta nombre de perfil';
-      return;
+  document.getElementById('openConfigBtn').onclick = async () => {
+    try {
+      await invoke('open_config_window');
+    } catch (error) {
+      setBanner(`Error abriendo configuracion: ${error.message || error}`, false);
     }
-    await invoke('export_profile', { name, cfg: readConfigFromForm() });
-    profileList = await invoke('list_profiles');
-    document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(profileList);
-    document.getElementById('updateBanner').textContent = `Perfil exportado: ${name}`;
-  };
-  document.getElementById('importConfigBtn').onclick = async () => {
-    const name = document.getElementById('savedProfilesSelect').value;
-    if (!name) {
-      document.getElementById('updateBanner').textContent = 'Selecciona un perfil';
-      return;
-    }
-    configCache = await invoke('import_profile', { name });
-    applyTheme(configCache.theme);
-    applyOpacity(configCache.windowOpacity || 1);
-    applyMainWidth(configCache.mainWidth || 192);
-    document.getElementById('refreshMs').value = configCache.refreshMs;
-    document.getElementById('themeSelect').value = configCache.theme;
-    document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
-    document.getElementById('mainWidthRange').value = configCache.mainWidth || 192;
-    document.getElementById('configGrid').innerHTML = configCache.items.map(configBox).join('');
-    bindConfigEvents();
-    document.getElementById('updateBanner').textContent = `Perfil importado: ${name}`;
-  };
-  document.getElementById('saveConfigBtn').onclick = async () => {
-    configCache = await invoke('save_config', { cfg: readConfigFromForm() });
-    applyTheme(configCache.theme);
-    applyOpacity(configCache.windowOpacity || 1);
-    applyMainWidth(configCache.mainWidth || 192);
-    toggleConfig(false);
   };
   document.getElementById('refreshBtn').onclick = () => pollLoop();
   document.getElementById('updateBanner').onclick = () => {
@@ -332,9 +206,7 @@ async function boot() {
     } catch (_) {}
   };
   document.getElementById('closeAppBtn').onclick = async () => {
-    if (tauriWindow && tauriWindow.getCurrentWindow) {
-      await tauriWindow.getCurrentWindow().close();
-    }
+    await invoke('close_app');
   };
   document.addEventListener('click', async (event) => {
     const btn = event.target.closest('[data-reset]');
@@ -348,6 +220,13 @@ async function boot() {
     if (calc) calc.textContent = 'calc reset';
     if (hist) hist.textContent = 'min - | avg - | max -';
   });
+  if (tauriEvent && tauriEvent.listen) {
+    tauriEvent.listen('config-updated', async () => {
+      await loadConfig();
+      await pollLoop();
+      setBanner(`Configuracion recargada`, false);
+    });
+  }
   pollLoop();
 }
 

@@ -13,11 +13,11 @@ use std::{
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State,
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const APP_BUILD: &str = "20260316.000100";
+const APP_BUILD: &str = "20260316.030500";
 const DEFAULT_WIDTH: f64 = 192.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -477,6 +477,34 @@ fn list_profiles() -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn open_config_window(app: AppHandle) -> Result<bool, String> {
+    if let Some(window) = app.get_webview_window("config") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(true);
+    }
+    let window = WebviewWindowBuilder::new(&app, "config", WebviewUrl::App("config.html".into()))
+        .title("Configuracion PalWeb SNMP VU Tauri")
+        .inner_size(1220.0, 900.0)
+        .min_inner_size(960.0, 720.0)
+        .resizable(true)
+        .maximizable(true)
+        .minimizable(true)
+        .always_on_top(true)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+    let _ = window.set_focus();
+    Ok(true)
+}
+
+#[tauri::command]
+fn close_app(app: AppHandle) -> Result<bool, String> {
+    app.exit(0);
+    Ok(true)
+}
+
+#[tauri::command]
 fn save_config(app: AppHandle, state: State<'_, AppState>, cfg: AppConfig) -> Result<AppConfig, String> {
     let normalized = normalize_config(cfg);
     persist_config(&normalized)?;
@@ -484,6 +512,7 @@ fn save_config(app: AppHandle, state: State<'_, AppState>, cfg: AppConfig) -> Re
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(normalized.main_width, window.inner_size().map(|s| s.height as f64).unwrap_or(980.0))));
     }
+    let _ = app.emit("config-updated", &normalized);
     Ok(normalized)
 }
 
@@ -639,7 +668,7 @@ fn main() {
             setup_tray(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_meta, get_config, list_profiles, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
+        .invoke_handler(tauri::generate_handler![get_meta, get_config, list_profiles, open_config_window, close_app, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }
