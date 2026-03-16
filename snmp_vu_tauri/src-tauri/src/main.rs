@@ -17,7 +17,7 @@ use tauri::{
 };
 
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-const APP_BUILD: &str = "20260316.030500";
+const APP_BUILD: &str = env!("APP_BUILD");
 const DEFAULT_WIDTH: f64 = 192.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

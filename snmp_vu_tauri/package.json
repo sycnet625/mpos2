@@ -1,10 +1,13 @@
 {
-  "name": "snmp-vu-tauri",
-  "version": "1.0.0",
-  "private": true,
-  "description": "PalWeb SNMP VU migrated to Tauri",
-  "scripts": {
-    "tauri:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
-    "tauri:build": "cargo build --release --manifest-path src-tauri/Cargo.toml"
-  }
+    "name": "snmp-vu-tauri",
+    "version": "1.0.0",
+    "private": true,
+    "description": "PalWeb SNMP VU migrated to Tauri",
+    "scripts": {
+        "bump:patch": "php scripts/bump_version.php patch",
+        "bump:minor": "php scripts/bump_version.php minor",
+        "bump:major": "php scripts/bump_version.php major",
+        "tauri:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+        "tauri:build": "cargo build --release --manifest-path src-tauri/Cargo.toml"
+    }
 }
