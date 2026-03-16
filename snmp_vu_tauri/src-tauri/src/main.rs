@@ -13,7 +13,7 @@ use std::{
 use tauri::{
     menu::MenuBuilder,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, Position, State, WebviewUrl, WebviewWindowBuilder,
 };
 
 #[cfg(target_os = "windows")]
@@ -54,6 +54,8 @@ struct AppConfig {
     window_opacity: f64,
     #[serde(rename = "mainWidth")]
     main_width: f64,
+    #[serde(rename = "dockMode", default)]
+    dock_mode: String,
     items: Vec<MonitorItem>,
 }
 
@@ -130,6 +132,7 @@ impl Default for AppConfig {
             theme: "blue_ice".into(),
             window_opacity: 1.0,
             main_width: DEFAULT_WIDTH,
+            dock_mode: "free".into(),
             items: (0..5)
                 .map(|idx| MonitorItem {
                     enabled: idx == 0,
@@ -179,6 +182,12 @@ fn normalize_config(mut cfg: AppConfig) -> AppConfig {
     cfg.refresh_ms = cfg.refresh_ms.max(1000);
     cfg.window_opacity = cfg.window_opacity.clamp(0.45, 1.0);
     cfg.main_width = cfg.main_width.clamp(140.0, 420.0);
+    if cfg.dock_mode.trim().is_empty() {
+        cfg.dock_mode = "free".into();
+    }
+    if !matches!(cfg.dock_mode.as_str(), "free" | "left" | "right") {
+        cfg.dock_mode = "free".into();
+    }
     if cfg.items.len() < 5 {
         let defaults = AppConfig::default();
         while cfg.items.len() < 5 {
@@ -483,6 +492,34 @@ fn update_tray_tooltip(app: &AppHandle, items: &[PollItemResult]) {
     }
 }
 
+fn apply_main_window_layout(window: &tauri::WebviewWindow, cfg: &AppConfig, expanded: bool) {
+    let width = if expanded { (cfg.main_width * 2.0).clamp(220.0, 840.0) } else { cfg.main_width };
+    let height = window
+        .inner_size()
+        .map(|s| s.height as f64)
+        .unwrap_or(980.0);
+    let _ = window.set_size(tauri::Size::Logical(LogicalSize::new(width, height)));
+
+    match cfg.dock_mode.as_str() {
+        "left" | "right" => {
+            if let Ok(Some(monitor)) = window.current_monitor() {
+                let scale = monitor.scale_factor();
+                let monitor_pos = monitor.position();
+                let monitor_size = monitor.size();
+                let px_width = (width * scale).round() as i32;
+                let x = if cfg.dock_mode == "left" {
+                    monitor_pos.x
+                } else {
+                    monitor_pos.x + monitor_size.width as i32 - px_width
+                };
+                let y = monitor_pos.y;
+                let _ = window.set_position(Position::Physical(PhysicalPosition::new(x, y)));
+            }
+        }
+        _ => {}
+    }
+}
+
 #[tauri::command]
 fn check_update_feed() -> Result<UpdateFeed, String> {
     let client = reqwest::blocking::Client::builder()
@@ -559,12 +596,21 @@ fn close_app() {
 }
 
 #[tauri::command]
+fn set_panel_expanded(app: AppHandle, state: State<'_, AppState>, expanded: bool) -> Result<bool, String> {
+    let cfg = state.config.lock().unwrap().clone();
+    if let Some(window) = app.get_webview_window("main") {
+        apply_main_window_layout(&window, &cfg, expanded);
+    }
+    Ok(true)
+}
+
+#[tauri::command]
 fn save_config(app: AppHandle, state: State<'_, AppState>, cfg: AppConfig) -> Result<AppConfig, String> {
     let normalized = normalize_config(cfg);
     persist_config(&normalized)?;
     *state.config.lock().unwrap() = normalized.clone();
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(normalized.main_width, window.inner_size().map(|s| s.height as f64).unwrap_or(980.0))));
+        apply_main_window_layout(&window, &normalized, false);
     }
     let _ = app.emit("config-updated", &normalized);
     Ok(normalized)
@@ -716,13 +762,13 @@ fn main() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 let cfg = app.state::<AppState>().config.lock().unwrap().clone();
-                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(cfg.main_width, 980.0)));
+                apply_main_window_layout(&window, &cfg, false);
                 let _ = window.set_always_on_top(true);
             }
             setup_tray(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_meta, check_update_feed, get_config, list_profiles, open_config_window, close_app, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
+        .invoke_handler(tauri::generate_handler![get_meta, check_update_feed, get_config, list_profiles, open_config_window, close_app, set_panel_expanded, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }

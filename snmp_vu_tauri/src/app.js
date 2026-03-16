@@ -5,6 +5,7 @@ let pollTimer = null;
 let configCache = null;
 const historyState = new Map();
 let remoteUpdate = null;
+let configOpen = false;
 const presets = {
   mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 100 },
   mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'auto', scaleMbps: 100 },
@@ -59,6 +60,7 @@ function defaultConfig() {
     theme: 'blue_ice',
     windowOpacity: 1,
     mainWidth: 192,
+    dockMode: 'free',
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: index === 0,
       label: `VU ${index + 1}`,
@@ -154,6 +156,7 @@ function readConfigFromForm() {
     theme: document.getElementById('themeSelect').value || 'blue_ice',
     windowOpacity: Number(document.getElementById('windowOpacityRange').value || 100) / 100,
     mainWidth: Number(document.getElementById('mainWidthRange').value || 192),
+    dockMode: document.getElementById('dockMode').value || 'free',
     items: Array.from({ length: 5 }, (_, index) => ({
       enabled: document.getElementById(`enabled_${index}`).checked,
       label: document.getElementById(`label_${index}`).value,
@@ -263,6 +266,7 @@ async function loadConfig() {
   document.getElementById('themeSelect').value = configCache.theme;
   document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
   document.getElementById('mainWidthRange').value = configCache.mainWidth || 192;
+  document.getElementById('dockMode').value = configCache.dockMode || 'free';
   document.getElementById('configGrid').innerHTML = configCache.items.map(compactItemCard).join('');
   bindConfigEvents();
   renderMain(configCache.items);
@@ -294,7 +298,12 @@ async function boot() {
   await loadConfig();
   checkRemoteUpdate(meta);
   document.getElementById('openConfigBtn').onclick = async () => {
-    document.getElementById('inlineConfig').classList.toggle('hidden');
+    configOpen = !configOpen;
+    document.getElementById('inlineConfig').classList.toggle('hidden', !configOpen);
+    try {
+      await invoke('set_panel_expanded', { expanded: configOpen });
+    } catch (_) {}
+    syncResponsiveMetrics();
   };
   document.getElementById('saveConfigBtn').onclick = async () => {
     try {
