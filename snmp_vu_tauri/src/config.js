@@ -12,10 +12,24 @@ const presets = {
 
 let configCache = null;
 let profileList = [];
+const debugLines = [];
 
 function invoke(cmd, args = {}) {
   if (!tauriCore || !tauriCore.invoke) throw new Error('Tauri API no disponible');
   return tauriCore.invoke(cmd, args);
+}
+
+function setDebug(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function logDebug(message) {
+  const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+  debugLines.push(line);
+  while (debugLines.length > 40) debugLines.shift();
+  const el = document.getElementById('debugLog');
+  if (el) el.textContent = debugLines.join('\n');
 }
 
 function setStatus(text, kind = 'info') {
@@ -125,30 +139,41 @@ async function renderConfig() {
 }
 
 async function loadConfig() {
+  logDebug('invoke get_config');
   configCache = await invoke('get_config');
+  setDebug('dbgConfig', 'OK');
   await renderConfig();
 }
 
 async function boot() {
+  setDebug('dbgTauri', window.__TAURI__ ? 'OK' : 'NO');
+  setDebug('dbgInvoke', tauriCore && tauriCore.invoke ? 'OK' : 'NO');
+  logDebug(`tauri=${!!window.__TAURI__} invoke=${!!(tauriCore && tauriCore.invoke)} event=${!!(tauriEvent && tauriEvent.listen)} window=${!!(tauriWindow && tauriWindow.getCurrentWindow)}`);
   try {
     const meta = await invoke('get_meta');
     document.getElementById('buildBadge').textContent = `v${meta.version} #${meta.build}`;
+    setDebug('dbgMeta', `OK ${meta.version}#${meta.build}`);
+    logDebug(`meta ${meta.version}#${meta.build}`);
   } catch (_) {}
   await loadConfig();
   setStatus('Configuracion lista', 'ok');
+  logDebug('config renderizada');
 
   document.getElementById('saveConfigBtn').onclick = async () => {
     try {
       configCache = await invoke('save_config', { cfg: readConfigFromForm() });
       await renderConfig();
       setStatus('Configuracion guardada', 'ok');
+      logDebug('save_config OK');
     } catch (error) {
       setStatus(`Error guardando: ${error.message || error}`, 'error');
+      logDebug(`save_config ERROR ${error.message || error}`);
     }
   };
 
   document.getElementById('closeConfigBtn').onclick = async () => {
     if (tauriWindow && tauriWindow.getCurrentWindow) {
+      logDebug('cerrando ventana config');
       await tauriWindow.getCurrentWindow().close();
     }
   };
@@ -164,8 +189,10 @@ async function boot() {
       profileList = await invoke('list_profiles');
       document.getElementById('savedProfilesSelect').innerHTML = profileOptionsHtml(profileList);
       setStatus(`Perfil exportado: ${name}`, 'ok');
+      logDebug(`export_profile OK ${name}`);
     } catch (error) {
       setStatus(`Error exportando: ${error.message || error}`, 'error');
+      logDebug(`export_profile ERROR ${error.message || error}`);
     }
   };
 
@@ -179,13 +206,16 @@ async function boot() {
       configCache = await invoke('import_profile', { name });
       await renderConfig();
       setStatus(`Perfil importado: ${name}`, 'ok');
+      logDebug(`import_profile OK ${name}`);
     } catch (error) {
       setStatus(`Error importando: ${error.message || error}`, 'error');
+      logDebug(`import_profile ERROR ${error.message || error}`);
     }
   };
 
   if (tauriEvent && tauriEvent.listen) {
     tauriEvent.listen('config-updated', async () => {
+      logDebug('evento config-updated');
       configCache = await invoke('get_config');
       await renderConfig();
       setStatus('Configuracion actualizada desde la aplicacion', 'info');
@@ -193,4 +223,19 @@ async function boot() {
   }
 }
 
-boot().catch((error) => setStatus(`Error inicial: ${error.message || error}`, 'error'));
+window.addEventListener('error', (event) => {
+  logDebug(`window.error ${event.message}`);
+  setStatus(`Error JS: ${event.message}`, 'error');
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  const message = event.reason && event.reason.message ? event.reason.message : String(event.reason);
+  logDebug(`unhandledrejection ${message}`);
+  setStatus(`Promise error: ${message}`, 'error');
+});
+
+boot().catch((error) => {
+  const message = error && error.message ? error.message : String(error);
+  logDebug(`boot ERROR ${message}`);
+  setStatus(`Error inicial: ${message}`, 'error');
+});
