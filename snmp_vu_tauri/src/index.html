@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PalWeb SNMP VU Tauri</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="app-shell">
+  <div id="mainView" class="main-view">
+    <div class="toolbar">
+      <div class="toolbar-actions">
+        <div class="drag-handle" data-tauri-drag-region title="Mover ventana">⠿</div>
+        <button class="gear-btn" id="closeAppBtn" title="Cerrar">✕</button>
+        <button class="gear-btn" id="openConfigBtn" title="Configuracion">⚙</button>
+        <button class="gear-btn" id="refreshBtn" title="Refrescar">⟳</button>
+      </div>
+      <div class="toolbar-info">
+        <div class="eyebrow">PalWeb Local SNMP Gadget Tauri</div>
+        <h1>5 VU Analogicos <span id="buildBadge" class="build-badge">build -</span></h1>
+        <div id="updateBanner" class="update-banner">MVP Tauri local</div>
+      </div>
+    </div>
+    <div id="gauges" class="gauges"></div>
+  </div>
+
+  <div id="configModal" class="config-modal hidden">
+    <div class="config-backdrop" id="configBackdrop"></div>
+    <div class="config-dialog">
+      <div class="config-header sticky-top">
+        <div>
+          <div class="eyebrow">Configuracion local</div>
+          <h2>SNMP VU Tauri</h2>
+        </div>
+        <div class="config-actions">
+          <input id="profileNameInput" class="text-input medium-input" placeholder="Nombre perfil">
+          <select id="savedProfilesSelect" class="select-input medium-input">
+            <option value="">Perfiles guardados</option>
+          </select>
+          <button id="exportConfigBtn" class="secondary-btn">Exportar</button>
+          <button id="importConfigBtn" class="secondary-btn">Importar</button>
+          <select id="themeSelect" class="select-input medium-input">
+            <option value="blue_ice">Tema Azul</option>
+            <option value="amber_lab">Tema Ambar</option>
+            <option value="green_radar">Tema Verde</option>
+          </select>
+          <div class="opacity-box">
+            <label class="field-label inline-label" for="windowOpacityRange">Transparencia</label>
+            <input id="windowOpacityRange" type="range" min="45" max="100" step="5" value="100">
+            <span id="windowOpacityValue">100%</span>
+          </div>
+          <div class="opacity-box">
+            <label class="field-label inline-label" for="mainWidthRange">Ancho gadget</label>
+            <input id="mainWidthRange" type="range" min="140" max="420" step="4" value="192">
+            <span id="mainWidthValue">192px</span>
+          </div>
+          <input id="refreshMs" type="number" min="1000" step="500" class="text-input small-input">
+          <button id="saveConfigBtn" class="primary-btn">Guardar</button>
+          <button id="closeConfigBtn" class="secondary-btn">Cerrar</button>
+        </div>
+      </div>
+      <div id="configGrid" class="config-grid config-grid-scroll"></div>
+      <div class="walk-panel">
+        <div class="walk-title">SNMP walk</div>
+        <pre id="walkOutput">MVP inicial Tauri. El walk se afina en la siguiente iteracion.</pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

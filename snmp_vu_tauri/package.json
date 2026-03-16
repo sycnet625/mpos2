@@ -1,0 +1,10 @@
+{
+  "name": "snmp-vu-tauri",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PalWeb SNMP VU migrated to Tauri",
+  "scripts": {
+    "tauri:dev": "cargo run --manifest-path src-tauri/Cargo.toml",
+    "tauri:build": "cargo build --release --manifest-path src-tauri/Cargo.toml"
+  }
+}
