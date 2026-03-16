@@ -1,12 +1,28 @@
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, path::PathBuf};
 
 fn main() {
     let build = std::env::var("APP_BUILD").unwrap_or_else(|_| generate_build_id());
     let version = std::env::var("APP_VERSION").unwrap_or_else(|_| generate_display_version(&build));
     println!("cargo:rustc-env=APP_BUILD={build}");
     println!("cargo:rustc-env=APP_VERSION={version}");
+    write_build_meta(&version, &build);
     tauri_build::build()
+}
+
+fn write_build_meta(version: &str, build: &str) {
+    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
+    let meta_path = manifest_dir.join("target").join("build-meta.json");
+    if let Some(parent) = meta_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let payload = format!(
+        "{{\n  \"version\": \"{}\",\n  \"build\": \"{}\"\n}}\n",
+        version.replace('"', ""),
+        build.replace('"', "")
+    );
+    let _ = fs::write(meta_path, payload);
 }
 
 fn generate_build_id() -> String {

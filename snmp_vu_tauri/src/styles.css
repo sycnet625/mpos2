@@ -245,6 +245,8 @@ h1 {
   display: grid;
   gap: 6px;
   overflow: visible;
+  justify-items: stretch;
+  align-items: start;
 }
 .hidden {
   display: none !important;
@@ -346,29 +348,26 @@ h1 {
 }
 .gauge-card {
   position: relative;
-  background:
-    linear-gradient(180deg, var(--card-top), var(--card-bottom));
-  border: 1px solid var(--card-border);
-  border-radius: 10px;
-  padding: 7px 6px 6px;
-  box-shadow: 0 10px 18px rgba(0,0,0,.28), inset 0 0 0 1px rgba(255,255,255,.03);
+  background: linear-gradient(180deg, rgba(14,24,38,.94), rgba(8,15,24,.98));
+  border: 1px solid rgba(159,183,210,.14);
+  border-radius: 8px;
+  padding: 5px 5px 4px;
+  box-shadow: 0 6px 14px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04);
   width: 100%;
 }
 .gauge-card::before {
   content: "";
   position: absolute;
-  inset: 4px;
-  border-radius: 7px;
-  border: 1px solid rgba(213,227,246,.12);
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.22), rgba(255,255,255,.04) 22%, transparent 58%),
-    radial-gradient(circle at 18% 6%, rgba(255,255,255,.22), transparent 34%);
+  inset: 3px;
+  border-radius: 6px;
+  border: 1px solid rgba(213,227,246,.06);
+  background: linear-gradient(180deg, rgba(255,255,255,.08), transparent 20%, transparent 80%, rgba(255,255,255,.03));
   pointer-events: none;
 }
 .gauge-led {
   position: absolute;
-  top: 9px;
-  left: 9px;
+  top: 8px;
+  left: 8px;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -388,114 +387,136 @@ h1 {
 .gauge-title {
   text-transform: uppercase;
   letter-spacing: .12em;
-  font-size: clamp(.48rem, calc(var(--content-width) / 320), .72rem);
+  font-size: clamp(.46rem, calc(var(--content-width) / 300), .7rem);
   color: var(--title-color);
   font-weight: 800;
 }
 .gauge-meta {
   color: var(--meta-color);
-  font-size: clamp(.5rem, calc(var(--content-width) / 290), .74rem);
-}
-.gauge-value {
-  text-align: right;
-}
-.gauge-value strong {
-  display: block;
-  font-size: clamp(.82rem, calc(var(--content-width) / 165), 1.18rem);
-  line-height: 1;
-  color: var(--value-color);
-}
-.gauge-value span {
-  color: #a5bbd5;
-  font-size: clamp(.5rem, calc(var(--content-width) / 290), .72rem);
+  font-size: clamp(.44rem, calc(var(--content-width) / 315), .64rem);
 }
 .dial-wrap {
-  margin-top: 4px;
+  margin-top: 2px;
+  display: flex;
+  justify-content: flex-start;
 }
-.dial-svg {
+.vu-stage {
+  position: relative;
   width: 100%;
-  height: clamp(64px, calc(var(--content-width) * 0.42), 170px);
-  min-height: 64px;
-  max-height: 170px;
+  height: clamp(92px, calc(var(--content-width) * 0.6), 190px);
+  min-height: 92px;
+  max-height: 190px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.vu-face {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
   display: block;
+  border-radius: 8px;
 }
-.dial-frame {
-  fill: var(--frame-fill);
-  stroke: var(--frame-stroke);
-  stroke-width: 2;
+.vu-glass {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.26) 0%, rgba(255,255,255,.08) 14%, rgba(255,255,255,0) 38%),
+    radial-gradient(circle at 18% 10%, rgba(255,255,255,.22), transparent 24%);
+  pointer-events: none;
 }
-.dial-plate {
-  fill: url(#dialPlate);
-  stroke: rgba(255,255,255,.18);
-  stroke-width: 2;
+.vu-scale-labels {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 46%;
+  display: flex;
+  justify-content: space-between;
+  font-size: clamp(.34rem, calc(var(--content-width) / 430), .52rem);
+  color: #6d737c;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  pointer-events: none;
 }
-.dial-glass {
-  fill: url(#dialGlass);
+.vu-value-float {
+  position: absolute;
+  right: 8%;
+  top: 6%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(8,15,24,.14);
+  color: #1d2f44;
+  pointer-events: none;
 }
-.dial-tick {
-  stroke: rgba(229,240,255,.6);
-  stroke-width: 1.8;
-  stroke-linecap: round;
+.vu-value-float strong {
+  display: block;
+  font-size: clamp(.78rem, calc(var(--content-width) / 150), 1.28rem);
+  line-height: 1;
+  color: #1a2f49;
 }
-.dial-tick.hot {
-  stroke: #f97316;
-}
-.dial-label {
-  fill: #c9d8eb;
-  font-size: 7px;
+.vu-value-float span {
+  font-size: clamp(.4rem, calc(var(--content-width) / 360), .58rem);
+  color: #3d546f;
   font-weight: 700;
 }
-.dial-needle-shadow {
-  stroke: rgba(8, 10, 14, .7);
-  stroke-width: 4;
-  stroke-linecap: round;
-  transform-origin: 150px 120px;
-  transition: transform .6s cubic-bezier(.2,.8,.2,1);
-  filter: blur(2px);
+.vu-needle-shadow,
+.vu-needle {
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  width: 41%;
+  height: 4px;
+  transform-origin: 0% 50%;
+  transition: transform .55s cubic-bezier(.22,.8,.22,1);
+  border-radius: 999px;
+  pointer-events: none;
 }
-.dial-needle {
-  stroke: var(--needle);
-  stroke-width: 3;
-  stroke-linecap: round;
-  transform-origin: 150px 118px;
-  transition: transform .6s cubic-bezier(.2,.8,.2,1);
-  filter: drop-shadow(0 4px 4px rgba(0,0,0,.65)) drop-shadow(0 0 6px rgba(255,111,97,.3));
+.vu-needle-shadow {
+  margin-left: 2px;
+  margin-bottom: -2px;
+  background: rgba(0,0,0,.55);
+  filter: blur(1.4px);
 }
-.dial-cap {
-  fill: #dfe8f7;
-  stroke: #21344b;
-  stroke-width: 3;
+.vu-needle {
+  background: linear-gradient(90deg, #68302a, #d64233 38%, #ffb79f 100%);
+  box-shadow: 0 0 6px rgba(214,66,51,.35);
+}
+.vu-needle::after {
+  content: "";
+  position: absolute;
+  right: -6px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  background: radial-gradient(circle, rgba(255,228,220,.98) 0%, rgba(215,82,64,.98) 40%, rgba(77,22,18,.98) 100%);
+  clip-path: polygon(0 50%, 100% 0, 100% 100%);
+}
+.vu-cap {
+  position: absolute;
+  left: calc(50% - 9px);
+  bottom: calc(18% - 8px);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #f6fafc 0%, #8c97a2 38%, #3b4650 100%);
+  box-shadow: 0 3px 6px rgba(0,0,0,.35);
+  pointer-events: none;
 }
 .dial-status {
-  text-align: center;
+  text-align: left;
   color: #88a0bb;
-  font-size: clamp(.48rem, calc(var(--content-width) / 300), .68rem);
-  min-height: 18px;
+  font-size: clamp(.44rem, calc(var(--content-width) / 320), .62rem);
+  min-height: 14px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.dial-calc {
-  text-align: center;
-  color: #f8d47d;
-  font-size: clamp(.45rem, calc(var(--content-width) / 320), .64rem);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.dial-history {
-  text-align: center;
-  color: #b7cbe3;
-  font-size: clamp(.45rem, calc(var(--content-width) / 320), .64rem);
-  letter-spacing: .03em;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  padding-left: 2px;
 }
 .mini-btn {
-  position: absolute;
-  right: 6px;
-  bottom: 6px;
   width: 18px;
   height: 18px;
   border: 0;
@@ -505,6 +526,7 @@ h1 {
   font-size: .55rem;
   cursor: pointer;
   -webkit-app-region: no-drag;
+  flex: 0 0 auto;
 }
 .config-shell {
   background: #e4ebf2;

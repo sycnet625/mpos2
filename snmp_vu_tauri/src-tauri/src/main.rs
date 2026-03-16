@@ -181,7 +181,7 @@ fn load_config() -> AppConfig {
 fn normalize_config(mut cfg: AppConfig) -> AppConfig {
     cfg.refresh_ms = cfg.refresh_ms.max(1000);
     cfg.window_opacity = cfg.window_opacity.clamp(0.45, 1.0);
-    cfg.main_width = cfg.main_width.clamp(140.0, 420.0);
+    cfg.main_width = cfg.main_width.clamp(140.0, 460.0);
     if cfg.dock_mode.trim().is_empty() {
         cfg.dock_mode = "free".into();
     }
@@ -402,6 +402,16 @@ fn calculate_mbps(item: &MonitorItem, raw: f64, state: &Mutex<HashMap<String, Pr
     let now = now_ms();
     let mut guard = state.lock().unwrap();
     let prev = guard.insert(item.label.clone(), PrevState { raw, ts_ms: now });
+    if prev.is_none() {
+        let direct_bps_limit = item.scale_mbps.max(1.0) * 8_000_000.0 * 25.0;
+        let direct_bytes_limit = item.scale_mbps.max(1.0) * 1_000_000.0 * 25.0;
+        if raw > 0.0 && raw <= direct_bps_limit {
+            return (((raw / 8.0) / 1_000_000.0).max(0.0), "bootstrap_direct_bps".into());
+        }
+        if raw > 0.0 && raw <= direct_bytes_limit {
+            return ((raw / 1_000_000.0).max(0.0), "bootstrap_direct_bytes".into());
+        }
+    }
     if raw > 0.0 && raw <= rate_threshold(&mode, item.scale_mbps) {
         if prev.is_none() || prev.as_ref().map(|p| raw < p.raw).unwrap_or(false) {
             return if mode == "counter_bits" {
@@ -605,6 +615,17 @@ fn set_panel_expanded(app: AppHandle, state: State<'_, AppState>, expanded: bool
 }
 
 #[tauri::command]
+fn preview_layout(app: AppHandle, state: State<'_, AppState>, width: f64, dock_mode: String, expanded: bool) -> Result<bool, String> {
+    let mut cfg = state.config.lock().unwrap().clone();
+    cfg.main_width = width.clamp(140.0, 460.0);
+    cfg.dock_mode = if matches!(dock_mode.as_str(), "free" | "left" | "right") { dock_mode } else { "free".into() };
+    if let Some(window) = app.get_webview_window("main") {
+        apply_main_window_layout(&window, &cfg, expanded);
+    }
+    Ok(true)
+}
+
+#[tauri::command]
 fn save_config(app: AppHandle, state: State<'_, AppState>, cfg: AppConfig) -> Result<AppConfig, String> {
     let normalized = normalize_config(cfg);
     persist_config(&normalized)?;
@@ -768,7 +789,7 @@ fn main() {
             setup_tray(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_meta, check_update_feed, get_config, list_profiles, open_config_window, close_app, set_panel_expanded, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
+        .invoke_handler(tauri::generate_handler![get_meta, check_update_feed, get_config, list_profiles, open_config_window, close_app, set_panel_expanded, preview_layout, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }

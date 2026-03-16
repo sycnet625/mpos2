@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f7f2df"/>
+      <stop offset="100%" stop-color="#d8c6a7"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="20%" r="80%">
+      <stop offset="0%" stop-color="#fff7db" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#fff7db" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="20" y="16" width="1160" height="608" rx="32" fill="#151b22"/>
+  <rect x="36" y="30" width="1128" height="580" rx="24" fill="url(#panel)" stroke="#5d5040" stroke-width="6"/>
+  <rect x="58" y="50" width="1084" height="538" rx="18" fill="url(#glow)"/>
+  <path d="M154 494 A446 446 0 0 1 1046 494" fill="none" stroke="#342e27" stroke-width="8" stroke-linecap="round"/>
+  <path d="M154 494 A446 446 0 0 1 1046 494" fill="none" stroke="#766755" stroke-width="18" stroke-linecap="round" opacity=".18"/>
+  <g stroke-linecap="round">
+    <g stroke="#3d342a" stroke-width="8">
+      <line x1="154" y1="494" x2="114" y2="494"/>
+      <line x1="203" y1="368" x2="166" y2="353"/>
+      <line x1="296" y1="257" x2="267" y2="228"/>
+      <line x1="425" y1="174" x2="408" y2="136"/>
+      <line x1="574" y1="128" x2="569" y2="86"/>
+      <line x1="726" y1="128" x2="731" y2="86"/>
+      <line x1="875" y1="174" x2="892" y2="136"/>
+      <line x1="1004" y1="257" x2="1033" y2="228"/>
+      <line x1="1097" y1="368" x2="1134" y2="353"/>
+      <line x1="1046" y1="494" x2="1086" y2="494"/>
+    </g>
+    <g stroke="#d64733" stroke-width="7">
+      <line x1="966" y1="215" x2="987" y2="179"/>
+      <line x1="1034" y1="279" x2="1065" y2="251"/>
+      <line x1="1082" y1="357" x2="1122" y2="340"/>
+      <line x1="1102" y1="441" x2="1144" y2="435"/>
+    </g>
+  </g>
+  <g font-family="Segoe UI, Arial, sans-serif" font-weight="700" fill="#3e352c" text-anchor="middle">
+    <text x="104" y="508" font-size="36">0</text>
+    <text x="149" y="347" font-size="30">12.5</text>
+    <text x="255" y="218" font-size="30">25</text>
+    <text x="396" y="120" font-size="30">37.5</text>
+    <text x="564" y="64" font-size="30">50</text>
+    <text x="736" y="64" font-size="30">62.5</text>
+    <text x="905" y="120" font-size="30">75</text>
+    <text x="1047" y="218" font-size="30">87.5</text>
+    <text x="1148" y="347" font-size="30" fill="#b13d2f">100</text>
+  </g>
+  <text x="600" y="560" font-family="Georgia, Times New Roman, serif" font-size="82" text-anchor="middle" fill="#4a4338" opacity=".26">VU</text>
+</svg>

@@ -3,7 +3,6 @@ const tauriEvent = window.__TAURI__ && window.__TAURI__.event ? window.__TAURI__
 
 let pollTimer = null;
 let configCache = null;
-const historyState = new Map();
 let remoteUpdate = null;
 let configOpen = false;
 const presets = {
@@ -96,6 +95,19 @@ function applyMainWidth(width) {
   syncResponsiveMetrics();
 }
 
+async function previewLayout() {
+  const widthEl = document.getElementById('mainWidthRange');
+  const dockEl = document.getElementById('dockMode');
+  try {
+    await invoke('preview_layout', {
+      width: Number(widthEl?.value || configCache?.mainWidth || 192),
+      dock_mode: dockEl?.value || configCache?.dockMode || 'free',
+      expanded: configOpen
+    });
+  } catch (_) {}
+  syncResponsiveMetrics();
+}
+
 function syncResponsiveMetrics() {
   const host = document.getElementById('mainView');
   if (!host) return;
@@ -179,7 +191,14 @@ function bindConfigEvents() {
   const opacityEl = document.getElementById('windowOpacityRange');
   if (opacityEl) opacityEl.oninput = () => applyOpacity(Number(opacityEl.value || 100) / 100);
   const widthEl = document.getElementById('mainWidthRange');
-  if (widthEl) widthEl.oninput = () => applyMainWidth(Number(widthEl.value || 192));
+  if (widthEl) {
+    widthEl.oninput = () => {
+      applyMainWidth(Number(widthEl.value || 192));
+      previewLayout();
+    };
+  }
+  const dockEl = document.getElementById('dockMode');
+  if (dockEl) dockEl.onchange = () => previewLayout();
   document.querySelectorAll('[id^="preset_"]').forEach((select) => {
     select.addEventListener('change', () => {
       const index = Number(select.id.split('_')[1]);
@@ -197,37 +216,24 @@ function angleFromPercent(percent) {
   return -135 + (Math.max(0, Math.min(100, percent)) * 270 / 100);
 }
 
-function gaugeSvg(index) {
-  const ticks = Array.from({ length: 9 }, (_, i) => {
-    const angle = (-135 + i * 33.75) * (Math.PI / 180);
-    const x1 = 150 + Math.cos(angle) * 90;
-    const y1 = 120 + Math.sin(angle) * 90;
-    const x2 = 150 + Math.cos(angle) * 108;
-    const y2 = 120 + Math.sin(angle) * 108;
-    const hot = i > 6 ? 'hot' : '';
-    const lx = 150 + Math.cos(angle) * 68;
-    const ly = 124 + Math.sin(angle) * 68;
-    return `<line class="dial-tick ${hot}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line><text class="dial-label" x="${lx}" y="${ly}" text-anchor="middle">${i * 12.5}</text>`;
-  }).join('');
-  return `<svg class="dial-svg" viewBox="0 0 300 160" aria-hidden="true"><defs><linearGradient id="dialPlate-${index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:var(--plate-top)"></stop><stop offset="55%" style="stop-color:var(--plate-mid)"></stop><stop offset="100%" style="stop-color:var(--plate-bottom)"></stop></linearGradient><linearGradient id="dialGlass-${index}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(255,255,255,.62)"></stop><stop offset="32%" stop-color="rgba(255,255,255,.16)"></stop><stop offset="100%" stop-color="rgba(255,255,255,0)"></stop></linearGradient></defs><rect class="dial-frame" x="18" y="20" rx="16" ry="16" width="264" height="122"></rect><path class="dial-plate" fill="url(#dialPlate-${index})" d="M40,128 C54,48 246,48 260,128 L260,136 L40,136 Z"></path><path class="dial-glass" fill="url(#dialGlass-${index})" d="M40,128 C54,48 246,48 260,128 L260,136 L40,136 Z"></path>${ticks}<line class="dial-needle-shadow" id="needle-shadow-${index}" x1="150" y1="120" x2="78" y2="120"></line><line class="dial-needle" id="needle-${index}" x1="150" y1="118" x2="78" y2="118"></line><circle class="dial-cap" cx="150" cy="120" r="11"></circle></svg>`;
+function gaugeFace(index) {
+  return `<div class="vu-stage">
+    <img class="vu-face" src="./assets/vu-meter-scale.svg" alt="" aria-hidden="true">
+    <div class="vu-glass"></div>
+    <div class="vu-scale-labels">
+      <span>0</span><span>12.5</span><span>25</span><span>37.5</span><span>50</span><span>62.5</span><span>75</span><span>87.5</span><span>100</span>
+    </div>
+    <div class="vu-value-float"><strong id="value-${index}">0.00</strong><span>MB/s</span></div>
+    <div class="vu-needle-shadow" id="needle-shadow-${index}"></div>
+    <div class="vu-needle" id="needle-${index}"></div>
+    <div class="vu-cap"></div>
+  </div>`;
 }
 
 function renderMain(items) {
   const host = document.getElementById('gauges');
   if (!host) return;
-  host.innerHTML = items.map((item, index) => `<div class="gauge-card"><span class="gauge-led red" id="led-${index}"></span><div class="gauge-head"><div><div class="gauge-title">${item.label}</div><div class="gauge-meta">Escala ${Number(item.scaleMbps).toFixed(0)} MB/s</div></div><div class="gauge-value"><strong id="value-${index}">0.00</strong><span>MB/s</span></div></div><div class="dial-wrap">${gaugeSvg(index)}</div><div class="dial-status" id="status-${index}">Esperando datos...</div><div class="dial-calc" id="calc-${index}">calc auto</div><div class="dial-history" id="history-${index}">min - | avg - | max -</div><button class="mini-btn" data-reset="${index}" title="Reset calculo">R</button></div>`).join('');
-}
-
-function updateHistory(index, mbps) {
-  const key = String(index);
-  const next = historyState.get(key) || [];
-  next.push(Number(mbps || 0));
-  while (next.length > 20) next.shift();
-  historyState.set(key, next);
-  const min = Math.min(...next);
-  const max = Math.max(...next);
-  const avg = next.reduce((sum, value) => sum + value, 0) / Math.max(1, next.length);
-  return { min, max, avg };
+  host.innerHTML = items.map((item, index) => `<div class="gauge-card"><span class="gauge-led red" id="led-${index}"></span><div class="gauge-head"><div><div class="gauge-title">${item.label}</div><div class="gauge-meta">${Number(item.scaleMbps).toFixed(0)} MB/s escala</div></div><button class="mini-btn" data-reset="${index}" title="Reset calculo">R</button></div><div class="dial-wrap">${gaugeFace(index)}</div><div class="dial-status" id="status-${index}">Esperando datos...</div></div>`).join('');
 }
 
 function updateMain(items) {
@@ -237,9 +243,6 @@ function updateMain(items) {
     const led = document.getElementById(`led-${index}`);
     const value = document.getElementById(`value-${index}`);
     const status = document.getElementById(`status-${index}`);
-    const calc = document.getElementById(`calc-${index}`);
-    const history = document.getElementById(`history-${index}`);
-    const stats = updateHistory(index, item.mbps || 0);
     if (needle) needle.style.transform = `rotate(${angleFromPercent(item.percent)}deg)`;
     if (needleShadow) needleShadow.style.transform = `rotate(${angleFromPercent(item.percent)}deg)`;
     if (led) {
@@ -248,8 +251,6 @@ function updateMain(items) {
     }
     if (value) value.textContent = Number(item.mbps || 0).toFixed(2);
     if (status) status.textContent = item.enabled ? `${item.msg} | raw ${item.raw ?? '-'} | ping ${item.pingMs ?? '-'} ms` : 'Desactivado';
-    if (calc) calc.textContent = `calc ${item.calcMode || '-'}`;
-    if (history) history.textContent = `min ${stats.min.toFixed(2)} | avg ${stats.avg.toFixed(2)} | max ${stats.max.toFixed(2)}`;
   });
 }
 
@@ -309,6 +310,11 @@ async function boot() {
     try {
       configCache = await invoke('save_config', { cfg: readConfigFromForm() });
       await loadConfig();
+      configOpen = false;
+      document.getElementById('inlineConfig').classList.add('hidden');
+      try {
+        await invoke('set_panel_expanded', { expanded: false });
+      } catch (_) {}
       setConfigStatus('Guardado', 'ok');
     } catch (error) {
       setConfigStatus(`Error: ${error.message || error}`, 'error');
@@ -330,12 +336,9 @@ async function boot() {
     if (!btn) return;
     const index = Number(btn.getAttribute('data-reset'));
     const item = configCache.items[index];
-    historyState.delete(String(index));
     await invoke('reset_calc', { label: item.label });
-    const calc = document.getElementById(`calc-${index}`);
-    const hist = document.getElementById(`history-${index}`);
-    if (calc) calc.textContent = 'calc reset';
-    if (hist) hist.textContent = 'min - | avg - | max -';
+    const status = document.getElementById(`status-${index}`);
+    if (status) status.textContent = 'Calculo reiniciado';
   });
   if (tauriEvent && tauriEvent.listen) {
     tauriEvent.listen('config-updated', async () => {
