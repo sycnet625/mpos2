@@ -2,6 +2,7 @@
 :root {
   --window-alpha: 1;
   --main-width: 192px;
+  --content-width: 192px;
   --app-glow: rgba(64,145,255,.22);
   --app-bg-top: #07111d;
   --app-bg-mid: #08131f;
@@ -387,35 +388,35 @@ h1 {
 .gauge-title {
   text-transform: uppercase;
   letter-spacing: .12em;
-  font-size: .52rem;
+  font-size: clamp(.48rem, calc(var(--content-width) / 320), .72rem);
   color: var(--title-color);
   font-weight: 800;
 }
 .gauge-meta {
   color: var(--meta-color);
-  font-size: .56rem;
+  font-size: clamp(.5rem, calc(var(--content-width) / 290), .74rem);
 }
 .gauge-value {
   text-align: right;
 }
 .gauge-value strong {
   display: block;
-  font-size: .88rem;
+  font-size: clamp(.82rem, calc(var(--content-width) / 165), 1.18rem);
   line-height: 1;
   color: var(--value-color);
 }
 .gauge-value span {
   color: #a5bbd5;
-  font-size: .56rem;
+  font-size: clamp(.5rem, calc(var(--content-width) / 290), .72rem);
 }
 .dial-wrap {
   margin-top: 4px;
 }
 .dial-svg {
   width: 100%;
-  height: calc(var(--main-width) * 0.365);
+  height: clamp(64px, calc(var(--content-width) * 0.42), 170px);
   min-height: 64px;
-  max-height: 132px;
+  max-height: 170px;
   display: block;
 }
 .dial-frame {
@@ -468,7 +469,7 @@ h1 {
 .dial-status {
   text-align: center;
   color: #88a0bb;
-  font-size: .52rem;
+  font-size: clamp(.48rem, calc(var(--content-width) / 300), .68rem);
   min-height: 18px;
   white-space: nowrap;
   overflow: hidden;
@@ -477,7 +478,7 @@ h1 {
 .dial-calc {
   text-align: center;
   color: #f8d47d;
-  font-size: .48rem;
+  font-size: clamp(.45rem, calc(var(--content-width) / 320), .64rem);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -485,7 +486,7 @@ h1 {
 .dial-history {
   text-align: center;
   color: #b7cbe3;
-  font-size: .48rem;
+  font-size: clamp(.45rem, calc(var(--content-width) / 320), .64rem);
   letter-spacing: .03em;
   white-space: nowrap;
   overflow: hidden;

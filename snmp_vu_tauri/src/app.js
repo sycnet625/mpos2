@@ -91,6 +91,14 @@ function applyMainWidth(width) {
   document.documentElement.style.setProperty('--main-width', `${safe}px`);
   const valueEl = document.getElementById('mainWidthValue');
   if (valueEl) valueEl.textContent = `${safe}px`;
+  syncResponsiveMetrics();
+}
+
+function syncResponsiveMetrics() {
+  const host = document.getElementById('mainView');
+  if (!host) return;
+  const contentWidth = Math.max(140, Math.round(host.clientWidth || Number(configCache?.mainWidth || 192)));
+  document.documentElement.style.setProperty('--content-width', `${contentWidth}px`);
 }
 
 function setConfigStatus(text, kind = 'info') {
@@ -258,6 +266,7 @@ async function loadConfig() {
   document.getElementById('configGrid').innerHTML = configCache.items.map(compactItemCard).join('');
   bindConfigEvents();
   renderMain(configCache.items);
+  syncResponsiveMetrics();
 }
 
 async function pollLoop() {
@@ -326,6 +335,7 @@ async function boot() {
       setBanner(`Configuracion recargada`, false);
     });
   }
+  window.addEventListener('resize', syncResponsiveMetrics);
   pollLoop();
 }
 
