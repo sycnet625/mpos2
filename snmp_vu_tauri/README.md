@@ -6,7 +6,8 @@ Estado actual:
 - UI gadget portada a Tauri en una sola ventana frameless.
 - Configuracion local persistente.
 - Poll local por SNMP GET y ping desde Rust.
-- Base lista para seguir con tray, OTA y bundle Windows.
+- SNMP walk, tray y perfiles import/export.
+- Build Windows portable lista para publicar como ZIP.
 
 Comandos:
 - `cargo run --manifest-path src-tauri/Cargo.toml`

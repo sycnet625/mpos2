@@ -194,6 +194,7 @@ h1 {
 }
 .update-banner.available {
   color: #ffd27a;
+  cursor: pointer;
 }
 .debug-panel {
   margin: 12px 0 16px;

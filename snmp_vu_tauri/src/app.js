@@ -13,10 +13,54 @@ let pollTimer = null;
 let configCache = null;
 const historyState = new Map();
 let profileList = [];
+let remoteUpdate = null;
 
 function invoke(cmd, args = {}) {
   if (!tauriCore || !tauriCore.invoke) throw new Error('Tauri API no disponible');
   return tauriCore.invoke(cmd, args);
+}
+
+function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map((v) => Number(v) || 0);
+  const pb = String(b || '0').split('.').map((v) => Number(v) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const av = pa[i] || 0;
+    const bv = pb[i] || 0;
+    if (av > bv) return 1;
+    if (av < bv) return -1;
+  }
+  return 0;
+}
+
+function setBanner(text, available = false, title = '') {
+  const banner = document.getElementById('updateBanner');
+  if (!banner) return;
+  banner.textContent = text;
+  banner.classList.toggle('available', !!available);
+  banner.title = title || text;
+}
+
+async function checkRemoteUpdate(meta) {
+  const urls = [
+    'https://www.palweb.net/apk/snmp-vu-tauri-update.json',
+    'https://shop.palweb.net/apk/snmp-vu-tauri-update.json'
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!response.ok) continue;
+      const data = await response.json();
+      remoteUpdate = data;
+      if (compareVersions(data.version, meta.version) > 0) {
+        setBanner(`Update disponible ${data.version}`, true, data.notes || data.zip_url || url);
+      } else {
+        setBanner(`Al dia ${meta.version}`, false, data.notes || '');
+      }
+      return;
+    } catch (_) {}
+  }
+  setBanner(`Sin acceso a updates | ${meta.version}`, false);
 }
 
 function defaultConfig() {
@@ -233,11 +277,13 @@ async function pollLoop() {
 }
 
 async function boot() {
+  let meta = { version: '1.0.0', build: '-' };
   try {
-    const meta = await invoke('get_meta');
+    meta = await invoke('get_meta');
     document.getElementById('buildBadge').textContent = `v${meta.version} #${meta.build}`;
   } catch (_) {}
   await loadConfig();
+  checkRemoteUpdate(meta);
   document.getElementById('openConfigBtn').onclick = () => toggleConfig(true);
   document.getElementById('closeConfigBtn').onclick = () => toggleConfig(false);
   document.getElementById('configBackdrop').onclick = () => toggleConfig(false);
@@ -278,6 +324,13 @@ async function boot() {
     toggleConfig(false);
   };
   document.getElementById('refreshBtn').onclick = () => pollLoop();
+  document.getElementById('updateBanner').onclick = () => {
+    const url = remoteUpdate && (remoteUpdate.zip_url || remoteUpdate.exe_url);
+    if (!url) return;
+    try {
+      window.open(url, '_blank');
+    } catch (_) {}
+  };
   document.getElementById('closeAppBtn').onclick = async () => {
     if (tauriWindow && tauriWindow.getCurrentWindow) {
       await tauriWindow.getCurrentWindow().close();

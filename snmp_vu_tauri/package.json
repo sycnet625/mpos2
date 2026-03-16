@@ -1,6 +1,6 @@
 {
   "name": "snmp-vu-tauri",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "PalWeb SNMP VU migrated to Tauri",
   "scripts": {
