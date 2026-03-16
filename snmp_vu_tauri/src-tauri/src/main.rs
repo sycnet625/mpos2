@@ -16,6 +16,12 @@ use tauri::{
     AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const APP_BUILD: &str = env!("APP_BUILD");
 const DEFAULT_WIDTH: f64 = 192.0;
@@ -243,7 +249,17 @@ fn ping_host(ip: &str) -> (bool, Option<f64>) {
         return (false, None);
     }
     let output = if cfg!(target_os = "windows") {
-        Command::new("ping").args(["-n", "1", "-w", "1200", ip]).output()
+        #[cfg(target_os = "windows")]
+        {
+            Command::new("ping")
+                .creation_flags(CREATE_NO_WINDOW)
+                .args(["-n", "1", "-w", "1200", ip])
+                .output()
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            unreachable!()
+        }
     } else {
         Command::new("ping").args(["-c", "1", "-W", "1", ip]).output()
     };
