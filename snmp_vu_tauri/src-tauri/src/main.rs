@@ -87,6 +87,19 @@ struct MetaResponse {
     build: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UpdateFeed {
+    product: String,
+    version: String,
+    build: String,
+    #[serde(default)]
+    zip_url: String,
+    #[serde(default)]
+    notes: String,
+    #[serde(default)]
+    kind: String,
+}
+
 #[derive(Debug, Clone)]
 struct PrevState {
     raw: f64,
@@ -455,6 +468,32 @@ fn update_tray_tooltip(app: &AppHandle, items: &[PollItemResult]) {
 }
 
 #[tauri::command]
+fn check_update_feed() -> Result<UpdateFeed, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(6))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let urls = [
+        "https://www.palweb.net/apk/snmp-vu-tauri-update.json",
+        "https://shop.palweb.net/apk/snmp-vu-tauri-update.json",
+    ];
+    let mut last_error = String::from("Sin acceso a updates");
+    for url in urls {
+        match client.get(url).send() {
+            Ok(response) => match response.error_for_status() {
+                Ok(ok) => match ok.json::<UpdateFeed>() {
+                    Ok(feed) => return Ok(feed),
+                    Err(err) => last_error = format!("JSON invalido en {}: {}", url, err),
+                },
+                Err(err) => last_error = format!("HTTP error en {}: {}", url, err),
+            },
+            Err(err) => last_error = format!("No se pudo leer {}: {}", url, err),
+        }
+    }
+    Err(last_error)
+}
+
+#[tauri::command]
 fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     Ok(state.config.lock().unwrap().clone())
 }
@@ -667,7 +706,7 @@ fn main() {
             setup_tray(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_meta, get_config, list_profiles, open_config_window, close_app, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
+        .invoke_handler(tauri::generate_handler![get_meta, check_update_feed, get_config, list_profiles, open_config_window, close_app, save_config, export_profile, import_profile, reset_calc, poll_items, snmp_walk])
         .run(tauri::generate_context!())
         .expect("error running tauri app");
 }

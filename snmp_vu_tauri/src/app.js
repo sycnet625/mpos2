@@ -33,25 +33,17 @@ function setBanner(text, available = false, title = '') {
 }
 
 async function checkRemoteUpdate(meta) {
-  const urls = [
-    'https://www.palweb.net/apk/snmp-vu-tauri-update.json',
-    'https://shop.palweb.net/apk/snmp-vu-tauri-update.json'
-  ];
-  for (const url of urls) {
-    try {
-      const response = await fetch(`${url}?t=${Date.now()}`, { cache: 'no-store' });
-      if (!response.ok) continue;
-      const data = await response.json();
-      remoteUpdate = data;
-      if (compareVersions(data.version, meta.version) > 0) {
-        setBanner(`Update disponible ${data.version}`, true, data.notes || data.zip_url || url);
-      } else {
-        setBanner(`Al dia ${meta.version}`, false, data.notes || '');
-      }
-      return;
-    } catch (_) {}
+  try {
+    const data = await invoke('check_update_feed');
+    remoteUpdate = data;
+    if (compareVersions(data.version, meta.version) > 0) {
+      setBanner(`Update disponible ${data.version}`, true, data.notes || data.zip_url || '');
+    } else {
+      setBanner(`Al dia ${meta.version}`, false, data.notes || '');
+    }
+  } catch (error) {
+    setBanner(`Sin acceso a updates | ${meta.version}`, false, error.message || String(error));
   }
-  setBanner(`Sin acceso a updates | ${meta.version}`, false);
 }
 
 function defaultConfig() {
