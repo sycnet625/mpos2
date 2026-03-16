@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-capability",
   "description": "Permisos base de la app desktop",
-  "windows": ["main"],
+  "windows": ["main", "config"],
   "permissions": [
     "core:default"
   ]

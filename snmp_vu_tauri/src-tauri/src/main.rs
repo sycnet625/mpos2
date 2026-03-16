@@ -499,9 +499,8 @@ fn open_config_window(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn close_app(app: AppHandle) -> Result<bool, String> {
-    app.exit(0);
-    Ok(true)
+fn close_app() {
+    std::process::exit(0);
 }
 
 #[tauri::command]
