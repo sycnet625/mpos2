@@ -22,7 +22,7 @@ use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const APP_VERSION: &str = env!("APP_VERSION");
 const APP_BUILD: &str = env!("APP_BUILD");
 const DEFAULT_WIDTH: f64 = 192.0;
 

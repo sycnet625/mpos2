@@ -3,7 +3,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 fn main() {
     let build = std::env::var("APP_BUILD").unwrap_or_else(|_| generate_build_id());
+    let version = std::env::var("APP_VERSION").unwrap_or_else(|_| generate_display_version(&build));
     println!("cargo:rustc-env=APP_BUILD={build}");
+    println!("cargo:rustc-env=APP_VERSION={version}");
     tauri_build::build()
 }
 
@@ -38,4 +40,15 @@ fn generate_build_id() -> String {
         .map(|d| d.as_secs())
         .unwrap_or(0);
     format!("unix.{seconds}")
+}
+
+fn generate_display_version(build: &str) -> String {
+    let cargo_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "1.0.0".to_string());
+    let mut parts = cargo_version.split('.');
+    let major = parts.next().unwrap_or("1");
+    let minor = parts.next().unwrap_or("0");
+    let patch_digits: String = build.chars().filter(|c| c.is_ascii_digit()).collect();
+    let patch = if patch_digits.is_empty() { "0" } else { patch_digits.trim_start_matches('0') };
+    let patch = if patch.is_empty() { "0" } else { patch };
+    format!("{}.{}.{}", major, minor, patch)
 }
