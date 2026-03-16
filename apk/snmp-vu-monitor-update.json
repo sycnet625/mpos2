@@ -1,8 +1,8 @@
 {
-  "product": "PalWeb SNMP VU",
-  "version": "1.0.10",
-  "build": "20260315.180500",
-  "exe_url": "https://www.palweb.net/apk/snmp-vu-monitor.exe",
+  "product": "PalWeb SNMP VU Tauri",
+  "version": "1.0.0",
+  "build": "20260316.000100",
   "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-  "notes": "Build 1.0.10 con scroll visible en configuracion, ancho del gadget ajustable y correccion del calculo SNMP para OIDs octets con soporte de wrap en contadores."
+  "notes": "Migracion a Tauri. La distribucion oficial queda portable en ZIP con snmp-vu-tauri.exe y WebView2Loader.dll.",
+  "kind": "portable_zip"
 }
