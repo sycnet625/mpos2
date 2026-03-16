@@ -5,6 +5,13 @@ let pollTimer = null;
 let configCache = null;
 const historyState = new Map();
 let remoteUpdate = null;
+const presets = {
+  mikrotik_ether1_in: { label: 'ether1 IN', oid: '1.3.6.1.2.1.2.2.1.10.1', mode: 'auto', scaleMbps: 100 },
+  mikrotik_ether1_out: { label: 'ether1 OUT', oid: '1.3.6.1.2.1.2.2.1.16.1', mode: 'auto', scaleMbps: 100 },
+  mikrotik_wlan1_in: { label: 'wlan1 IN', oid: '1.3.6.1.2.1.2.2.1.10.2', mode: 'auto', scaleMbps: 100 },
+  mikrotik_bridge_in: { label: 'bridge IN', oid: '1.3.6.1.2.1.2.2.1.10.3', mode: 'auto', scaleMbps: 300 },
+  mikrotik_pppoe_out: { label: 'PPPoE/WAN OUT', oid: '1.3.6.1.2.1.2.2.1.16.4', mode: 'auto', scaleMbps: 300 }
+};
 
 function invoke(cmd, args = {}) {
   if (!tauriCore || !tauriCore.invoke) throw new Error('Tauri API no disponible');
@@ -86,6 +93,95 @@ function applyMainWidth(width) {
   if (valueEl) valueEl.textContent = `${safe}px`;
 }
 
+function setConfigStatus(text, kind = 'info') {
+  const el = document.getElementById('configStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.kind = kind;
+}
+
+function compactItemCard(item, index) {
+  return `<details class="compact-card"${index === 0 ? ' open' : ''}>
+    <summary>${item.label || `VU ${index + 1}`}<span>${item.enabled ? 'on' : 'off'}</span></summary>
+    <div class="compact-body">
+      <div class="compact-row">
+        <label><input type="checkbox" id="enabled_${index}" ${item.enabled ? 'checked' : ''}> activo</label>
+        <select class="select-input tiny-select" id="preset_${index}">
+          <option value="">preset</option>
+          <option value="mikrotik_ether1_in">e1 IN</option>
+          <option value="mikrotik_ether1_out">e1 OUT</option>
+          <option value="mikrotik_wlan1_in">wl IN</option>
+          <option value="mikrotik_bridge_in">br IN</option>
+          <option value="mikrotik_pppoe_out">wan OUT</option>
+        </select>
+      </div>
+      <input class="text-input compact-input" id="label_${index}" value="${item.label}" placeholder="Etiqueta">
+      <input class="text-input compact-input" id="host_${index}" value="${item.host}" placeholder="Host">
+      <div class="compact-row">
+        <input class="text-input compact-input" id="community_${index}" value="${item.community}" placeholder="Community">
+        <select class="select-input tiny-select" id="version_${index}">
+          <option value="2c" ${item.version === '2c' ? 'selected' : ''}>v2c</option>
+          <option value="1" ${item.version === '1' ? 'selected' : ''}>v1</option>
+        </select>
+      </div>
+      <input class="text-input compact-input" id="oid_${index}" value="${item.oid}" placeholder="OID">
+      <div class="compact-row">
+        <select class="select-input tiny-select" id="mode_${index}">
+          <option value="auto" ${item.mode === 'auto' ? 'selected' : ''}>auto</option>
+          <option value="counter_bytes" ${item.mode === 'counter_bytes' ? 'selected' : ''}>bytes</option>
+          <option value="counter_bits" ${item.mode === 'counter_bits' ? 'selected' : ''}>bits</option>
+          <option value="direct_bps" ${item.mode === 'direct_bps' ? 'selected' : ''}>bps</option>
+          <option value="direct_mbps" ${item.mode === 'direct_mbps' ? 'selected' : ''}>MB/s</option>
+        </select>
+        <input class="text-input compact-input" type="number" min="1" step="0.1" id="scale_${index}" value="${item.scaleMbps}" placeholder="Escala">
+      </div>
+      <input class="text-input compact-input" id="ping_${index}" value="${item.pingIp}" placeholder="IP ping">
+    </div>
+  </details>`;
+}
+
+function readConfigFromForm() {
+  return {
+    refreshMs: Number(document.getElementById('refreshMs').value || 3000),
+    theme: document.getElementById('themeSelect').value || 'blue_ice',
+    windowOpacity: Number(document.getElementById('windowOpacityRange').value || 100) / 100,
+    mainWidth: Number(document.getElementById('mainWidthRange').value || 192),
+    items: Array.from({ length: 5 }, (_, index) => ({
+      enabled: document.getElementById(`enabled_${index}`).checked,
+      label: document.getElementById(`label_${index}`).value,
+      host: document.getElementById(`host_${index}`).value,
+      community: document.getElementById(`community_${index}`).value,
+      version: document.getElementById(`version_${index}`).value,
+      oid: document.getElementById(`oid_${index}`).value,
+      walkOid: configCache.items[index].walkOid || '1.3.6.1.2.1.2.2.1',
+      mode: document.getElementById(`mode_${index}`).value,
+      scaleMbps: Number(document.getElementById(`scale_${index}`).value || 100),
+      pingIp: document.getElementById(`ping_${index}`).value,
+      alarmEnabled: configCache.items[index].alarmEnabled || false
+    }))
+  };
+}
+
+function bindConfigEvents() {
+  const themeEl = document.getElementById('themeSelect');
+  if (themeEl) themeEl.onchange = () => applyTheme(themeEl.value);
+  const opacityEl = document.getElementById('windowOpacityRange');
+  if (opacityEl) opacityEl.oninput = () => applyOpacity(Number(opacityEl.value || 100) / 100);
+  const widthEl = document.getElementById('mainWidthRange');
+  if (widthEl) widthEl.oninput = () => applyMainWidth(Number(widthEl.value || 192));
+  document.querySelectorAll('[id^="preset_"]').forEach((select) => {
+    select.addEventListener('change', () => {
+      const index = Number(select.id.split('_')[1]);
+      const preset = presets[select.value];
+      if (!preset) return;
+      document.getElementById(`label_${index}`).value = preset.label;
+      document.getElementById(`oid_${index}`).value = preset.oid;
+      document.getElementById(`mode_${index}`).value = preset.mode;
+      document.getElementById(`scale_${index}`).value = preset.scaleMbps;
+    });
+  });
+}
+
 function angleFromPercent(percent) {
   return -135 + (Math.max(0, Math.min(100, percent)) * 270 / 100);
 }
@@ -155,6 +251,12 @@ async function loadConfig() {
   applyTheme(configCache.theme);
   applyOpacity(configCache.windowOpacity || 1);
   applyMainWidth(configCache.mainWidth || 192);
+  document.getElementById('refreshMs').value = configCache.refreshMs;
+  document.getElementById('themeSelect').value = configCache.theme;
+  document.getElementById('windowOpacityRange').value = Math.round((configCache.windowOpacity || 1) * 100);
+  document.getElementById('mainWidthRange').value = configCache.mainWidth || 192;
+  document.getElementById('configGrid').innerHTML = configCache.items.map(compactItemCard).join('');
+  bindConfigEvents();
   renderMain(configCache.items);
 }
 
@@ -183,10 +285,15 @@ async function boot() {
   await loadConfig();
   checkRemoteUpdate(meta);
   document.getElementById('openConfigBtn').onclick = async () => {
+    document.getElementById('inlineConfig').classList.toggle('hidden');
+  };
+  document.getElementById('saveConfigBtn').onclick = async () => {
     try {
-      await invoke('open_config_window');
+      configCache = await invoke('save_config', { cfg: readConfigFromForm() });
+      await loadConfig();
+      setConfigStatus('Guardado', 'ok');
     } catch (error) {
-      setBanner(`Error abriendo configuracion: ${error.message || error}`, false);
+      setConfigStatus(`Error: ${error.message || error}`, 'error');
     }
   };
   document.getElementById('refreshBtn').onclick = () => pollLoop();

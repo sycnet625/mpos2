@@ -85,7 +85,8 @@ body.config-shell::-webkit-scrollbar-thumb {
     linear-gradient(180deg, var(--app-bg-top) 0%, var(--app-bg-mid) 55%, var(--app-bg-bottom) 100%);
   min-height: 100vh;
   opacity: var(--window-alpha);
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .config-window {
   opacity: var(--window-alpha);
@@ -95,7 +96,7 @@ body.config-shell::-webkit-scrollbar-thumb {
   width: var(--main-width);
   min-width: var(--main-width);
   max-width: var(--main-width);
-  overflow: hidden;
+  overflow: visible;
 }
 .toolbar {
   display: flex;
@@ -242,7 +243,105 @@ h1 {
 .gauges {
   display: grid;
   gap: 6px;
+  overflow: visible;
+}
+.hidden {
+  display: none !important;
+}
+.inline-config {
+  margin: 0 0 6px;
+  padding: 6px;
+  border: 1px solid rgba(159,183,210,.24);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(19,31,49,.96), rgba(8,16,27,1));
+  box-shadow: 0 10px 18px rgba(0,0,0,.22);
+}
+.inline-config-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: .68rem;
+  color: var(--title-color);
+}
+.compact-btn {
+  padding: 4px 8px;
+  border-radius: 8px;
+  font-size: .62rem;
+}
+.compact-status {
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  font-size: .62rem;
+}
+.compact-global {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.mini-field {
+  display: grid;
+  gap: 3px;
+  font-size: .56rem;
+  color: #b7cae1;
+}
+.mini-field em {
+  font-style: normal;
+  font-size: .55rem;
+  color: #ffd27a;
+}
+.tiny-input,
+.tiny-select,
+.compact-input {
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: .62rem;
+}
+.compact-grid {
+  display: grid;
+  gap: 6px;
+}
+.compact-card {
+  border: 1px solid rgba(159,183,210,.18);
+  border-radius: 8px;
+  background: rgba(12,23,38,.65);
   overflow: hidden;
+}
+.compact-card summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 8px;
+  font-size: .62rem;
+  font-weight: 700;
+  color: #dce9fb;
+}
+.compact-card summary::-webkit-details-marker {
+  display: none;
+}
+.compact-card summary span {
+  color: #8fb0d6;
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: .54rem;
+}
+.compact-body {
+  display: grid;
+  gap: 5px;
+  padding: 0 8px 8px;
+}
+.compact-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px;
+  align-items: center;
+}
+.compact-row label {
+  font-size: .58rem;
+  color: #b7cae1;
 }
 .gauge-card {
   position: relative;
