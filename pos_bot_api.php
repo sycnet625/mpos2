@@ -11,6 +11,7 @@ $BOT_BRIDGE_STATUS_FILE = __DIR__ . '/wa_web_bridge/status.json';
 $BOT_BRIDGE_CHATS_FILE = '/tmp/palweb_wa_chats.json';
 $BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
 $BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
+$BOT_PROMO_GROUP_LISTS_FILE = '/tmp/palweb_wa_promo_group_lists.json';
 $BOT_BRIDGE_OUTBOX_FILE = '/tmp/palweb_wa_outbox_queue.json';
 
 function bot_clone_promo_job(array $job): array {
@@ -2050,6 +2051,7 @@ $adminActions = [
     'conversation_list','conversation_pause','conversation_resume','conversation_send_manual',
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
+    'promo_group_lists','promo_group_list_save','promo_group_list_delete',
     'bridge_restart','bridge_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();
@@ -2460,6 +2462,111 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_templates') {
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     usort($rows, static fn($a, $b) => strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? '')));
     echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_group_lists') {
+    $data = bot_read_json_file($BOT_PROMO_GROUP_LISTS_FILE, ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    usort($rows, static fn($a, $b) => strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? '')));
+    foreach ($rows as &$row) {
+        $row['id'] = substr(trim((string)($row['id'] ?? '')), 0, 80);
+        $name = substr(trim((string)($row['name'] ?? '')), 0, 120);
+        $row['name'] = $name !== '' ? $name : 'Lista sin nombre';
+        $targets = is_array($row['targets'] ?? null) ? $row['targets'] : [];
+        $row['targets'] = array_values(array_filter(array_map(static function($t){
+            $id = substr(trim((string)($t['id'] ?? $t)), 0, 120);
+            if ($id === '') return null;
+            $name = substr(trim((string)($t['name'] ?? $id)), 0, 200);
+            return ['id' => $id, 'name' => $name !== '' ? $name : $id];
+        }, $targets), static fn($x) => is_array($x) && (trim((string)($x['id'] ?? '')) !== '')));
+    }
+    unset($row);
+    echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_group_list_save') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $listId = substr(trim((string)($in['id'] ?? '')), 0, 80);
+    $name = substr(trim((string)($in['name'] ?? '')), 0, 120);
+    $targetsInput = is_array($in['targets'] ?? null) ? $in['targets'] : [];
+    if ($name === '') {
+        echo json_encode(['status' => 'error', 'msg' => 'Nombre de lista obligatorio']);
+        exit;
+    }
+    if (count($targetsInput) === 0) {
+        echo json_encode(['status' => 'error', 'msg' => 'La lista no tiene destinos']);
+        exit;
+    }
+
+    $targets = [];
+    $seen = [];
+    foreach ($targetsInput as $t) {
+        $id = substr(trim((string)($t['id'] ?? $t)), 0, 120);
+        if ($id === '' || !empty($seen[$id])) continue;
+        $seen[$id] = true;
+        $targets[] = [
+            'id' => $id,
+            'name' => substr(trim((string)($t['name'] ?? $id)), 0, 200)
+        ];
+    }
+    if (count($targets) === 0) {
+        echo json_encode(['status' => 'error', 'msg' => 'La lista no tiene destinos']);
+        exit;
+    }
+
+    $data = bot_read_json_file($BOT_PROMO_GROUP_LISTS_FILE, ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    $now = date('c');
+    $updated = false;
+    if ($listId !== '') {
+        foreach ($rows as &$row) {
+            if ((string)($row['id'] ?? '') !== $listId) continue;
+            $row['name'] = $name;
+            $row['targets'] = $targets;
+            $row['updated_at'] = $now;
+            $updated = true;
+            break;
+        }
+        unset($row);
+    }
+    if (!$updated) {
+        $listId = 'list_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
+        $rows[] = [
+            'id' => $listId,
+            'name' => $name,
+            'targets' => $targets,
+            'created_at' => $now,
+            'updated_at' => $now,
+            'created_by' => $_SESSION['admin_name'] ?? 'admin'
+        ];
+    }
+
+    if (!bot_write_json_file($BOT_PROMO_GROUP_LISTS_FILE, ['rows' => $rows])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar la lista']);
+        exit;
+    }
+    echo json_encode(['status' => 'success', 'id' => $listId]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_group_list_delete') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $listId = substr(trim((string)($in['id'] ?? '')), 0, 80);
+    if ($listId === '') {
+        echo json_encode(['status' => 'error', 'msg' => 'id requerido']);
+        exit;
+    }
+    $data = bot_read_json_file($BOT_PROMO_GROUP_LISTS_FILE, ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    $filtered = array_values(array_filter($rows, static fn($r) => (string)($r['id'] ?? '') !== $listId));
+    if (count($filtered) === count($rows)) {
+        echo json_encode(['status' => 'error', 'msg' => 'Lista no encontrada']);
+        exit;
+    }
+    if (!bot_write_json_file($BOT_PROMO_GROUP_LISTS_FILE, ['rows' => $filtered])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo eliminar la lista']);
+        exit;
+    }
+    echo json_encode(['status' => 'success']); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {

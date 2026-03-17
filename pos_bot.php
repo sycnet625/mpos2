@@ -309,6 +309,25 @@ body{background:#f6f8fc}
               <div id="promoChatsWrap" tabindex="-1" style="max-height:320px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
                 <div class="text-muted small">Sin datos aún.</div>
               </div>
+
+              <hr class="my-3">
+              <div class="small fw-semibold mb-2">Listas de grupos de WhatsApp</div>
+              <div class="row g-2 align-items-end mb-2">
+                <div class="col-12">
+                  <label class="form-label">Nombre de lista</label>
+                  <input id="promoGroupListName" class="form-control form-control-sm" maxlength="120" placeholder="Ej: Promoción Fin de semana">
+                </div>
+                <div class="col-sm-6">
+                  <button class="btn btn-sm btn-outline-success w-100" type="button" onclick="savePromoGroupList()"><i class="fas fa-save"></i> Guardar lista</button>
+                </div>
+                <div class="col-sm-6">
+                  <button class="btn btn-sm btn-outline-primary w-100" type="button" onclick="savePromoGroupList(true)"><i class="fas fa-sync-alt"></i> Actualizar lista</button>
+                </div>
+              </div>
+              <div id="promoGroupListWrap" style="max-height:220px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
+                <div class="text-muted small">Sin listas aún.</div>
+              </div>
+              <div class="small text-muted mt-2 mb-0">La lista se guarda con los destinos actualmente seleccionados.</div>
             </div>
           </div>
       </div>
@@ -595,6 +614,8 @@ let promoProducts=[];
 let promoBannerImages=[];
 let promoTemplates=[];
 let promoCampaigns=[];
+let promoGroupLists=[];
+let promoGroupListEditingId='';
 let conversationRows=[];
 let activeConversationId='';
 let activeCampaignLogId='';
@@ -985,6 +1006,134 @@ async function loadPromoChats(){
   promoChats=Array.isArray(d.rows)?d.rows:[];
   renderPromoChats();
 }
+
+async function loadPromoGroupLists(){
+  const d=await g(API+'?action=promo_group_lists');
+  if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar listas');return;}
+  promoGroupLists=Array.isArray(d.rows)?d.rows:[];
+  renderPromoGroupLists();
+}
+
+function renderPromoGroupLists(){
+  const w=document.getElementById('promoGroupListWrap');
+  if(!w) return;
+  if(!promoGroupLists.length){
+    w.innerHTML='<div class="text-muted small">Sin listas aún.</div>';
+    return;
+  }
+  w.innerHTML=promoGroupLists.map(l=>{
+    const targets=Array.isArray(l.targets)?l.targets:[];
+    const names=targets.map(t=>esc(String(t.name||t.id||''))).join(' | ');
+    return `<div class="d-flex align-items-center gap-2 py-2 border-bottom">
+      <div class="flex-grow-1">
+        <div class="fw-semibold small">${esc(String(l.name||'Sin nombre'))}</div>
+        <div class="small text-muted">${targets.length} destinos</div>
+        <div class="small text-muted text-truncate" style="max-width:360px">${names || '-'}</div>
+      </div>
+      <button class="btn btn-sm btn-outline-success" type="button" title="Aplicar lista" onclick="applyPromoGroupList('${esc(String(l.id||''))}')"><i class="fas fa-check-circle"></i></button>
+      <button class="btn btn-sm btn-outline-primary" type="button" title="Editar lista" onclick="editPromoGroupList('${esc(String(l.id||''))}')"><i class="fas fa-pen"></i></button>
+      <button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar lista" onclick="deletePromoGroupList('${esc(String(l.id||''))}')"><i class="fas fa-trash"></i></button>
+    </div>`;
+  }).join('');
+}
+
+function selectedPromoChatTargets(){
+  const checks=Array.from(document.querySelectorAll('.promo-chat:checked'));
+  return checks.map(ch=>{
+    const idx=parseInt(ch.dataset.idx,10);
+    const item=promoChats[idx];
+    if(!item) return null;
+    return {id:String(item.id||''), name:String(item.name||item.id||'')};
+  }).filter(Boolean);
+}
+
+async function savePromoGroupList(isUpdate=false){
+  const input=document.getElementById('promoGroupListName');
+  const name=(input?.value||'').trim();
+  const targets=selectedPromoChatTargets();
+  const id=(isUpdate && promoGroupListEditingId)?promoGroupListEditingId:'';
+  if(!name){a('danger','Ingresa un nombre de lista');return;}
+  if(!targets.length){a('danger','Selecciona al menos un destino para guardar la lista');return;}
+  const d=await p(API+'?action=promo_group_list_save',{id,name,targets});
+  if(d.status==='success'){
+    a('success',isUpdate?'Lista actualizada':'Lista guardada');
+    clearPromoGroupListEditing();
+    await loadPromoGroupLists();
+  }else{
+    a('danger',d.msg||'No se pudo guardar la lista');
+  }
+}
+
+async function applyPromoGroupList(id){
+  const listId=String(id||'');
+  const list=promoGroupLists.find(x=>String(x.id)===listId);
+  if(!list){a('danger','Lista no encontrada');return;}
+  const targetSet=new Set((Array.isArray(list.targets)?list.targets:[]).map(t=>String(t.id||t)));
+  let checks=document.querySelectorAll('.promo-chat');
+  if(!checks.length){
+    await loadPromoChats();
+    checks=document.querySelectorAll('.promo-chat');
+  }
+  let selectedCount=0;
+  checks.forEach(ch=>{
+    const itemId=String(ch.dataset.id||'');
+    const on=targetSet.has(itemId);
+    ch.checked=on;
+    if(on) selectedCount++;
+  });
+  if(selectedCount===0){
+    a('warning','La lista no tiene destinos cargados en la vista actual');
+  }else{
+    a('success',`Lista aplicada: ${selectedCount} destinos`);
+  }
+  if(__promoGroupsOnlyMode){
+    __promoGroupsOnlyMode=false;
+    const btn=document.getElementById('promoGroupsOnlyBtn');
+    if(btn){btn.classList.add('btn-outline-info');btn.classList.remove('btn-info','text-white');btn.title='Seleccionar solo grupos';}
+  }
+  updatePromoSelectionSummary();
+}
+
+function editPromoGroupList(id){
+  const listId=String(id||'');
+  const list=promoGroupLists.find(x=>String(x.id)===listId);
+  if(!list){a('danger','Lista no encontrada');return;}
+  promoGroupListEditingId=listId;
+  const input=document.getElementById('promoGroupListName');
+  if(input) input.value=String(list.name||'');
+  const targetSet=new Set((Array.isArray(list.targets)?list.targets:[]).map(t=>String(t.id||t)));
+  const checks=document.querySelectorAll('.promo-chat');
+  if(!checks.length){a('info','Carga nuevamente los destinos y vuelve a editar si no aparecen todos.');}
+  checks.forEach(ch=>{ch.checked=targetSet.has(String(ch.dataset.id||''));});
+  updatePromoSelectionSummary();
+  if(__promoGroupsOnlyMode){
+    __promoGroupsOnlyMode=false;
+    const btn=document.getElementById('promoGroupsOnlyBtn');
+    if(btn){btn.classList.add('btn-outline-info');btn.classList.remove('btn-info','text-white');btn.title='Seleccionar solo grupos';}
+  }
+  a('info','Ajusta los destinos y luego pulsa Actualizar lista');
+}
+
+async function deletePromoGroupList(id){
+  const listId=String(id||'');
+  if(!listId){a('danger','Lista inválida');return;}
+  if(!window.confirm('¿Eliminar esta lista de destinos?')) return;
+  const d=await p(API+'?action=promo_group_list_delete',{id:listId});
+  if(d.status==='success'){
+    a('success','Lista eliminada');
+    if(promoGroupListEditingId===listId) clearPromoGroupListEditing();
+    await loadPromoGroupLists();
+  }else{
+    a('danger',d.msg||'No se pudo eliminar la lista');
+  }
+}
+
+function clearPromoGroupListEditing(){
+  promoGroupListEditingId='';
+  const input=document.getElementById('promoGroupListName');
+  if(input) input.value='';
+}
+
 function renderMyGroupOptions(){
   const w=document.getElementById('myGroupWrap');
   if(!w) return;
@@ -1466,7 +1615,7 @@ function renderProgrammingTab(){
     </div>
   </div>`).join('');
 }
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadConversations(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates()])}catch(e){a('danger',e.message||'error')}}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadConversations(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates(),loadPromoGroupLists()])}catch(e){a('danger',e.message||'error')}}
 function openWhatsAppWeb(){
   const w = window.open('https://web.whatsapp.com/','_blank','noopener,noreferrer');
   const s = document.getElementById('waWebStatus');
@@ -1507,7 +1656,7 @@ document.addEventListener('change',ev=>{
   if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });
 loadAll();
-setInterval(()=>{loadStats();loadMsgs();loadOrders();loadConversations();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates()},12000);
+setInterval(()=>{loadStats();loadMsgs();loadOrders();loadConversations();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates();loadPromoGroupLists()},12000);
 </script>
 <script src="assets/js/qrcode.min.js"></script>
 <script src="assets/js/bootstrap.bundle.min.js"></script>
