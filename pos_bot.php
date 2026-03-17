@@ -291,6 +291,9 @@ body{background:#f6f8fc}
             </div>
             <div class="card-body">
               <div class="small text-muted mb-2">Se leen chats y grupos desde WhatsApp Web del bridge conectado.</div>
+              <div class="mb-2">
+                <input id="promoChatsFilter" class="form-control form-control-sm" placeholder="Filtrar destino (nombre o id)..." autocomplete="off">
+              </div>
               <div class="d-flex gap-2 mb-2">
                 <button class="btn btn-sm btn-outline-primary" type="button" title="Marcar todos los grupos" onclick="selectAllPromoChats(true)">
                   <i class="fas fa-check-double"></i>
@@ -597,6 +600,8 @@ let activeConversationId='';
 let activeCampaignLogId='';
 let promoSearchTimer=null;
 let conversationFilter='all';
+let promoChatsSearchTimer=null;
+let promoChatsSearchTerm='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 let toastTimer=null;
 const hideToast=()=>{const e=document.getElementById('alertBox'); if(e) e.innerHTML='';};
@@ -953,9 +958,18 @@ async function testBot(){const d=await p(API+'?action=test_incoming',{wa_user_id
 function renderPromoChats(){
   const w=document.getElementById('promoChatsWrap');
   if(!w) return;
-  if(!promoChats.length){w.innerHTML='<div class="text-muted small">Sin chats detectados aún. Verifica estado listo y refresca.</div>';renderMyGroupOptions();return;}
+  const selectedIds=new Set(
+    Array.from(document.querySelectorAll('.promo-chat:checked'))
+      .map(i=>i.getAttribute('data-id')).filter(Boolean)
+  );
+  if(!promoChats.length){
+    const hasFilter=promoChatsSearchTerm.trim().length>0;
+    w.innerHTML=`<div class="text-muted small">${hasFilter?'No hay destinos que coincidan con el filtro.': 'Sin chats detectados aún. Verifica estado listo y refresca.'}</div>`;
+    renderMyGroupOptions();
+    return;
+  }
   w.innerHTML=promoChats.map((c,i)=>`<label class="d-flex align-items-center gap-2 py-1 border-bottom small">
-      <input type="checkbox" class="form-check-input promo-chat" data-idx="${i}" data-group="${Number(c.is_group||0)}">
+      <input type="checkbox" class="form-check-input promo-chat" data-id="${esc(c.id)}" data-idx="${i}" data-group="${Number(c.is_group||0)}" ${selectedIds.has(String(c.id||''))?'checked':''}>
       <span class="badge ${c.is_group?'bg-primary':'bg-secondary'}">${c.is_group?'Grupo':'Chat'}</span>
       <span>${esc(c.name||c.id)}</span>
       <span class="text-muted ms-auto">${esc(c.id)}</span>
@@ -964,7 +978,9 @@ function renderPromoChats(){
   updatePromoSelectionSummary();
 }
 async function loadPromoChats(){
-  const d=await g(API+'?action=promo_chats');
+  const term=(promoChatsSearchTerm||'').trim();
+  const query=term?`&q=${encodeURIComponent(term)}`:'';
+  const d=await g(API+'?action=promo_chats'+query);
   if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar chats');return;}
   promoChats=Array.isArray(d.rows)?d.rows:[];
   renderPromoChats();
@@ -1482,6 +1498,11 @@ document.getElementById('promoSearch').addEventListener('input',ev=>{
   promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);
 });
 document.getElementById('promoBannerInput').addEventListener('change',onPromoBannerInput);
+document.getElementById('promoChatsFilter')?.addEventListener('input',ev=>{
+  promoChatsSearchTerm=(ev.target?.value||'').trim();
+  if(promoChatsSearchTimer) clearTimeout(promoChatsSearchTimer);
+  promoChatsSearchTimer=setTimeout(()=>loadPromoChats(promoChatsSearchTerm),220);
+});
 document.addEventListener('change',ev=>{
   if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });

@@ -196,6 +196,24 @@ function bot_is_bridge_process_running(): bool {
     return $code === 0 && !empty($out);
 }
 
+function bot_normalize_banner_images($input): array {
+    $items = is_array($input) ? $input : [];
+    $out = [];
+    $hasSeen = [];
+    foreach ($items as $img) {
+        $url = trim((string)($img['url'] ?? $img));
+        if ($url === '') continue;
+        if (!empty($hasSeen[$url])) continue;
+        $hasSeen[$url] = true;
+        $out[] = [
+            'url' => substr($url, 0, 500),
+            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
+        ];
+        if (count($out) >= 3) break;
+    }
+    return $out;
+}
+
 function bot_run_bridge_service_command(string $verb, ?string &$detail = null): bool {
     $verb = trim($verb);
     if ($verb === '') {
@@ -2369,14 +2387,24 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_chats') {
+    $q = trim((string)($_GET['q'] ?? ''));
+    $search = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
     $data = bot_read_json_file($BOT_BRIDGE_CHATS_FILE, ['updated_at' => null, 'rows' => []]);
     $rows = [];
     foreach (($data['rows'] ?? []) as $r) {
         $id = substr(trim((string)($r['id'] ?? '')), 0, 120);
         if ($id === '') continue;
+        $name = substr(trim((string)($r['name'] ?? $id)), 0, 200);
+        if ($search !== '') {
+            $haystackId = function_exists('mb_strtolower') ? mb_strtolower($id, 'UTF-8') : strtolower($id);
+            $haystackName = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
+            if (strpos($haystackId, $search) === false && strpos($haystackName, $search) === false) {
+                continue;
+            }
+        }
         $rows[] = [
             'id' => $id,
-            'name' => substr(trim((string)($r['name'] ?? $id)), 0, 200),
+            'name' => $name,
             'is_group' => !empty($r['is_group']) ? 1 : 0,
             'is_contact' => !empty($r['is_contact']) ? 1 : 0,
         ];
@@ -2455,16 +2483,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
             'image' => trim((string)($p['image'] ?? ''))
         ];
     }
-    $cleanBannerImages = [];
-    foreach ($bannerImages as $img) {
-        $url = trim((string)($img['url'] ?? $img));
-        if ($url === '') continue;
-        $cleanBannerImages[] = [
-            'url' => substr($url, 0, 500),
-            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
-        ];
-        if (count($cleanBannerImages) >= 3) break;
-    }
+    $cleanBannerImages = bot_normalize_banner_images($bannerImages);
 
     $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
@@ -2768,20 +2787,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
             'image' => trim((string)($p['image'] ?? ('image.php?code=' . rawurlencode($pid))))
         ];
     }
-    $cleanBannerImages = [];
-    foreach ($bannerImages as $img) {
-        $url = trim((string)($img['url'] ?? $img));
-        if ($url === '') continue;
-        $cleanBannerImages[] = [
-            'url' => substr($url, 0, 500),
-            'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
-        ];
-        if (count($cleanBannerImages) >= 3) break;
-    }
+    $cleanBannerImages = bot_normalize_banner_images($bannerImages);
 
     if ($text === '' && $outroText === '' && count($cleanProducts) === 0 && count($cleanBannerImages) === 0) { echo json_encode(['status'=>'error','msg'=>'La campaña está vacía']); exit; }
     if (count($targetsFinal) === 0) { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un grupo/chat']); exit; }
-    if (count($cleanProducts) === 0 && $outroText === '') { echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un producto']); exit; }
 
     $daysFinal = [];
     foreach ($scheduleDays as $d) {
