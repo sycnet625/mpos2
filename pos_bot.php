@@ -13,7 +13,73 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 <title>POS BOT WhatsApp</title>
 <link href="assets/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/all.min.css">
-<style>body{background:#f6f8fc}.card{border:0;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06)}.stat{font-size:1.6rem;font-weight:700}</style>
+<style>
+body{background:#f6f8fc}
+.card{border:0;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
+.stat{font-size:1.6rem;font-weight:700}
+#toastArea{
+  position:fixed;
+  left:0;
+  right:0;
+  bottom:14px;
+  z-index:2000;
+  pointer-events:none;
+  padding:0 16px 16px;
+}
+#alertBox{
+  max-width:1280px;
+  margin:0 auto;
+  pointer-events:auto;
+}
+#alertBox .toast-msg.slide-in{
+  animation: pb-toast-in 220ms ease-out forwards;
+}
+#alertBox .toast-msg.hide{
+  animation: pb-toast-out 220ms ease-in forwards;
+}
+#alertBox .toast-msg{
+  min-height:74px;
+  width:100%;
+  font-size:1.2rem;
+  font-weight:600;
+  border:0;
+  border-radius:14px;
+  padding:1.15rem 1.25rem;
+  box-shadow:0 16px 34px rgba(0,0,0,.3);
+  backdrop-filter:blur(2px);
+  position:relative;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+#alertBox .toast-msg .toast-msg-text{flex:1;}
+#alertBox .toast-msg .toast-close{opacity:.9;margin-left:auto;border-radius:999px;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;border:1px solid rgba(255,255,255,.45);background:rgba(0,0,0,.12);line-height:1;pointer-events:auto;}
+#alertBox .toast-msg.alert-danger{background:linear-gradient(120deg,#991b1b,#dc2626);color:#fff;border-left:10px solid #fca5a5;}
+#alertBox .toast-msg.alert-success{background:linear-gradient(120deg,#166534,#16a34a);color:#fff;}
+#alertBox .toast-msg.alert-info{background:#0ea5e9;color:#fff;}
+#alertBox .toast-msg.alert-warning{
+  background:linear-gradient(120deg,#92400e,#b45309);
+  color:#fff;
+}
+@keyframes pb-toast-in{
+  from{transform:translateY(24px);opacity:0;}
+  to{transform:translateY(0);opacity:1;}
+}
+@keyframes pb-toast-out{
+  from{transform:translateY(0);opacity:1;}
+  to{transform:translateY(24px);opacity:0;}
+}
+#alertBox .is-invalid{
+  border-color:#dc2626!important;
+  box-shadow:0 0 0 .2rem rgba(220,38,38,.15)!important;
+}
+.error-block{
+  border:2px solid #ef4444!important;
+  box-shadow:0 0 0 .2rem rgba(239,68,68,.18)!important;
+}
+</style>
 </head>
 <body class="p-3 p-md-4">
 <div class="container-fluid" style="max-width:1400px;">
@@ -22,7 +88,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     <button class="btn btn-outline-secondary" onclick="loadAll()"><i class="fas fa-sync"></i> Refrescar</button>
   </div>
 
-  <div id="alertBox"></div>
+  <div id="toastArea" class="px-2">
+    <div id="alertBox"></div>
+  </div>
 
   <div class="row g-3 mb-3">
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Sesiones</div><div id="s1" class="stat">0</div></div></div>
@@ -235,7 +303,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
                 </button>
               </div>
               <div id="promoSelectionSummary" class="small text-muted mb-2">0 chats · 0 grupos seleccionados</div>
-              <div id="promoChatsWrap" style="max-height:320px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
+              <div id="promoChatsWrap" tabindex="-1" style="max-height:320px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
                 <div class="text-muted small">Sin datos aún.</div>
               </div>
             </div>
@@ -274,7 +342,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               <label class="form-label">Banners o logo del texto (máximo 3)</label>
               <input id="promoBannerInput" type="file" class="form-control" accept="image/*" multiple>
               <div class="form-text">Estas imágenes acompañarán el texto promocional como banners publicitarios o logo de empresa.</div>
-              <div id="promoBannerWrap" class="border rounded p-2 mt-2" style="min-height:84px;max-height:200px;overflow:auto">
+            <div id="promoBannerWrap" tabindex="-1" class="border rounded p-2 mt-2" style="min-height:84px;max-height:200px;overflow:auto">
                 <div class="text-muted small">Sin imágenes cargadas.</div>
               </div>
             </div>
@@ -323,7 +391,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
               </div>
             </div>
             <div class="small text-muted mb-2">El bridge publica en cada destino con un intervalo aleatorio entre min y max. Ej: 1:20, 1:57, 1:08.</div>
-            <div id="promoProductsWrap" class="border rounded p-2" style="min-height:100px;max-height:240px;overflow:auto">
+            <div id="promoProductsWrap" tabindex="-1" class="border rounded p-2" style="min-height:100px;max-height:240px;overflow:auto">
               <div class="text-muted small">Sin productos seleccionados.</div>
             </div>
             <div class="mt-2">
@@ -360,7 +428,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
           </div>
           <div class="card-body">
             <div class="small text-muted mb-2">Selecciona un solo grupo. Se enviarán todos los productos con existencias y, al final, un texto con los reservables y la promoción web.</div>
-            <div id="myGroupWrap" style="max-height:360px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
+            <div id="myGroupWrap" tabindex="-1" style="max-height:360px;overflow:auto;border:1px solid #e9ecef;border-radius:8px;padding:8px">
               <div class="text-muted small">Sin grupos detectados aún.</div>
             </div>
           </div>
@@ -412,8 +480,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
           <div class="card-body p-0">
             <div class="table-responsive" style="max-height:380px">
               <table class="table table-sm mb-0">
-                <thead class="table-light"><tr><th>Plantilla</th><th>Productos</th><th>Actualizada</th></tr></thead>
-                <tbody id="promoTemplateRows"><tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr></tbody>
+                <thead class="table-light"><tr><th>Plantilla</th><th>Productos</th><th>Banners</th><th>Actualizada</th></tr></thead>
+                <tbody id="promoTemplateRows"><tr><td colspan="4" class="text-center text-muted p-3">Sin plantillas</td></tr></tbody>
               </table>
             </div>
           </div>
@@ -530,7 +598,63 @@ let activeCampaignLogId='';
 let promoSearchTimer=null;
 let conversationFilter='all';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const a=(t,m)=>{const e=document.getElementById('alertBox');e.innerHTML=`<div class="alert alert-${t} py-2">${esc(m)}</div>`;setTimeout(()=>e.innerHTML='',3500)};
+let toastTimer=null;
+const hideToast=()=>{const e=document.getElementById('alertBox'); if(e) e.innerHTML='';};
+function closeToastWithAnim(){
+  if(toastTimer){
+    clearTimeout(toastTimer);
+    toastTimer=null;
+  }
+  const toast=document.querySelector('#alertBox .toast-msg');
+  if(!toast){
+    return;
+  }
+  toast.classList.remove('slide-in');
+  toast.classList.add('hide');
+  toast.addEventListener('animationend', ()=>{hideToast();}, {once:true});
+}
+const clearValidationMarks=()=>{
+  document.querySelectorAll('.is-invalid,.error-block').forEach(el=>{
+    el.classList.remove('is-invalid');
+    el.classList.remove('error-block');
+    el.removeAttribute('aria-invalid');
+  });
+  document.querySelectorAll('.invalid-feedback[data-pb-mark]').forEach(el=>el.remove());
+};
+const markFieldInvalid=(el,msg='')=>{
+  if(!el) return;
+  const node=el instanceof Element ? el : null;
+  if(!node) return;
+  if(node.matches('input,select,textarea,.form-control,.form-select')) node.classList.add('is-invalid');
+  else node.classList.add('error-block');
+  node.setAttribute('aria-invalid','true');
+  node.scrollIntoView({behavior:'smooth',block:'center'});
+  if(typeof node.focus==='function') node.focus();
+  if(msg && !node.nextElementSibling?.classList?.contains('invalid-feedback')) {
+    const fb=document.createElement('div');
+    fb.className='invalid-feedback d-block';
+    fb.setAttribute('data-pb-mark','1');
+    fb.textContent=msg;
+    node.parentElement?.appendChild(fb);
+  }
+};
+const a=(type,msg,{focusEl=null}={})=>{
+  const e=document.getElementById('alertBox');
+  if(!e) return;
+  const safeMsg=esc(msg||'');
+  const cls=type==='danger' ? 'alert-danger' : `alert-${type}`;
+  e.innerHTML=`<div class="alert ${cls} toast-msg slide-in" role="status"><span class="toast-msg-text">${safeMsg}</span><span class="toast-close" role="button" aria-label="Cerrar notificación" onclick="closeToastWithAnim()">×</span></div>`;
+  const toast=e.querySelector('.toast-msg');
+  if(toast){
+    toast.addEventListener('click', ()=>closeToastWithAnim());
+  }
+  if(type==='danger' && focusEl){
+    clearValidationMarks();
+    markFieldInvalid(focusEl);
+  }
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(closeToastWithAnim,4000);
+};
 async function parseApiResponse(r){
   const txt=await r.text();
   try{return JSON.parse(txt);}catch(_){
@@ -583,7 +707,33 @@ function botAutoPayload(){
   };
 }
 async function loadCfg(){const d=await g(API+'?action=get_config');if(d.status!=='success')throw new Error(d.msg||'error');const c=d.config||{};enabled.checked=Number(c.enabled)===1;auto_schedule_enabled.checked=Number(c.auto_schedule_enabled)===1;auto_off_start.value=c.auto_off_start||'07:00';auto_off_end.value=c.auto_off_end||'20:00';wa_mode.value=(c.wa_mode==='meta_api'?'meta_api':'web');bot_tone.value=(c.bot_tone||'muy_cercano');verify_token.value=c.verify_token||'';wa_phone_number_id.value=c.wa_phone_number_id||'';business_name.value=c.business_name||'';welcome_message.value=c.welcome_message||'';menu_intro.value=c.menu_intro||'';no_match_message.value=c.no_match_message||'';applyModeUI();renderBotTonePreview();renderAutoReplyState(c.auto_reply_state||{});}
-async function saveCfg(ev){ev.preventDefault();const payload=botAutoPayload();payload.wa_mode=wa_mode.value;payload.bot_tone=bot_tone.value;payload.verify_token=verify_token.value.trim();payload.wa_phone_number_id=wa_phone_number_id.value.trim();payload.wa_access_token=wa_access_token.value.trim();payload.business_name=business_name.value.trim();payload.welcome_message=welcome_message.value.trim();payload.menu_intro=menu_intro.value.trim();payload.no_match_message=no_match_message.value.trim();const d=await p(API+'?action=save_config',payload);if(d.status==='success'){wa_access_token.value='';a('success','Guardado');loadAll()} else a('danger',d.msg||'error');}
+async function saveCfg(ev){
+  ev.preventDefault();
+  clearValidationMarks();
+  const mode=(wa_mode.value||'web').trim();
+  if(mode==='meta_api'){
+    if(!verify_token.value.trim()){a('danger','Ingresa el Verify Token',{focusEl:verify_token});return;}
+    if(!wa_phone_number_id.value.trim()){a('danger','Ingresa el Phone Number ID',{focusEl:wa_phone_number_id});return;}
+    if(!wa_access_token.value.trim()){a('danger','Ingresa el Access Token',{focusEl:wa_access_token});return;}
+  }
+  const payload=botAutoPayload();
+  payload.wa_mode=mode;
+  payload.bot_tone=bot_tone.value;
+  payload.verify_token=verify_token.value.trim();
+  payload.wa_phone_number_id=wa_phone_number_id.value.trim();
+  payload.wa_access_token=wa_access_token.value.trim();
+  payload.business_name=business_name.value.trim();
+  payload.welcome_message=welcome_message.value.trim();
+  payload.menu_intro=menu_intro.value.trim();
+  payload.no_match_message=no_match_message.value.trim();
+  const d=await p(API+'?action=save_config',payload);
+  if(d.status==='success'){
+    wa_access_token.value='';
+    clearValidationMarks();
+    a('success','Guardado');
+    loadAll();
+  } else a('danger',d.msg||'error');
+}
 async function saveAutoReplyConfig(msg){
   const d=await p(API+'?action=save_config',botAutoPayload());
   if(d.status==='success'){
@@ -886,14 +1036,22 @@ async function loadPromoTemplates(){
   renderProgrammingTab();
 }
 async function savePromoTemplate(){
+  clearValidationMarks();
   const name=(promoTemplateName.value||'').trim();
   const text=(promoText.value||'').trim();
-  if(!name){a('danger','Pon nombre a la plantilla');return;}
-  if(!text && !promoProducts.length && !promoBannerImages.length){a('danger','La plantilla no puede estar vacía');return;}
+  if(!name){a('danger','Pon nombre a la plantilla',{focusEl:promoTemplateName});return;}
+  if(!text && !promoProducts.length && !promoBannerImages.length){
+    const focusTarget=(text===''?promoText:
+      (promoProducts.length===0?document.getElementById('promoProductsWrap'):document.getElementById('promoBannerWrap')));
+    a('danger','La plantilla no puede estar vacía',{focusEl:focusTarget||promoText});
+    return;
+  }
   const currentId=(promoTemplateSelect.value||'').trim();
   const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts,banner_images:promoBannerImages});
   if(d.status==='success'){
-    a('success','Plantilla guardada');
+    const banners = Array.isArray(promoBannerImages)?promoBannerImages.length:0;
+    a('success',`Plantilla guardada` + (banners>0 ? ` (banners: ${Math.min(banners,3)})` : ''));
+    clearValidationMarks();
     await loadPromoTemplates();
     promoTemplateSelect.value=d.id||'';
   } else a('danger',d.msg||'No se pudo guardar plantilla');
@@ -1057,6 +1215,7 @@ async function searchPromoProducts(q){
 }
 async function createPromoCampaign(){
   try{
+    clearValidationMarks();
     const text=(promoText.value||'').trim();
     const campaignName=(promoCampaignName.value||'').trim();
     const campaignGroup=(promoCampaignGroup.value||'').trim()||'General';
@@ -1065,11 +1224,18 @@ async function createPromoCampaign(){
     const minSec=Math.max(60,parseInt(promoMinSec.value||'60',10)||60);
     const maxSec=Math.max(minSec,parseInt(promoMaxSec.value||'120',10)||120);
     const targets=[...document.querySelectorAll('.promo-chat:checked')].map(ch=>promoChats[parseInt(ch.dataset.idx,10)]).filter(Boolean);
-    if(!text){a('danger','Escribe el texto de promoción');return;}
-    if(!targets.length){a('danger','Selecciona al menos un grupo/chat');return;}
-    if(!promoProducts.length){a('danger','Selecciona al menos un producto');return;}
-    if(!scheduleTime){a('danger','Selecciona hora de lanzamiento');return;}
-    if(!scheduleDays.length){a('danger','Selecciona al menos un día');return;}
+    if(!promoProducts.length){
+      const ok=confirm('No has seleccionado productos. ¿Quieres continuar la campaña solo con texto y/o banners?');
+      if(!ok) return;
+    }
+    const hasBanner = Array.isArray(promoBannerImages) && promoBannerImages.length > 0;
+    if(!text && !hasBanner){
+      a('danger','Agrega texto o banner para la campaña',{focusEl:promoText});
+      return;
+    }
+    if(!targets.length){a('danger','Selecciona al menos un grupo/chat',{focusEl:document.getElementById('promoChatsWrap')});return;}
+    if(!scheduleTime){a('danger','Selecciona hora de lanzamiento',{focusEl:promoScheduleTime});return;}
+    if(!scheduleDays.length){a('danger','Selecciona al menos un día',{focusEl:document.querySelector('.promo-day')});return;}
     const d=await p(API+'?action=promo_create',{
       campaign_name:campaignName,
       campaign_group:campaignGroup,
@@ -1084,18 +1250,19 @@ async function createPromoCampaign(){
       schedule_time:scheduleTime,
       schedule_days:scheduleDays
     });
-    if(d.status==='success'){a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
+    if(d.status==='success'){clearValidationMarks();a('success','Campaña programada: '+(d.id||''));loadPromoList();} else a('danger',d.msg||'Error al crear campaña');
   }catch(e){
     a('danger','No se pudo programar la campaña: '+(e?.message||'error inesperado'));
   }
 }
 async function createMyGroupCampaign(){
   try{
+    clearValidationMarks();
     const target=selectedMyGroup();
     const scheduleTime=(myGroupScheduleTime.value||'').trim();
     const campaignGroup=(myGroupCampaignGroup.value||'').trim()||'Mi grupo';
-    if(!target){a('danger','Selecciona un grupo');return;}
-    if(!scheduleTime){a('danger','Selecciona la hora diaria');return;}
+    if(!target){a('danger','Selecciona un grupo',{focusEl:document.getElementById('myGroupWrap')});return;}
+    if(!scheduleTime){a('danger','Selecciona la hora diaria',{focusEl:myGroupScheduleTime});return;}
     const payload=await g(API+'?action=promo_my_group_payload');
     if(payload.status!=='success'){a('danger',payload.msg||'No se pudo preparar Mi grupo');return;}
     const products=Array.isArray(payload.products)?payload.products:[];
@@ -1114,6 +1281,7 @@ async function createMyGroupCampaign(){
       schedule_days:[0,1,2,3,4,5,6]
     });
     if(d.status==='success'){
+      clearValidationMarks();
       renderMyGroupPreview(payload, target.name||target.id);
       a('success','Mi grupo programado: '+(d.id||''));
       loadPromoList();
@@ -1230,11 +1398,12 @@ function renderProgrammingTab(){
   const tplRows=document.getElementById('promoTemplateRows');
   if(tplRows){
     if(!promoTemplates.length){
-      tplRows.innerHTML='<tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr>';
+      tplRows.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin plantillas</td></tr>';
     }else{
       tplRows.innerHTML=promoTemplates.map(t=>`<tr>
         <td class="small fw-semibold">${esc(t.name||t.id||'-')}</td>
         <td class="small">${Array.isArray(t.products)?t.products.length:0}</td>
+        <td class="small">${Array.isArray(t.banner_images)?t.banner_images.length:0}</td>
         <td class="small">${esc(t.updated_at||'-')}</td>
       </tr>`).join('');
     }
