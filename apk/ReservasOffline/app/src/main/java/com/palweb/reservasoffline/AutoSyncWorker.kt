@@ -15,22 +15,29 @@ class AutoSyncWorker(
             val db = AppDatabase.get(applicationContext, cfg.sucursalId)
             val api = OfflineApi(cfg)
             val repo = ReservasRepository(db, api, cfg)
+            val lastReservationsSyncBeforePull = cfg.lastReservationsSyncEpoch / 1000
 
             repo.syncQueue()
             repo.downloadProductsOnly()
             repo.downloadClientsOnly()
-            repo.downloadReservationsOnly()
+            val downloadedReservations = repo.downloadReservationsOnly()
 
-            val changes = api.changesSince(cfg.lastReservationsSyncEpoch / 1000)
-            val changedCount = changes.optInt("reservations_changed", 0) +
-                changes.optInt("products_changed", 0) +
-                changes.optInt("clients_changed", 0)
-            if (changedCount > 0) {
+            val changes = api.changesSince(lastReservationsSyncBeforePull)
+            val reservationsChanged = changes.optInt("reservations_changed", 0)
+            val productsChanged = changes.optInt("products_changed", 0)
+            val clientsChanged = changes.optInt("clients_changed", 0)
+            val changedCount = reservationsChanged + productsChanged + clientsChanged
+            if (changedCount > 0 && downloadedReservations == 0) {
+                val parts = buildList {
+                    if (reservationsChanged > 0) add("$reservationsChanged reservas")
+                    if (productsChanged > 0) add("$productsChanged productos")
+                    if (clientsChanged > 0) add("$clientsChanged clientes")
+                }
                 SyncNotifier.notify(
                     applicationContext,
                     2001,
                     "Cambios remotos disponibles",
-                    "Hay $changedCount cambios nuevos en el servidor."
+                    "Pendientes: ${parts.joinToString(", ")}."
                 )
             }
 

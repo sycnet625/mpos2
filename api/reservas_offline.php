@@ -373,6 +373,7 @@ try {
 
     if ($action === 'changes_since' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $since = intval($_GET['since'] ?? 0);
+        $_GET['updated_after'] = $since;
         $resCount = count(fetch_reservations($pdo, $sucursalID, $idAlmacen));
         $prodCount = count(fetch_products($pdo, $sucursalID, $idAlmacen, $empID));
         $cliCount = count(fetch_clients($pdo));

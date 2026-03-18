@@ -4,6 +4,7 @@ plugins {
     id("org.jetbrains.kotlin.kapt")
 }
 
+import java.io.File
 import java.util.Properties
 
 val keystorePropsFile = rootProject.file("keystore.properties")
@@ -35,12 +36,15 @@ fun bumpVersionName(current: String): String {
 
 val currentVersionCode = (versionProps.getProperty("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
 val currentVersionName = versionProps.getProperty("VERSION_NAME") ?: "1.0.0"
-val nextVersionCode = currentVersionCode + 1
-val nextVersionName = bumpVersionName(currentVersionName)
+val isReleaseBuild = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val targetVersionCode = if (isReleaseBuild) currentVersionCode + 1 else currentVersionCode
+val targetVersionName = if (isReleaseBuild) bumpVersionName(currentVersionName) else currentVersionName
 
-versionProps.setProperty("VERSION_CODE", nextVersionCode.toString())
-versionProps.setProperty("VERSION_NAME", nextVersionName)
-versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented on build") }
+if (isReleaseBuild) {
+    versionProps.setProperty("VERSION_CODE", targetVersionCode.toString())
+    versionProps.setProperty("VERSION_NAME", targetVersionName)
+    versionPropsFile.outputStream().use { versionProps.store(it, "Auto-incremented on release build") }
+}
 
 android {
     namespace = "com.palweb.reservasoffline"
@@ -50,8 +54,8 @@ android {
         applicationId = "com.palweb.reservasoffline"
         minSdk = 26
         targetSdk = 34
-        versionCode = nextVersionCode
-        versionName = nextVersionName
+        versionCode = targetVersionCode
+        versionName = targetVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "DEFAULT_API_PATH", "\"/api/reservas_offline.php\"")
@@ -132,4 +136,16 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     testImplementation("junit:junit:4.13.2")
+}
+
+afterEvaluate {
+    tasks.matching { it.name == "assembleRelease" }.configureEach {
+        doLast {
+            val releaseApk = layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile
+            val otaApk = File(rootProject.projectDir.parentFile, "reservas.apk")
+            if (releaseApk.exists()) {
+                releaseApk.copyTo(otaApk, overwrite = true)
+            }
+        }
+    }
 }

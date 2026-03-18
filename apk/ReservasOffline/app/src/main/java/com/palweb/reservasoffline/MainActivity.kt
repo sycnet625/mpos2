@@ -595,32 +595,43 @@ private fun NetworkBanner(
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.Top
         ) {
-            Text(
-                if (online) "Internet disponible" else "Sin internet",
-                color = fg,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.labelMedium
-            )
-            Spacer(Modifier.width(8.dp))
-            Text("Cola: $queueCount", color = fg, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.width(8.dp))
-            Text("Pend: $pendingReservations", color = fg, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.width(8.dp))
-            Text("Prod: $localProducts", color = fg, style = MaterialTheme.typography.labelSmall)
-            Spacer(Modifier.weight(1f))
-            if (syncing) {
-                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp, color = fg)
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (online) "Internet disponible" else "Sin internet",
+                    color = fg,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelMedium
+                )
                 Spacer(Modifier.width(4.dp))
+                Text("Cola: $queueCount", color = fg, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.width(8.dp))
+                Text("Pend: $pendingReservations", color = fg, style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.width(8.dp))
+                Text("Prod: $localProducts", color = fg, style = MaterialTheme.typography.labelSmall)
             }
-            Text(
-                status,
-                color = fg,
-                style = MaterialTheme.typography.labelSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Spacer(Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.End
+            ) {
+                if (syncing) {
+                    CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 1.8.dp, color = fg)
+                    Spacer(Modifier.width(4.dp))
+                }
+                Text(
+                    status,
+                    color = fg,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }

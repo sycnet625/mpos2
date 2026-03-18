@@ -100,8 +100,9 @@ class OfflineApi(private val cfg: AppConfig) {
         val url = cfg.endpoint(BuildConfig.DEFAULT_API_PATH) + "?action=download_reservations&sucursal_id=${cfg.sucursalId}&updated_after=${cfg.lastReservationsSyncEpoch / 1000}"
         val json = request(url, "GET", null)
         if (json.optString("status") != "success") error(json.optString("msg", "Error descargando reservaciones"))
-        return parseReservations(json.optJSONArray("reservations") ?: JSONArray()).also {
-            cfg.lastReservationsSyncEpoch = System.currentTimeMillis()
+        return parseReservations(json.optJSONArray("reservations") ?: JSONArray()).also { reservations ->
+            val maxServerEpoch = reservations.maxOfOrNull { it.reservation.serverUpdatedAtEpoch } ?: 0L
+            cfg.lastReservationsSyncEpoch = maxOf(System.currentTimeMillis(), maxServerEpoch)
         }
     }
 
