@@ -331,6 +331,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             isInstallingOta.value = true
             otaProgressText.value = "Descargando OTA..."
             statusMsg.value = "Descargando OTA..."
+            SyncNotifier.notifyOtaProgress(getApplication(), "Descargando actualización", "Preparando descarga OTA...", null, indeterminate = true)
             val path = withContext(Dispatchers.IO) {
                 OtaInstaller.downloadAndInstall(
                     getApplication(),
@@ -345,15 +346,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         }
                         otaProgressText.value = progressText
                         statusMsg.value = progressText
+                        val progressValue = if (totalBytes > 0) {
+                            ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                        } else null
+                        SyncNotifier.notifyOtaProgress(
+                            getApplication(),
+                            "Descargando actualización ${info.versionName}",
+                            progressText,
+                            progressValue,
+                            indeterminate = totalBytes <= 0
+                        )
                     }
                 )
             }
             statusMsg.value = "OTA descargada"
             toastMessage.value = "OTA descargada: $path"
+            SyncNotifier.notifyOtaResult(
+                getApplication(),
+                true,
+                "Actualización descargada",
+                "Versión ${info.versionName} lista para instalar."
+            )
         } catch (e: Exception) {
             val msg = debugError("Instalar OTA", activeOtaUrl(), e)
             statusMsg.value = msg
             toastMessage.value = msg
+            SyncNotifier.notifyOtaResult(
+                getApplication(),
+                false,
+                "Error actualizando",
+                e.message ?: "No se pudo descargar o verificar la actualización OTA."
+            )
         } finally {
             isInstallingOta.value = false
             otaProgressText.value = ""
