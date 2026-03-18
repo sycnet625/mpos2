@@ -127,7 +127,9 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     val search by vm.searchText.collectAsStateWithLifecycle()
     val bootstrapping by vm.isBootstrapping.collectAsStateWithLifecycle()
     val syncing by vm.isSyncingQueue.collectAsStateWithLifecycle()
-    val busy = bootstrapping || syncing
+    val installingOta by vm.isInstallingOta.collectAsStateWithLifecycle()
+    val otaProgressText by vm.otaProgressText.collectAsStateWithLifecycle()
+    val busy = bootstrapping || syncing || installingOta
 
     val haptic = LocalHapticFeedback.current
     val context = LocalContext.current
@@ -445,7 +447,14 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                 enter = fadeIn(),
                 exit = fadeOut(),
             ) {
-                LoadingOverlay(label = if (bootstrapping) "Descargando datos..." else "Sincronizando cola...")
+                LoadingOverlay(
+                    label = when {
+                        bootstrapping -> "Descargando datos..."
+                        syncing -> "Sincronizando cola..."
+                        installingOta -> otaProgressText.ifBlank { "Descargando OTA..." }
+                        else -> "Procesando..."
+                    }
+                )
             }
         }
     }

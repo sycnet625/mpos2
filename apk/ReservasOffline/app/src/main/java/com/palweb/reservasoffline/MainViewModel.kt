@@ -46,6 +46,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val online = MutableStateFlow(false)
     val isBootstrapping = MutableStateFlow(false)
     val isSyncingQueue = MutableStateFlow(false)
+    val isInstallingOta = MutableStateFlow(false)
+    val otaProgressText = MutableStateFlow("")
     val toastMessage = MutableStateFlow<String?>(null)
     val otaEvent = MutableStateFlow<OtaInfo?>(null)
     val diagnosticReport = MutableStateFlow<String?>(null)
@@ -323,20 +325,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun installOtaUpdate(info: OtaInfo) = viewModelScope.launch {
         try {
-            toastMessage.value = "Descargando OTA..."
+            isInstallingOta.value = true
+            otaProgressText.value = "Descargando OTA..."
+            statusMsg.value = "Descargando OTA..."
             val path = withContext(Dispatchers.IO) {
                 OtaInstaller.downloadAndInstall(
                     getApplication(),
                     info.apkUrl,
-                    info.apkSha256
+                    info.apkSha256,
+                    onProgress = { downloadedBytes, totalBytes ->
+                        val progressText = if (totalBytes > 0) {
+                            val pct = ((downloadedBytes * 100) / totalBytes).toInt().coerceIn(0, 100)
+                            "Descargando OTA... $pct%"
+                        } else {
+                            "Descargando OTA... ${downloadedBytes / 1024} KB"
+                        }
+                        otaProgressText.value = progressText
+                        statusMsg.value = progressText
+                    }
                 )
             }
+            statusMsg.value = "OTA descargada"
             toastMessage.value = "OTA descargada: $path"
         } catch (e: Exception) {
             val msg = debugError("Instalar OTA", activeOtaUrl(), e)
             statusMsg.value = msg
             toastMessage.value = msg
         } finally {
+            isInstallingOta.value = false
+            otaProgressText.value = ""
             otaEvent.value = null
         }
     }
