@@ -21,7 +21,40 @@ $defaultConfig = [
     "mostrar_materias_primas" => false,
     "mostrar_servicios" => true,
     "categorias_ocultas" => [],
+    "notification_type_settings" => [
+        "purchase_new" => true,
+        "reservation_new" => true,
+        "reservation_manual_created" => true,
+        "reservation_web_new" => true,
+        "reservation_no_stock" => true,
+        "payment_transfer_pending" => true,
+        "self_order_new" => true,
+        "shop_client_new" => true,
+        "bot_new_client" => true,
+        "bot_campaign_created" => true,
+        "cash_session_opened" => true,
+        "cash_session_closed" => true,
+        "web_order_new" => true,
+        "kitchen_new_ticket" => true
+    ],
     "cajeros" => [["nombre" => "Admin", "pin" => "0000"]]
+];
+
+$notificationTypeLabels = [
+    "purchase_new" => "Compra nueva",
+    "reservation_new" => "Nueva reserva",
+    "reservation_manual_created" => "Nueva reserva manual",
+    "reservation_web_new" => "Nueva reserva web",
+    "reservation_no_stock" => "Reserva sin stock",
+    "payment_transfer_pending" => "Transferencia pendiente",
+    "self_order_new" => "Nuevo autopedido",
+    "shop_client_new" => "Nuevo cliente web",
+    "bot_new_client" => "Nuevo cliente por auto bot",
+    "bot_campaign_created" => "Campaña programada",
+    "cash_session_opened" => "Apertura de caja",
+    "cash_session_closed" => "Cierre de caja",
+    "web_order_new" => "Nuevo pedido web",
+    "kitchen_new_ticket" => "Nueva comanda cocina"
 ];
 
 $currentConfig = $defaultConfig;
@@ -46,8 +79,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             "mostrar_materias_primas" => isset($_POST['mostrar_materias_primas']),
             "mostrar_servicios" => isset($_POST['mostrar_servicios']),
             "categorias_ocultas" => $_POST['categorias_ocultas'] ?? [],
+            "notification_type_settings" => [],
             "cajeros" => []
         ];
+
+        $postedNotificationKeys = $_POST['notification_type_keys'] ?? [];
+        foreach ($postedNotificationKeys as $key) {
+            $newConfig['notification_type_settings'][$key] = in_array($key, $_POST['notification_type_enabled'] ?? [], true);
+        }
 
         if (isset($_POST['cajero_nombre'])) {
             for ($i = 0; $i < count($_POST['cajero_nombre']); $i++) {
@@ -68,6 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 try {
     $dbCategories = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1")->fetchAll(PDO::FETCH_COLUMN);
 } catch (Exception $e) { $dbCategories = []; }
+try {
+    $existingNotificationKeys = $pdo->query("SELECT DISTINCT event_key FROM push_notifications WHERE event_key <> '' ORDER BY event_key ASC")->fetchAll(PDO::FETCH_COLUMN);
+} catch (Exception $e) { $existingNotificationKeys = []; }
+$allNotificationKeys = array_values(array_unique(array_merge(array_keys($notificationTypeLabels), $existingNotificationKeys)));
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -83,20 +126,32 @@ try {
     <?php if($msg): ?><div class="alert alert-success"><?php echo $msg; ?></div><?php endif; ?>
     
     <form method="POST">
+        <ul class="nav nav-tabs mb-3" id="cfgTabs">
+            <li class="nav-item"><button type="button" class="nav-link active" onclick="showCfgTab('negocio', this)">Negocio</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('tecnico', this)">Técnico</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('cajeros', this)">Cajeros</button></li>
+            <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('notificaciones', this)">Notificaciones</button></li>
+        </ul>
+
+        <div class="cfg-tab" data-tab-panel="negocio">
         <div class="card"><div class="card-header fw-bold text-primary">Negocio</div><div class="card-body row g-3">
             <div class="col-md-6"><label class="form-label">Nombre</label><input type="text" name="tienda_nombre" class="form-control" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>" required></div>
             <div class="col-md-6"><label class="form-label">Teléfono</label><input type="text" name="telefono" class="form-control" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>"></div>
             <div class="col-12"><label class="form-label">Dirección</label><input type="text" name="direccion" class="form-control" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>"></div>
             <div class="col-12"><label class="form-label">Mensaje Ticket</label><input type="text" name="mensaje_final" class="form-control" value="<?php echo htmlspecialchars($currentConfig['mensaje_final']); ?>"></div>
         </div></div>
+        </div>
 
+        <div class="cfg-tab d-none" data-tab-panel="tecnico">
         <div class="card"><div class="card-header fw-bold text-danger">Técnico y Envíos</div><div class="card-body row g-3">
             <div class="col-md-3"><label class="form-label">ID Empresa</label><input type="number" name="id_empresa" class="form-control" value="<?php echo $currentConfig['id_empresa']; ?>"></div>
             <div class="col-md-3"><label class="form-label">ID Sucursal</label><input type="number" name="id_sucursal" class="form-control" value="<?php echo $currentConfig['id_sucursal']; ?>"></div>
             <div class="col-md-3"><label class="form-label">ID Almacén</label><input type="number" name="id_almacen" class="form-control" value="<?php echo $currentConfig['id_almacen']; ?>"></div>
             <div class="col-md-3"><label class="form-label text-success fw-bold">Tarifa KM ($)</label><input type="number" name="mensajeria_tarifa_km" class="form-control border-success" step="0.01" value="<?php echo $currentConfig['mensajeria_tarifa_km']; ?>"></div>
         </div></div>
+        </div>
 
+        <div class="cfg-tab d-none" data-tab-panel="cajeros">
         <div class="card"><div class="card-header fw-bold text-info">Cajeros</div><div class="card-body">
             <div id="cajerosList">
                 <?php foreach($currentConfig['cajeros'] as $c): ?>
@@ -109,6 +164,28 @@ try {
             </div>
             <button type="button" class="btn btn-sm btn-outline-primary" onclick="addCajero()">+ Agregar</button>
         </div></div>
+        </div>
+
+        <div class="cfg-tab d-none" data-tab-panel="notificaciones">
+            <div class="card">
+                <div class="card-header fw-bold text-warning">Tipos de notificaciones push</div>
+                <div class="card-body">
+                    <p class="text-muted small">Desactiva aquí cualquier tipo para que no se persista ni se lance al sistema.</p>
+                    <div class="row g-2">
+                        <?php foreach($allNotificationKeys as $key): $enabled = !array_key_exists($key, $currentConfig['notification_type_settings'] ?? []) || !empty($currentConfig['notification_type_settings'][$key]); ?>
+                        <div class="col-md-6">
+                            <input type="hidden" name="notification_type_keys[]" value="<?php echo htmlspecialchars($key); ?>">
+                            <label class="form-check form-switch border rounded p-3 d-block bg-white">
+                                <input class="form-check-input" type="checkbox" name="notification_type_enabled[]" value="<?php echo htmlspecialchars($key); ?>" <?php echo $enabled ? 'checked' : ''; ?>>
+                                <span class="ms-2 fw-semibold"><?php echo htmlspecialchars($notificationTypeLabels[$key] ?? $key); ?></span>
+                                <div class="small text-muted mt-1"><?php echo htmlspecialchars($key); ?></div>
+                            </label>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
 
         <button type="submit" class="btn btn-primary btn-lg w-100 shadow">GUARDAR</button>
     </form>
@@ -118,6 +195,12 @@ function addCajero(){
     const d=document.createElement('div');d.className='row g-2 mb-2 item';
     d.innerHTML='<div class="col-5"><input type="text" name="cajero_nombre[]" class="form-control"></div><div class="col-5"><input type="text" name="cajero_pin[]" class="form-control"></div><div class="col-2"><button type="button" class="btn btn-outline-danger" onclick="this.closest(\'.item\').remove()">X</button></div>';
     document.getElementById('cajerosList').appendChild(d);
+}
+function showCfgTab(name, btn){
+    document.querySelectorAll('.cfg-tab').forEach(el=>el.classList.add('d-none'));
+    document.querySelector(`[data-tab-panel="${name}"]`)?.classList.remove('d-none');
+    document.querySelectorAll('#cfgTabs .nav-link').forEach(el=>el.classList.remove('active'));
+    btn.classList.add('active');
 }
 </script>
 </body>

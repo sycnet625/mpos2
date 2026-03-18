@@ -185,7 +185,8 @@ try {
             ]);
             push_notify($pdo, 'operador', '📦 Reserva sin stock',
                 "Pedido #{$idVenta} — {$clienteNombre} tiene productos sin existencia.",
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                'reservation_no_stock'
             );
         }
         if ($estadoPago === 'verificando') {
@@ -194,18 +195,20 @@ try {
             ]);
             push_notify($pdo, 'operador', '💳 Transferencia pendiente de verificar',
                 "Pedido #{$idVenta} — {$clienteNombre}. Código: {$codigoPago}",
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                'payment_transfer_pending'
             );
         }
         if ($estadoPago !== 'verificando') {
-            push_notify($pdo, 'operador', '🛒 Nuevo pedido web',
+            push_notify($pdo, 'operador', $esReserva ? '📅 Nueva reserva web' : '🛒 Nuevo pedido web',
                 "#{$idVenta} — {$clienteNombre} — " . number_format($total, 2) . ' CUP',
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                $esReserva ? 'reservation_web_new' : 'web_order_new'
             );
         }
         if (!empty($itemsCocina) && !$esReserva) {
             $resumen = implode(', ', array_map(fn($i) => $i['qty'] . '× ' . $i['name'], array_slice($itemsCocina, 0, 3)));
-            push_notify($pdo, 'cocina', '🍳 Nueva comanda #' . $idVenta, $resumen, '/marinero/cocina.php');
+            push_notify($pdo, 'cocina', '🍳 Nueva comanda #' . $idVenta, $resumen, '/marinero/cocina.php', 'kitchen_new_ticket');
         }
     } catch (Throwable $notifErr) {
         error_log("ventas_api notifications error: " . $notifErr->getMessage());

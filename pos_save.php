@@ -292,7 +292,8 @@ try {
             push_notify($pdo, 'operador',
                 '📦 Reserva sin stock',
                 "Pedido #{$idVenta} — {$clienteNombre} tiene productos sin existencia.",
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                'reservation_no_stock'
             );
         }
         if ($estadoPago === 'verificando') {
@@ -303,15 +304,33 @@ try {
             push_notify($pdo, 'operador',
                 '💳 Transferencia pendiente de verificar',
                 "Pedido #{$idVenta} — {$clienteNombre}. Código: {$codigoPago}",
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                'payment_transfer_pending'
             );
         }
         // Nuevo pedido web
         if ($canalOrigen === 'Web' && $estadoPago !== 'verificando') {
             push_notify($pdo, 'operador',
-                '🛒 Nuevo pedido web',
+                ($tipoServicio === 'reserva' ? '📅 Nueva reserva web' : '🛒 Nuevo pedido web'),
                 "#{$idVenta} — {$clienteNombre} — " . number_format(floatval($input['total']), 2) . ' CUP',
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                ($tipoServicio === 'reserva' ? 'reservation_web_new' : 'web_order_new')
+            );
+        }
+        if ($canalOrigen !== 'Web' && $tipoServicio === 'reserva') {
+            push_notify($pdo, 'operador',
+                '📅 Nueva reserva',
+                "#{$idVenta} — {$clienteNombre}",
+                '/marinero/reservas.php',
+                'reservation_new'
+            );
+        }
+        if ($canalOrigen !== 'Web' && $tipoServicio !== 'reserva' && $estadoPago !== 'verificando') {
+            push_notify($pdo, 'operador',
+                '🧾 Compra nueva',
+                "#{$idVenta} — {$clienteNombre} — " . number_format(floatval($input['total']), 2) . ' CUP',
+                '/marinero/pos.php',
+                'purchase_new'
             );
         }
         // Nueva comanda a cocina
@@ -320,7 +339,8 @@ try {
             push_notify($pdo, 'cocina',
                 '🍳 Nueva comanda #' . $idVenta,
                 $resumenCocina,
-                '/marinero/cocina.php'
+                '/marinero/cocina.php',
+                'kitchen_new_ticket'
             );
         }
     } catch (Throwable $chatErr) {
@@ -335,4 +355,3 @@ try {
     echo json_encode(['status' => 'error', 'msg' => 'Error: ' . $e->getMessage()]);
 }
 ?>
-

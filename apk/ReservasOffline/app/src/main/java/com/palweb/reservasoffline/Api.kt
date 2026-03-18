@@ -40,6 +40,14 @@ class AppConfig(context: Context) {
         get() = prefs.getLong("last_reservations_sync", 0L)
         set(value) = prefs.edit().putLong("last_reservations_sync", value).apply()
 
+    var lastPlatformNotificationId: Long
+        get() = prefs.getLong("last_platform_notification_id", 0L)
+        set(value) = prefs.edit().putLong("last_platform_notification_id", value).apply()
+
+    var silenceNonReservationNotifications: Boolean
+        get() = prefs.getBoolean("silence_non_reservation_notifications", false)
+        set(value) = prefs.edit().putBoolean("silence_non_reservation_notifications", value).apply()
+
     var otaJsonUrl: String
         get() = prefs.getString("ota_json_url", DEFAULT_OTA_JSON_URL) ?: DEFAULT_OTA_JSON_URL
         set(value) = prefs.edit().putString("ota_json_url", value.trim()).apply()
@@ -66,6 +74,15 @@ data class OtaInfo(
     val apkUrl: String,
     val apkSha256: String,
     val notes: String,
+)
+
+data class PlatformNotification(
+    val id: Long,
+    val type: String,
+    val eventKey: String,
+    val title: String,
+    val body: String,
+    val url: String,
 )
 
 data class SyncOperationResult(
@@ -169,6 +186,26 @@ class OfflineApi(private val cfg: AppConfig) {
     fun changesSince(epochSeconds: Long): JSONObject {
         val url = cfg.endpoint(BuildConfig.DEFAULT_API_PATH) + "?action=changes_since&sucursal_id=${cfg.sucursalId}&since=$epochSeconds"
         return request(url, "GET", null)
+    }
+
+    fun fetchPlatformNotifications(sinceId: Long): List<PlatformNotification> {
+        val url = cfg.endpoint(BuildConfig.DEFAULT_API_PATH) + "?action=notifications_feed&sucursal_id=${cfg.sucursalId}&since_id=$sinceId&limit=20"
+        val json = request(url, "GET", null)
+        if (json.optString("status") != "success") error(json.optString("msg", "Error consultando notificaciones"))
+        val arr = json.optJSONArray("notifications") ?: JSONArray()
+        val items = mutableListOf<PlatformNotification>()
+        for (i in 0 until arr.length()) {
+            val row = arr.getJSONObject(i)
+            items += PlatformNotification(
+                id = row.optLong("id"),
+                type = row.optString("tipo"),
+                eventKey = row.optString("event_key"),
+                title = row.optString("titulo"),
+                body = row.optString("cuerpo"),
+                url = row.optString("url"),
+            )
+        }
+        return items
     }
 
     fun reservationDetail(remoteId: Long): JSONObject {

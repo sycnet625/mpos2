@@ -145,6 +145,7 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     var editingUuid by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
+    var showNotificationOptions by remember { mutableStateOf(false) }
     var resolveConflictUuid by remember { mutableStateOf<String?>(null) }
     var showStatusDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     val mainScroll = rememberScrollState()
@@ -169,6 +170,9 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showSettings = true
                     }) { Icon(Icons.Default.Settings, null) }
+                    TextButton(onClick = { showNotificationOptions = true }) {
+                        Text("Avisos", color = Color.White)
+                    }
                     IconButton(onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showHelp = true
@@ -467,6 +471,9 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     }
     if (showHelp) {
         HelpDialog(onClose = { showHelp = false })
+    }
+    if (showNotificationOptions) {
+        NotificationOptionsDialog(vm = vm, onClose = { showNotificationOptions = false })
     }
     resolveConflictUuid?.let { uuid ->
         ConflictResolverDialog(
@@ -950,6 +957,42 @@ private fun HelpDialog(onClose: () -> Unit) {
 }
 
 @Composable
+private fun NotificationOptionsDialog(vm: MainViewModel, onClose: () -> Unit) {
+    val silence by vm.silenceNonReservationNotifications.collectAsStateWithLifecycle()
+    AlertDialog(
+        onDismissRequest = onClose,
+        confirmButton = {
+            Button(onClick = {
+                vm.saveSettings()
+                onClose()
+            }) { Text("Cerrar") }
+        },
+        title = { Text("Opciones de notificaciones") },
+        text = {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC))) {
+                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Silenciar las notificaciones que no sean de reservas.", color = Color(0xFF334155))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AppAssistChip(selected = !silence, label = "Todas") {
+                            vm.silenceNonReservationNotifications.value = false
+                        }
+                        AppAssistChip(selected = silence, label = "Solo reservas") {
+                            vm.silenceNonReservationNotifications.value = true
+                        }
+                    }
+                    Text(
+                        if (silence) "La app ignorará compras, campañas, caja y otros avisos no relacionados con reservas."
+                        else "La app mostrará todas las notificaciones centrales de la plataforma.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF64748B)
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
 private fun DiagnosticDialog(report: String, onClose: () -> Unit) {
     val scroll = rememberScrollState()
     AlertDialog(
@@ -1068,87 +1111,145 @@ private fun ReservationFormDialog(vm: MainViewModel, editingUuid: String?, onClo
         text = {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 item {
-                    OutlinedTextField(value = clientName, onValueChange = { clientName = it }, label = { Text("Cliente") })
-                    OutlinedTextField(value = clientPhone, onValueChange = { clientPhone = it }, label = { Text("Telefono") })
-                    OutlinedTextField(value = clientAddress, onValueChange = { clientAddress = it }, label = { Text("Direccion") })
-                    OutlinedTextField(value = fecha, onValueChange = { fecha = it }, label = { Text("Fecha yyyy-MM-dd HH:mm") })
-                    OutlinedTextField(value = notas, onValueChange = { notas = it }, label = { Text("Notas") })
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        OutlinedTextField(value = abono, onValueChange = { abono = it }, label = { Text("Abono") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(value = mensajeria, onValueChange = { mensajeria = it }, label = { Text("Mensajeria") }, modifier = Modifier.weight(1f))
+                    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC))) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Cliente", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            OutlinedTextField(value = clientName, onValueChange = { clientName = it }, label = { Text("Nombre") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = clientPhone, onValueChange = { clientPhone = it }, label = { Text("Teléfono") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = clientAddress, onValueChange = { clientAddress = it }, label = { Text("Dirección") }, modifier = Modifier.fillMaxWidth())
+                        }
                     }
                 }
                 item {
-                    HorizontalDivider()
-                    Text("Seleccionar cliente existente")
-                    OutlinedTextField(value = csearch, onValueChange = { csearch = it; vm.clientSearch.value = it }, label = { Text("Buscar cliente") })
-                    clients.take(8).forEach { c ->
-                        Text(
-                            "${c.name} (${c.phone})",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    clientName = c.name
-                                    clientPhone = c.phone
-                                    clientAddress = c.address
-                                    clientRemoteId = c.remoteId
-                                }
-                                .padding(vertical = 3.dp)
-                        )
+                    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Reserva", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            OutlinedTextField(value = fecha, onValueChange = { fecha = it }, label = { Text("Fecha yyyy-MM-dd HH:mm") }, modifier = Modifier.fillMaxWidth())
+                            OutlinedTextField(value = notas, onValueChange = { notas = it }, label = { Text("Notas") }, modifier = Modifier.fillMaxWidth(), minLines = 2)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(value = abono, onValueChange = { abono = it }, label = { Text("Abono") }, modifier = Modifier.weight(1f))
+                                OutlinedTextField(value = mensajeria, onValueChange = { mensajeria = it }, label = { Text("Mensajería") }, modifier = Modifier.weight(1f))
+                            }
+                            Text("Canal", fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AppAssistChip(selected = canal == "WhatsApp", label = "WhatsApp") { canal = "WhatsApp" }
+                                AppAssistChip(selected = canal == "Web", label = "Web") { canal = "Web" }
+                                AppAssistChip(selected = canal == "POS", label = "POS") { canal = "POS" }
+                            }
+                            Text("Pago", fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AppAssistChip(selected = metodo == "Efectivo", label = "Efectivo") { metodo = "Efectivo" }
+                                AppAssistChip(selected = metodo == "Transferencia", label = "Transferencia") { metodo = "Transferencia" }
+                            }
+                            Text("Estado", fontWeight = FontWeight.SemiBold, color = Color(0xFF334155))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AppAssistChip(selected = estadoReserva == "PENDIENTE", label = "Pendiente") { estadoReserva = "PENDIENTE" }
+                                AppAssistChip(selected = estadoReserva == "ENTREGADO", label = "Entregado") { estadoReserva = "ENTREGADO" }
+                                AppAssistChip(selected = estadoReserva == "CANCELADO", label = "Cancelado") { estadoReserva = "CANCELADO" }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                AppAssistChip(selected = estadoPago == "pendiente", label = "Pago pendiente") { estadoPago = "pendiente" }
+                                AppAssistChip(selected = estadoPago == "confirmado", label = "Pago confirmado") { estadoPago = "confirmado" }
+                            }
+                        }
                     }
                 }
                 item {
-                    HorizontalDivider()
-                    Text("Agregar productos")
-                    OutlinedTextField(value = psearch, onValueChange = { psearch = it; vm.productSearch.value = it }, label = { Text("Buscar producto") })
-                    products.take(12).forEach { p ->
-                        Text(
-                            "${p.name}  ${p.code}  $${"%.2f".format(p.price)}  stock:${"%.0f".format(p.stock)}",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    val idx = lines.indexOfFirst { it.productCode == p.code }
-                                    if (idx >= 0) {
-                                        val old = lines[idx]
-                                        lines[idx] = old.copy(qty = old.qty + 1)
-                                    } else {
-                                        lines.add(
-                                            ReservationItemEntity(
-                                                reservationUuid = localUuid ?: "temp",
-                                                productCode = p.code,
-                                                productName = p.name,
-                                                category = p.category,
-                                                qty = 1.0,
-                                                price = p.price,
-                                                stockSnapshot = p.stock,
-                                                esServicio = p.esServicio,
-                                            )
-                                        )
+                    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Cliente existente", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            OutlinedTextField(value = csearch, onValueChange = { csearch = it; vm.clientSearch.value = it }, label = { Text("Buscar cliente") }, modifier = Modifier.fillMaxWidth())
+                            clients.take(8).forEach { c ->
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        clientName = c.name
+                                        clientPhone = c.phone
+                                        clientAddress = c.address
+                                        clientRemoteId = c.remoteId
+                                    }
+                                ) {
+                                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                                        Text(c.name, fontWeight = FontWeight.SemiBold)
+                                        Text("${c.phone} · ${c.address}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
                                     }
                                 }
-                                .padding(vertical = 3.dp)
-                        )
+                            }
+                        }
+                    }
+                }
+                item {
+                    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("Productos", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                            OutlinedTextField(value = psearch, onValueChange = { psearch = it; vm.productSearch.value = it }, label = { Text("Buscar producto") }, modifier = Modifier.fillMaxWidth())
+                            products.take(12).forEach { p ->
+                                Card(
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                                    modifier = Modifier.fillMaxWidth().clickable {
+                                        val idx = lines.indexOfFirst { it.productCode == p.code }
+                                        if (idx >= 0) {
+                                            val old = lines[idx]
+                                            lines[idx] = old.copy(qty = old.qty + 1)
+                                        } else {
+                                            lines.add(
+                                                ReservationItemEntity(
+                                                    reservationUuid = localUuid ?: "temp",
+                                                    productCode = p.code,
+                                                    productName = p.name,
+                                                    category = p.category,
+                                                    qty = 1.0,
+                                                    price = p.price,
+                                                    stockSnapshot = p.stock,
+                                                    esServicio = p.esServicio,
+                                                )
+                                            )
+                                        }
+                                    }
+                                ) {
+                                    Row(Modifier.fillMaxWidth().padding(10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(p.name, fontWeight = FontWeight.SemiBold)
+                                            Text("${p.code} · ${p.category}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF64748B))
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text("$${"%.2f".format(p.price)}", fontWeight = FontWeight.Bold, color = Color(0xFF1D4ED8))
+                                            Text("stock ${"%.0f".format(p.stock)}", style = MaterialTheme.typography.bodySmall, color = if (p.stock > 0) Color(0xFF166534) else Color(0xFF991B1B))
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 items(lines.size) { idx ->
                     val it = lines[idx]
-                    Card(shape = RoundedCornerShape(12.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFEEF2FF))) {
+                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(it.productName, fontWeight = FontWeight.Bold)
-                                Text("${it.productCode}  $${"%.2f".format(it.price)}")
+                                Text("${it.productCode} · $${"%.2f".format(it.price)}", style = MaterialTheme.typography.bodySmall, color = Color(0xFF475569))
                             }
-                            OutlinedButton(onClick = { if (it.qty > 1.0) lines[idx] = it.copy(qty = it.qty - 1) }) { Text("-") }
-                            Text(" ${"%.0f".format(it.qty)} ")
+                            OutlinedButton(onClick = {
+                                if (it.qty > 1.0) lines[idx] = it.copy(qty = it.qty - 1) else lines.removeAt(idx)
+                            }) { Text("-") }
+                            Text(" ${"%.0f".format(it.qty)} ", fontWeight = FontWeight.Bold)
                             OutlinedButton(onClick = { lines[idx] = it.copy(qty = it.qty + 1) }) { Text("+") }
                         }
                     }
                 }
                 item {
-                    val subtotal = lines.sumOf { it.qty * it.price }
-                    val total = subtotal + (mensajeria.toDoubleOrNull() ?: 0.0)
-                    Text("Subtotal: $${"%.2f".format(subtotal)}")
-                    Text("Total: $${"%.2f".format(total)}", fontWeight = FontWeight.Bold)
+                    Card(shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))) {
+                        val subtotal = lines.sumOf { it.qty * it.price }
+                        val total = subtotal + (mensajeria.toDoubleOrNull() ?: 0.0)
+                        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Resumen", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Subtotal: $${"%.2f".format(subtotal)}", color = Color(0xFFCBD5E1))
+                            Text("Total: $${"%.2f".format(total)}", color = Color.White, fontWeight = FontWeight.ExtraBold)
+                        }
+                    }
                 }
             }
         }

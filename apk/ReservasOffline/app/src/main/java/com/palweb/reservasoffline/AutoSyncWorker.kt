@@ -52,6 +52,25 @@ class AutoSyncWorker(
                 )
             }
 
+            val platformNotifications = api.fetchPlatformNotifications(cfg.lastPlatformNotificationId)
+            if (platformNotifications.isNotEmpty()) {
+                platformNotifications.forEach { n ->
+                    if (cfg.silenceNonReservationNotifications && !n.eventKey.startsWith("reservation_")) {
+                        return@forEach
+                    }
+                    SyncNotifier.notify(
+                        applicationContext,
+                        300_000 + n.id.toInt(),
+                        n.title.ifBlank { "Nuevo evento" },
+                        n.body.ifBlank { n.type.ifBlank { "Hay una novedad en la plataforma." } }
+                    )
+                }
+                cfg.lastPlatformNotificationId = maxOf(
+                    cfg.lastPlatformNotificationId,
+                    platformNotifications.maxOf { it.id }
+                )
+            }
+
             db.syncHistoryDao().insert(
                 SyncHistoryEntity(
                     action = "auto_sync",

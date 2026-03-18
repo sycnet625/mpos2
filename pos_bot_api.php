@@ -5,6 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
 require_once __DIR__ . '/habana_delivery.php';
+require_once __DIR__ . '/push_notify.php';
 
 $BOT_OUTBOX = [];
 $BOT_BRIDGE_STATUS_FILE = __DIR__ . '/wa_web_bridge/status.json';
@@ -1023,6 +1024,14 @@ function bot_sync_crm_client(PDO $pdo, string $wa, string $name, string $address
     if (bot_has_column($pdo, 'clientes', 'activo')) { $cols[] = 'activo'; $vals[] = 1; }
     $placeholders = implode(',', array_fill(0, count($cols), '?'));
     $pdo->prepare("INSERT INTO clientes (" . implode(',', $cols) . ") VALUES ({$placeholders})")->execute($vals);
+    push_notify(
+        $pdo,
+        'operador',
+        '🤖 Nuevo cliente atendido por auto bot',
+        "{$name} — {$phone}",
+        '/marinero/pos_bot.php',
+        'bot_new_client'
+    );
 }
 
 function bot_tone(array $cfg): string {
@@ -2947,6 +2956,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, $queue)) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo guardar cola de promoción']); exit;
     }
+    push_notify(
+        $pdo,
+        'operador',
+        '📣 Campaña programada',
+        ($campaignName !== '' ? $campaignName : $jobId) . ' — ' . count($targetsFinal) . ' destino(s)',
+        '/marinero/pos_bot.php',
+        'bot_campaign_created'
+    );
     echo json_encode(['status'=>'success','id'=>$jobId]); exit;
 }
 

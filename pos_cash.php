@@ -3,6 +3,7 @@
 header('Content-Type: application/json');
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'push_notify.php';
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
@@ -70,6 +71,15 @@ try {
             VALUES (?, ?, ?, ?, 'ABIERTA', NOW())");
         
         if ($stmt->execute([$cajero, $monto, $fechaContable, $sucursalID])) {
+            $sessionId = (int)$pdo->lastInsertId();
+            push_notify(
+                $pdo,
+                'operador',
+                '🟢 Sesión de caja abierta',
+                "{$cajero} — fondo inicial $" . number_format($monto, 2),
+                '/marinero/pos.php',
+                'cash_session_opened'
+            );
             echo json_encode(['status' => 'success']);
         } else {
             echo json_encode(['status' => 'error', 'msg' => 'No se pudo abrir el turno en la BD']);
@@ -97,6 +107,14 @@ try {
             $input['nota'] ?? '', 
             intval($input['id'])
         ])) {
+            push_notify(
+                $pdo,
+                'operador',
+                '🔴 Sesión de caja cerrada',
+                'Caja #' . intval($input['id']) . ' — diferencia $' . number_format($diff, 2),
+                '/marinero/pos.php',
+                'cash_session_closed'
+            );
             echo json_encode(['status' => 'success']);
         } else {
             echo json_encode(['status' => 'error', 'msg' => 'No se pudo actualizar la base de datos']);
@@ -106,5 +124,4 @@ try {
 } catch (Exception $e) {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
-
 

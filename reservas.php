@@ -95,13 +95,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             push_notify($pdo, 'operador',
                 '📅 Nueva reserva #' . $idVenta,
                 "{$clienteNombre}" . ($resumenItems ? " — {$resumenItems}" : ''),
-                '/marinero/reservas.php'
+                '/marinero/reservas.php',
+                'reservation_manual_created'
             );
             if ($sinExistencia) {
                 push_notify($pdo, 'operador',
                     '📦 Reserva sin stock',
                     "Reserva #{$idVenta} — {$clienteNombre} tiene productos sin existencia.",
-                    '/marinero/reservas.php'
+                    '/marinero/reservas.php',
+                    'reservation_no_stock'
                 );
             }
 

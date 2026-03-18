@@ -3,6 +3,7 @@
 ini_set('display_errors', 0); // Evitar que errores PHP rompan el JSON
 header('Content-Type: application/json');
 require_once 'db.php';
+require_once 'push_notify.php';
 session_start();
 
 $input = json_decode(file_get_contents('php://input'), true);
@@ -73,6 +74,14 @@ if ($action === 'create') {
         }
 
         $pdo->commit();
+        push_notify(
+            $pdo,
+            'operador',
+            '🛎️ Nuevo autopedido',
+            trim(($input['name'] ?? 'Cliente') . ' — ' . number_format((float)$total, 2) . ' CUP'),
+            '/marinero/pos.php',
+            'self_order_new'
+        );
         echo json_encode(['status' => 'success', 'id' => $id]);
 
     } catch (Exception $e) {

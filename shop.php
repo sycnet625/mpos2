@@ -40,6 +40,7 @@ header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
 
 require_once 'config_loader.php';
+require_once 'push_notify.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
@@ -438,6 +439,14 @@ if (isset($input_client_api['action_client'])) {
             $hash = password_hash($input_client_api['password'], PASSWORD_DEFAULT);
             $stmt = $pdo->prepare("INSERT INTO clientes_tienda (nombre, telefono, password_hash, direccion) VALUES (?, ?, ?, ?)");
             $stmt->execute([$input_client_api['nombre'], $input_client_api['telefono'], $hash, $input_client_api['direccion'] ?? '']);
+            push_notify(
+                $pdo,
+                'operador',
+                '👤 Nuevo cliente web',
+                trim(($input_client_api['nombre'] ?? 'Cliente') . ' — ' . ($input_client_api['telefono'] ?? '')),
+                '/marinero/shop.php',
+                'shop_client_new'
+            );
             echo json_encode(['status' => 'success']);
         }
         elseif ($act === 'logout') {

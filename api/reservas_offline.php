@@ -315,6 +315,31 @@ function fetch_reservation_detail(PDO $pdo, int $id, int $sucursalID, int $idAlm
     return $r;
 }
 
+function fetch_platform_notifications(PDO $pdo, int $sinceId, int $limit = 20): array {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS push_notifications (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        tipo       VARCHAR(30)  NOT NULL,
+        event_key  VARCHAR(80)  NOT NULL DEFAULT '',
+        titulo     VARCHAR(200) NOT NULL,
+        cuerpo     TEXT,
+        url        VARCHAR(500),
+        leida      TINYINT(1)  DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_tipo_leida (tipo, leida)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $limit = max(1, min(50, $limit));
+    $stmt = $pdo->prepare(
+        "SELECT id, tipo, event_key, titulo, cuerpo, url, created_at
+           FROM push_notifications
+          WHERE id > ? AND tipo IN ('operador', 'todos')
+          ORDER BY id ASC
+          LIMIT {$limit}"
+    );
+    $stmt->execute([$sinceId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
 $action = $_GET['action'] ?? '';
 
 try {
@@ -383,6 +408,18 @@ try {
             'reservations_changed' => $resCount,
             'products_changed' => $prodCount,
             'clients_changed' => $cliCount,
+            'server_time' => date('c'),
+        ]);
+        exit;
+    }
+
+    if ($action === 'notifications_feed' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+        $sinceId = intval($_GET['since_id'] ?? 0);
+        $rows = fetch_platform_notifications($pdo, $sinceId, intval($_GET['limit'] ?? 20));
+        echo json_encode([
+            'status' => 'success',
+            'notifications' => $rows,
+            'count' => count($rows),
             'server_time' => date('c'),
         ]);
         exit;

@@ -12,9 +12,29 @@ if (!class_exists('PushManager')) {
     require_once __DIR__ . '/push_manager.php';
 }
 
-function push_notify(PDO $pdo, string $tipo, string $titulo, string $cuerpo = '', string $url = ''): void
+function push_notify_is_enabled(string $eventKey): bool
+{
+    if ($eventKey === '') return true;
+    $configFile = __DIR__ . '/pos.cfg';
+    if (!is_file($configFile)) return true;
+    $cfg = json_decode(file_get_contents($configFile), true) ?: [];
+    $settings = is_array($cfg['notification_type_settings'] ?? null) ? $cfg['notification_type_settings'] : [];
+    if (!array_key_exists($eventKey, $settings)) return true;
+    return !empty($settings[$eventKey]);
+}
+
+function push_notify(
+    PDO $pdo,
+    string $tipo,
+    string $titulo,
+    string $cuerpo = '',
+    string $url = '',
+    string $eventKey = ''
+): void
 {
     try {
+        if (!push_notify_is_enabled($eventKey)) return;
+
         // ── Auto-crear tablas si no existen ──────────────────────────────
         $pdo->exec("CREATE TABLE IF NOT EXISTS push_subscriptions (
             id          INT AUTO_INCREMENT PRIMARY KEY,
@@ -32,6 +52,7 @@ function push_notify(PDO $pdo, string $tipo, string $titulo, string $cuerpo = ''
         $pdo->exec("CREATE TABLE IF NOT EXISTS push_notifications (
             id         INT AUTO_INCREMENT PRIMARY KEY,
             tipo       VARCHAR(30)  NOT NULL,
+            event_key  VARCHAR(80)  NOT NULL DEFAULT '',
             titulo     VARCHAR(200) NOT NULL,
             cuerpo     TEXT,
             url        VARCHAR(500),
@@ -39,12 +60,14 @@ function push_notify(PDO $pdo, string $tipo, string $titulo, string $cuerpo = ''
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX idx_tipo_leida (tipo, leida)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $pdo->exec("ALTER TABLE push_notifications ADD COLUMN IF NOT EXISTS event_key VARCHAR(80) NOT NULL DEFAULT '' AFTER tipo");
 
         // ── Persistir notificación ────────────────────────────────────────
         $pdo->prepare(
-            "INSERT INTO push_notifications (tipo, titulo, cuerpo, url) VALUES (?, ?, ?, ?)"
+            "INSERT INTO push_notifications (tipo, event_key, titulo, cuerpo, url) VALUES (?, ?, ?, ?, ?)"
         )->execute([
             $tipo,
+            mb_substr($eventKey, 0, 80),
             mb_substr($titulo, 0, 200),
             mb_substr($cuerpo, 0, 1000),
             mb_substr($url,    0, 500),

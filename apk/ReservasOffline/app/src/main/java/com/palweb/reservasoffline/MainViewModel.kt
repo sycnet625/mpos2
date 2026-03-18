@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +49,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val isSyncingQueue = MutableStateFlow(false)
     val isInstallingOta = MutableStateFlow(false)
     val otaProgressText = MutableStateFlow("")
+    val silenceNonReservationNotifications = MutableStateFlow(cfg.silenceNonReservationNotifications)
     val toastMessage = MutableStateFlow<String?>(null)
     val otaEvent = MutableStateFlow<OtaInfo?>(null)
     val diagnosticReport = MutableStateFlow<String?>(null)
@@ -103,6 +105,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         cfg.apiKey = apiKey.value
         cfg.otaJsonUrl = otaJsonUrl.value
         cfg.sucursalId = sucursalId.value
+        cfg.silenceNonReservationNotifications = silenceNonReservationNotifications.value
         statusMsg.value = "Configuracion guardada"
     }
 
@@ -432,6 +435,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             override fun onAvailable(network: Network) {
                 online.value = true
                 statusMsg.value = "Internet disponible: pulsa Subir pendientes"
+                WorkManager.getInstance(app).enqueue(
+                    OneTimeWorkRequestBuilder<AutoSyncWorker>()
+                        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                        .build()
+                )
             }
 
             override fun onLost(network: Network) {
