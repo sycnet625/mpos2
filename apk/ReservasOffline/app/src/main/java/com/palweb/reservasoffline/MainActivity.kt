@@ -145,7 +145,6 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     var editingUuid by remember { mutableStateOf<String?>(null) }
     var showSettings by remember { mutableStateOf(false) }
     var showHelp by remember { mutableStateOf(false) }
-    var showNotificationOptions by remember { mutableStateOf(false) }
     var resolveConflictUuid by remember { mutableStateOf<String?>(null) }
     var showStatusDialog by remember { mutableStateOf<Pair<String, String>?>(null) }
     val mainScroll = rememberScrollState()
@@ -170,9 +169,6 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showSettings = true
                     }) { Icon(Icons.Default.Settings, null) }
-                    TextButton(onClick = { showNotificationOptions = true }) {
-                        Text("Avisos", color = Color.White)
-                    }
                     IconButton(onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         showHelp = true
@@ -471,9 +467,6 @@ private fun AppRoot(vm: MainViewModel = viewModel()) {
     }
     if (showHelp) {
         HelpDialog(onClose = { showHelp = false })
-    }
-    if (showNotificationOptions) {
-        NotificationOptionsDialog(vm = vm, onClose = { showNotificationOptions = false })
     }
     resolveConflictUuid?.let { uuid ->
         ConflictResolverDialog(
@@ -899,6 +892,7 @@ private fun SettingsDialog(vm: MainViewModel, onClose: () -> Unit) {
     val apiKey by vm.apiKey.collectAsStateWithLifecycle()
     val sucursalId by vm.sucursalId.collectAsStateWithLifecycle()
     val otaJsonUrl by vm.otaJsonUrl.collectAsStateWithLifecycle()
+    val silence by vm.silenceNonReservationNotifications.collectAsStateWithLifecycle()
     val scroll = rememberScrollState()
 
     AlertDialog(
@@ -923,6 +917,32 @@ private fun SettingsDialog(vm: MainViewModel, onClose: () -> Unit) {
                     onValueChange = { vm.otaJsonUrl.value = it },
                     label = { Text("OTA JSON URL (opcional)") }
                 )
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC))
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("Notificaciones", fontWeight = FontWeight.Bold, color = Color(0xFF0F172A))
+                        Text("Controla si la app muestra todos los eventos del sistema central o solo los avisos de reservas.", color = Color(0xFF334155))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AppAssistChip(selected = !silence, label = "Todas") {
+                                vm.silenceNonReservationNotifications.value = false
+                            }
+                            AppAssistChip(selected = silence, label = "Solo reservas") {
+                                vm.silenceNonReservationNotifications.value = true
+                            }
+                        }
+                        Text(
+                            if (silence) "Se silenciarán compras, campañas, caja y otros avisos que no sean de reservas."
+                            else "La app mostrará todas las notificaciones centrales de la plataforma.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF64748B)
+                        )
+                    }
+                }
                 Text("Endpoint fijo: ${BuildConfig.DEFAULT_API_PATH}")
                 Text("Nota: al cambiar sucursal, la base local usada sera la de esa sucursal.")
             }
@@ -951,42 +971,6 @@ private fun HelpDialog(onClose: () -> Unit) {
                 Text("5) Revisa Historial Sync para errores y exporta CSV si necesitas soporte.")
                 Text("6) Usa OTA para buscar y actualizar la app online.")
                 Text("7) El autosync corre en segundo plano cuando hay internet.")
-            }
-        }
-    )
-}
-
-@Composable
-private fun NotificationOptionsDialog(vm: MainViewModel, onClose: () -> Unit) {
-    val silence by vm.silenceNonReservationNotifications.collectAsStateWithLifecycle()
-    AlertDialog(
-        onDismissRequest = onClose,
-        confirmButton = {
-            Button(onClick = {
-                vm.saveSettings()
-                onClose()
-            }) { Text("Cerrar") }
-        },
-        title = { Text("Opciones de notificaciones") },
-        text = {
-            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC))) {
-                Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Silenciar las notificaciones que no sean de reservas.", color = Color(0xFF334155))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AppAssistChip(selected = !silence, label = "Todas") {
-                            vm.silenceNonReservationNotifications.value = false
-                        }
-                        AppAssistChip(selected = silence, label = "Solo reservas") {
-                            vm.silenceNonReservationNotifications.value = true
-                        }
-                    }
-                    Text(
-                        if (silence) "La app ignorará compras, campañas, caja y otros avisos no relacionados con reservas."
-                        else "La app mostrará todas las notificaciones centrales de la plataforma.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color(0xFF64748B)
-                    )
-                }
             }
         }
     )
