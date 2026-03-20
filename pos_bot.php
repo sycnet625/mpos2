@@ -1369,7 +1369,10 @@ function renderPromoProducts(){
   if(!promoProducts.length){w.innerHTML='<div class="text-muted small">Sin productos seleccionados.</div>';return;}
   w.innerHTML=promoProducts.map((p,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-1">
     <img src="${esc(p.image||'')}" alt="" width="42" height="42" style="object-fit:cover;border-radius:6px;border:1px solid #ddd">
-    <div class="small"><div class="fw-semibold">${esc(p.name)}</div><div class="text-muted">$${Number(p.price||0).toFixed(2)} · ${esc(p.id)}</div></div>
+    <div class="small">
+      <div class="fw-semibold">${esc(p.name)}</div>
+      <div class="text-muted">$${Number(p.price||0).toFixed(2)} · ${esc(p.id)} · ${String(p.price_mode||'retail')==='wholesale'?'Mayorista':'Minorista'}</div>
+    </div>
     <button class="btn btn-sm btn-outline-danger ms-auto" type="button" onclick="removePromoProduct(${idx})"><i class="fas fa-times"></i></button>
   </div>`).join('');
 }
@@ -1387,6 +1390,37 @@ function renderPromoBanners(){
   </div>`).join('');
 }
 function removePromoBanner(idx){promoBannerImages.splice(idx,1);renderPromoBanners();}
+function normalizePromoProductChoice(p, mode){
+  const retail=Number(p?.retail_price ?? p?.price ?? 0);
+  const wholesaleRaw=Number(p?.wholesale_price ?? 0);
+  const useWholesale=mode==='wholesale';
+  const wholesale=wholesaleRaw>0?wholesaleRaw:retail;
+  return {
+    ...p,
+    retail_price:retail,
+    wholesale_price:wholesaleRaw,
+    price_mode:useWholesale?'wholesale':'retail',
+    price:useWholesale?wholesale:retail
+  };
+}
+function askPromoPriceMode(p, existingMode=''){
+  const retail=Number(p?.retail_price ?? p?.price ?? 0);
+  const wholesale=Number(p?.wholesale_price ?? 0);
+  const defaultCode=existingMode==='wholesale'?'M':'N';
+  const hasWholesale=wholesale>0 && wholesale!==retail;
+  const msg=[
+    `Precio para ${p?.name||p?.id||'producto'} (${p?.id||'-'}):`,
+    `N = Minorista $${retail.toFixed(2)}`,
+    `M = Mayorista $${(hasWholesale?wholesale:retail).toFixed(2)}${hasWholesale?'':' (igual al minorista)'}`,
+    'Escribe N o M'
+  ].join('\n');
+  const raw=(prompt(msg, defaultCode)||'').trim().toUpperCase();
+  if(!raw) return null;
+  if(raw==='M') return hasWholesale?'wholesale':'retail';
+  if(raw==='N') return 'retail';
+  a('danger','Respuesta inválida. Usa N para minorista o M para mayorista.');
+  return null;
+}
 async function onPromoBannerInput(ev){
   const files=[...(ev.target.files||[])];
   if(!files.length) return;
@@ -1408,8 +1442,17 @@ async function onPromoBannerInput(ev){
 function removePromoProduct(idx){promoProducts.splice(idx,1);renderPromoProducts();}
 function addPromoProduct(p){
   if(!p||!p.id) return;
-  if(promoProducts.some(x=>String(x.id)===String(p.id))) return;
-  promoProducts.push(p);
+  const existingIdx=promoProducts.findIndex(x=>String(x.id)===String(p.id));
+  const existing=existingIdx>=0?promoProducts[existingIdx]:null;
+  const mode=askPromoPriceMode(p, existing?.price_mode||'');
+  if(!mode) return;
+  const chosen=normalizePromoProductChoice(p, mode);
+  if(existingIdx>=0){
+    promoProducts[existingIdx]=chosen;
+    a('info','Precio actualizado para '+(p.name||p.id));
+  }else{
+    promoProducts.push(chosen);
+  }
   renderPromoProducts();
 }
 async function searchPromoProducts(q){
@@ -1421,7 +1464,7 @@ async function searchPromoProducts(q){
   const rows=Array.isArray(d.rows)?d.rows:[];
   box.innerHTML=rows.map(r=>`<button class="list-group-item list-group-item-action d-flex align-items-center gap-2" type="button" onclick='addPromoProduct(${JSON.stringify(r).replace(/'/g,"&#39;")});document.getElementById("promoSearchRes").innerHTML="";'>
     <img src="${esc(r.image||'')}" alt="" width="32" height="32" style="object-fit:cover;border-radius:5px;border:1px solid #ddd">
-    <span class="small">${esc(r.name)} <span class="text-muted">(${esc(r.id)})</span> - $${Number(r.price||0).toFixed(2)}</span>
+    <span class="small">${esc(r.name)} <span class="text-muted">(${esc(r.id)})</span> - Min $${Number(r.retail_price||r.price||0).toFixed(2)} · May $${Number((r.wholesale_price||0)>0?r.wholesale_price:r.retail_price||r.price||0).toFixed(2)}</span>
   </button>`).join('');
 }
 async function createPromoCampaign(){

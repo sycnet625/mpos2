@@ -2440,7 +2440,7 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
     $q = trim((string)($_GET['q'] ?? ''));
     $lim = max(1, min(30, (int)($_GET['limit'] ?? 20)));
     $like = '%' . $q . '%';
-    $sql = "SELECT codigo,nombre,precio
+    $sql = "SELECT codigo,nombre,precio,COALESCE(precio_mayorista,0) AS precio_mayorista
             FROM productos
             WHERE activo=1 AND id_empresa=?
               AND (nombre LIKE ? OR codigo LIKE ?)
@@ -2458,6 +2458,9 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
             'id' => $sku,
             'name' => (string)$r['nombre'],
             'price' => (float)$r['precio'],
+            'retail_price' => (float)$r['precio'],
+            'wholesale_price' => (float)($r['precio_mayorista'] ?? 0),
+            'price_mode' => 'retail',
             'image' => $img
         ];
     }
@@ -2605,6 +2608,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
             'id' => $pid,
             'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
             'price' => (float)($p['price'] ?? 0),
+            'retail_price' => (float)($p['retail_price'] ?? ($p['price'] ?? 0)),
+            'wholesale_price' => (float)($p['wholesale_price'] ?? 0),
+            'price_mode' => in_array((string)($p['price_mode'] ?? 'retail'), ['retail','wholesale'], true) ? (string)$p['price_mode'] : 'retail',
             'image' => trim((string)($p['image'] ?? ''))
         ];
     }
@@ -2921,6 +2927,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
             'id' => $pid,
             'name' => substr(trim((string)($p['name'] ?? $pid)), 0, 150),
             'price' => (float)($p['price'] ?? 0),
+            'retail_price' => (float)($p['retail_price'] ?? ($p['price'] ?? 0)),
+            'wholesale_price' => (float)($p['wholesale_price'] ?? 0),
+            'price_mode' => in_array((string)($p['price_mode'] ?? 'retail'), ['retail','wholesale'], true) ? (string)$p['price_mode'] : 'retail',
             'image' => trim((string)($p['image'] ?? ('image.php?code=' . rawurlencode($pid))))
         ];
     }
