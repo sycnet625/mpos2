@@ -7,6 +7,7 @@ import java.io.BufferedReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 
 class AppConfig(context: Context) {
     private val prefs = context.getSharedPreferences("reservas_offline_cfg", Context.MODE_PRIVATE)
@@ -301,6 +302,13 @@ class OfflineApi(private val cfg: AppConfig) {
         val uuid = r.optString("local_uuid").ifBlank {
             "remote-${r.optLong("id")}-${System.currentTimeMillis()}-$index"
         }
+        val rawEstado = r.optString("estado_reserva", "PENDIENTE").trim().uppercase(Locale.ROOT)
+        val normalizedEstado = when (rawEstado) {
+            "", "NULL" -> "PENDIENTE"
+            "COMPLETADO", "COMPLETADA", "FINALIZADO", "FINALIZADA" -> "ENTREGADO"
+            "ANULADO", "ANULADA" -> "CANCELADO"
+            else -> rawEstado
+        }
         val res = ReservationEntity(
             localUuid = uuid,
             remoteId = r.optLong("id").takeIf { it > 0 },
@@ -313,7 +321,7 @@ class OfflineApi(private val cfg: AppConfig) {
             metodoPago = r.optString("metodo_pago", "Efectivo"),
             canalOrigen = r.optString("canal_origen", "POS"),
             estadoPago = r.optString("estado_pago", "pendiente"),
-            estadoReserva = r.optString("estado_reserva", "PENDIENTE"),
+            estadoReserva = normalizedEstado,
             abono = r.optDouble("abono", 0.0),
             total = r.optDouble("total", 0.0),
             costoMensajeria = r.optDouble("costo_mensajeria", 0.0),

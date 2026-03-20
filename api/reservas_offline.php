@@ -37,6 +37,14 @@ function parse_fecha($input) {
     return date('Y-m-d H:i:s', strtotime($text));
 }
 
+function normalize_reservation_status($status): string {
+    $value = strtoupper(trim((string)$status));
+    if ($value === '' || $value === 'NULL') return 'PENDIENTE';
+    if (in_array($value, ['COMPLETADO', 'COMPLETADA', 'FINALIZADO', 'FINALIZADA'], true)) return 'ENTREGADO';
+    if (in_array($value, ['ANULADO', 'ANULADA'], true)) return 'CANCELADO';
+    return $value;
+}
+
 function calcular_sin_existencia(PDO $pdo, array $items, int $idAlmacen): int {
     $sinExistencia = 0;
     foreach ($items as $it) {
@@ -250,6 +258,9 @@ function fetch_reservations(PDO $pdo, int $sucursalID, int $idAlmacen): array {
     $hasUpdatedAt = has_column($pdo, 'ventas_cabecera', 'updated_at');
     $updatedField = $hasUpdatedAt ? 'updated_at' : 'fecha';
     $updatedFilter = ($updatedAfter > 0) ? "AND UNIX_TIMESTAMP({$updatedField}) > {$updatedAfter}" : '';
+    $activeFilter = $updatedAfter > 0
+        ? ''
+        : "AND (estado_reserva IS NULL OR UPPER(TRIM(estado_reserva)) IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO','LISTO'))";
 
     $stmtR = $pdo->prepare("SELECT id, uuid_venta, cliente_nombre, cliente_telefono, cliente_direccion,
                                    id_cliente, fecha_reserva, UNIX_TIMESTAMP(fecha_reserva) AS fecha_reserva_epoch,
@@ -263,6 +274,7 @@ function fetch_reservations(PDO $pdo, int $sucursalID, int $idAlmacen): array {
                             WHERE id_sucursal=? AND tipo_servicio='reserva'
                               AND fecha_reserva >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
                               AND fecha_reserva < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
+                              {$activeFilter}
                               {$updatedFilter}
                             ORDER BY fecha_reserva ASC
                             LIMIT 5000");
@@ -279,6 +291,7 @@ function fetch_reservations(PDO $pdo, int $sucursalID, int $idAlmacen): array {
         $stmtD->execute([$idAlmacen, intval($r['id'])]);
         $r['items'] = $stmtD->fetchAll(PDO::FETCH_ASSOC);
         $r['local_uuid'] = $r['uuid_venta'] ?: ('remote-' . $r['id']);
+        $r['estado_reserva'] = normalize_reservation_status($r['estado_reserva'] ?? 'PENDIENTE');
         $subtotal = 0.0;
         foreach ($r['items'] as $it) {
             $subtotal += floatval($it['cantidad']) * floatval($it['precio']);
@@ -312,6 +325,7 @@ function fetch_reservation_detail(PDO $pdo, int $id, int $sucursalID, int $idAlm
     $stmtD->execute([$idAlmacen, intval($r['id'])]);
     $r['items'] = $stmtD->fetchAll(PDO::FETCH_ASSOC);
     $r['local_uuid'] = $r['uuid_venta'] ?: ('remote-' . $r['id']);
+    $r['estado_reserva'] = normalize_reservation_status($r['estado_reserva'] ?? 'PENDIENTE');
     return $r;
 }
 
