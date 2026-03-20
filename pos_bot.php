@@ -17,6 +17,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 body{background:#f6f8fc}
 .card{border:0;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.06)}
 .stat{font-size:1.6rem;font-weight:700}
+.metric-card{border:1px solid transparent !important;border-radius:14px;box-shadow:0 10px 24px rgba(15,23,42,.06)}
 #toastArea{
   position:fixed;
   left:0;
@@ -93,10 +94,10 @@ body{background:#f6f8fc}
   </div>
 
   <div class="row g-3 mb-3">
-    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Sesiones</div><div id="s1" class="stat">0</div></div></div>
-    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Mensajes hoy</div><div id="s2" class="stat">0</div></div></div>
-    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Reservas hoy</div><div id="s3" class="stat">0</div></div></div>
-    <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Ventas hoy</div><div id="s4" class="stat">$0.00</div></div></div>
+    <div class="col-md-3"><div class="card metric-card p-3" style="background:#eef6ff !important;border-color:#cfe3ff !important"><div class="text-muted small">Sesiones</div><div id="s1" class="stat">0</div></div></div>
+    <div class="col-md-3"><div class="card metric-card p-3" style="background:#f3f0ff !important;border-color:#ddd1ff !important"><div class="text-muted small">Mensajes hoy</div><div id="s2" class="stat">0</div></div></div>
+    <div class="col-md-3"><div class="card metric-card p-3" style="background:#ecfff5 !important;border-color:#c8f1da !important"><div class="text-muted small">Reservas hoy</div><div id="s3" class="stat">0</div></div></div>
+    <div class="col-md-3"><div class="card metric-card p-3" style="background:#fff7e8 !important;border-color:#ffe0a8 !important"><div class="text-muted small">Ventas hoy</div><div id="s4" class="stat">$0.00</div></div></div>
     <div class="col-12">
       <div class="card p-3">
         <div class="d-flex align-items-center gap-2">
