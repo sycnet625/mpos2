@@ -180,6 +180,36 @@ function ptable_like_patterns(string $sku): array {
     ];
 }
 
+function ptable_json_exit(array $payload, int $statusCode = 200): void {
+    if (!headers_sent()) {
+        http_response_code($statusCode);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function ptable_register_upload_shutdown(): void {
+    register_shutdown_function(static function () {
+        $error = error_get_last();
+        if (!$error) {
+            return;
+        }
+        $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+        if (!in_array((int)$error['type'], $fatalTypes, true)) {
+            return;
+        }
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode([
+            'status' => 'error',
+            'msg' => 'Fallo procesando la imagen: ' . trim((string)($error['message'] ?? 'error interno')),
+        ], JSON_UNESCAPED_UNICODE);
+    });
+}
+
 $allowedCategories = ptable_fetch_categories($pdo);
 
 // ---------------------------------------------------------
@@ -404,6 +434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // SUBIDA DE IMAGEN — guarda en .jpg, .webp y .avif
         if (isset($_FILES['new_photo'])) {
         try {
+            ptable_register_upload_shutdown();
             $code = trim((string)($_POST['prod_code'] ?? ''));
             if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) {
                 throw new Exception("Código de producto inválido.");
@@ -439,8 +470,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (@file_put_contents($base . $ext, $imgData) === false) {
                     throw new Exception("No se pudo guardar la imagen en disco.");
                 }
-                echo json_encode(['status' => 'success', 'mode' => 'original']);
-                exit;
+                ptable_json_exit(['status' => 'success', 'mode' => 'original']);
             }
 
             $src = @imagecreatefromstring($imgData);
@@ -492,9 +522,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             imagedestroy($master);
             imagedestroy($thumb);
 
-            echo json_encode(['status' => 'success', 'mode' => 'processed']);
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+            ptable_json_exit(['status' => 'success', 'mode' => 'processed']);
+        } catch (Throwable $e) {
+            ptable_json_exit(['status' => 'error', 'msg' => $e->getMessage()], 500);
         }
         exit;
     }
@@ -1903,7 +1933,13 @@ async function handleEditorUpload() {
 
     try {
         const res  = await fetch('products_table.php', { method: 'POST', body: formData });
-        const data = await res.json();
+        const raw  = await res.text();
+        let data;
+        try {
+            data = JSON.parse(raw);
+        } catch (parseError) {
+            throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
+        }
         if (data.status === 'success') {
             if (imgEl) {
                 imgEl.src = `image.php?code=${encodeURIComponent(prodCode)}&t=${Date.now()}`;
@@ -1935,7 +1971,7 @@ async function handleEditorUpload() {
         }
     } catch (e) {
         if (imgEl) imgEl.style.opacity = '1';
-        showToast('❌ Error de conexión al subir imagen.');
+        showToast('❌ Error al subir imagen: ' + (e.message || 'desconocido'));
     }
 }
 
@@ -2021,7 +2057,14 @@ function uploadPhoto() {
     // Resetear el input para que el mismo archivo se pueda subir de nuevo
     document.getElementById('fileInput').value = '';
     fetch('products_table.php', { method: 'POST', body: formData })
-        .then(r => r.json())
+        .then(r => r.text())
+        .then(raw => {
+            try {
+                return JSON.parse(raw);
+            } catch (e) {
+                throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
+            }
+        })
         .then(res => {
             if(res.status === 'success') {
                 // Actualizar la imagen en la tabla con cache-buster (sin recargar página)
