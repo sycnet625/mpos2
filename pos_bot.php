@@ -499,13 +499,8 @@ body{background:#f6f8fc}
             <span>Plantillas guardadas</span>
             <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadPromoTemplates()"><i class="fas fa-sync"></i></button>
           </div>
-          <div class="card-body p-0">
-            <div class="table-responsive" style="max-height:380px">
-              <table class="table table-sm mb-0">
-                <thead class="table-light"><tr><th>Plantilla</th><th>Productos</th><th>Banners</th><th>Actualizada</th></tr></thead>
-                <tbody id="promoTemplateRows"><tr><td colspan="4" class="text-center text-muted p-3">Sin plantillas</td></tr></tbody>
-              </table>
-            </div>
+          <div class="card-body" id="promoTemplateRows">
+            <div class="text-center text-muted p-3">Sin plantillas</div>
           </div>
         </div>
       </div>
@@ -614,6 +609,7 @@ let promoProducts=[];
 let promoBannerImages=[];
 let promoTemplates=[];
 let promoCampaigns=[];
+let activePromoTemplateId='';
 let promoGroupLists=[];
 let promoGroupListEditingId='';
 let conversationRows=[];
@@ -1197,6 +1193,9 @@ async function loadPromoTemplates(){
   const d=await g(API+'?action=promo_templates');
   if(d.status!=='success'){a('danger',d.msg||'No se pudieron cargar plantillas');return;}
   promoTemplates=Array.isArray(d.rows)?d.rows:[];
+  if(!activePromoTemplateId || !promoTemplates.some(t=>String(t.id)===String(activePromoTemplateId))){
+    activePromoTemplateId=promoTemplates.length?String(promoTemplates[0].id||''):'';
+  }
   renderPromoTemplates();
   renderProgrammingTab();
 }
@@ -1239,10 +1238,56 @@ async function deletePromoTemplate(){
   if(!id){a('danger','Selecciona una plantilla');return;}
   const d=await p(API+'?action=promo_template_delete',{id});
   if(d.status==='success'){
-    a('success','Plantilla eliminada');
+    a('success','Plantilla eliminada' + (Number(d.deleted_campaigns||0)>0?` y ${Number(d.deleted_campaigns||0)} campaña(s) enlazada(s)`:'')); 
     await loadPromoTemplates();
     promoTemplateName.value='';
   } else a('danger',d.msg||'No se pudo eliminar plantilla');
+}
+async function deletePromoTemplateById(id){
+  id=String(id||'').trim();
+  if(!id){a('danger','Selecciona una plantilla');return;}
+  const t=promoTemplates.find(x=>String(x.id)===id);
+  if(!confirm(`¿Eliminar plantilla "${t?.name||id}"? Si hay campañas enlazadas se eliminarán también.`)) return;
+  const d=await p(API+'?action=promo_template_delete',{id});
+  if(d.status==='success'){
+    a('success','Plantilla eliminada' + (Number(d.deleted_campaigns||0)>0?` y ${Number(d.deleted_campaigns||0)} campaña(s) enlazada(s)`:'')); 
+    if(activePromoTemplateId===id) activePromoTemplateId='';
+    if((promoTemplateSelect.value||'').trim()===id) promoTemplateSelect.value='';
+    await loadPromoTemplates();
+    await loadPromoList();
+  } else a('danger',d.msg||'No se pudo eliminar plantilla');
+}
+function selectPromoTemplateDetail(id){
+  activePromoTemplateId=String(id||'');
+  renderProgrammingTab();
+}
+function renderPromoTemplateDetailCard(t){
+  const products=Array.isArray(t.products)?t.products:[];
+  const banners=Array.isArray(t.banner_images)?t.banner_images:[];
+  const linked=promoCampaigns.filter(c=>String(c.template_id||'')===String(t.id||''));
+  return `<div class="border rounded p-3 h-100 bg-white">
+    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+      <div>
+        <div class="fw-bold">${esc(t.name||t.id||'-')}</div>
+        <div class="small text-muted">${esc(t.id||'-')} · ${esc(t.updated_at||'-')}</div>
+      </div>
+      <div class="d-flex gap-1">
+        <button class="btn btn-sm btn-outline-primary" type="button" onclick="promoTemplateSelect.value='${esc(t.id||'')}';applyPromoTemplate()" title="Cargar plantilla"><i class="fas fa-file-import"></i></button>
+        <button class="btn btn-sm btn-outline-danger" type="button" onclick="deletePromoTemplateById('${esc(t.id||'')}')" title="Eliminar plantilla"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <span class="badge bg-light text-dark border">${products.length} productos</span>
+      <span class="badge bg-light text-dark border">${banners.length} banners</span>
+      <span class="badge bg-light text-dark border">${linked.length} campañas enlazadas</span>
+    </div>
+    <div class="small text-muted mb-1">Texto</div>
+    <div class="border rounded p-2 small mb-3" style="min-height:74px;white-space:pre-wrap;background:#f8fafc">${esc(t.text||'(Sin texto)')}</div>
+    <div class="small text-muted mb-1">Productos</div>
+    <div class="small mb-3" style="max-height:120px;overflow:auto">${products.length?products.map(p=>`<div class="py-1 border-bottom">${esc(p.name||p.id||'-')} <span class="text-muted">(${esc(p.id||'-')})</span></div>`).join(''):'<div class="text-muted">Sin productos</div>'}</div>
+    <div class="small text-muted mb-1">Campañas enlazadas</div>
+    <div class="small" style="max-height:120px;overflow:auto">${linked.length?linked.map(c=>`<div class="py-1 border-bottom">${esc(c.name||c.id||'-')} <span class="text-muted">· ${esc(c.status||'-')}</span></div>`).join(''):'<div class="text-muted">Sin campañas enlazadas</div>'}</div>
+  </div>`;
 }
 function selectedPromoDays(){
   return [...document.querySelectorAll('.promo-day:checked')].map(x=>parseInt(x.value,10)).filter(x=>!Number.isNaN(x));
@@ -1563,14 +1608,29 @@ function renderProgrammingTab(){
   const tplRows=document.getElementById('promoTemplateRows');
   if(tplRows){
     if(!promoTemplates.length){
-      tplRows.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin plantillas</td></tr>';
+      tplRows.innerHTML='<div class="text-center text-muted p-3">Sin plantillas</div>';
     }else{
-      tplRows.innerHTML=promoTemplates.map(t=>`<tr>
-        <td class="small fw-semibold">${esc(t.name||t.id||'-')}</td>
-        <td class="small">${Array.isArray(t.products)?t.products.length:0}</td>
-        <td class="small">${Array.isArray(t.banner_images)?t.banner_images.length:0}</td>
-        <td class="small">${esc(t.updated_at||'-')}</td>
-      </tr>`).join('');
+      const active=promoTemplates.find(t=>String(t.id)===String(activePromoTemplateId)) || promoTemplates[0];
+      if(active) activePromoTemplateId=String(active.id||'');
+      tplRows.innerHTML=`<div class="row g-3">
+        <div class="col-12 col-xl-5">
+          <div class="border rounded overflow-auto" style="max-height:420px;background:#fff">
+            ${promoTemplates.map(t=>{
+              const selected=String(t.id)===String(activePromoTemplateId);
+              return `<div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom ${selected?'bg-primary-subtle':''}" style="cursor:pointer" onclick="selectPromoTemplateDetail('${esc(t.id||'')}')">
+                <div class="flex-grow-1">
+                  <div class="small fw-semibold">${esc(t.name||t.id||'-')}</div>
+                  <div class="small text-muted">${Array.isArray(t.products)?t.products.length:0} prod · ${Array.isArray(t.banner_images)?t.banner_images.length:0} banners</div>
+                </div>
+                <button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar plantilla" onclick="event.stopPropagation();deletePromoTemplateById('${esc(t.id||'')}')"><i class="fas fa-trash"></i></button>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>
+        <div class="col-12 col-xl-7">
+          ${active?renderPromoTemplateDetailCard(active):'<div class="text-muted">Selecciona una plantilla</div>'}
+        </div>
+      </div>`;
     }
   }
 

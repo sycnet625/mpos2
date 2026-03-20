@@ -2695,11 +2695,23 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
     $templateId = substr(trim((string)($in['id'] ?? '')), 0, 80);
     if ($templateId === '') { echo json_encode(['status' => 'error', 'msg' => 'id requerido']); exit; }
     $data = bot_read_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => []]);
+    $beforeTpl = count((array)($data['rows'] ?? []));
     $rows = array_values(array_filter((array)($data['rows'] ?? []), static fn($r) => (string)($r['id'] ?? '') !== $templateId));
+    if ($beforeTpl === count($rows)) { echo json_encode(['status' => 'error', 'msg' => 'Plantilla no encontrada']); exit; }
     if (!bot_write_json_file($BOT_PROMO_TEMPLATES_FILE, ['rows' => $rows])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo borrar plantilla']); exit;
     }
-    echo json_encode(['status' => 'success']); exit;
+    $queue = bot_read_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $beforeJobs = count($jobs);
+    $jobs = array_values(array_filter($jobs, static fn($j) => (string)($j['template_id'] ?? '') !== $templateId));
+    $deletedCampaigns = $beforeJobs - count($jobs);
+    if ($deletedCampaigns > 0) {
+        if (!bot_write_json_file($BOT_PROMO_QUEUE_FILE, ['jobs' => $jobs])) {
+            echo json_encode(['status' => 'error', 'msg' => 'La plantilla se borró, pero no se pudieron eliminar las campañas enlazadas']); exit;
+        }
+    }
+    echo json_encode(['status' => 'success', 'deleted_campaigns' => $deletedCampaigns]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
