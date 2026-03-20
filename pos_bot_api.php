@@ -1570,6 +1570,15 @@ function bot_try_resolve_pending_choice(array $menu, array &$cart, string $msg):
 }
 
 function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string $name, string $text): void {
+    $liveCfg = bot_cfg($pdo);
+    $liveReplyState = bot_autoreply_state($liveCfg);
+    if (empty($liveReplyState['effective_enabled'])) {
+        return;
+    }
+    if (!empty($liveCfg)) {
+        $cfg = array_merge($cfg, $liveCfg);
+    }
+
     $msg = trim($text);
     if ($msg === '') return;
     $norm = bot_norm($msg);
