@@ -1917,9 +1917,61 @@ function triggerEditorImg(sku, slot) {
     document.getElementById('editorFileInput').click();
 }
 
+async function ptablePrepareUploadFile(file) {
+    if (!file || !file.type || !file.type.startsWith('image/')) return file;
+    const compressBySize = file.size > (4 * 1024 * 1024);
+    const maxSide = compressBySize ? 1600 : 2200;
+    const quality = compressBySize ? 0.82 : 0.9;
+
+    const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error('No se pudo leer la imagen local.'));
+        reader.readAsDataURL(file);
+    });
+
+    const img = await new Promise((resolve, reject) => {
+        const node = new Image();
+        node.onload = () => resolve(node);
+        node.onerror = () => reject(new Error('La imagen seleccionada no es válida.'));
+        node.src = dataUrl;
+    });
+
+    const width = img.naturalWidth || img.width || 0;
+    const height = img.naturalHeight || img.height || 0;
+    if (!width || !height) return file;
+
+    const needsResize = width > maxSide || height > maxSide;
+    if (!needsResize && file.size <= (2 * 1024 * 1024)) return file;
+
+    const scale = Math.min(1, maxSide / Math.max(width, height));
+    const targetW = Math.max(1, Math.round(width * scale));
+    const targetH = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return file;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, targetW, targetH);
+    ctx.drawImage(img, 0, 0, targetW, targetH);
+
+    const blob = await new Promise((resolve, reject) => {
+        canvas.toBlob(
+            (out) => out ? resolve(out) : reject(new Error('No se pudo optimizar la imagen antes de subirla.')),
+            'image/jpeg',
+            quality
+        );
+    });
+
+    const safeName = (file.name || 'producto').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([blob], safeName, { type: 'image/jpeg', lastModified: Date.now() });
+}
+
 async function handleEditorUpload() {
     const input = document.getElementById('editorFileInput');
-    const file  = input.files[0];
+    const selectedFile  = input.files[0];
+    const file = selectedFile ? await ptablePrepareUploadFile(selectedFile) : null;
     if (!file) return;
     input.value = '';
 
@@ -2049,32 +2101,33 @@ async function chooseInternetImage() {
 
 function triggerUpload(code) { currentCode = code; document.getElementById('fileInput').click(); }
 function uploadPhoto() {
-    const file = document.getElementById('fileInput').files[0];
-    if(!file) return;
-    const formData = new FormData();
-    formData.append('new_photo', file);
-    formData.append('prod_code', currentCode);
-    // Resetear el input para que el mismo archivo se pueda subir de nuevo
-    document.getElementById('fileInput').value = '';
-    fetch('products_table.php', { method: 'POST', body: formData })
-        .then(r => r.text())
-        .then(raw => {
-            try {
-                return JSON.parse(raw);
-            } catch (e) {
-                throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
-            }
-        })
-        .then(res => {
-            if(res.status === 'success') {
-                // Actualizar la imagen en la tabla con cache-buster (sin recargar página)
-                const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
-                if(img) img.src = `image.php?code=${encodeURIComponent(currentCode)}&t=${Date.now()}`;
-            } else {
-                showToast('❌ Error al guardar imagen: ' + res.msg);
-            }
-        })
-        .catch(e => showToast('❌ Error de conexión: ' + e.message));
+    (async () => {
+        const selectedFile = document.getElementById('fileInput').files[0];
+        const file = selectedFile ? await ptablePrepareUploadFile(selectedFile) : null;
+        if(!file) return;
+        const formData = new FormData();
+        formData.append('new_photo', file);
+        formData.append('prod_code', currentCode);
+        document.getElementById('fileInput').value = '';
+        fetch('products_table.php', { method: 'POST', body: formData })
+            .then(r => r.text())
+            .then(raw => {
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
+                }
+            })
+            .then(res => {
+                if(res.status === 'success') {
+                    const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
+                    if(img) img.src = `image.php?code=${encodeURIComponent(currentCode)}&t=${Date.now()}`;
+                } else {
+                    showToast('❌ Error al guardar imagen: ' + res.msg);
+                }
+            })
+            .catch(e => showToast('❌ Error de conexión: ' + e.message));
+    })().catch(e => showToast('❌ Error preparando imagen: ' + (e.message || 'desconocido')));
 }
 async function toggleWeb(sku, checkbox) {
     const val = checkbox.checked ? 1 : 0;
