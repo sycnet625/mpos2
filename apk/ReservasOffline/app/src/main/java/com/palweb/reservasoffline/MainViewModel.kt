@@ -20,6 +20,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -98,6 +100,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     init {
         observeConnectivity(app)
         scheduleAutoSync(app)
+        startPlatformNotificationPolling()
     }
 
     fun saveSettings() {
@@ -107,6 +110,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         cfg.sucursalId = sucursalId.value
         cfg.silenceNonReservationNotifications = silenceNonReservationNotifications.value
         statusMsg.value = "Configuracion guardada"
+        refreshPlatformNotifications()
     }
 
     private fun activeBaseUrl(): String = baseUrl.value.trim().trimEnd('/').ifBlank { AppConfig.DEFAULT_BASE_URL }
@@ -228,6 +232,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     repo.downloadProductsOnly()
                     repo.downloadClientsOnly()
                     repo.downloadReservationsOnly()
+                    refreshPlatformNotificationsNow()
                 }
             }
         } catch (e: Exception) {
@@ -241,6 +246,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun consumeToast() {
         toastMessage.value = null
+    }
+
+    fun refreshPlatformNotifications() = viewModelScope.launch(Dispatchers.IO) {
+        refreshPlatformNotificationsNow()
     }
 
     fun checkOtaUpdate() = viewModelScope.launch {
@@ -458,6 +467,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             override fun onAvailable(network: Network) {
                 online.value = true
                 statusMsg.value = "Internet disponible: pulsa Subir pendientes"
+                viewModelScope.launch(Dispatchers.IO) { refreshPlatformNotificationsNow() }
                 WorkManager.getInstance(app).enqueue(
                     OneTimeWorkRequestBuilder<AutoSyncWorker>()
                         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -484,6 +494,32 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ExistingPeriodicWorkPolicy.UPDATE,
             req
         )
+    }
+
+    private fun startPlatformNotificationPolling() {
+        viewModelScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                if (online.value) {
+                    runCatching { refreshPlatformNotificationsNow() }
+                }
+                delay(45_000)
+            }
+        }
+    }
+
+    private fun refreshPlatformNotificationsNow() {
+        val rows = OfflineApi(cfg).fetchPlatformNotifications(cfg.lastPlatformNotificationId)
+        if (rows.isEmpty()) return
+        rows.forEach { n ->
+            if (cfg.silenceNonReservationNotifications && !n.eventKey.startsWith("reservation_")) return@forEach
+            SyncNotifier.notify(
+                getApplication(),
+                300_000 + n.id.toInt(),
+                n.title.ifBlank { "Nuevo evento" },
+                n.body.ifBlank { n.type.ifBlank { "Hay una novedad en la plataforma." } }
+            )
+        }
+        cfg.lastPlatformNotificationId = maxOf(cfg.lastPlatformNotificationId, rows.maxOf { it.id })
     }
 
     private fun isSameDay(a: Long, b: Long): Boolean {

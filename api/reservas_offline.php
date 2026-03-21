@@ -45,6 +45,61 @@ function normalize_reservation_status($status): string {
     return $value;
 }
 
+function crm_upsert_client_for_offline_reservation(PDO $pdo, int $idCliente, string $name, string $phone, string $address): int {
+    if (!has_column($pdo, 'clientes', 'id')) return max(0, $idCliente);
+    $name = safe_str($name, 150);
+    $phone = safe_str($phone, 50);
+    $address = safe_str($address, 255);
+
+    if ($idCliente > 0) {
+        $check = $pdo->prepare("SELECT id FROM clientes WHERE id = ? LIMIT 1");
+        $check->execute([$idCliente]);
+        if ($check->fetchColumn()) return $idCliente;
+    }
+
+    $existingId = 0;
+    if ($phone !== '') {
+        $st = $pdo->prepare("SELECT id, nombre, direccion FROM clientes WHERE telefono = ? ORDER BY id DESC LIMIT 1");
+        $st->execute([$phone]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $existingId = (int)($row['id'] ?? 0);
+            $fields = [];
+            $vals = [];
+            if ($name !== '' && trim((string)($row['nombre'] ?? '')) === '') {
+                $fields[] = 'nombre = ?';
+                $vals[] = $name;
+            }
+            if ($address !== '' && has_column($pdo, 'clientes', 'direccion') && trim((string)($row['direccion'] ?? '')) === '') {
+                $fields[] = 'direccion = ?';
+                $vals[] = $address;
+            }
+            if (has_column($pdo, 'clientes', 'categoria')) {
+                $fields[] = "categoria = COALESCE(NULLIF(categoria,''),'Regular')";
+            }
+            if (has_column($pdo, 'clientes', 'origen')) {
+                $fields[] = "origen = COALESCE(NULLIF(origen,''),'ReservasOffline')";
+            }
+            if ($fields) {
+                $vals[] = $existingId;
+                $pdo->prepare("UPDATE clientes SET " . implode(',', $fields) . " WHERE id = ?")->execute($vals);
+            }
+            return $existingId;
+        }
+    }
+
+    $cols = ['nombre', 'telefono'];
+    $vals = [$name !== '' ? $name : 'Cliente Reservas Offline', $phone];
+    if (has_column($pdo, 'clientes', 'direccion')) { $cols[] = 'direccion'; $vals[] = $address; }
+    if (has_column($pdo, 'clientes', 'categoria')) { $cols[] = 'categoria'; $vals[] = 'Regular'; }
+    if (has_column($pdo, 'clientes', 'origen')) { $cols[] = 'origen'; $vals[] = 'ReservasOffline'; }
+    if (has_column($pdo, 'clientes', 'activo')) { $cols[] = 'activo'; $vals[] = 1; }
+    if (has_column($pdo, 'clientes', 'uuid')) { $cols[] = 'uuid'; $vals[] = uniqid('crm-off-', true); }
+    $placeholders = implode(',', array_fill(0, count($cols), '?'));
+    $pdo->prepare("INSERT INTO clientes (" . implode(',', $cols) . ") VALUES ({$placeholders})")->execute($vals);
+    return (int)$pdo->lastInsertId();
+}
+
 function calcular_sin_existencia(PDO $pdo, array $items, int $idAlmacen): int {
     $sinExistencia = 0;
     foreach ($items as $it) {
@@ -83,7 +138,7 @@ function create_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAl
     $clienteNombre = safe_str($payload['cliente_nombre'] ?? 'Sin nombre', 100);
     $clienteTel = safe_str($payload['cliente_telefono'] ?? '', 50);
     $clienteDir = safe_str($payload['cliente_direccion'] ?? '', 255);
-    $idCliente = intval($payload['id_cliente'] ?? 0);
+    $idCliente = crm_upsert_client_for_offline_reservation($pdo, intval($payload['id_cliente'] ?? 0), $clienteNombre, $clienteTel, $clienteDir);
     $fechaReserva = parse_fecha($payload['fecha_reserva'] ?? '');
     $notas = safe_str($payload['notas'] ?? '', 1000);
     $metodo = safe_str($payload['metodo_pago'] ?? 'Efectivo', 50);
@@ -130,7 +185,7 @@ function create_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAl
     $sinExistencia = calcular_sin_existencia($pdo, $items, $idAlmacen);
     $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=? WHERE id=?")->execute([$sinExistencia, $idVenta]);
 
-    return ['remote_id' => $idVenta, 'sin_existencia' => $sinExistencia];
+    return ['remote_id' => $idVenta, 'sin_existencia' => $sinExistencia, 'remote_client_id' => $idCliente];
 }
 
 function get_reservation_server_updated_epoch(PDO $pdo, int $remoteId): int {
