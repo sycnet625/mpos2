@@ -19,6 +19,8 @@ if ($OFFLINE_API_KEY !== '' && $providedKey !== $OFFLINE_API_KEY) {
 }
 
 $pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN IF NOT EXISTS canal_origen VARCHAR(30) DEFAULT 'POS'");
+$pdo->exec("ALTER TABLE productos ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+$pdo->exec("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
 
 function safe_str($s, $max = 255) {
     return mb_substr(trim((string)$s), 0, $max);
@@ -467,13 +469,25 @@ try {
 
     if ($action === 'changes_since' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $since = intval($_GET['since'] ?? 0);
-        $_GET['updated_after'] = $since;
+        $sinceReservations = intval($_GET['since_reservations'] ?? $since);
+        $sinceProducts = intval($_GET['since_products'] ?? $since);
+        $sinceClients = intval($_GET['since_clients'] ?? $since);
+
+        $_GET['updated_after'] = $sinceReservations;
         $resCount = count(fetch_reservations($pdo, $sucursalID, $idAlmacen));
+
+        $_GET['updated_after'] = $sinceProducts;
         $prodCount = count(fetch_products($pdo, $sucursalID, $idAlmacen, $empID));
+
+        $_GET['updated_after'] = $sinceClients;
         $cliCount = count(fetch_clients($pdo));
+
         echo json_encode([
             'status' => 'success',
             'since' => $since,
+            'since_reservations' => $sinceReservations,
+            'since_products' => $sinceProducts,
+            'since_clients' => $sinceClients,
             'reservations_changed' => $resCount,
             'products_changed' => $prodCount,
             'clients_changed' => $cliCount,

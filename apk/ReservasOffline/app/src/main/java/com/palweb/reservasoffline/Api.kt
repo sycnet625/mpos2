@@ -184,8 +184,16 @@ class OfflineApi(private val cfg: AppConfig) {
         return results
     }
 
-    fun changesSince(epochSeconds: Long): JSONObject {
-        val url = cfg.endpoint(BuildConfig.DEFAULT_API_PATH) + "?action=changes_since&sucursal_id=${cfg.sucursalId}&since=$epochSeconds"
+    fun changesSince(
+        reservationsSinceSeconds: Long = cfg.lastReservationsSyncEpoch / 1000,
+        productsSinceSeconds: Long = cfg.lastProductsSyncEpoch / 1000,
+        clientsSinceSeconds: Long = cfg.lastClientsSyncEpoch / 1000,
+    ): JSONObject {
+        val url = cfg.endpoint(BuildConfig.DEFAULT_API_PATH) +
+            "?action=changes_since&sucursal_id=${cfg.sucursalId}" +
+            "&since_reservations=$reservationsSinceSeconds" +
+            "&since_products=$productsSinceSeconds" +
+            "&since_clients=$clientsSinceSeconds"
         return request(url, "GET", null)
     }
 

@@ -294,7 +294,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
             val changes = runCatching {
                 withContext(Dispatchers.IO) {
-                    api.changesSince(cfg.lastReservationsSyncEpoch / 1000)
+                    api.changesSince()
                 }
             }.getOrNull()
             if (changes != null && changes.optString("status") == "success") {

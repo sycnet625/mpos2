@@ -15,14 +15,12 @@ class AutoSyncWorker(
             val db = AppDatabase.get(applicationContext, cfg.sucursalId)
             val api = OfflineApi(cfg)
             val repo = ReservasRepository(db, api, cfg)
-            val lastReservationsSyncBeforePull = cfg.lastReservationsSyncEpoch / 1000
-
             repo.syncQueue()
             repo.downloadProductsOnly()
             repo.downloadClientsOnly()
             val downloadedReservations = repo.downloadReservationsOnly()
 
-            val changes = api.changesSince(lastReservationsSyncBeforePull)
+            val changes = api.changesSince()
             val reservationsChanged = changes.optInt("reservations_changed", 0)
             val productsChanged = changes.optInt("products_changed", 0)
             val clientsChanged = changes.optInt("clients_changed", 0)
