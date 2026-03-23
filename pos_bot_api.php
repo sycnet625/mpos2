@@ -14,6 +14,8 @@ $BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
 $BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
 $BOT_PROMO_GROUP_LISTS_FILE = '/tmp/palweb_wa_promo_group_lists.json';
 $BOT_BRIDGE_OUTBOX_FILE = '/tmp/palweb_wa_outbox_queue.json';
+$BOT_AUTOREPLY_REQUEST = false;
+$BOT_NEW_CLIENT_NOTIFY = [];
 
 function bot_clone_promo_job(array $job): array {
     $now = time();
@@ -319,6 +321,26 @@ function bot_cfg(PDO $pdo): array {
     return $c ?: [];
 }
 
+function bot_session_exists(PDO $pdo, string $wa): bool {
+    $st = $pdo->prepare("SELECT 1 FROM pos_bot_sessions WHERE wa_user_id=? LIMIT 1");
+    $st->execute([$wa]);
+    return (bool)$st->fetchColumn();
+}
+
+function bot_begin_autoreply_request(PDO $pdo, string $wa): void {
+    global $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
+    $BOT_AUTOREPLY_REQUEST = true;
+    if ($wa !== '' && !bot_session_exists($pdo, $wa)) {
+        $BOT_NEW_CLIENT_NOTIFY[$wa] = true;
+    }
+}
+
+function bot_end_autoreply_request(string $wa = ''): void {
+    global $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
+    $BOT_AUTOREPLY_REQUEST = false;
+    if ($wa !== '') unset($BOT_NEW_CLIENT_NOTIFY[$wa]);
+}
+
 function bot_valid_time_hhmm(string $value, string $fallback): string {
     $value = substr(trim($value), 0, 5);
     return preg_match('/^\d{2}:\d{2}$/', $value) ? $value : $fallback;
@@ -370,11 +392,31 @@ function bot_log(PDO $pdo, string $wa, string $dir, string $txt, string $type='t
 }
 
 function bot_queue_response(PDO $pdo, string $wa, string $type, array $payload): void {
-    global $BOT_OUTBOX;
+    global $BOT_OUTBOX, $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
+    if ($BOT_AUTOREPLY_REQUEST) {
+        $liveCfg = bot_cfg($pdo);
+        $liveReplyState = bot_autoreply_state($liveCfg);
+        if (empty($liveReplyState['effective_enabled'])) {
+            return;
+        }
+    }
     $row = ['wa_user_id' => $wa, 'type' => $type] + $payload;
     $BOT_OUTBOX[] = $row;
     $logText = trim((string)($payload['text'] ?? $payload['caption'] ?? $payload['url'] ?? ''));
     if ($logText !== '') bot_log($pdo, $wa, 'out', $logText, $type);
+    if (!empty($BOT_NEW_CLIENT_NOTIFY[$wa])) {
+        $preview = trim((string)($payload['text'] ?? $payload['caption'] ?? ''));
+        if ($preview === '') $preview = 'El bot respondió por primera vez a un cliente nuevo.';
+        push_notify(
+            $pdo,
+            'operador',
+            '🤖 Bot respondió a un cliente nuevo',
+            "{$wa}" . ($preview !== '' ? " — " . mb_substr($preview, 0, 120) : ''),
+            '/marinero/pos_bot.php',
+            'bot_first_reply_new_client'
+        );
+        unset($BOT_NEW_CLIENT_NOTIFY[$wa]);
+    }
 }
 
 function bot_send(PDO $pdo, array $cfg, string $wa, string $text): void {
@@ -3007,7 +3049,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='test_incoming') {
     $name = trim((string)($in['wa_name'] ?? 'Cliente Test'));
     $text = trim((string)($in['text'] ?? 'MENU'));
     bot_log($pdo, $wa, 'in', $text);
+    bot_begin_autoreply_request($pdo, $wa);
     bot_handle_text($pdo, $cfg, $config, $wa, $name, $text);
+    bot_end_autoreply_request($wa);
     echo json_encode(['status'=>'success','responses'=>bot_take_outbox()]); exit;
 }
 
@@ -3041,7 +3085,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='web_incoming') {
         echo json_encode(['status'=>'ok','msg'=>'empty text ignored','responses'=>[]]); exit;
     }
     bot_log($pdo, $wa, 'in', $text);
+    bot_begin_autoreply_request($pdo, $wa);
     bot_handle_text($pdo, $cfg, $config, $wa, $name, $text);
+    bot_end_autoreply_request($wa);
     echo json_encode(['status'=>'success','responses'=>bot_take_outbox()]); exit;
 }
 
@@ -3059,7 +3105,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST') {
                 $type = (string)($m['type'] ?? 'text');
                 $text = $type === 'text' ? (string)($m['text']['body'] ?? '') : (string)($m['button']['text'] ?? '[non-text]');
                 bot_log($pdo, $from, 'in', $text, $type);
+                bot_begin_autoreply_request($pdo, $from);
                 bot_handle_text($pdo, $cfg, $config, $from, $name, $text);
+                bot_end_autoreply_request($from);
             }
         }
     }
