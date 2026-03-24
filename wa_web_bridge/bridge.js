@@ -5,23 +5,38 @@ const fs = require('fs');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
-const API_URL = process.env.POS_BOT_API_URL || 'http://127.0.0.1/marinero/pos_bot_api.php?action=web_incoming';
-const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || API_URL.replace('action=web_incoming', 'action=bridge_scan_jobs');
+const POS_BOT_HOST = process.env.POS_BOT_HOST || '';
+const API_BASE = process.env.POS_BOT_API_BASE || 'http://127.0.0.1';
+const API_PATH = process.env.POS_BOT_API_PATH || '/pos_bot_api.php?action=web_incoming';
+const API_JOBS_PATH = process.env.POS_BOT_JOBS_PATH || '/pos_bot_api.php?action=bridge_scan_jobs';
+const API_URL = process.env.POS_BOT_API_URL || `${API_BASE}${API_PATH}`;
+const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || `${API_BASE}${API_JOBS_PATH}`;
 const API_ORIGIN = (() => {
+  const publicOrigin = String(process.env.POS_BOT_PUBLIC_ORIGIN || '').trim();
+  if (publicOrigin) return publicOrigin.replace(/\/+$/, '');
+  if (POS_BOT_HOST) return `https://${POS_BOT_HOST}`;
   try { return new URL(API_URL).origin; } catch (_) { return ''; }
 })();
 const VERIFY_TOKEN = process.env.POS_BOT_VERIFY_TOKEN || 'palweb_bot_verify';
 const SESSION_NAME = process.env.WA_SESSION_NAME || 'palweb-pos-bot';
 const AUTH_PATH = process.env.WA_AUTH_PATH || path.join(__dirname, '.wwebjs_auth');
 const STATUS_FILE = process.env.WA_STATUS_FILE || path.join(__dirname, 'status.json');
-const CHATS_FILE = process.env.WA_CHATS_FILE || '/tmp/palweb_wa_chats.json';
-const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || '/tmp/palweb_wa_promo_queue.json';
-const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || '/tmp/palweb_wa_outbox_queue.json';
+const RUNTIME_DIR = process.env.WA_RUNTIME_DIR || path.join(__dirname, 'runtime');
+const CHATS_FILE = process.env.WA_CHATS_FILE || path.join(RUNTIME_DIR, 'palweb_wa_chats.json');
+const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || path.join(RUNTIME_DIR, 'palweb_wa_promo_queue.json');
+const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || path.join(RUNTIME_DIR, 'palweb_wa_outbox_queue.json');
+const CONTROL_FILE = process.env.WA_CONTROL_FILE || path.join(RUNTIME_DIR, 'palweb_wa_bridge_control.json');
 const PROMO_TIMEZONE = process.env.WA_PROMO_TIMEZONE || 'America/Havana';
 const LOCAL_PRODUCT_IMAGE_DIRS = [
   path.join(__dirname, '..', 'assets', 'product_images'),
   path.join(__dirname, 'assets', 'product_images')
 ];
+
+try {
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+} catch (err) {
+  console.error('[bridge] No se pudo crear runtime dir:', err.message);
+}
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: SESSION_NAME, dataPath: AUTH_PATH }),
@@ -49,6 +64,7 @@ let initRetryTimer = null;
 let currentBridgeState = 'starting';
 let currentStateMeta = {};
 const processedMessageIds = new Map();
+let controlCommandBusy = false;
 
 function normalizeWaUserId(rawFrom) {
   const base = String(rawFrom || '').split('@')[0] || '';
@@ -86,6 +102,29 @@ function setBridgeState(state, extra = {}) {
   writeStatus(state, currentStateMeta);
 }
 
+function getClientIdentity() {
+  try {
+    const info = client.info || {};
+    const wid = String(info?.wid?._serialized || info?.wid?.user || info?.me?._serialized || info?.me?.user || '').trim();
+    const phone = wid.split('@')[0] || '';
+    const pushname = String(info?.pushname || info?.wid?.name || info?.me?.name || '').trim();
+    const platform = String(info?.platform || '').trim();
+    return {
+      owner_phone: phone,
+      owner_jid: wid,
+      owner_name: pushname,
+      owner_platform: platform
+    };
+  } catch (_) {
+    return {
+      owner_phone: '',
+      owner_jid: '',
+      owner_name: '',
+      owner_platform: ''
+    };
+  }
+}
+
 function readJsonFile(file, fallback) {
   try {
     if (!fs.existsSync(file)) return fallback;
@@ -107,6 +146,58 @@ function writeJsonFile(file, data) {
   } catch (err) {
     console.error('[bridge] Error escribiendo JSON:', file, err.message);
     return false;
+  }
+}
+
+async function apiFetch(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (POS_BOT_HOST && !headers.Host) headers.Host = POS_BOT_HOST;
+  if (POS_BOT_HOST && !headers['X-Forwarded-Host']) headers['X-Forwarded-Host'] = POS_BOT_HOST;
+  return fetch(url, { ...options, headers });
+}
+
+function removePathIfExists(targetPath) {
+  try {
+    if (!fs.existsSync(targetPath)) return;
+    fs.rmSync(targetPath, { recursive: true, force: true });
+  } catch (err) {
+    console.error('[bridge] No se pudo borrar:', targetPath, err.message);
+  }
+}
+
+async function processControlFileTick() {
+  if (controlCommandBusy) return;
+  if (!fs.existsSync(CONTROL_FILE)) return;
+  controlCommandBusy = true;
+  try {
+    const raw = fs.readFileSync(CONTROL_FILE, 'utf8');
+    if (!raw.trim()) {
+      fs.unlinkSync(CONTROL_FILE);
+      return;
+    }
+    const command = JSON.parse(raw);
+    const action = String(command?.action || '').trim();
+    fs.unlinkSync(CONTROL_FILE);
+    if (!action) return;
+    if (action === 'restart') {
+      setBridgeState('starting', { control_action: 'restart', session_ok: false, qr: '' });
+      try { await client.destroy(); } catch (err) { console.warn('[bridge] destroy restart:', err.message); }
+      setTimeout(() => { safeInit().catch(() => {}); }, 1200);
+      return;
+    }
+    if (action === 'reset_session') {
+      setBridgeState('starting', { control_action: 'reset_session', session_ok: false, qr: '' });
+      try { await client.logout(); } catch (err) { console.warn('[bridge] logout reset_session:', err.message); }
+      try { await client.destroy(); } catch (err) { console.warn('[bridge] destroy reset_session:', err.message); }
+      removePathIfExists(path.join(AUTH_PATH, `session-${SESSION_NAME}`));
+      removePathIfExists(path.join(__dirname, '.wwebjs_cache'));
+      removePathIfExists(STATUS_FILE);
+      setTimeout(() => { safeInit().catch(() => {}); }, 1500);
+    }
+  } catch (err) {
+    console.error('[bridge] Error procesando control file:', err.message);
+  } finally {
+    controlCommandBusy = false;
   }
 }
 
@@ -488,7 +579,7 @@ async function processOutboundQueueTick() {
 
 async function scanDueJobs() {
   try {
-    await fetch(API_JOBS_URL, {
+    await apiFetch(API_JOBS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ verify_token: VERIFY_TOKEN })
@@ -550,7 +641,7 @@ async function processIncoming(message) {
   setBridgeState('message_in', { last_from: String(message.from || ''), last_text_preview: text.slice(0, 80) });
   console.log(`[bridge] inbound from=${String(message.from || '')} type=${msgType} text="${text.slice(0, 80)}"`);
 
-  const res = await fetch(API_URL, {
+  const res = await apiFetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -604,7 +695,7 @@ client.on('qr', (qr) => {
 });
 
 client.on('ready', () => {
-  setBridgeState('ready', { qr: '', session_ok: true });
+  setBridgeState('ready', { qr: '', session_ok: true, ...getClientIdentity() });
   console.log('[bridge] WhatsApp Web conectado y listo.');
   if (!bgLoopsStarted) {
     bgLoopsStarted = true;
@@ -613,10 +704,11 @@ client.on('ready', () => {
     setInterval(() => { processPromoQueueTick().catch(() => {}); }, 5000);
     setInterval(() => { processOutboundQueueTick().catch(() => {}); }, 3000);
     setInterval(() => { scanDueJobs().catch(() => {}); }, 60000);
+    setInterval(() => { processControlFileTick().catch(() => {}); }, 1500);
     setInterval(() => {
       const connected = !!client.info;
       if (connected) {
-        setBridgeState('ready', { qr: '', session_ok: true });
+        setBridgeState('ready', { qr: '', session_ok: true, ...getClientIdentity() });
       } else {
         setBridgeState('disconnected', { reason: 'heartbeat_no_client_info', qr: '', session_ok: false });
       }
@@ -625,7 +717,7 @@ client.on('ready', () => {
 });
 
 client.on('authenticated', () => {
-  setBridgeState('authenticated', { qr: '', session_ok: true });
+  setBridgeState('authenticated', { qr: '', session_ok: true, ...getClientIdentity() });
   console.log('[bridge] Sesion autenticada.');
 });
 
@@ -647,7 +739,7 @@ client.on('change_state', (waState) => {
     return;
   }
   if (upper.includes('CONNECTED') || upper.includes('OPENING') || upper.includes('PAIRING')) {
-    setBridgeState('ready', { wa_state: stateText, qr: '', session_ok: !!client.info });
+    setBridgeState('ready', { wa_state: stateText, qr: '', session_ok: !!client.info, ...getClientIdentity() });
     return;
   }
   setBridgeState(currentBridgeState, { wa_state: stateText });

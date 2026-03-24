@@ -99,6 +99,28 @@ body{background:#f6f8fc}
     <div class="col-md-3"><div class="card metric-card p-3" style="background:#ecfff5 !important;border-color:#c8f1da !important"><div class="text-muted small">Reservas hoy</div><div id="s3" class="stat">0</div></div></div>
     <div class="col-md-3"><div class="card metric-card p-3" style="background:#fff7e8 !important;border-color:#ffe0a8 !important"><div class="text-muted small">Ventas hoy</div><div id="s4" class="stat">$0.00</div></div></div>
     <div class="col-12">
+      <div class="card p-3" style="background:#f8fafc;border:1px solid #e2e8f0 !important">
+        <div class="row g-3 align-items-center">
+          <div class="col-lg-3">
+            <div class="text-muted small">Cuenta WhatsApp conectada</div>
+            <div id="waOwnerName" class="fw-semibold" style="font-size:1.05rem">Sin datos</div>
+          </div>
+          <div class="col-lg-3">
+            <div class="text-muted small">Número</div>
+            <div id="waOwnerPhone" class="fw-semibold">-</div>
+          </div>
+          <div class="col-lg-3">
+            <div class="text-muted small">Usuario / JID</div>
+            <div id="waOwnerJid" class="fw-semibold small text-break">-</div>
+          </div>
+          <div class="col-lg-3">
+            <div class="text-muted small">Plataforma</div>
+            <div id="waOwnerPlatform" class="fw-semibold">-</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-12">
       <div class="card p-3">
         <div class="d-flex align-items-center gap-2">
           <span class="small text-muted">Estado WhatsApp Web</span>
@@ -692,7 +714,7 @@ function renderBotTonePreview(){
   const box=document.getElementById('botTonePreview');
   if(!box) return;
   const name=(tname?.value||'Daniel').trim()||'Daniel';
-  const site='www.palweb.net';
+  const site=location.host||'tu sitio web';
   const previews={
     premium:`Hola ${name}, es un placer atenderte.\nPuedo ayudarte a realizar tu pedido con rapidez o mostrarte el catálogo.\nTambién puedes consultar el catálogo y comprar automáticamente en ${site}.`,
     popular_cubano:`Hola ${name}, qué bolá, aquí te atiendo rapidito.\nTú dime lo que quieres y yo te lo voy armando sin lío.\nOye, en ${site} también puedes mirar el catálogo y comprar automático.`,
@@ -890,8 +912,12 @@ async function loadBridgeStatus(){
   const s = document.getElementById('waWebStatus');
   const ledDot = document.getElementById('waLedDot');
   const ledText = document.getElementById('waLedText');
+  const ownerName = document.getElementById('waOwnerName');
+  const ownerPhone = document.getElementById('waOwnerPhone');
+  const ownerJid = document.getElementById('waOwnerJid');
+  const ownerPlatform = document.getElementById('waOwnerPlatform');
   const d = await g(API+'?action=bridge_status');
-  if(d.status!=='success' || !d.bridge){s.textContent='Estado: sin datos del bridge';if(ledDot){ledDot.style.background='#64748b';ledDot.style.boxShadow='0 0 0 4px rgba(100,116,139,.2)';}if(ledText){ledText.textContent='Sin datos';ledText.style.color='#334155';}return;}
+  if(d.status!=='success' || !d.bridge){s.textContent='Estado: sin datos del bridge';if(ledDot){ledDot.style.background='#64748b';ledDot.style.boxShadow='0 0 0 4px rgba(100,116,139,.2)';}if(ledText){ledText.textContent='Sin datos';ledText.style.color='#334155';}if(ownerName)ownerName.textContent='Sin datos';if(ownerPhone)ownerPhone.textContent='-';if(ownerJid)ownerJid.textContent='-';if(ownerPlatform)ownerPlatform.textContent='-';return;}
   lastBridgeState=d.bridge;
   const st = String(d.bridge.state||'unknown');
   const map = {
@@ -915,6 +941,10 @@ async function loadBridgeStatus(){
     ledText.textContent = cfg.txt;
     ledText.style.color = cfg.color;
   }
+  if(ownerName) ownerName.textContent = String(d.bridge.owner_name||'Sin datos');
+  if(ownerPhone) ownerPhone.textContent = String(d.bridge.owner_phone||'-');
+  if(ownerJid) ownerJid.textContent = String(d.bridge.owner_jid||'-');
+  if(ownerPlatform) ownerPlatform.textContent = String(d.bridge.owner_platform||'-');
 }
 async function showBridgeQr(){
   if(!lastBridgeState){

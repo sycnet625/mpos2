@@ -10,13 +10,39 @@ require_once __DIR__ . '/config_loader.php';
 require_once __DIR__ . '/habana_delivery.php';
 require_once __DIR__ . '/push_notify.php';
 
+function bot_current_host_slug(): string {
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? ''));
+    $host = strtolower((string)preg_replace('/:\d+$/', '', $host));
+    $host = (string)preg_replace('/[^a-z0-9.-]+/', '-', $host);
+    $host = trim($host, '-.');
+    return $host !== '' ? $host : 'default';
+}
+
+function bot_bridge_instance_dir(): string {
+    return __DIR__ . '/wa_web_bridge/instances/' . bot_current_host_slug();
+}
+
+function bot_bridge_service_names(): array {
+    $host = bot_current_host_slug();
+    return [
+        "palweb-wa-bridge@{$host}.service",
+        'palweb-wa-bridge.service'
+    ];
+}
+
+$BOT_BRIDGE_RUNTIME_DIR = bot_bridge_instance_dir() . '/runtime';
+if (!is_dir($BOT_BRIDGE_RUNTIME_DIR)) {
+    @mkdir($BOT_BRIDGE_RUNTIME_DIR, 0775, true);
+}
+
 $BOT_OUTBOX = [];
-$BOT_BRIDGE_STATUS_FILE = __DIR__ . '/wa_web_bridge/status.json';
-$BOT_BRIDGE_CHATS_FILE = '/tmp/palweb_wa_chats.json';
-$BOT_PROMO_QUEUE_FILE = '/tmp/palweb_wa_promo_queue.json';
+$BOT_BRIDGE_STATUS_FILE = bot_bridge_instance_dir() . '/status.json';
+$BOT_BRIDGE_CHATS_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_chats.json';
+$BOT_PROMO_QUEUE_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_queue.json';
 $BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
 $BOT_PROMO_GROUP_LISTS_FILE = '/tmp/palweb_wa_promo_group_lists.json';
-$BOT_BRIDGE_OUTBOX_FILE = '/tmp/palweb_wa_outbox_queue.json';
+$BOT_BRIDGE_OUTBOX_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_outbox_queue.json';
+$BOT_BRIDGE_CONTROL_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_bridge_control.json';
 $BOT_AUTOREPLY_REQUEST = false;
 $BOT_NEW_CLIENT_NOTIFY = [];
 
@@ -227,10 +253,11 @@ function bot_run_bridge_service_command(string $verb, ?string &$detail = null): 
         $detail = 'Comando de servicio vacío.';
         return false;
     }
-    $commands = [
-        "/usr/bin/systemctl {$verb} palweb-wa-bridge.service 2>&1",
-        "/usr/bin/sudo -n /usr/bin/systemctl {$verb} palweb-wa-bridge.service 2>&1"
-    ];
+    $commands = [];
+    foreach (bot_bridge_service_names() as $serviceName) {
+        $commands[] = "/usr/bin/systemctl {$verb} {$serviceName} 2>&1";
+        $commands[] = "/usr/bin/sudo -n /usr/bin/systemctl {$verb} {$serviceName} 2>&1";
+    }
     $lastOut = '';
     foreach ($commands as $cmd) {
         $out = [];
@@ -244,6 +271,29 @@ function bot_run_bridge_service_command(string $verb, ?string &$detail = null): 
     }
     $detail = $lastOut !== '' ? $lastOut : 'Permisos insuficientes para systemctl desde PHP.';
     return false;
+}
+
+function bot_queue_bridge_control(array $command, ?string &$detail = null): bool {
+    global $BOT_BRIDGE_CONTROL_FILE;
+    $command['requested_at'] = date('c');
+    $command['request_id'] = substr(bin2hex(random_bytes(8)), 0, 16);
+    $tmpFile = $BOT_BRIDGE_CONTROL_FILE . '.tmp';
+    $json = json_encode($command, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        $detail = 'No se pudo serializar la orden al bridge.';
+        return false;
+    }
+    if (@file_put_contents($tmpFile, $json) === false) {
+        $detail = 'No se pudo escribir el archivo temporal de control del bridge.';
+        return false;
+    }
+    if (!@rename($tmpFile, $BOT_BRIDGE_CONTROL_FILE)) {
+        @unlink($tmpFile);
+        $detail = 'No se pudo publicar la orden de control del bridge.';
+        return false;
+    }
+    $detail = 'Orden enviada al bridge.';
+    return true;
 }
 
 function bot_ensure_tables(PDO $pdo): void {
@@ -2322,20 +2372,21 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_status') {
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
     $detail = '';
-    if (!bot_run_bridge_service_command('restart', $detail)) {
+    if (!bot_queue_bridge_control(['action' => 'restart'], $detail) && !bot_run_bridge_service_command('restart', $detail)) {
         echo json_encode([
             'status' => 'error',
-            'msg' => 'No se pudo reiniciar el bridge desde PHP. Revisa permisos de systemctl/sudo.',
+            'msg' => 'No se pudo reiniciar el bridge desde PHP ni enviar la orden interna al bridge.',
             'detail' => $detail
         ]);
         exit;
     }
 
     $active = '';
-    $activeCmds = [
-        '/usr/bin/systemctl is-active palweb-wa-bridge.service 2>&1',
-        '/usr/bin/sudo -n /usr/bin/systemctl is-active palweb-wa-bridge.service 2>&1'
-    ];
+    $activeCmds = [];
+    foreach (bot_bridge_service_names() as $serviceName) {
+        $activeCmds[] = "/usr/bin/systemctl is-active {$serviceName} 2>&1";
+        $activeCmds[] = "/usr/bin/sudo -n /usr/bin/systemctl is-active {$serviceName} 2>&1";
+    }
     foreach ($activeCmds as $cmd) {
         $activeOut = [];
         $activeCode = 1;
@@ -2354,18 +2405,28 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_restart') {
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
     $detail = '';
-    if (!bot_run_bridge_service_command('stop', $detail)) {
+    if (bot_queue_bridge_control(['action' => 'reset_session'], $detail)) {
         echo json_encode([
-            'status' => 'error',
-            'msg' => 'No se pudo detener el bridge antes de cerrar la sesión.',
+            'status' => 'success',
+            'msg' => 'Orden enviada. El bridge cerrará la sesión actual y generará un QR nuevo.',
             'detail' => $detail
         ]);
         exit;
     }
 
-    $sessionDir = __DIR__ . '/wa_web_bridge/.wwebjs_auth/session-palweb-pos-bot';
-    $cacheDir = __DIR__ . '/wa_web_bridge/.wwebjs_cache';
-    $statusFile = __DIR__ . '/wa_web_bridge/status.json';
+    if (!bot_run_bridge_service_command('stop', $detail)) {
+        echo json_encode([
+            'status' => 'error',
+            'msg' => 'No se pudo detener el bridge ni enviar la orden interna para cerrar la sesión.',
+            'detail' => $detail
+        ]);
+        exit;
+    }
+
+    $instanceDir = bot_bridge_instance_dir();
+    $sessionDir = $instanceDir . '/.wwebjs_auth/session-palweb-pos-bot-' . bot_current_host_slug();
+    $cacheDir = $instanceDir . '/.wwebjs_cache';
+    $statusFile = $instanceDir . '/status.json';
     $removed = [];
     $errors = [];
 
