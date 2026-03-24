@@ -30,6 +30,10 @@ function bot_bridge_service_names(): array {
     ];
 }
 
+function bot_bridge_session_name(): string {
+    return preg_replace('/[^a-zA-Z0-9_-]+/', '-', 'palweb-pos-bot-' . bot_current_host_slug());
+}
+
 $BOT_BRIDGE_RUNTIME_DIR = bot_bridge_instance_dir() . '/runtime';
 if (!is_dir($BOT_BRIDGE_RUNTIME_DIR)) {
     @mkdir($BOT_BRIDGE_RUNTIME_DIR, 0775, true);
@@ -2424,7 +2428,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
     }
 
     $instanceDir = bot_bridge_instance_dir();
-    $sessionDir = $instanceDir . '/.wwebjs_auth/session-palweb-pos-bot-' . bot_current_host_slug();
+    $sessionDir = $instanceDir . '/.wwebjs_auth/session-' . bot_bridge_session_name();
     $cacheDir = $instanceDir . '/.wwebjs_cache';
     $statusFile = $instanceDir . '/status.json';
     $removed = [];

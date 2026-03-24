@@ -18,7 +18,10 @@ const API_ORIGIN = (() => {
   try { return new URL(API_URL).origin; } catch (_) { return ''; }
 })();
 const VERIFY_TOKEN = process.env.POS_BOT_VERIFY_TOKEN || 'palweb_bot_verify';
-const SESSION_NAME = process.env.WA_SESSION_NAME || 'palweb-pos-bot';
+const SESSION_NAME = String(process.env.WA_SESSION_NAME || 'palweb-pos-bot')
+  .replace(/[^a-zA-Z0-9_-]+/g, '-')
+  .replace(/-+/g, '-')
+  .replace(/^-|-$/g, '') || 'palweb-pos-bot';
 const AUTH_PATH = process.env.WA_AUTH_PATH || path.join(__dirname, '.wwebjs_auth');
 const STATUS_FILE = process.env.WA_STATUS_FILE || path.join(__dirname, 'status.json');
 const RUNTIME_DIR = process.env.WA_RUNTIME_DIR || path.join(__dirname, 'runtime');
