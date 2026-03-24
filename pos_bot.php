@@ -245,7 +245,7 @@ body{background:#f6f8fc}
     </div>
 
     <div class="col-lg-6">
-      <div class="card mb-3"><div class="card-header bg-white fw-bold">Mensajes</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Teléfono/WA</th><th>Nombre</th><th>Dir</th><th>Texto</th></tr></thead><tbody id="tm"><tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
+      <div class="card mb-3"><div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center gap-2"><span>Mensajes</span><button class="btn btn-sm btn-outline-danger" type="button" onclick="clearMessageLogs()"><i class="fas fa-trash"></i> Borrar logs</button></div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Teléfono/WA</th><th>Nombre</th><th>Dir</th><th>Texto</th></tr></thead><tbody id="tm"><tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
       <div class="card"><div class="card-header bg-white fw-bold">Reservas BOT</div><div class="card-body p-0"><div class="table-responsive" style="max-height:320px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Reserva</th><th>Cliente</th><th>Total</th></tr></thead><tbody id="to"><tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr></tbody></table></div></div></div>
       <div class="card mt-3">
         <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
@@ -795,6 +795,15 @@ async function saveAutoReplyConfig(msg){
 }
 async function loadStats(){const d=await g(API+'?action=stats');if(d.status!=='success')return;s1.textContent=d.stats.sessions||0;s2.textContent=d.stats.msgs_today||0;s3.textContent=d.stats.orders_today||0;s4.textContent='$'+Number(d.stats.sales_today||0).toFixed(2)}
 async function loadMsgs(){const d=await g(API+'?action=recent_messages');if(d.status!=='success'||!(d.rows||[]).length){tm.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin datos</td></tr>';return;}tm.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td class="small">${esc(r.wa_user_id)}</td><td class="small">${esc(r.wa_name||'-')}</td><td>${esc(r.direction)}</td><td class="small">${esc((r.message_text||'').slice(0,120))}</td></tr>`).join('')}
+async function clearMessageLogs(){
+  if(!confirm('¿Borrar todos los logs de Mensajes del bot? Esta acción no se puede deshacer.')) return;
+  const d=await p(API+'?action=clear_message_logs',{});
+  if(d.status==='success'){
+    a('success',`Logs borrados: ${Number(d.deleted||0)}`);
+    loadMsgs();
+    loadStats();
+  } else a('danger',d.msg||'No se pudieron borrar los logs');
+}
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
 function conversationBadge(row){
   if(Number(row.escalation_active||0)===1) return `<span class="badge bg-danger text-white">ALARMA ${esc(row.escalation_label||'Humano')}</span>`;

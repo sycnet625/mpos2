@@ -2181,7 +2181,7 @@ $adminActions = [
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'promo_group_lists','promo_group_list_save','promo_group_list_delete',
-    'bridge_restart','bridge_logs'
+    'bridge_restart','bridge_logs','clear_message_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();
 
@@ -2337,6 +2337,12 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_messages') {
         LEFT JOIN pos_bot_sessions s ON s.wa_user_id = m.wa_user_id
         ORDER BY m.id DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
     echo json_encode(['status'=>'success','rows'=>$rows]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='clear_message_logs') {
+    $deleted = (int)$pdo->query("SELECT COUNT(*) FROM pos_bot_messages")->fetchColumn();
+    $pdo->exec("TRUNCATE TABLE pos_bot_messages");
+    echo json_encode(['status'=>'success','deleted'=>$deleted]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='recent_orders') {
