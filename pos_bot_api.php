@@ -24,10 +24,7 @@ function bot_bridge_instance_dir(): string {
 
 function bot_bridge_service_names(): array {
     $host = bot_current_host_slug();
-    return [
-        "palweb-wa-bridge@{$host}.service",
-        'palweb-wa-bridge.service'
-    ];
+    return ["palweb-wa-bridge@{$host}.service"];
 }
 
 function bot_bridge_session_name(): string {
@@ -43,8 +40,8 @@ $BOT_OUTBOX = [];
 $BOT_BRIDGE_STATUS_FILE = bot_bridge_instance_dir() . '/status.json';
 $BOT_BRIDGE_CHATS_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_chats.json';
 $BOT_PROMO_QUEUE_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_queue.json';
-$BOT_PROMO_TEMPLATES_FILE = '/tmp/palweb_wa_promo_templates.json';
-$BOT_PROMO_GROUP_LISTS_FILE = '/tmp/palweb_wa_promo_group_lists.json';
+$BOT_PROMO_TEMPLATES_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_templates.json';
+$BOT_PROMO_GROUP_LISTS_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_group_lists.json';
 $BOT_BRIDGE_OUTBOX_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_outbox_queue.json';
 $BOT_BRIDGE_CONTROL_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_bridge_control.json';
 $BOT_AUTOREPLY_REQUEST = false;
@@ -2488,10 +2485,11 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
-    $cmds = [
-        '/usr/bin/journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1',
-        '/usr/bin/sudo -n /usr/bin/journalctl -q -u palweb-wa-bridge.service -n 120 --no-pager 2>&1'
-    ];
+    $cmds = [];
+    foreach (bot_bridge_service_names() as $serviceName) {
+        $cmds[] = "/usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
+        $cmds[] = "/usr/bin/sudo -n /usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
+    }
     $logText = '';
     foreach ($cmds as $cmd) {
         $out = [];
