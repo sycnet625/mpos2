@@ -1237,7 +1237,7 @@ async function loadPromoTemplates(){
 }
 async function savePromoTemplate(){
   clearValidationMarks();
-  const name=(promoTemplateName.value||'').trim();
+  let name=(promoTemplateName.value||'').trim();
   const text=(promoText.value||'').trim();
   if(!name){a('danger','Pon nombre a la plantilla',{focusEl:promoTemplateName});return;}
   if(!text && !promoProducts.length && !promoBannerImages.length){
@@ -1246,8 +1246,28 @@ async function savePromoTemplate(){
     a('danger','La plantilla no puede estar vacía',{focusEl:focusTarget||promoText});
     return;
   }
-  const currentId=(promoTemplateSelect.value||'').trim();
-  const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts,banner_images:promoBannerImages});
+  let currentId=(promoTemplateSelect.value||'').trim();
+  const normalized=(v)=>String(v||'').trim().toLowerCase();
+  const conflict=promoTemplates.find(t=>normalized(t.name)===normalized(name) && String(t.id||'')!==currentId);
+  let overwriteExisting=0;
+  if(conflict){
+    if(confirm(`Ya existe una plantilla llamada "${conflict.name}".\n\nAceptar: sobrescribir la existente.\nCancelar: crear una nueva con otro nombre.`)){
+      currentId=String(conflict.id||'').trim();
+      overwriteExisting=1;
+    }else{
+      const suggested=`${name} copia`;
+      const nextName=(prompt('Escribe un nombre nuevo para guardar otra plantilla sin duplicar.', suggested)||'').trim();
+      if(!nextName) return;
+      if(promoTemplates.some(t=>normalized(t.name)===normalized(nextName))){
+        a('danger','Ya existe otra plantilla con ese nombre.',{focusEl:promoTemplateName});
+        return;
+      }
+      name=nextName;
+      promoTemplateName.value=nextName;
+      currentId='';
+    }
+  }
+  const d=await p(API+'?action=promo_template_save',{id:currentId,name,text,products:promoProducts,banner_images:promoBannerImages,overwrite_existing:overwriteExisting});
   if(d.status==='success'){
     const banners = Array.isArray(promoBannerImages)?promoBannerImages.length:0;
     a('success',`Plantilla guardada` + (banners>0 ? ` (banners: ${Math.min(banners,3)})` : ''));
@@ -1490,6 +1510,14 @@ function addPromoProduct(p){
   }
   renderPromoProducts();
 }
+function addPromoProductFromSearch(idx){
+  const rows=Array.isArray(window.__promoProductSearchRows)?window.__promoProductSearchRows:[];
+  const item=rows[idx];
+  if(!item) return;
+  addPromoProduct(item);
+  const box=document.getElementById('promoSearchRes');
+  if(box) box.innerHTML='';
+}
 async function searchPromoProducts(q){
   const box=document.getElementById('promoSearchRes');
   if(!box) return;
@@ -1497,7 +1525,9 @@ async function searchPromoProducts(q){
   const d=await g(API+'?action=promo_products&q='+encodeURIComponent(q.trim()));
   if(d.status!=='success'){box.innerHTML='';return;}
   const rows=Array.isArray(d.rows)?d.rows:[];
-  box.innerHTML=rows.map(r=>`<button class="list-group-item list-group-item-action d-flex align-items-center gap-2" type="button" onclick='addPromoProduct(${JSON.stringify(r).replace(/'/g,"&#39;")});document.getElementById("promoSearchRes").innerHTML="";'>
+  window.__promoProductSearchRows=rows;
+  if(!rows.length){box.innerHTML='<div class="list-group-item small text-muted">Sin productos para esa búsqueda.</div>';return;}
+  box.innerHTML=rows.map((r,idx)=>`<button class="list-group-item list-group-item-action d-flex align-items-center gap-2" type="button" onclick="addPromoProductFromSearch(${idx})">
     <img src="${esc(r.image||'')}" alt="" width="32" height="32" style="object-fit:cover;border-radius:5px;border:1px solid #ddd">
     <span class="small">${esc(r.name)} <span class="text-muted">(${esc(r.id)})</span> - Min $${Number(r.retail_price||r.price||0).toFixed(2)} · May $${Number((r.wholesale_price||0)>0?r.wholesale_price:r.retail_price||r.price||0).toFixed(2)}</span>
   </button>`).join('');
