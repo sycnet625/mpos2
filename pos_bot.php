@@ -4,6 +4,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     header('Location: login.php');
     exit;
 }
+$posBotBuildTs = @filemtime(__FILE__) ?: time();
+$posBotVersion = 'v' . date('Ymd.His', $posBotBuildTs);
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -86,7 +88,10 @@ body{background:#f6f8fc}
 <div class="container-fluid" style="max-width:1400px;">
   <div class="d-flex justify-content-between align-items-center mb-3">
     <div><h4 class="mb-0"><i class="fab fa-whatsapp text-success"></i> POS BOT WhatsApp</h4><small class="text-muted">Auto-reply, reservas y ventas por WhatsApp</small></div>
-    <button class="btn btn-outline-secondary" onclick="loadAll()"><i class="fas fa-sync"></i> Refrescar</button>
+    <div class="d-flex align-items-center gap-2">
+      <span class="badge text-bg-dark" style="font-size:.82rem;">Versión <?php echo htmlspecialchars($posBotVersion, ENT_QUOTES, 'UTF-8'); ?></span>
+      <button class="btn btn-outline-secondary" onclick="loadAll()"><i class="fas fa-sync"></i> Refrescar</button>
+    </div>
   </div>
 
   <div id="toastArea" class="px-2">
