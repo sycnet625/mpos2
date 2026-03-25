@@ -147,20 +147,28 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
           <div class="card mb-3">
             <div class="card-header bg-white fw-bold">Nueva campaña</div>
             <div class="card-body">
-              <div class="alert alert-warning py-2 small">
-                Los grupos automáticos de Facebook ya no están disponibles por la API oficial actual de Meta. Este módulo publica en tu página y, opcionalmente, en Instagram. Si necesitas publicar en grupos, habría que hacerlo manualmente o con otra estrategia fuera de API oficial.
+              <div class="alert alert-info py-2 small">
+                Este módulo puede publicar en tu página de Facebook y también en grupos configurados. Para grupos, debes indicar el <b>Group ID</b> y un <b>token con permisos válidos</b> para ese grupo. Si dejas el token vacío, intentará usar el token principal de la página.
               </div>
               <div class="card border mb-3">
-                <div class="card-header bg-white fw-semibold py-2">Grupos manuales de referencia</div>
+                <div class="card-header bg-white fw-semibold py-2">Destinos Facebook: grupos</div>
                 <div class="card-body">
-                  <div class="small text-muted mb-2">Puedes guardar aquí los grupos donde acostumbras compartir manualmente. Sirve como checklist y acceso rápido, no como publicación automática.</div>
+                  <div class="small text-muted mb-2">Los grupos habilitados se usarán como destinos reales de publicación junto con la página configurada.</div>
                   <div id="manualGroupsWrap" class="border rounded p-2 mb-2" style="max-height:180px;overflow:auto">
-                    <div class="text-muted small">Sin grupos manuales guardados.</div>
+                    <div class="text-muted small">Sin grupos configurados.</div>
                   </div>
                   <div class="row g-2">
-                    <div class="col-md-5"><input id="manualGroupName" class="form-control" placeholder="Nombre del grupo"></div>
-                    <div class="col-md-5"><input id="manualGroupUrl" class="form-control" placeholder="URL del grupo"></div>
-                    <div class="col-md-2 d-grid"><button class="btn btn-outline-primary" type="button" onclick="addManualGroup()"><i class="fas fa-plus"></i></button></div>
+                    <div class="col-md-3"><input id="manualGroupName" class="form-control" placeholder="Nombre del grupo"></div>
+                    <div class="col-md-3"><input id="manualGroupId" class="form-control" placeholder="Group ID"></div>
+                    <div class="col-md-3"><input id="manualGroupUrl" class="form-control" placeholder="URL del grupo"></div>
+                    <div class="col-md-3"><input id="manualGroupToken" type="password" class="form-control" placeholder="Token grupo opcional"></div>
+                    <div class="col-md-9">
+                      <div class="form-check form-switch mt-2">
+                        <input class="form-check-input" id="manualGroupEnabled" type="checkbox" checked>
+                        <label class="form-check-label" for="manualGroupEnabled">Habilitar este grupo para campañas y pruebas</label>
+                      </div>
+                    </div>
+                    <div class="col-md-3 d-grid"><button class="btn btn-outline-primary" type="button" onclick="addManualGroup()"><i class="fas fa-plus"></i> Agregar grupo</button></div>
                   </div>
                 </div>
               </div>
@@ -219,7 +227,7 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 </div>
                 <div class="col-md-6">
                   <label class="form-label">Página / canal</label>
-                  <div class="form-control bg-light" id="campaignTargetInfo">Se usará la página configurada.</div>
+                  <div class="form-control bg-light" id="campaignTargetInfo">Se usará la página configurada y los grupos habilitados.</div>
                 </div>
               </div>
               <div class="row g-2 mb-2">
@@ -312,7 +320,8 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 <div class="small text-muted">
                   1. Todos los productos con existencias disponibles.<br>
                   2. Texto final con todos los productos reservables.<br>
-                  3. Cierre con promoción a <b>www.palweb.net</b>.
+                  3. Publicación en la página configurada y grupos habilitados.<br>
+                  4. Cierre con promoción web.
                 </div>
               </div>
               <div class="mt-3">
@@ -515,12 +524,15 @@ async function uploadPromoBanner(file){const fd=new FormData();fd.append('image'
 function selectedPromoDays(){return [...document.querySelectorAll('.promo-day:checked')].map(x=>parseInt(x.value,10)).filter(x=>!Number.isNaN(x));}
 function daysToText(days){const map={0:'D',1:'L',2:'M',3:'X',4:'J',5:'V',6:'S'};const arr=(Array.isArray(days)?days:[]).map(x=>parseInt(x,10)).filter(x=>map[x]!==undefined);return arr.length?arr.map(x=>map[x]).join(','):'-';}
 function stateBadge(status){if(status==='success'||status==='done') return '<span class="badge bg-success">OK</span>'; if(status==='scheduled') return '<span class="badge bg-info text-dark">scheduled</span>'; if(status==='queued'||status==='running') return `<span class="badge bg-warning text-dark">${esc(status)}</span>`; if(status==='error') return '<span class="badge bg-danger">error</span>'; return `<span class="badge bg-secondary">${esc(status||'-')}</span>`;}
-function targetsToText(targets){const arr=Array.isArray(targets)?targets:[]; if(!arr.length) return '-'; return arr.map(t=>String(t.name||t.id||'')).filter(Boolean).join(' | ')}
+function targetsToText(targets){const arr=Array.isArray(targets)?targets:[]; if(!arr.length) return '-'; return arr.map(t=>`${String(t.type||'page')==='group'?'Grupo':'Página'}: ${String(t.name||t.id||'')}`).filter(Boolean).join(' | ')}
+function enabledGroupTargets(){return manualGroups.filter(g=>Number(g.enabled||0)===1 && String(g.id||'').trim()!=='');}
 function describePublishMode(mode){if(mode==='facebook') return 'Facebook solo'; if(mode==='instagram') return 'Instagram solo'; return 'Facebook + Instagram';}
 function buildPreviewHtml({text='',products=[],banners=[],mode='both',outroText='',emptyText='Completa el contenido para ver la vista previa.'}={}){
   const targetName = page_name.value.trim() || page_id.value.trim() || 'página configurada';
   const igName = ig_username.value.trim() || ig_user_id.value.trim() || 'Instagram';
-  const channelLabel = mode==='instagram' ? igName : (mode==='facebook' ? targetName : `${targetName} + ${igName}`);
+  const groupsCount = enabledGroupTargets().length;
+  const fbLabel = groupsCount>0 ? `${targetName} + ${groupsCount} grupo(s)` : targetName;
+  const channelLabel = mode==='instagram' ? igName : (mode==='facebook' ? fbLabel : `${fbLabel} + ${igName}`);
   let html = `<div class="social-preview"><div class="social-preview-header"><div class="social-avatar">${esc((business_name.value.trim()||'PW').slice(0,2).toUpperCase())}</div><div><div class="fw-semibold">${esc(business_name.value.trim()||targetName)}</div><div class="small text-muted">${esc(describePublishMode(mode))} · ${esc(channelLabel)}</div></div></div><div class="social-preview-body">`;
   if(text) html += `<div class="mb-3" style="white-space:pre-wrap">${esc(text)}</div>`;
   if(banners.length) html += `<div class="social-media-grid mb-3">${banners.map(img=>`<img src="${esc(img.url||'')}" alt="">`).join('')}</div>`;
@@ -545,7 +557,7 @@ function summarizeCampaignSnapshot(s){
     <div><b>Cierre:</b> ${outro}</div>
   </div>`;
 }
-function updateTargetInfo(){const box=document.getElementById('campaignTargetInfo'); if(!box) return; const page=page_name.value.trim()||page_id.value.trim()||'página configurada'; const ig=ig_username.value.trim()||ig_user_id.value.trim()||'Instagram'; const mode=promoPublishMode.value||'both'; box.textContent=mode==='facebook'?page:(mode==='instagram'?ig:`${page} + ${ig}`);}
+function updateTargetInfo(){const box=document.getElementById('campaignTargetInfo'); if(!box) return; const page=page_name.value.trim()||page_id.value.trim()||'página configurada'; const groups=enabledGroupTargets().length; const fbTarget=groups>0?`${page} + ${groups} grupo(s)` : page; const ig=ig_username.value.trim()||ig_user_id.value.trim()||'Instagram'; const mode=promoPublishMode.value||'both'; box.textContent=mode==='facebook'?fbTarget:(mode==='instagram'?ig:`${fbTarget} + ${ig}`);}
 function renderCampaignPreview(source='campaign'){
   const box = source==='my_page' ? document.getElementById('myPagePreview') : document.getElementById('campaignPreview');
   if(!box) return;
@@ -555,11 +567,12 @@ function renderCampaignPreview(source='campaign'){
   const mode = source==='my_page' ? (myPagePublishMode.value||'both') : (promoPublishMode.value||'both');
   box.innerHTML = buildPreviewHtml({text: text || (source==='my_page' ? 'Publicación automática diaria de catálogo y reservables.' : ''), products, banners, mode});
 }
-function renderManualGroups(){const wrap=document.getElementById('manualGroupsWrap'); if(!wrap) return; if(!manualGroups.length){wrap.innerHTML='<div class="text-muted small">Sin grupos manuales guardados.</div>';return;} wrap.innerHTML=manualGroups.map((g,idx)=>`<div class="d-flex align-items-center gap-2 border-bottom py-2 small"><div class="flex-grow-1"><div class="fw-semibold">${esc(g.name||('Grupo '+(idx+1)))}</div>${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener" class="text-decoration-none">${esc(g.url)}</a>`:'<div class="text-muted">Sin URL</div>'}</div><button class="btn btn-sm btn-outline-danger" type="button" onclick="removeManualGroup(${idx})"><i class="fas fa-trash"></i></button></div>`).join('');}
+function renderManualGroups(){const wrap=document.getElementById('manualGroupsWrap'); if(!wrap) return; if(!manualGroups.length){wrap.innerHTML='<div class="text-muted small">Sin grupos configurados.</div>'; updateTargetInfo(); return;} wrap.innerHTML=manualGroups.map((g,idx)=>`<div class="border-bottom py-2 small"><div class="d-flex align-items-start gap-2"><div class="flex-grow-1"><div class="fw-semibold">${esc(g.name||('Grupo '+(idx+1)))} ${Number(g.enabled||0)===1?'<span class="badge bg-success ms-1">activo</span>':'<span class="badge bg-secondary ms-1">inactivo</span>'}</div><div class="text-muted">ID: ${esc(g.id||'-')}</div>${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener" class="text-decoration-none">${esc(g.url)}</a>`:'<div class="text-muted">Sin URL</div>'}<div class="text-muted">${String(g.access_token||'').trim()!==''?'Token específico guardado':'Usa token principal si existe'}</div></div><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-${Number(g.enabled||0)===1?'warning':'success'}" type="button" onclick="toggleManualGroup(${idx})"><i class="fas fa-power-off"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="removeManualGroup(${idx})"><i class="fas fa-trash"></i></button></div></div></div>`).join(''); updateTargetInfo();}
 async function loadManualGroups(){const d=await g(API+'?action=manual_groups'); if(d.status!=='success') return; manualGroups=Array.isArray(d.rows)?d.rows:[]; renderManualGroups();}
-async function saveManualGroups(){const d=await p(API+'?action=manual_groups',{rows:manualGroups}); if(d.status!=='success'){a('danger',d.msg||'No se pudo guardar grupos manuales'); return;} manualGroups=Array.isArray(d.rows)?d.rows:manualGroups; renderManualGroups();}
-function addManualGroup(){const name=(manualGroupName.value||'').trim(); const url=(manualGroupUrl.value||'').trim(); if(!name && !url){a('danger','Escribe nombre o URL del grupo');return;} manualGroups.push({name,url}); manualGroupName.value=''; manualGroupUrl.value=''; renderManualGroups(); saveManualGroups();}
+async function saveManualGroups(){const rows=manualGroups.map(g=>({id:String(g.id||'').trim(),name:String(g.name||'').trim(),url:String(g.url||'').trim(),enabled:Number(g.enabled||0)===1?1:0,access_token:g._token_edit||'',keep_token:String(g.access_token||'').trim()!=='' && !g._token_edit?1:0})); const d=await p(API+'?action=manual_groups',{rows}); if(d.status!=='success'){a('danger',d.msg||'No se pudo guardar grupos'); return;} manualGroups=Array.isArray(d.rows)?d.rows:manualGroups; renderManualGroups();}
+function addManualGroup(){const name=(manualGroupName.value||'').trim(); const id=(manualGroupId.value||'').trim(); const url=(manualGroupUrl.value||'').trim(); const token=(manualGroupToken.value||'').trim(); const enabled=manualGroupEnabled.checked?1:0; if(!id){a('danger','Escribe el Group ID');return;} manualGroups.push({name,id,url,enabled,access_token:token?'************':'',_token_edit:token}); manualGroupName.value=''; manualGroupId.value=''; manualGroupUrl.value=''; manualGroupToken.value=''; manualGroupEnabled.checked=true; renderManualGroups(); saveManualGroups();}
 function removeManualGroup(idx){manualGroups.splice(idx,1); renderManualGroups(); saveManualGroups();}
+function toggleManualGroup(idx){manualGroups[idx].enabled=Number(manualGroups[idx].enabled||0)===1?0:1; renderManualGroups(); saveManualGroups();}
 function updateStatusLed(){
   const dot=document.getElementById('fbLedDot');
   const txt=document.getElementById('fbLedText');
@@ -611,7 +624,7 @@ async function saveCfg(ev){
     ig_user_id:ig_user_id.value.trim(),
     ig_access_token:ig_access_token.value.trim()
   });
-  if(d.status==='success'){a('success','Guardado');await loadCfg();await loadStats();page_access_token.value='';ig_access_token.value='';} else a('danger',d.msg||'No se pudo guardar');
+  if(d.status==='success'){a('success','Guardado');await loadCfg();await loadManualGroups();await loadStats();page_access_token.value='';ig_access_token.value='';} else a('danger',d.msg||'No se pudo guardar');
 }
 async function loadStats(){const d=await g(API+'?action=stats'); if(d.status!=='success') return; s1.textContent=d.stats.posts_today||0; s2.textContent=d.stats.facebook_today||0; s3.textContent=d.stats.instagram_today||0; if(!s4.textContent || s4.textContent==='-') s4.textContent=Number(d.stats.enabled||0)===1?'Activo':'Pausado';}
 function renderRecentPosts(){const tb=document.getElementById('recentPostsRows'); const preview=document.getElementById('lastPostPreview'); if(!recentPosts.length){tb.innerHTML='<tr><td colspan="6" class="text-center text-muted p-3">Sin publicaciones</td></tr>'; preview.textContent='Sin datos.'; return;} tb.innerHTML=recentPosts.map((r,idx)=>`<tr onclick="showPostDetail(${idx})" style="cursor:pointer"><td class="small">${esc(r.created_at||'')}</td><td class="small"><span class="badge ${String(r.platform)==='instagram'?'bg-danger':'bg-primary'}">${esc(r.platform||'facebook')}</span></td><td class="small">${esc(r.page_name||'-')}</td><td class="small">${esc(r.campaign_id||'-')}</td><td>${stateBadge(r.status||'-')}</td><td class="small">${esc(r.fb_post_id||'-')}</td></tr>`).join(''); showPostDetail(0);}
@@ -660,7 +673,7 @@ async function openCampaignLogs(id){activeCampaignLogId=String(id||''); await re
 function renderProgrammingTab(){const tplRows=document.getElementById('promoTemplateRows'); if(tplRows){if(!promoTemplates.length){tplRows.innerHTML='<tr><td colspan="3" class="text-center text-muted p-3">Sin plantillas</td></tr>';} else {tplRows.innerHTML=promoTemplates.map(t=>`<tr><td class="small fw-semibold">${esc(t.name||t.id||'-')}<br><span class="badge bg-dark mt-1">${esc(describePublishMode(t.publish_mode||'both'))}</span></td><td class="small">${Array.isArray(t.products)?t.products.length:0}</td><td class="small">${esc(t.updated_at||'-')}</td></tr>`).join('');}} const wrap=document.getElementById('promoProgramGroups'); if(!wrap) return; const scheduled=promoCampaigns.filter(r=>Number(r.schedule_enabled||0)===1); if(!scheduled.length){wrap.innerHTML='<div class="text-muted small">Sin campañas programadas.</div>'; return;} const groups={}; for(const r of scheduled){const g=String(r.campaign_group||'General'); if(!groups[g]) groups[g]=[]; groups[g].push(r);} wrap.innerHTML=Object.keys(groups).sort().map(g=>`<div class="border rounded p-2 mb-2"><div class="fw-semibold mb-1">${esc(g)}</div><div class="table-responsive"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Campaña</th><th>Modo</th><th>Hora</th><th>Días</th><th>Estado</th><th>Página</th><th>Acciones</th></tr></thead><tbody>${groups[g].map(r=>`<tr><td class="small">${esc(r.name||r.id||'-')}</td><td class="small">${esc(describePublishMode(r.publish_mode||'both'))}</td><td class="small">${esc(r.schedule_time||'-')}</td><td class="small">${esc(daysToText(r.schedule_days||[]))}</td><td>${stateBadge(r.status||'-')}</td><td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td><td class="small"><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button><button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button><button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button><button class="btn btn-sm btn-outline-primary" type="button" onclick="openCampaignEditModal('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button></div></td></tr>`).join('')}</tbody></table></div></div>`).join('');}
 function exportJson(type){const payload=type==='templates'?promoTemplates:promoCampaigns; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json;charset=utf-8'}); const url=URL.createObjectURL(blob); const aEl=document.createElement('a'); aEl.href=url; aEl.download=`fb_${type}_${new Date().toISOString().replace(/[:.]/g,'-')}.json`; document.body.appendChild(aEl); aEl.click(); aEl.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function importJson(type,file){if(!file) return; try{const raw=await file.text(); const parsed=JSON.parse(raw); const rows=Array.isArray(parsed)?parsed:(Array.isArray(parsed.rows)?parsed.rows:[]); if(!rows.length){a('danger','El JSON no contiene filas válidas'); return;} const d=await p(API+'?action=promo_import',{type,rows}); if(d.status==='success'){a('success',`Importados ${d.imported||0} ${type==='templates'?'elementos de plantilla':'campañas'}`); if(type==='templates') await loadPromoTemplates(); else await loadPromoList();} else a('danger',d.msg||'No se pudo importar');}catch(e){a('danger','JSON inválido o no legible');}}
-async function testPost(){const text=(testText.value||'').trim()||'Prueba de publicación desde PalWeb Facebook'; const d=await p(API+'?action=test_post',{text,publish_mode:testPublishMode.value||'both'}); if(d.status==='success'){a('success','Publicación de prueba enviada'); loadRecentPosts(); loadStats(); loadLogsSnapshot();} else a('danger',d.msg||'No se pudo publicar');}
+async function testPost(){const text=(testText.value||'').trim()||'Prueba de publicación desde PalWeb Facebook'; const d=await p(API+'?action=test_post',{text,publish_mode:testPublishMode.value||'both'}); if(d.status==='success'){a('success','Publicación de prueba enviada a los destinos configurados'); loadRecentPosts(); loadStats(); loadLogsSnapshot();} else a('danger',d.msg||'No se pudo publicar');}
 async function runQueue(){const wk=(worker_key.value||currentConfig.worker_key||'').trim(); if(!wk){a('danger','Configura el worker key primero');return;} const d=await g(API+'?action=process_queue&worker_key='+encodeURIComponent(wk)); if(d.status==='success'){appendLog(`Queue ejecutada. Procesadas: ${d.processed||0}`); loadPromoList(); loadRecentPosts(); loadStats();} else appendLog(`Fallo process_queue: ${d.msg||'error'}`);}
 function appendLog(text){const box=document.getElementById('logsText'); const stamp=new Date().toISOString(); const current=box.textContent||''; box.textContent=`[${stamp}] ${text}\n` + current.slice(0,12000); document.getElementById('logsStatus').textContent=`Última actualización: ${stamp}`;}
 async function loadLogsSnapshot(){const d=await g(API+'?action=worker_logs'); if(d.status==='success'){logsText.textContent=(d.logs||'Sin logs persistentes.'); logsStatus.textContent='Logs persistentes del worker y del procesador de campañas';} await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}

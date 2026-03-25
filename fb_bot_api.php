@@ -142,13 +142,44 @@ function fb_local_time_info(): array {
 }
 
 function fb_clean_targets(array $cfg): array {
+    $targets = [];
     $pageId = substr(trim((string)($cfg['page_id'] ?? '')), 0, 80);
     $pageName = substr(trim((string)($cfg['page_name'] ?? '')), 0, 120);
-    if ($pageId === '') return [];
-    return [[
-        'id' => $pageId,
-        'name' => $pageName !== '' ? $pageName : $pageId,
-    ]];
+    if ($pageId !== '') {
+        $targets[] = [
+            'id' => $pageId,
+            'name' => $pageName !== '' ? $pageName : $pageId,
+            'type' => 'page',
+            'token' => ''
+        ];
+    }
+    foreach (fb_group_targets() as $group) {
+        $targets[] = $group;
+    }
+    return $targets;
+}
+
+function fb_group_targets(): array {
+    $data = fb_read_json_file($GLOBALS['FB_MANUAL_GROUPS_FILE'], ['rows' => []]);
+    $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
+    $out = [];
+    foreach ($rows as $row) {
+        $id = substr(trim((string)($row['id'] ?? '')), 0, 80);
+        if ($id === '') continue;
+        $enabled = !empty($row['enabled']) ? 1 : 0;
+        if (!$enabled) continue;
+        $name = substr(trim((string)($row['name'] ?? $id)), 0, 180);
+        $url = substr(trim((string)($row['url'] ?? '')), 0, 500);
+        $token = trim((string)($row['access_token'] ?? ''));
+        $out[] = [
+            'id' => $id,
+            'name' => $name !== '' ? $name : $id,
+            'url' => $url,
+            'type' => 'group',
+            'token' => $token
+        ];
+    }
+    return $out;
 }
 
 function fb_catalog_for_campaigns(PDO $pdo, array $config): array {
@@ -298,25 +329,66 @@ function fb_graph_request(array $cfg, string $path, array $params = [], string $
     if ($token === '') return ['ok' => false, 'error' => 'Falta page access token'];
     $version = trim((string)($cfg['graph_version'] ?? 'v23.0')) ?: 'v23.0';
     $url = 'https://graph.facebook.com/' . rawurlencode($version) . $path;
-    $ch = curl_init();
     $params['access_token'] = $token;
     if (strtoupper($method) === 'GET') {
         $url .= '?' . http_build_query($params);
-    } else {
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
     }
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 45,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_HTTPHEADER => ['User-Agent: PalWebFB/1.0']
-    ]);
-    $raw = curl_exec($ch);
-    $err = curl_error($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+    $raw = false;
+    $err = '';
+    $code = 0;
+
+    if (function_exists('curl_init')) {
+        $ch = curl_init();
+        if (strtoupper($method) !== 'GET') {
+            curl_setopt($ch, CURLOPT_POST, true);
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
+        }
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_SSL_VERIFYPEER => true,
+            CURLOPT_HTTPHEADER => ['User-Agent: PalWebFB/1.0']
+        ]);
+        $raw = curl_exec($ch);
+        $err = curl_error($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+    } else {
+        $requestHeaders = [
+            'User-Agent: PalWebFB/1.0',
+            'Accept: application/json'
+        ];
+        $opts = [
+            'http' => [
+                'method' => strtoupper($method),
+                'ignore_errors' => true,
+                'timeout' => 45,
+                'header' => implode("\r\n", $requestHeaders),
+            ],
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+            ],
+        ];
+        if (strtoupper($method) !== 'GET') {
+            $opts['http']['header'] .= "\r\nContent-Type: application/x-www-form-urlencoded";
+            $opts['http']['content'] = http_build_query($params);
+        }
+        $ctx = stream_context_create($opts);
+        $raw = @file_get_contents($url, false, $ctx);
+        $respHeaders = $http_response_header ?? [];
+        foreach ((array)$respHeaders as $hdr) {
+            if (preg_match('~^HTTP/\S+\s+(\d{3})~', (string)$hdr, $m)) {
+                $code = (int)$m[1];
+                break;
+            }
+        }
+        if ($raw === false) {
+            $last = error_get_last();
+            $err = (string)($last['message'] ?? 'Error desconocido');
+        }
+    }
     if ($raw === false) return ['ok' => false, 'error' => $err !== '' ? $err : 'Error desconocido'];
     $json = json_decode($raw, true);
     if ($code >= 400 || isset($json['error'])) {
@@ -471,31 +543,36 @@ function fb_publish_instagram(PDO $pdo, array $cfg, array $job): array {
 function fb_publish_campaign(PDO $pdo, array $cfg, array $job, array $target): array {
     $pageId = trim((string)($target['id'] ?? $cfg['page_id'] ?? ''));
     $pageName = trim((string)($target['name'] ?? $cfg['page_name'] ?? $pageId));
+    $targetType = trim((string)($target['type'] ?? 'page')) ?: 'page';
+    $tokenOverride = trim((string)($target['token'] ?? ''));
     if ($pageId === '') return ['ok' => false, 'error' => 'Falta page_id'];
     $message = fb_build_message($job);
     $media = fb_collect_media($job);
     if (!$media) {
-        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', ['message' => $message], 'POST');
+        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', ['message' => $message], 'POST', $tokenOverride !== '' ? $tokenOverride : null);
         if (!$res['ok']) return $res;
         fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['id'] ?? ''), $message, 'success', '');
         return ['ok' => true, 'post_id' => (string)($res['data']['id'] ?? ''), 'messages_sent' => 1, 'facebook_sent' => 1];
     }
     if (count($media) === 1) {
-        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', ['url' => $media[0], 'caption' => $message], 'POST');
+        $params = $targetType === 'group'
+            ? ['url' => $media[0], 'message' => $message]
+            : ['url' => $media[0], 'caption' => $message];
+        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', $params, 'POST', $tokenOverride !== '' ? $tokenOverride : null);
         if (!$res['ok']) return $res;
         fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['post_id'] ?? $res['data']['id'] ?? ''), $message, 'success', '');
         return ['ok' => true, 'post_id' => (string)($res['data']['post_id'] ?? $res['data']['id'] ?? ''), 'messages_sent' => 1, 'facebook_sent' => 1];
     }
     $attached = [];
     foreach ($media as $idx => $url) {
-        $upload = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', ['url' => $url, 'published' => 'false'], 'POST');
+        $upload = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', ['url' => $url, 'published' => 'false'], 'POST', $tokenOverride !== '' ? $tokenOverride : null);
         if (!$upload['ok']) return $upload;
         $mediaId = (string)($upload['data']['id'] ?? '');
         if ($mediaId === '') return ['ok' => false, 'error' => 'Meta no devolvió media id'];
         $attached['attached_media[' . $idx . ']'] = json_encode(['media_fbid' => $mediaId], JSON_UNESCAPED_UNICODE);
     }
     $params = ['message' => $message] + $attached;
-    $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', $params, 'POST');
+    $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', $params, 'POST', $tokenOverride !== '' ? $tokenOverride : null);
     if (!$res['ok']) return $res;
     fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['id'] ?? ''), $message, 'success', '');
     return ['ok' => true, 'post_id' => (string)($res['data']['id'] ?? ''), 'messages_sent' => count($media) + 1, 'facebook_sent' => count($media) + 1];
@@ -668,21 +745,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'worker_logs') {
 if ($action === 'manual_groups') {
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         $data = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
-        echo json_encode(['status' => 'success', 'rows' => array_values((array)($data['rows'] ?? []))]); exit;
+        $rows = [];
+        foreach ((array)($data['rows'] ?? []) as $row) {
+            $id = substr(trim((string)($row['id'] ?? '')), 0, 80);
+            $name = substr(trim((string)($row['name'] ?? '')), 0, 180);
+            $url = substr(trim((string)($row['url'] ?? '')), 0, 500);
+            $enabled = !empty($row['enabled']) ? 1 : 0;
+            $token = trim((string)($row['access_token'] ?? ''));
+            $rows[] = [
+                'id' => $id,
+                'name' => $name,
+                'url' => $url,
+                'enabled' => $enabled,
+                'access_token' => $token !== '' ? '************' : ''
+            ];
+        }
+        echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $in = json_decode(file_get_contents('php://input'), true) ?: [];
         $rows = [];
         foreach ((array)($in['rows'] ?? []) as $row) {
+            $id = substr(trim((string)($row['id'] ?? '')), 0, 80);
             $name = substr(trim((string)($row['name'] ?? '')), 0, 180);
             $url = substr(trim((string)($row['url'] ?? '')), 0, 500);
-            if ($name === '' && $url === '') continue;
-            $rows[] = ['name' => $name, 'url' => $url];
+            $enabled = !empty($row['enabled']) ? 1 : 0;
+            $token = trim((string)($row['access_token'] ?? ''));
+            if ($id === '' && $name === '' && $url === '') continue;
+            $storedToken = $token;
+            if ($storedToken === '' && !empty($row['keep_token'])) {
+                $prevData = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
+                foreach ((array)($prevData['rows'] ?? []) as $prev) {
+                    if ((string)($prev['id'] ?? '') === $id && $id !== '') {
+                        $storedToken = trim((string)($prev['access_token'] ?? ''));
+                        break;
+                    }
+                }
+            }
+            $rows[] = ['id' => $id, 'name' => $name, 'url' => $url, 'enabled' => $enabled, 'access_token' => $storedToken];
         }
         if (!fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $rows])) {
             echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar listado manual']); exit;
         }
-        echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
+        $safeRows = array_map(static function ($row) {
+            return [
+                'id' => (string)($row['id'] ?? ''),
+                'name' => (string)($row['name'] ?? ''),
+                'url' => (string)($row['url'] ?? ''),
+                'enabled' => !empty($row['enabled']) ? 1 : 0,
+                'access_token' => trim((string)($row['access_token'] ?? '')) !== '' ? '************' : ''
+            ];
+        }, $rows);
+        echo json_encode(['status' => 'success', 'rows' => $safeRows]); exit;
     }
 }
 
@@ -1082,11 +1196,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_post') {
     ];
     $cfgLive = fb_cfg($pdo);
     $targets = in_array($publishMode, ['facebook','both'], true) ? fb_clean_targets($cfgLive) : [];
-    if (in_array($publishMode, ['facebook','both'], true) && !$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura primero la página']); exit; }
+    if (in_array($publishMode, ['facebook','both'], true) && !$targets) { echo json_encode(['status' => 'error', 'msg' => 'Configura al menos una página o grupo de Facebook']); exit; }
     if (in_array($publishMode, ['instagram','both'], true) && empty($cfgLive['enable_instagram'])) { echo json_encode(['status' => 'error', 'msg' => 'Instagram no está habilitado']); exit; }
     $resFb = ['ok' => true, 'skipped' => true];
     $resIg = ['ok' => true, 'skipped' => true];
-    if (in_array($publishMode, ['facebook','both'], true)) $resFb = fb_publish_campaign($pdo, $cfgLive, $job, $targets[0]);
+    if (in_array($publishMode, ['facebook','both'], true)) {
+        $errors = [];
+        $messagesSent = 0;
+        $postIds = [];
+        foreach ($targets as $target) {
+            $single = fb_publish_campaign($pdo, $cfgLive, $job, $target);
+            if (empty($single['ok'])) {
+                $errors[] = (string)($target['name'] ?? $target['id'] ?? 'Destino') . ': ' . (string)($single['error'] ?? 'Error');
+            } else {
+                $messagesSent += (int)($single['messages_sent'] ?? 0);
+                if (!empty($single['post_id'])) $postIds[] = (string)$single['post_id'];
+            }
+        }
+        $resFb = empty($errors)
+            ? ['ok' => true, 'messages_sent' => $messagesSent, 'post_id' => implode(',', $postIds)]
+            : ['ok' => false, 'error' => implode(' | ', $errors), 'messages_sent' => $messagesSent, 'post_id' => implode(',', $postIds)];
+    }
     if (in_array($publishMode, ['instagram','both'], true)) $resIg = fb_publish_instagram($pdo, $cfgLive, $job);
     if (!empty($resFb['ok']) && (!empty($resIg['ok']) || !empty($resIg['skipped']))) {
         echo json_encode([
