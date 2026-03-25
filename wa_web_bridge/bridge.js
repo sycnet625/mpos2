@@ -25,6 +25,7 @@ const SESSION_NAME = String(process.env.WA_SESSION_NAME || 'palweb-pos-bot')
 const AUTH_PATH = process.env.WA_AUTH_PATH || path.join(__dirname, '.wwebjs_auth');
 const STATUS_FILE = process.env.WA_STATUS_FILE || path.join(__dirname, 'status.json');
 const RUNTIME_DIR = process.env.WA_RUNTIME_DIR || path.join(__dirname, 'runtime');
+const LOG_FILE = process.env.WA_LOG_FILE || path.join(RUNTIME_DIR, 'bridge.log');
 const CHATS_FILE = process.env.WA_CHATS_FILE || path.join(RUNTIME_DIR, 'palweb_wa_chats.json');
 const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || path.join(RUNTIME_DIR, 'palweb_wa_promo_queue.json');
 const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || path.join(RUNTIME_DIR, 'palweb_wa_outbox_queue.json');
@@ -40,6 +41,31 @@ try {
 } catch (err) {
   console.error('[bridge] No se pudo crear runtime dir:', err.message);
 }
+
+function appendBridgeLog(level, args) {
+  try {
+    const line = [
+      new Date().toISOString(),
+      `[${level}]`,
+      args.map((v) => {
+        if (typeof v === 'string') return v;
+        try { return JSON.stringify(v); } catch (_) { return String(v); }
+      }).join(' ')
+    ].join(' ') + '\n';
+    fs.appendFileSync(LOG_FILE, line);
+  } catch (_) {}
+}
+
+const origConsoleLog = console.log.bind(console);
+const origConsoleError = console.error.bind(console);
+console.log = (...args) => {
+  appendBridgeLog('INFO', args);
+  origConsoleLog(...args);
+};
+console.error = (...args) => {
+  appendBridgeLog('ERROR', args);
+  origConsoleError(...args);
+};
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: SESSION_NAME, dataPath: AUTH_PATH }),

@@ -1033,7 +1033,7 @@ function bot_business_logo_url(array $appCfg): string {
     $logo = trim((string)($appCfg['ticket_logo'] ?? ''));
     if ($logo === '') return '';
     if (preg_match('~^https?://~i', $logo)) return $logo;
-    $base = bot_public_base_url();
+    $base = rtrim(bot_site_url($appCfg), '/');
     return $logo[0] === '/' ? ($base . $logo) : ($base . '/' . ltrim($logo, '/'));
 }
 
@@ -2505,24 +2505,34 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
-    $cmds = [];
-    foreach (bot_bridge_service_names() as $serviceName) {
-        $cmds[] = "/usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
-        $cmds[] = "/usr/bin/sudo -n /usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
-    }
     $logText = '';
-    foreach ($cmds as $cmd) {
-        $out = [];
-        $code = 1;
-        @exec($cmd, $out, $code);
-        $txt = bot_sanitize_shell_output(implode("\n", $out));
-        if ($txt !== '') {
-            $logText = $txt;
-            if ($code === 0) break;
+    $runtimeLogFile = dirname($BOT_BRIDGE_STATUS_FILE) . '/runtime/bridge.log';
+    if (is_file($runtimeLogFile) && is_readable($runtimeLogFile)) {
+        $raw = @file($runtimeLogFile, FILE_IGNORE_NEW_LINES);
+        if (is_array($raw) && $raw) {
+            $tail = array_slice($raw, -120);
+            $logText = bot_sanitize_shell_output(implode("\n", $tail));
         }
     }
     if ($logText === '') {
-        $logText = 'Sin logs disponibles (o sin permisos de journal para el usuario web).';
+        $cmds = [];
+        foreach (bot_bridge_service_names() as $serviceName) {
+            $cmds[] = "/usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
+            $cmds[] = "/usr/bin/sudo -n /usr/bin/journalctl -q -u {$serviceName} -n 120 --no-pager 2>&1";
+        }
+        foreach ($cmds as $cmd) {
+            $out = [];
+            $code = 1;
+            @exec($cmd, $out, $code);
+            $txt = bot_sanitize_shell_output(implode("\n", $out));
+            if ($txt !== '') {
+                $logText = $txt;
+                if ($code === 0) break;
+            }
+        }
+    }
+    if ($logText === '') {
+        $logText = 'Sin logs disponibles.';
     }
     $statusRaw = @file_get_contents($BOT_BRIDGE_STATUS_FILE);
     $status = json_decode((string)$statusRaw, true);
