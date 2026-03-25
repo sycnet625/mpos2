@@ -74,15 +74,13 @@ function bot_write_json_file(string $file, array $data): bool {
 }
 
 function bot_enqueue_bridge_job(array $job): bool {
-    $queueFile = (string)bot_context_get('bridge_outbox_file', '');
-    if ($queueFile === '') return false;
-    $queue = bot_read_json_file($queueFile, ['jobs' => []]);
+    $queue = bot_repo_read('bridge_outbox_file', ['jobs' => []]);
     $queue['jobs'] = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $job['id'] = trim((string)($job['id'] ?? ('out_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)))));
     $job['created_at'] = $job['created_at'] ?? date('c');
     $job['status'] = $job['status'] ?? 'queued';
     $queue['jobs'][] = $job;
-    return bot_write_json_file($queueFile, $queue);
+    return bot_repo_write('bridge_outbox_file', $queue);
 }
 
 function bot_public_base_url(array $appCfg = []): string {
@@ -236,7 +234,7 @@ function bot_run_bridge_service_command(string $verb, ?string &$detail = null): 
 }
 
 function bot_queue_bridge_control(array $command, ?string &$detail = null): bool {
-    $controlFile = (string)bot_context_get('bridge_control_file', '');
+    $controlFile = bot_repo_file('bridge_control_file');
     if ($controlFile === '') {
         $detail = 'No se encontró el archivo de control del bridge.';
         return false;

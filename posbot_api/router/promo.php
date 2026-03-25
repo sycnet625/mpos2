@@ -1,13 +1,8 @@
 <?php
-$botBridgeChatsFile = (string)bot_context_get('bridge_chats_file', '');
-$botPromoTemplatesFile = (string)bot_context_get('promo_templates_file', '');
-$botPromoGroupListsFile = (string)bot_context_get('promo_group_lists_file', '');
-$botPromoQueueFile = (string)bot_context_get('promo_queue_file', '');
-
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_chats') {
     $q = trim((string)($_GET['q'] ?? ''));
     $search = function_exists('mb_strtolower') ? mb_strtolower($q, 'UTF-8') : strtolower($q);
-    $data = bot_read_json_file($botBridgeChatsFile, ['updated_at' => null, 'rows' => []]);
+    $data = bot_repo_read('bridge_chats_file', ['updated_at' => null, 'rows' => []]);
     if (empty($data['rows']) || !is_array($data['rows'])) {
         $fallbackRows = $pdo->query("SELECT wa_user_id, wa_name, last_seen FROM pos_bot_sessions ORDER BY last_seen DESC LIMIT 120")->fetchAll(PDO::FETCH_ASSOC);
         $data = [
@@ -101,14 +96,14 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_my_group_payload') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_templates') {
-    $data = bot_read_json_file($botPromoTemplatesFile, ['rows' => []]);
+    $data = bot_repo_read('promo_templates_file', ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     usort($rows, static fn($a, $b) => strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? '')));
     echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_group_lists') {
-    $data = bot_read_json_file($botPromoGroupListsFile, ['rows' => []]);
+    $data = bot_repo_read('promo_group_lists_file', ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     usort($rows, static fn($a, $b) => strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? '')));
     foreach ($rows as &$row) {
@@ -157,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_group_list_save') {
         exit;
     }
 
-    $data = bot_read_json_file($botPromoGroupListsFile, ['rows' => []]);
+    $data = bot_repo_read('promo_group_lists_file', ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     $now = date('c');
     $updated = false;
@@ -184,7 +179,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_group_list_save') {
         ];
     }
 
-    if (!bot_write_json_file($botPromoGroupListsFile, ['rows' => $rows])) {
+    if (!bot_repo_write('promo_group_lists_file', ['rows' => $rows])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar la lista']);
         exit;
     }
@@ -198,14 +193,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_group_list_delete') 
         echo json_encode(['status' => 'error', 'msg' => 'id requerido']);
         exit;
     }
-    $data = bot_read_json_file($botPromoGroupListsFile, ['rows' => []]);
+    $data = bot_repo_read('promo_group_lists_file', ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     $filtered = array_values(array_filter($rows, static fn($r) => (string)($r['id'] ?? '') !== $listId));
     if (count($filtered) === count($rows)) {
         echo json_encode(['status' => 'error', 'msg' => 'Lista no encontrada']);
         exit;
     }
-    if (!bot_write_json_file($botPromoGroupListsFile, ['rows' => $filtered])) {
+    if (!bot_repo_write('promo_group_lists_file', ['rows' => $filtered])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo eliminar la lista']);
         exit;
     }
@@ -239,7 +234,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
     $cleanBannerImages = bot_normalize_banner_images($bannerImages);
     $overwriteExisting = !empty($in['overwrite_existing']);
 
-    $data = bot_read_json_file($botPromoTemplatesFile, ['rows' => []]);
+    $data = bot_repo_read('promo_templates_file', ['rows' => []]);
     $rows = is_array($data['rows'] ?? null) ? $data['rows'] : [];
     $nowIso = date('c');
     $nameNorm = function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
@@ -284,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_save') {
             'created_by' => $_SESSION['admin_name'] ?? 'admin'
         ];
     }
-    if (!bot_write_json_file($botPromoTemplatesFile, ['rows' => $rows])) {
+    if (!bot_repo_write('promo_templates_file', ['rows' => $rows])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar plantilla']); exit;
     }
     echo json_encode(['status' => 'success', 'id' => $templateId]); exit;
@@ -340,20 +335,20 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $templateId = substr(trim((string)($in['id'] ?? '')), 0, 80);
     if ($templateId === '') { echo json_encode(['status' => 'error', 'msg' => 'id requerido']); exit; }
-    $data = bot_read_json_file($botPromoTemplatesFile, ['rows' => []]);
+    $data = bot_repo_read('promo_templates_file', ['rows' => []]);
     $beforeTpl = count((array)($data['rows'] ?? []));
     $rows = array_values(array_filter((array)($data['rows'] ?? []), static fn($r) => (string)($r['id'] ?? '') !== $templateId));
     if ($beforeTpl === count($rows)) { echo json_encode(['status' => 'error', 'msg' => 'Plantilla no encontrada']); exit; }
-    if (!bot_write_json_file($botPromoTemplatesFile, ['rows' => $rows])) {
+    if (!bot_repo_write('promo_templates_file', ['rows' => $rows])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo borrar plantilla']); exit;
     }
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $beforeJobs = count($jobs);
     $jobs = array_values(array_filter($jobs, static fn($j) => (string)($j['template_id'] ?? '') !== $templateId));
     $deletedCampaigns = $beforeJobs - count($jobs);
     if ($deletedCampaigns > 0) {
-        if (!bot_write_json_file($botPromoQueueFile, ['jobs' => $jobs])) {
+        if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
             echo json_encode(['status' => 'error', 'msg' => 'La plantilla se borró, pero no se pudieron eliminar las campañas enlazadas']); exit;
         }
     }
@@ -361,7 +356,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
 }
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = array_slice(array_reverse($queue['jobs'] ?? []), 0, 25);
     echo json_encode(['status' => 'success', 'rows' => $jobs]); exit;
 }
@@ -369,7 +364,7 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_detail') {
     $jobId = substr(trim((string)($_GET['id'] ?? '')), 0, 120);
     if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     foreach ($jobs as $job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
@@ -382,7 +377,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
     if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $found = false;
     $now = time();
@@ -412,7 +407,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
     }
     unset($job);
     if (!$found) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
-    if (!bot_write_json_file($botPromoQueueFile, ['jobs' => $jobs])) {
+    if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo forzar la campaña']); exit;
     }
     echo json_encode(['status'=>'success']); exit;
@@ -423,7 +418,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_update') {
     $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
     if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
 
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $found = false;
 
@@ -479,7 +474,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_update') {
     unset($job);
 
     if (!$found) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
-    if (!bot_write_json_file($botPromoQueueFile, ['jobs' => $jobs])) {
+    if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo actualizar campaña']); exit;
     }
     echo json_encode(['status'=>'success']); exit;
@@ -489,7 +484,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_delete') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
     if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $before = count($jobs);
     $jobs = array_values(array_filter($jobs, static fn($j) => (string)($j['id'] ?? '') !== $jobId));
@@ -538,7 +533,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $scheduleEnabled = !empty($in['schedule_enabled']) ? 1 : 0;
 
     if ($templateId !== '' && ($text === '' || count($products) === 0)) {
-        $tplData = bot_read_json_file($botPromoTemplatesFile, ['rows' => []]);
+        $tplData = bot_repo_read('promo_templates_file', ['rows' => []]);
         foreach (($tplData['rows'] ?? []) as $tpl) {
             if ((string)($tpl['id'] ?? '') !== $templateId) continue;
             if ($text === '') $text = trim((string)($tpl['text'] ?? ''));
@@ -597,7 +592,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         $daysFinal = [];
     }
 
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobId = 'promo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
     $now = time();
     $queue['jobs'][] = [
@@ -623,7 +618,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         'current_index' => 0,
         'log' => []
     ];
-    if (!bot_write_json_file($botPromoQueueFile, $queue)) {
+    if (!bot_repo_write('promo_queue_file', $queue)) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo guardar cola de promoción']); exit;
     }
     push_notify(

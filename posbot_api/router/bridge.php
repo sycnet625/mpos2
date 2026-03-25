@@ -1,6 +1,6 @@
 <?php
-$botBridgeStatusFile = (string)bot_context_get('bridge_status_file', '');
-$botBridgeRuntimeDir = (string)bot_context_get('bridge_runtime_dir', '');
+$botBridgeStatusFile = bot_bridge_status_file();
+$botBridgeRuntimeDir = bot_bridge_runtime_dir();
 
 if ($action === 'webhook_verify' || ($_SERVER['REQUEST_METHOD']==='GET' && (isset($_GET['hub.mode']) || isset($_GET['hub_mode'])))) {
     $mode = $_GET['hub.mode'] ?? $_GET['hub_mode'] ?? '';

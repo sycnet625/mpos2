@@ -12,5 +12,6 @@ require_once POSBOT_API_ROOT . '/config_loader.php';
 require_once POSBOT_API_ROOT . '/habana_delivery.php';
 require_once POSBOT_API_ROOT . '/push_notify.php';
 require_once POSBOT_API_ROOT . '/posbot_api/bootstrap.php';
+require_once POSBOT_API_ROOT . '/posbot_api/repository.php';
 require_once POSBOT_API_ROOT . '/posbot_api/helpers.php';
 require POSBOT_API_ROOT . '/posbot_api/router.php';
