@@ -11,6 +11,7 @@ $posBotBuildPatterns = [
     __DIR__ . '/../wa_web_bridge/bridge.js',
     __DIR__ . '/../posbot_api/*.php',
     __DIR__ . '/../posbot_api/helpers/*.php',
+    __DIR__ . '/../posbot_api/router/*.php',
 ];
 $posBotBuildFiles = [];
 foreach ($posBotBuildPatterns as $posBotBuildPattern) {
