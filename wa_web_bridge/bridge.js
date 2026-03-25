@@ -6,7 +6,7 @@ const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
 const POS_BOT_HOST = process.env.POS_BOT_HOST || '';
-const API_BASE = process.env.POS_BOT_API_BASE || 'http://127.0.0.1';
+const API_BASE = process.env.POS_BOT_API_BASE || (POS_BOT_HOST ? `https://${POS_BOT_HOST}` : 'http://127.0.0.1');
 const API_PATH = process.env.POS_BOT_API_PATH || '/pos_bot_api.php?action=web_incoming';
 const API_JOBS_PATH = process.env.POS_BOT_JOBS_PATH || '/pos_bot_api.php?action=bridge_scan_jobs';
 const API_URL = process.env.POS_BOT_API_URL || `${API_BASE}${API_PATH}`;
