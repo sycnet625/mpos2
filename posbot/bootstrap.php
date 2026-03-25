@@ -4,14 +4,20 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     header('Location: login.php');
     exit;
 }
-$posBotBuildFiles = [
+$posBotBuildPatterns = [
+    __DIR__ . '/*.php',
     __DIR__ . '/../pos_bot.php',
-    __DIR__ . '/page.php',
-    __DIR__ . '/styles.php',
-    __DIR__ . '/app.js.php',
     __DIR__ . '/../pos_bot_api.php',
     __DIR__ . '/../wa_web_bridge/bridge.js',
+    __DIR__ . '/../posbot_api/*.php',
+    __DIR__ . '/../posbot_api/helpers/*.php',
 ];
+$posBotBuildFiles = [];
+foreach ($posBotBuildPatterns as $posBotBuildPattern) {
+    foreach ((array) glob($posBotBuildPattern) as $posBotBuildFile) {
+        $posBotBuildFiles[$posBotBuildFile] = $posBotBuildFile;
+    }
+}
 $posBotBuildTs = 0;
 foreach ($posBotBuildFiles as $posBotBuildFile) {
     $posBotFileTs = @filemtime($posBotBuildFile) ?: 0;
