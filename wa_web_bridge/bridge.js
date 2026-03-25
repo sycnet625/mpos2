@@ -2,7 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { Agent } = require('undici');
+const https = require('https');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
@@ -99,12 +99,6 @@ let currentBridgeState = 'starting';
 let currentStateMeta = {};
 const processedMessageIds = new Map();
 let controlCommandBusy = false;
-const LOOPBACK_TLS_DISPATCHER = new Agent({
-  connect: {
-    rejectUnauthorized: false,
-    servername: POS_BOT_HOST || undefined
-  }
-});
 
 function normalizeWaUserId(rawFrom) {
   const base = String(rawFrom || '').split('@')[0] || '';
@@ -207,7 +201,39 @@ async function apiFetch(url, options = {}) {
       const loopbackBase = LOOPBACK_API_BASE.replace(/^http:\/\//i, 'https://').replace(/\/+$/, '');
       const fallbackUrl = `${loopbackBase}${parsed.pathname}${parsed.search}`;
       console.error('[bridge] fetch principal falló, reintentando por loopback TLS:', err.message || err, '=>', fallbackUrl);
-      return await fetch(fallbackUrl, { ...options, headers, dispatcher: LOOPBACK_TLS_DISPATCHER });
+      return await new Promise((resolve, reject) => {
+        const req = https.request(fallbackUrl, {
+          method: options.method || 'GET',
+          headers,
+          rejectUnauthorized: false,
+          servername: POS_BOT_HOST || undefined
+        }, (res) => {
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => {
+            const body = Buffer.concat(chunks);
+            resolve({
+              ok: (res.statusCode || 0) >= 200 && (res.statusCode || 0) < 300,
+              status: res.statusCode || 0,
+              headers: {
+                get(name) {
+                  const value = res.headers[String(name).toLowerCase()];
+                  return Array.isArray(value) ? value.join(', ') : (value || null);
+                }
+              },
+              async json() {
+                return JSON.parse(body.toString('utf8') || 'null');
+              },
+              async text() {
+                return body.toString('utf8');
+              }
+            });
+          });
+        });
+        req.on('error', reject);
+        if (options.body) req.write(options.body);
+        req.end();
+      });
     } catch (_) {
       throw err;
     }
