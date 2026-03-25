@@ -147,9 +147,22 @@ function bot_enqueue_bridge_job(array $job): bool {
     return bot_write_json_file($BOT_BRIDGE_OUTBOX_FILE, $queue);
 }
 
-function bot_public_base_url(): string {
-    global $config;
-    $website = trim((string)($config['website'] ?? ''));
+function bot_public_base_url(array $appCfg = []): string {
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+        || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+    $scheme = $https ? 'https' : 'http';
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? $_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''));
+    if ($host === '') $host = trim((string)($_SERVER['SERVER_NAME'] ?? ''));
+    $hostCheck = preg_replace('/:\d+$/', '', $host ?? '');
+    if ($hostCheck !== '' && !in_array($hostCheck, ['127.0.0.1', 'localhost'], true)) {
+        return $scheme . '://' . $host;
+    }
+    if ($appCfg === []) {
+        global $config;
+        $appCfg = is_array($config ?? null) ? $config : [];
+    }
+    $website = trim((string)($appCfg['website'] ?? ''));
     if ($website !== '') {
         if (!preg_match('~^https?://~i', $website)) $website = 'https://' . ltrim($website, '/');
         $parts = parse_url($website);
@@ -159,12 +172,7 @@ function bot_public_base_url(): string {
             return $origin;
         }
     }
-    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
-    $scheme = $https ? 'https' : 'http';
-    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
-    if ($host === '') $host = trim((string)($_SERVER['SERVER_NAME'] ?? 'localhost'));
-    if (in_array($host, ['127.0.0.1', 'localhost'], true)) return 'https://www.palweb.net';
-    return $scheme . '://' . $host;
+    return 'https://www.palweb.net';
 }
 
 function bot_public_product_image(string $sku): string {
@@ -216,7 +224,7 @@ function bot_my_group_campaign_payload(PDO $pdo, array $config): array {
             $outroLines[] = '- ' . $name;
         }
     }
-    $outroLines[] = 'En www.palweb.net se pueden comprar automaticamente.';
+    $outroLines[] = 'En ' . preg_replace('#^https?://#i', '', rtrim(bot_public_base_url($config), '/')) . ' se pueden comprar automaticamente.';
     return [
         'products' => $products,
         'reservables' => $reservables,

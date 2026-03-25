@@ -4,8 +4,22 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     header('Location: login.php');
     exit;
 }
-$posBotBuildTs = @filemtime(__FILE__) ?: time();
-$posBotVersion = 'v' . date('Ymd.His', $posBotBuildTs);
+$posBotBuildFiles = [
+    __FILE__,
+    __DIR__ . '/pos_bot_api.php',
+    __DIR__ . '/wa_web_bridge/bridge.js',
+];
+$posBotBuildTs = 0;
+foreach ($posBotBuildFiles as $posBotBuildFile) {
+    $posBotFileTs = @filemtime($posBotBuildFile) ?: 0;
+    if ($posBotFileTs > $posBotBuildTs) {
+        $posBotBuildTs = $posBotFileTs;
+    }
+}
+if ($posBotBuildTs <= 0) {
+    $posBotBuildTs = time();
+}
+$posBotVersion = 'v 1.1.' . str_pad((string) (int) (intdiv($posBotBuildTs, 60) % 10000), 4, '0', STR_PAD_LEFT);
 ?>
 <!DOCTYPE html>
 <html lang="es">

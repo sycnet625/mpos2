@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const qrcode = require('qrcode-terminal');
-const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 
 const POS_BOT_HOST = process.env.POS_BOT_HOST || '';
 const API_BASE = process.env.POS_BOT_API_BASE || (POS_BOT_HOST ? `https://${POS_BOT_HOST}` : 'http://127.0.0.1');
