@@ -974,6 +974,7 @@ function bot_menu(PDO $pdo, int $emp, int $suc): array {
     global $config;
     $idAlmacen = (int)($config['id_almacen'] ?? 1);
     $st = $pdo->prepare("SELECT p.codigo,p.nombre,p.precio,p.categoria,COALESCE(p.es_servicio,0) AS es_servicio,
+                            COALESCE(p.es_reservable,0) AS es_reservable,
                             COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = ?),0) AS stock_total
                          FROM productos p
                          WHERE activo=1 AND es_web=1 AND id_empresa=?
@@ -986,6 +987,10 @@ function bot_menu(PDO $pdo, int $emp, int $suc): array {
 function bot_product_in_stock(array $product, int $qty=1): bool {
     if (!empty($product['es_servicio'])) return true;
     return (float)($product['stock_total'] ?? 0) >= max(1, $qty);
+}
+
+function bot_product_is_reservable(array $product): bool {
+    return !empty($product['es_reservable']);
 }
 
 function bot_find_substitutes(array $menu, array $product, int $limit=3): array {
@@ -2017,6 +2022,11 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             if (!$product) continue;
             $qty = max(1, (int)($it['qty'] ?? 1));
             if (!bot_product_in_stock($product, $qty)) {
+                if (bot_product_is_reservable($product)) {
+                    $it['reserved_warning'] = true;
+                    $availableItems[] = $it;
+                    continue;
+                }
                 $unavailable[] = ['product' => $product, 'qty' => $qty];
                 continue;
             }
@@ -2046,6 +2056,9 @@ function bot_handle_text(PDO $pdo, array $cfg, array $appCfg, string $wa, string
             $line = "- {$it['name']} x{$it['qty']}";
             if ($it['note'] !== '') $line .= " [{$it['note']}]";
             $lines[] = $line;
+            if (!empty($it['reserved_warning'])) {
+                $lines[] = "  Aviso: {$it['name']} no tiene existencia para despacho inmediato. Se acepta como reserva para su próxima producción.";
+            }
         }
         if ($unavailable) {
             foreach ($unavailable as $row) {
