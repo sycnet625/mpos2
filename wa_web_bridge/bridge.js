@@ -49,6 +49,9 @@ function appendBridgeLog(level, args) {
       new Date().toISOString(),
       `[${level}]`,
       args.map((v) => {
+        if (v instanceof Error) {
+          return v.stack || v.message || String(v);
+        }
         if (typeof v === 'string') return v;
         try { return JSON.stringify(v); } catch (_) { return String(v); }
       }).join(' ')
@@ -106,6 +109,10 @@ function normalizeWaUserId(rawFrom) {
 function normalizeTargetId(raw) {
   const value = String(raw || '').trim();
   if (!value) return '';
+  if (value.endsWith('@lid')) {
+    const digits = value.split('@')[0].replace(/\D+/g, '');
+    return digits ? `${digits}@c.us` : value;
+  }
   if (value.includes('@')) return value;
   const digits = value.replace(/\D+/g, '');
   if (digits) return `${digits}@c.us`;
@@ -415,17 +422,13 @@ async function sendButtonsMessage(targetId, body, buttons, title = '', footer = 
     }
     return 0;
   }
-  try {
-    const payload = new Buttons(textBody || 'Selecciona una opción', labelButtons.map((txt) => ({ body: txt })), String(title || '').trim(), String(footer || '').trim());
-    await client.sendMessage(targetId, payload);
-    return 1;
-  } catch (err) {
-    const fallback = [textBody || 'Opciones rápidas:']
-      .concat(labelButtons.map((txt, idx) => `${idx + 1}. ${txt}`))
-      .join('\n');
-    await client.sendMessage(targetId, fallback);
-    return 1;
-  }
+  const lines = [];
+  if (title) lines.push(String(title).trim());
+  lines.push(textBody || 'Opciones rápidas:');
+  lines.push(...labelButtons.map((txt, idx) => `${idx + 1}. ${txt}`));
+  if (footer) lines.push(String(footer).trim());
+  await client.sendMessage(targetId, lines.filter(Boolean).join('\n'));
+  return 1;
 }
 
 async function sendProductCards(targetId, text, products, outroText, bannerImages) {
@@ -714,25 +717,29 @@ async function processIncoming(message) {
   }
 
   const responses = Array.isArray(data.responses) ? data.responses : [];
+  const replyTarget = normalizeTargetId(message.from);
+  if (!replyTarget) {
+    throw new Error(`Destino inválido para responder: ${String(message.from || '')}`);
+  }
   for (const out of responses) {
     const type = String(out?.type || 'text').trim().toLowerCase();
     if (type === 'image') {
       const url = String(out?.url || '').trim();
       const caption = String(out?.caption || out?.text || '').trim();
       if (!url) {
-        if (caption) await client.sendMessage(message.from, caption);
+        if (caption) await client.sendMessage(replyTarget, caption);
         continue;
       }
-      await sendMediaUrl(message.from, url, caption, 'bot_reply');
+      await sendMediaUrl(replyTarget, url, caption, 'bot_reply');
       continue;
     }
     if (type === 'buttons') {
-      await sendButtonsMessage(message.from, String(out?.text || '').trim(), Array.isArray(out?.buttons) ? out.buttons : [], String(out?.title || '').trim(), String(out?.footer || '').trim());
+      await sendButtonsMessage(replyTarget, String(out?.text || '').trim(), Array.isArray(out?.buttons) ? out.buttons : [], String(out?.title || '').trim(), String(out?.footer || '').trim());
       continue;
     }
     const outText = String(out?.text || '').trim();
     if (!outText) continue;
-    await client.sendMessage(message.from, outText);
+    await client.sendMessage(replyTarget, outText);
   }
 }
 
