@@ -787,6 +787,13 @@ function bot_datetime_prompt(string $mode): string {
 }
 
 function bot_ticket_url(int $idReserva, array $appCfg = []): string {
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? $_SERVER['SERVER_NAME'] ?? ''));
+    $host = preg_replace('/:\d+$/', '', $host ?? '');
+    if ($host !== '' && !in_array($host, ['127.0.0.1', 'localhost'], true)) {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443') || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+        $scheme = $https ? 'https' : 'http';
+        return $scheme . '://' . $host . '/ticket_view.php?id=' . $idReserva . '&source=qr';
+    }
     return rtrim(bot_site_url($appCfg), '/') . '/ticket_view.php?id=' . $idReserva . '&source=qr';
 }
 
@@ -1406,6 +1413,7 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
     $pdo->beginTransaction();
     try {
         $total = 0.0; $valid = [];
+        $sinExistencia = 0;
         $itemNotes = (array)($cart['item_notes'] ?? []);
         $deliveryFee = $fulfillmentMode === 'delivery' ? (float)($cart['delivery_fee'] ?? 0) : 0.0;
         $validation = is_array($cart['address_validation'] ?? null) ? $cart['address_validation'] : [];
@@ -1483,7 +1491,6 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
         ]);
         $idReserva = (int)$pdo->lastInsertId();
 
-        $sinExistencia = 0;
         $d = $pdo->prepare("INSERT INTO ventas_detalle
             (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
             VALUES (?,?,?,?,?,?,?)");
@@ -1496,6 +1503,25 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
 
         $pdo->prepare("INSERT INTO pos_bot_orders (id_pedido,wa_user_id,total) VALUES (?,?,?)")->execute([$idReserva, $wa, $totalFinal]);
         $pdo->commit();
+        $resumenPush = ($name ?: 'Cliente WhatsApp') . ' — $' . number_format($totalFinal, 2);
+        push_notify(
+            $pdo,
+            'operador',
+            '📅 Nueva reserva por WhatsApp Bot',
+            $resumenPush,
+            '/marinero/reservas.php',
+            'bot_new_reservation'
+        );
+        if ($sinExistencia) {
+            push_notify(
+                $pdo,
+                'operador',
+                '📦 Reserva WhatsApp con productos sin stock',
+                $resumenPush,
+                '/marinero/reservas.php',
+                'bot_reservation_no_stock'
+            );
+        }
         return [
             'ok'=>true,
             'id_reserva'=>$idReserva,
