@@ -272,6 +272,18 @@ function normalizeProductImageUrl(rawUrl, productId = '') {
   return mediaUrl;
 }
 
+function extractProductCodeFromImageUrl(rawUrl) {
+  const mediaUrl = String(rawUrl || '').trim();
+  if (!mediaUrl) return '';
+  try {
+    const parsed = new URL(normalizeProductImageUrl(mediaUrl, ''), API_ORIGIN || 'https://www.palweb.net');
+    if (!/image\.php$/i.test(parsed.pathname)) return '';
+    return String(parsed.searchParams.get('code') || '').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 function resolveLocalProductImage(productId = '') {
   const sku = String(productId || '').trim();
   if (!sku) return null;
@@ -303,6 +315,27 @@ async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner')
     }
     return 0;
   }
+  const productCode = extractProductCodeFromImageUrl(mediaUrl);
+  if (productCode) {
+    const localImage = resolveLocalProductImage(productCode);
+    if (localImage) {
+      try {
+        const bytes = fs.readFileSync(localImage.filePath);
+        const b64 = Buffer.from(bytes).toString('base64');
+        if (!b64) throw new Error('imagen local vacía');
+        const fileName = `${productCode.replace(/[^a-zA-Z0-9._-]/g, '_')}.${localImage.ext || 'jpg'}`;
+        const media = new MessageMedia(localImage.mime, b64, fileName);
+        if (caption) {
+          await client.sendMessage(targetId, media, { caption });
+        } else {
+          await client.sendMessage(targetId, media);
+        }
+        return 1;
+      } catch (err) {
+        console.error('[bridge] No se pudo enviar imagen local detectada por URL:', productCode, localImage.filePath, err.message || err);
+      }
+    }
+  }
   try {
     const res = await fetch(mediaUrl, {
       method: 'GET',
@@ -312,6 +345,7 @@ async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner')
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const contentType = String(res.headers.get('content-type') || '').split(';')[0].trim();
     if (!contentType.startsWith('image/')) throw new Error(`MIME inválido: ${contentType}`);
+    if (contentType === 'image/svg+xml') throw new Error('MIME no compatible para WhatsApp: image/svg+xml');
     const bytes = await res.arrayBuffer();
     const b64 = Buffer.from(bytes).toString('base64');
     if (!b64) throw new Error('imagen vacía');
@@ -325,7 +359,7 @@ async function sendMediaUrl(targetId, rawUrl, caption = '', fileBase = 'banner')
     }
     return 1;
   } catch (err) {
-    const fallback = caption ? `${caption}\n${mediaUrl}` : mediaUrl;
+    const fallback = [caption, mediaUrl].filter(Boolean).join('\n');
     await client.sendMessage(targetId, fallback);
     return 1;
   }
@@ -391,37 +425,8 @@ async function sendProductCards(targetId, text, products, outroText, bannerImage
       }
     }
     if (imageUrl) {
-      try {
-        const mediaUrl = normalizeProductImageUrl(imageUrl, sku);
-        const res = await fetch(mediaUrl, {
-          method: 'GET',
-          redirect: 'follow',
-          headers: { 'User-Agent': 'Mozilla/5.0 (PalWebBot/1.0)' }
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const contentType = String(res.headers.get('content-type') || '').split(';')[0].trim();
-        if (!contentType.startsWith('image/')) throw new Error(`MIME inválido: ${contentType}`);
-        const bytes = await res.arrayBuffer();
-        const b64 = Buffer.from(bytes).toString('base64');
-        if (!b64) throw new Error('imagen vacía');
-        const ext = contentType.split('/')[1] || 'jpg';
-        const fileName = `${(sku || 'producto').replace(/[^a-zA-Z0-9._-]/g, '_')}.${ext}`;
-        const media = new MessageMedia(contentType, b64, fileName);
-        await client.sendMessage(targetId, media, { caption });
-        sentCount += 1;
-        continue;
-      } catch (err) {
-        const fallbackUrl = normalizeProductImageUrl(imageUrl, sku);
-        console.error('[bridge] No se pudo enviar imagen de producto:', sku || name, fallbackUrl, err.message || err);
-        if (fallbackUrl) {
-          await client.sendMessage(targetId, `${caption}\n${fallbackUrl}`);
-          sentCount += 1;
-        } else {
-          await client.sendMessage(targetId, caption);
-          sentCount += 1;
-        }
-        continue;
-      }
+      sentCount += await sendMediaUrl(targetId, imageUrl, caption, sku || name || 'producto');
+      continue;
     }
     await client.sendMessage(targetId, caption);
     sentCount += 1;
