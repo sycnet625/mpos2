@@ -29,4 +29,9 @@ foreach ($posBotBuildFiles as $posBotBuildFile) {
 if ($posBotBuildTs <= 0) {
     $posBotBuildTs = time();
 }
-$posBotVersion = 'v 1.1.' . str_pad((string) (int) (intdiv($posBotBuildTs, 60) % 10000), 4, '0', STR_PAD_LEFT);
+$gitHead = @trim((string)@shell_exec('git -C ' . escapeshellarg(dirname(__DIR__)) . ' rev-parse --short HEAD 2>/dev/null'));
+if ($gitHead !== '' && preg_match('/^[a-f0-9]{7,}$/i', $gitHead)) {
+    $posBotVersion = 'v 1.1.' . strtolower($gitHead);
+} else {
+    $posBotVersion = 'v 1.1.' . str_pad((string) (int) (intdiv($posBotBuildTs, 60) % 10000), 4, '0', STR_PAD_LEFT);
+}
