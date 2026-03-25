@@ -166,6 +166,26 @@
           <div class="col-12"><button class="btn btn-primary" onclick="testBot()"><i class="fas fa-paper-plane"></i> Simular entrada</button></div>
         </div>
       </div>
+      <div class="card mt-3">
+        <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+          <span>Clientes atendidos por el bot</span>
+          <button class="btn btn-sm btn-outline-secondary" type="button" onclick="loadBotClientActivity()"><i class="fas fa-sync"></i></button>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-lg-5">
+              <div id="botClientList" class="border rounded overflow-auto" style="max-height:420px">
+                <div class="text-center text-muted p-3">Cargando clientes...</div>
+              </div>
+            </div>
+            <div class="col-lg-7">
+              <div id="botClientDetail" class="border rounded p-3" style="min-height:220px;background:#f8fafc">
+                <div class="text-muted">Selecciona un cliente para ver detalles.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="col-lg-6">

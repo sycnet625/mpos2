@@ -12,6 +12,8 @@ let promoGroupListEditingId='';
 let conversationRows=[];
 let activeConversationId='';
 let activeCampaignLogId='';
+let botClientRows=[];
+let activeBotClientId='';
 let promoSearchTimer=null;
 let conversationFilter='all';
 let promoChatsSearchTimer=null;
@@ -174,6 +176,105 @@ async function clearMessageLogs(){
   } else a('danger',d.msg||'No se pudieron borrar los logs');
 }
 async function loadOrders(){const d=await g(API+'?action=recent_orders');if(d.status!=='success'||!(d.rows||[]).length){to.innerHTML='<tr><td colspan="4" class="text-center text-muted p-3">Sin datos</td></tr>';return;}to.innerHTML=d.rows.map(r=>`<tr><td class="small">${esc(r.created_at)}</td><td>#${esc(r.id_pedido)}</td><td class="small">${esc(r.cliente_nombre||r.wa_user_id)}</td><td>$${Number(r.total||0).toFixed(2)}</td></tr>`).join('')}
+function botClientStateBadge(row){
+  if(Number(row.escalation_active||0)===1) return '<span class="badge bg-danger">Alarma</span>';
+  if(Number(row.bot_paused||0)===1) return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Humano</span>';
+  if(String(row.awaiting_field||'').trim()) return `<span class="badge bg-warning-subtle text-dark border border-warning-subtle">Esperando ${esc(row.awaiting_field)}</span>`;
+  if(Number(row.orders_count||0)>0) return '<span class="badge bg-success-subtle text-success border border-success-subtle">Compró</span>';
+  return '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle">Activo</span>';
+}
+function renderBotClientList(){
+  const wrap=document.getElementById('botClientList');
+  if(!wrap) return;
+  if(!botClientRows.length){
+    wrap.innerHTML='<div class="text-center text-muted p-3">Sin clientes atendidos todavía.</div>';
+    return;
+  }
+  wrap.innerHTML=botClientRows.map(r=>`<button type="button" class="list-group-item list-group-item-action border-0 border-bottom text-start ${String(r.wa_user_id)===String(activeBotClientId)?'active':''}" onclick="selectBotClient('${esc(r.wa_user_id)}')">
+      <div class="d-flex justify-content-between align-items-start gap-2">
+        <div>
+          <div class="fw-semibold">${esc(r.wa_name||r.phone||r.wa_user_id)}</div>
+          <div class="small text-muted">${esc(r.phone||r.wa_user_id)}</div>
+          <div class="small text-muted">Última actividad: ${esc(r.last_seen||r.last_message_at||'-')}</div>
+        </div>
+        <div class="text-end">
+          ${botClientStateBadge(r)}
+          <div class="small mt-1">Resp: ${Number(r.out_count||0)} | Err: ${Number(r.misunderstood_count||0)}</div>
+          <div class="small">Compras: ${Number(r.orders_count||0)}</div>
+        </div>
+      </div>
+    </button>`).join('');
+  wrap.classList.add('list-group');
+}
+function renderBotClientDetail(d){
+  const box=document.getElementById('botClientDetail');
+  if(!box) return;
+  if(!d){
+    box.innerHTML='<div class="text-muted">Selecciona un cliente para ver detalles.</div>';
+    return;
+  }
+  const cartRows=(d.cart_items||[]).length
+    ? `<div class="mt-3"><div class="fw-semibold mb-2">Carrito actual</div><ul class="small mb-0">${d.cart_items.map(i=>`<li>${esc(i.name||i.id)} x ${Number(i.qty||0)} · $${Number(i.price||0).toFixed(2)}</li>`).join('')}</ul></div>`
+    : '';
+  const ordersRows=(d.orders||[]).length
+    ? `<div class="mt-3"><div class="fw-semibold mb-2">Compras / reservas</div><div class="table-responsive"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Pedido</th><th>Total</th></tr></thead><tbody>${d.orders.map(o=>`<tr><td class="small">${esc(o.created_at)}</td><td>#${esc(o.id_pedido)}</td><td>$${Number(o.total||0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div></div>`
+    : '<div class="mt-3 text-muted small">Sin compras registradas.</div>';
+  const msgRows=(d.messages||[]).length
+    ? `<div class="mt-3"><div class="fw-semibold mb-2">Mensajes recientes</div><div class="table-responsive" style="max-height:260px"><table class="table table-sm mb-0"><thead class="table-light"><tr><th>Fecha</th><th>Dir</th><th>Tipo</th><th>Texto</th></tr></thead><tbody>${d.messages.map(m=>`<tr><td class="small">${esc(m.created_at)}</td><td>${esc(m.direction)}</td><td>${esc(m.msg_type)}</td><td class="small">${esc(m.message_text||'')}</td></tr>`).join('')}</tbody></table></div></div>`
+    : '<div class="mt-3 text-muted small">Sin mensajes recientes.</div>';
+  box.innerHTML=`<div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+      <div>
+        <div class="h5 mb-1">${esc(d.wa_name||d.phone||d.wa_user_id)}</div>
+        <div class="text-muted small">${esc(d.phone||d.wa_user_id)}</div>
+        ${(d.customer_name&&d.customer_name!==d.wa_name)?`<div class="small text-muted">Nombre para pedido: ${esc(d.customer_name)}</div>`:''}
+      </div>
+      <div>${botClientStateBadge(d)}</div>
+    </div>
+    <div class="row g-2 mt-2">
+      <div class="col-6 col-xl-3"><div class="border rounded p-2 bg-white"><div class="small text-muted">Respuestas</div><div class="fw-bold">${Number(d.out_count||0)}</div></div></div>
+      <div class="col-6 col-xl-3"><div class="border rounded p-2 bg-white"><div class="small text-muted">No entendidos</div><div class="fw-bold">${Number(d.misunderstood_count||0)}</div></div></div>
+      <div class="col-6 col-xl-3"><div class="border rounded p-2 bg-white"><div class="small text-muted">Compras</div><div class="fw-bold">${Number(d.orders_count||0)}</div></div></div>
+      <div class="col-6 col-xl-3"><div class="border rounded p-2 bg-white"><div class="small text-muted">Total vendido</div><div class="fw-bold">$${Number(d.total_spent||0).toFixed(2)}</div></div></div>
+    </div>
+    <div class="row g-2 mt-2">
+      <div class="col-md-6"><div class="small text-muted">Última actividad</div><div>${esc(d.last_seen||d.last_message_at||'-')}</div></div>
+      <div class="col-md-6"><div class="small text-muted">Última compra</div><div>${esc(d.last_order_at||'-')}</div></div>
+      <div class="col-md-6"><div class="small text-muted">Esperando dato</div><div>${esc(d.awaiting_field||'-')}</div></div>
+      <div class="col-md-6"><div class="small text-muted">Respuesta manual</div><div>${esc(d.last_manual_reply_at||'-')}</div></div>
+      <div class="col-md-6"><div class="small text-muted">Dirección</div><div>${esc(d.customer_address||'-')}</div></div>
+      <div class="col-md-6"><div class="small text-muted">Entrega / recogida</div><div>${esc(d.fulfillment_mode||'-')} ${d.requested_datetime_label?`· ${esc(d.requested_datetime_label)}`:''}</div></div>
+    </div>
+    ${cartRows}
+    ${ordersRows}
+    ${msgRows}`;
+}
+async function loadBotClientDetail(){
+  const box=document.getElementById('botClientDetail');
+  if(!box) return;
+  if(!activeBotClientId){
+    renderBotClientDetail(null);
+    return;
+  }
+  const d=await g(API+'?action=client_activity_detail&wa_user_id='+encodeURIComponent(activeBotClientId));
+  if(d.status!=='success'){box.innerHTML=`<div class="text-danger">${esc(d.msg||'No se pudo cargar el detalle')}</div>`;return;}
+  renderBotClientDetail(d.detail||null);
+}
+function selectBotClient(wa){
+  activeBotClientId=String(wa||'');
+  renderBotClientList();
+  loadBotClientDetail();
+}
+async function loadBotClientActivity(){
+  const d=await g(API+'?action=client_activity_list');
+  if(d.status!=='success'){a('danger',d.msg||'No se pudo cargar actividad de clientes');return;}
+  botClientRows=Array.isArray(d.rows)?d.rows:[];
+  if(botClientRows.length && !botClientRows.some(r=>String(r.wa_user_id)===String(activeBotClientId))){
+    activeBotClientId=String(botClientRows[0].wa_user_id||'');
+  }
+  if(!botClientRows.length) activeBotClientId='';
+  renderBotClientList();
+  loadBotClientDetail();
+}
 function conversationBadge(row){
   if(Number(row.escalation_active||0)===1) return `<span class="badge bg-danger text-white">ALARMA ${esc(row.escalation_label||'Humano')}</span>`;
   if(Number(row.bot_paused||0)===1) return '<span class="badge bg-danger-subtle text-danger border border-danger-subtle">Humano</span>';
@@ -1162,7 +1263,7 @@ function renderProgrammingTab(){
     </div>
   </div>`).join('');
 }
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadConversations(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates(),loadPromoGroupLists()])}catch(e){a('danger',e.message||'error')}}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadMsgs(),loadOrders(),loadBotClientActivity(),loadConversations(),loadBridgeStatus(),loadPromoList(),loadPromoChats(),loadPromoTemplates(),loadPromoGroupLists()])}catch(e){a('danger',e.message||'error')}}
 function openWhatsAppWeb(){
   const w = window.open('https://web.whatsapp.com/','_blank','noopener,noreferrer');
   const s = document.getElementById('waWebStatus');
@@ -1203,5 +1304,5 @@ document.addEventListener('change',ev=>{
   if(ev.target && ev.target.matches('input[name="my_group_chat"]')) loadMyGroupPreview();
 });
 loadAll();
-setInterval(()=>{loadStats();loadMsgs();loadOrders();loadConversations();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates();loadPromoGroupLists()},12000);
+setInterval(()=>{loadStats();loadMsgs();loadOrders();loadBotClientActivity();loadConversations();loadBridgeStatus();loadPromoList();loadPromoChats();loadPromoTemplates();loadPromoGroupLists()},12000);
 </script>
