@@ -786,8 +786,8 @@ function bot_datetime_prompt(string $mode): string {
     return "Ahora dime la fecha y hora para la {$target}.\nEjemplos válidos:\n- hoy 5:30 pm\n- mañana 10:00 am\n- 15/03/2026 14:30";
 }
 
-function bot_ticket_url(int $idReserva): string {
-    return bot_public_base_url() . '/ticket_view.php?id=' . $idReserva . '&source=qr';
+function bot_ticket_url(int $idReserva, array $appCfg = []): string {
+    return rtrim(bot_site_url($appCfg), '/') . '/ticket_view.php?id=' . $idReserva . '&source=qr';
 }
 
 function bot_send_fulfillment_prompt(PDO $pdo, string $wa): void {
@@ -1412,7 +1412,7 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
         $requestedAt = trim((string)($cart['requested_datetime'] ?? ''));
         $requestedLabel = trim((string)($cart['requested_datetime_label'] ?? ''));
         foreach ($items as $sku => $qty) {
-            $st = $pdo->prepare("SELECT codigo,nombre,precio,categoria,COALESCE(es_servicio,0) AS es_servicio FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
+            $st = $pdo->prepare("SELECT codigo,nombre,precio,categoria,COALESCE(es_servicio,0) AS es_servicio, COALESCE(es_reservable,0) AS es_reservable FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
             $st->execute([$sku, (int)$appCfg['id_empresa']]);
             $p = $st->fetch(PDO::FETCH_ASSOC);
             if (!$p) continue;
@@ -1422,7 +1422,11 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
                 $stockSt->execute([$sku, (int)($appCfg['id_almacen'] ?? 1)]);
                 $stock = (float)$stockSt->fetchColumn();
                 if ($stock < $q) {
-                    throw new Exception("Sin existencia suficiente para {$p['nombre']}.");
+                    if (!empty($p['es_reservable'])) {
+                        $sinExistencia = 1;
+                    } else {
+                        throw new Exception("Sin existencia suficiente para {$p['nombre']}.");
+                    }
                 }
             }
             $total += (float)$p['precio'] * $q;
@@ -1497,7 +1501,7 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
             'id_reserva'=>$idReserva,
             'id_pedido'=>$idReserva,
             'total'=>$totalFinal,
-            'ticket_url'=>bot_ticket_url($idReserva),
+            'ticket_url'=>bot_ticket_url($idReserva, $appCfg),
             'order_snapshot'=>[
                 'items' => $items,
                 'item_notes' => $itemNotes,
