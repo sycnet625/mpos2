@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { Agent } = require('undici');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
@@ -98,6 +99,12 @@ let currentBridgeState = 'starting';
 let currentStateMeta = {};
 const processedMessageIds = new Map();
 let controlCommandBusy = false;
+const LOOPBACK_TLS_DISPATCHER = new Agent({
+  connect: {
+    rejectUnauthorized: false,
+    servername: POS_BOT_HOST || undefined
+  }
+});
 
 function normalizeWaUserId(rawFrom) {
   const base = String(rawFrom || '').split('@')[0] || '';
@@ -197,9 +204,10 @@ async function apiFetch(url, options = {}) {
     try {
       const parsed = new URL(url);
       if (parsed.hostname !== POS_BOT_HOST || !/^https:/i.test(parsed.protocol)) throw err;
-      const fallbackUrl = `${LOOPBACK_API_BASE.replace(/\/+$/, '')}${parsed.pathname}${parsed.search}`;
-      console.error('[bridge] fetch principal falló, reintentando por loopback:', err.message || err, '=>', fallbackUrl);
-      return await fetch(fallbackUrl, { ...options, headers });
+      const loopbackBase = LOOPBACK_API_BASE.replace(/^http:\/\//i, 'https://').replace(/\/+$/, '');
+      const fallbackUrl = `${loopbackBase}${parsed.pathname}${parsed.search}`;
+      console.error('[bridge] fetch principal falló, reintentando por loopback TLS:', err.message || err, '=>', fallbackUrl);
+      return await fetch(fallbackUrl, { ...options, headers, dispatcher: LOOPBACK_TLS_DISPATCHER });
     } catch (_) {
       throw err;
     }
