@@ -502,6 +502,14 @@ function bot_pick(array $options, string $seed=''): string {
 }
 
 function bot_site_url(array $appCfg): string {
+    $host = trim((string)($_SERVER['HTTP_HOST'] ?? $_SERVER['HTTP_X_FORWARDED_HOST'] ?? $_SERVER['SERVER_NAME'] ?? ''));
+    $host = preg_replace('/:\d+$/', '', $host ?? '');
+    if ($host !== '' && !in_array($host, ['127.0.0.1', 'localhost'], true)) {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+            || (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+        return ($https ? 'https' : 'http') . '://' . $host;
+    }
     $url = trim((string)($appCfg['website'] ?? ''));
     if ($url === '') $url = 'https://www.palweb.net';
     if (!preg_match('~^https?://~i', $url)) $url = 'https://' . ltrim($url, '/');
@@ -517,8 +525,16 @@ function bot_site_promo(array $cfg, array $appCfg, string $seed=''): string {
 function bot_business_logo_url(array $appCfg): string {
     $logo = trim((string)($appCfg['ticket_logo'] ?? ''));
     if ($logo === '') return '';
-    if (preg_match('~^https?://~i', $logo)) return $logo;
+    if (preg_match('~^https?://~i', $logo)) {
+        $parts = parse_url($logo);
+        $path = (string)($parts['path'] ?? '');
+        if ($path !== '') {
+            $rebased = rtrim(bot_site_url($appCfg), '/') . $path;
+            if (!empty($parts['query'])) $rebased .= '?' . $parts['query'];
+            return $rebased;
+        }
+        return $logo;
+    }
     $base = rtrim(bot_site_url($appCfg), '/');
     return $logo[0] === '/' ? ($base . $logo) : ($base . '/' . ltrim($logo, '/'));
 }
-
