@@ -7,6 +7,7 @@ const { Client, LocalAuth, MessageMedia, Buttons } = require('whatsapp-web.js');
 
 const POS_BOT_HOST = process.env.POS_BOT_HOST || '';
 const API_BASE = process.env.POS_BOT_API_BASE || (POS_BOT_HOST ? `https://${POS_BOT_HOST}` : 'http://127.0.0.1');
+const LOOPBACK_API_BASE = process.env.POS_BOT_LOOPBACK_API_BASE || 'http://127.0.0.1';
 const API_PATH = process.env.POS_BOT_API_PATH || '/pos_bot_api.php?action=web_incoming';
 const API_JOBS_PATH = process.env.POS_BOT_JOBS_PATH || '/pos_bot_api.php?action=bridge_scan_jobs';
 const API_URL = process.env.POS_BOT_API_URL || `${API_BASE}${API_PATH}`;
@@ -182,7 +183,20 @@ async function apiFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (POS_BOT_HOST && !headers.Host) headers.Host = POS_BOT_HOST;
   if (POS_BOT_HOST && !headers['X-Forwarded-Host']) headers['X-Forwarded-Host'] = POS_BOT_HOST;
-  return fetch(url, { ...options, headers });
+  if (POS_BOT_HOST && !headers['X-Forwarded-Proto']) headers['X-Forwarded-Proto'] = 'https';
+  try {
+    return await fetch(url, { ...options, headers });
+  } catch (err) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== POS_BOT_HOST || !/^https:/i.test(parsed.protocol)) throw err;
+      const fallbackUrl = `${LOOPBACK_API_BASE.replace(/\/+$/, '')}${parsed.pathname}${parsed.search}`;
+      console.error('[bridge] fetch principal falló, reintentando por loopback:', err.message || err, '=>', fallbackUrl);
+      return await fetch(fallbackUrl, { ...options, headers });
+    } catch (_) {
+      throw err;
+    }
+  }
 }
 
 function removePathIfExists(targetPath) {
