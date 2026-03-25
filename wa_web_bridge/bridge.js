@@ -12,7 +12,17 @@ const LOOPBACK_API_BASE = process.env.POS_BOT_LOOPBACK_API_BASE || 'http://127.0
 const API_PATH = process.env.POS_BOT_API_PATH || '/pos_bot_api.php?action=web_incoming';
 const API_JOBS_PATH = process.env.POS_BOT_JOBS_PATH || '/pos_bot_api.php?action=bridge_scan_jobs';
 const API_URL = process.env.POS_BOT_API_URL || `${API_BASE}${API_PATH}`;
-const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || `${API_BASE}${API_JOBS_PATH}`;
+const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || (() => {
+  if (process.env.POS_BOT_API_URL) {
+    try {
+      const derived = new URL(process.env.POS_BOT_API_URL);
+      derived.pathname = '/pos_bot_api.php';
+      derived.search = 'action=bridge_scan_jobs';
+      return derived.toString();
+    } catch (_) {}
+  }
+  return `${API_BASE}${API_JOBS_PATH}`;
+})();
 const API_ORIGIN = (() => {
   const publicOrigin = String(process.env.POS_BOT_PUBLIC_ORIGIN || '').trim();
   if (publicOrigin) return publicOrigin.replace(/\/+$/, '');
@@ -110,14 +120,29 @@ function normalizeWaUserId(rawFrom) {
 function normalizeTargetId(raw) {
   const value = String(raw || '').trim();
   if (!value) return '';
-  if (value.endsWith('@lid')) {
-    const digits = value.split('@')[0].replace(/\D+/g, '');
-    return digits ? `${digits}@c.us` : value;
-  }
+  if (value.endsWith('@lid')) return value;
   if (value.includes('@')) return value;
   const digits = value.replace(/\D+/g, '');
   if (digits) return `${digits}@c.us`;
   return value;
+}
+
+function resolveKnownChatId(raw) {
+  const value = String(raw || '').trim();
+  if (!value || value.includes('@')) return normalizeTargetId(value);
+  const digits = value.replace(/\D+/g, '');
+  if (!digits) return normalizeTargetId(value);
+  const cache = readJsonFile(CHATS_FILE, { rows: [] });
+  const rows = Array.isArray(cache.rows) ? cache.rows : [];
+  for (const row of rows) {
+    const id = String(row?.id || '').trim();
+    if (id === `${digits}@lid`) return id;
+  }
+  for (const row of rows) {
+    const id = String(row?.id || '').trim();
+    if (id === `${digits}@c.us`) return id;
+  }
+  return normalizeTargetId(digits);
 }
 
 function writeStatus(state, extra = {}) {
@@ -192,17 +217,34 @@ async function apiFetch(url, options = {}) {
   if (POS_BOT_HOST && !headers.Host) headers.Host = POS_BOT_HOST;
   if (POS_BOT_HOST && !headers['X-Forwarded-Host']) headers['X-Forwarded-Host'] = POS_BOT_HOST;
   if (POS_BOT_HOST && !headers['X-Forwarded-Proto']) headers['X-Forwarded-Proto'] = 'https';
-  try {
-    return await fetch(url, { ...options, headers });
-  } catch (err) {
+  const attempts = [{ mode: 'fetch', url }];
+  if (POS_BOT_HOST) {
     try {
       const parsed = new URL(url);
-      if (parsed.hostname !== POS_BOT_HOST || !/^https:/i.test(parsed.protocol)) throw err;
-      const loopbackBase = LOOPBACK_API_BASE.replace(/^http:\/\//i, 'https://').replace(/\/+$/, '');
-      const fallbackUrl = `${loopbackBase}${parsed.pathname}${parsed.search}`;
-      console.error('[bridge] fetch principal falló, reintentando por loopback TLS:', err.message || err, '=>', fallbackUrl);
+      const loopbackHttpBase = LOOPBACK_API_BASE.replace(/\/+$/, '');
+      const loopbackTlsBase = LOOPBACK_API_BASE.replace(/^http:\/\//i, 'https://').replace(/\/+$/, '');
+      const samePath = `${parsed.pathname}${parsed.search}`;
+      const directLoopbackUrl = `${loopbackHttpBase}${samePath}`;
+      const directLoopbackTlsUrl = `${loopbackTlsBase}${samePath}`;
+      const originalTlsUrl = `${parsed.protocol === 'https:' ? 'https://' : 'https://'}${parsed.host}${samePath}`;
+      if (directLoopbackUrl !== url) attempts.push({ mode: 'fetch', url: directLoopbackUrl });
+      if (directLoopbackTlsUrl !== url && directLoopbackTlsUrl !== directLoopbackUrl) {
+        attempts.push({ mode: 'https-request', url: directLoopbackTlsUrl });
+      }
+      if (originalTlsUrl !== url && originalTlsUrl !== directLoopbackTlsUrl) {
+        attempts.push({ mode: 'https-request', url: originalTlsUrl });
+      }
+    } catch (_) {}
+  }
+  let lastErr = null;
+  for (let i = 0; i < attempts.length; i += 1) {
+    const attempt = attempts[i];
+    try {
+      if (attempt.mode === 'fetch') {
+        return await fetch(attempt.url, { ...options, headers });
+      }
       return await new Promise((resolve, reject) => {
-        const req = https.request(fallbackUrl, {
+        const req = https.request(attempt.url, {
           method: options.method || 'GET',
           headers,
           rejectUnauthorized: false,
@@ -234,10 +276,17 @@ async function apiFetch(url, options = {}) {
         if (options.body) req.write(options.body);
         req.end();
       });
-    } catch (_) {
-      throw err;
+    } catch (err) {
+      lastErr = err;
+      const cause = err && typeof err === 'object' && err.cause
+        ? ` cause=${err.cause.code || err.cause.message || String(err.cause)}`
+        : '';
+      if (i < attempts.length - 1) {
+        console.error(`[bridge] fetch intento ${i + 1}/${attempts.length} falló (${attempt.mode}) ${attempt.url}:`, `${err.message || err}${cause}`);
+      }
     }
   }
+  throw lastErr || new Error(`fetch failed for ${url}`);
 }
 
 function removePathIfExists(targetPath) {
@@ -630,7 +679,7 @@ async function processOutboundQueueTick() {
   let changed = false;
   for (const job of jobs) {
     if (String(job.status || 'queued') !== 'queued') continue;
-    const targetId = normalizeTargetId(job.target_id || job.wa_user_id || '');
+    const targetId = resolveKnownChatId(job.target_id || job.wa_user_id || '');
     if (!targetId) {
       job.status = 'error';
       job.error = 'target_id vacío';
@@ -751,7 +800,7 @@ async function processIncoming(message) {
   }
 
   const responses = Array.isArray(data.responses) ? data.responses : [];
-  const replyTarget = normalizeTargetId(message.from);
+  const replyTarget = resolveKnownChatId(message.from);
   if (!replyTarget) {
     throw new Error(`Destino inválido para responder: ${String(message.from || '')}`);
   }
