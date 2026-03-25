@@ -35,18 +35,37 @@ function bot_verify_token_matches(array $cfg, string $provided): bool {
     return false;
 }
 
-$BOT_BRIDGE_RUNTIME_DIR = bot_bridge_instance_dir() . '/runtime';
-if (!is_dir($BOT_BRIDGE_RUNTIME_DIR)) {
-    @mkdir($BOT_BRIDGE_RUNTIME_DIR, 0775, true);
+$botBridgeRuntimeDir = bot_bridge_instance_dir() . '/runtime';
+if (!is_dir($botBridgeRuntimeDir)) {
+    @mkdir($botBridgeRuntimeDir, 0775, true);
 }
 
-$BOT_OUTBOX = [];
-$BOT_BRIDGE_STATUS_FILE = bot_bridge_instance_dir() . '/status.json';
-$BOT_BRIDGE_CHATS_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_chats.json';
-$BOT_PROMO_QUEUE_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_queue.json';
-$BOT_PROMO_TEMPLATES_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_templates.json';
-$BOT_PROMO_GROUP_LISTS_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_promo_group_lists.json';
-$BOT_BRIDGE_OUTBOX_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_outbox_queue.json';
-$BOT_BRIDGE_CONTROL_FILE = $BOT_BRIDGE_RUNTIME_DIR . '/palweb_wa_bridge_control.json';
-$BOT_AUTOREPLY_REQUEST = false;
-$BOT_NEW_CLIENT_NOTIFY = [];
+$BOT_CONTEXT = [
+    'bridge_runtime_dir' => $botBridgeRuntimeDir,
+    'bridge_status_file' => bot_bridge_instance_dir() . '/status.json',
+    'bridge_chats_file' => $botBridgeRuntimeDir . '/palweb_wa_chats.json',
+    'promo_queue_file' => $botBridgeRuntimeDir . '/palweb_wa_promo_queue.json',
+    'promo_templates_file' => $botBridgeRuntimeDir . '/palweb_wa_promo_templates.json',
+    'promo_group_lists_file' => $botBridgeRuntimeDir . '/palweb_wa_promo_group_lists.json',
+    'bridge_outbox_file' => $botBridgeRuntimeDir . '/palweb_wa_outbox_queue.json',
+    'bridge_control_file' => $botBridgeRuntimeDir . '/palweb_wa_bridge_control.json',
+    'outbox' => [],
+    'autoreply_request' => false,
+    'new_client_notify' => [],
+];
+
+function bot_context_get(string $key, $default = null) {
+    global $BOT_CONTEXT;
+    if (!isset($BOT_CONTEXT) || !is_array($BOT_CONTEXT) || !array_key_exists($key, $BOT_CONTEXT)) {
+        return $default;
+    }
+    return $BOT_CONTEXT[$key];
+}
+
+function bot_context_set(string $key, $value): void {
+    global $BOT_CONTEXT;
+    if (!isset($BOT_CONTEXT) || !is_array($BOT_CONTEXT)) {
+        $BOT_CONTEXT = [];
+    }
+    $BOT_CONTEXT[$key] = $value;
+}

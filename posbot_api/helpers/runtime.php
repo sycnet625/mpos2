@@ -74,14 +74,15 @@ function bot_write_json_file(string $file, array $data): bool {
 }
 
 function bot_enqueue_bridge_job(array $job): bool {
-    global $BOT_BRIDGE_OUTBOX_FILE;
-    $queue = bot_read_json_file($BOT_BRIDGE_OUTBOX_FILE, ['jobs' => []]);
+    $queueFile = (string)bot_context_get('bridge_outbox_file', '');
+    if ($queueFile === '') return false;
+    $queue = bot_read_json_file($queueFile, ['jobs' => []]);
     $queue['jobs'] = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $job['id'] = trim((string)($job['id'] ?? ('out_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)))));
     $job['created_at'] = $job['created_at'] ?? date('c');
     $job['status'] = $job['status'] ?? 'queued';
     $queue['jobs'][] = $job;
-    return bot_write_json_file($BOT_BRIDGE_OUTBOX_FILE, $queue);
+    return bot_write_json_file($queueFile, $queue);
 }
 
 function bot_public_base_url(array $appCfg = []): string {
@@ -235,10 +236,14 @@ function bot_run_bridge_service_command(string $verb, ?string &$detail = null): 
 }
 
 function bot_queue_bridge_control(array $command, ?string &$detail = null): bool {
-    global $BOT_BRIDGE_CONTROL_FILE;
+    $controlFile = (string)bot_context_get('bridge_control_file', '');
+    if ($controlFile === '') {
+        $detail = 'No se encontró el archivo de control del bridge.';
+        return false;
+    }
     $command['requested_at'] = date('c');
     $command['request_id'] = substr(bin2hex(random_bytes(8)), 0, 16);
-    $tmpFile = $BOT_BRIDGE_CONTROL_FILE . '.tmp';
+    $tmpFile = $controlFile . '.tmp';
     $json = json_encode($command, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($json === false) {
         $detail = 'No se pudo serializar la orden al bridge.';
@@ -248,7 +253,7 @@ function bot_queue_bridge_control(array $command, ?string &$detail = null): bool
         $detail = 'No se pudo escribir el archivo temporal de control del bridge.';
         return false;
     }
-    if (!@rename($tmpFile, $BOT_BRIDGE_CONTROL_FILE)) {
+    if (!@rename($tmpFile, $controlFile)) {
         @unlink($tmpFile);
         $detail = 'No se pudo publicar la orden de control del bridge.';
         return false;
@@ -342,17 +347,23 @@ function bot_session_exists(PDO $pdo, string $wa): bool {
 }
 
 function bot_begin_autoreply_request(PDO $pdo, string $wa): void {
-    global $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
-    $BOT_AUTOREPLY_REQUEST = true;
+    bot_context_set('autoreply_request', true);
     if ($wa !== '' && !bot_session_exists($pdo, $wa)) {
-        $BOT_NEW_CLIENT_NOTIFY[$wa] = true;
+        $pending = bot_context_get('new_client_notify', []);
+        if (!is_array($pending)) $pending = [];
+        $pending[$wa] = true;
+        bot_context_set('new_client_notify', $pending);
     }
 }
 
 function bot_end_autoreply_request(string $wa = ''): void {
-    global $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
-    $BOT_AUTOREPLY_REQUEST = false;
-    if ($wa !== '') unset($BOT_NEW_CLIENT_NOTIFY[$wa]);
+    bot_context_set('autoreply_request', false);
+    if ($wa !== '') {
+        $pending = bot_context_get('new_client_notify', []);
+        if (!is_array($pending)) $pending = [];
+        unset($pending[$wa]);
+        bot_context_set('new_client_notify', $pending);
+    }
 }
 
 function bot_valid_time_hhmm(string $value, string $fallback): string {
@@ -406,8 +417,7 @@ function bot_log(PDO $pdo, string $wa, string $dir, string $txt, string $type='t
 }
 
 function bot_queue_response(PDO $pdo, string $wa, string $type, array $payload): void {
-    global $BOT_OUTBOX, $BOT_AUTOREPLY_REQUEST, $BOT_NEW_CLIENT_NOTIFY;
-    if ($BOT_AUTOREPLY_REQUEST) {
+    if ((bool)bot_context_get('autoreply_request', false)) {
         $liveCfg = bot_cfg($pdo);
         $liveReplyState = bot_autoreply_state($liveCfg);
         if (empty($liveReplyState['effective_enabled'])) {
@@ -415,10 +425,15 @@ function bot_queue_response(PDO $pdo, string $wa, string $type, array $payload):
         }
     }
     $row = ['wa_user_id' => $wa, 'type' => $type] + $payload;
-    $BOT_OUTBOX[] = $row;
+    $outbox = bot_context_get('outbox', []);
+    if (!is_array($outbox)) $outbox = [];
+    $outbox[] = $row;
+    bot_context_set('outbox', $outbox);
     $logText = trim((string)($payload['text'] ?? $payload['caption'] ?? $payload['url'] ?? ''));
     if ($logText !== '') bot_log($pdo, $wa, 'out', $logText, $type);
-    if (!empty($BOT_NEW_CLIENT_NOTIFY[$wa])) {
+    $pending = bot_context_get('new_client_notify', []);
+    if (!is_array($pending)) $pending = [];
+    if (!empty($pending[$wa])) {
         $preview = trim((string)($payload['text'] ?? $payload['caption'] ?? ''));
         if ($preview === '') $preview = 'El bot respondió por primera vez a un cliente nuevo.';
         push_notify(
@@ -429,7 +444,8 @@ function bot_queue_response(PDO $pdo, string $wa, string $type, array $payload):
             '/marinero/pos_bot.php',
             'bot_first_reply_new_client'
         );
-        unset($BOT_NEW_CLIENT_NOTIFY[$wa]);
+        unset($pending[$wa]);
+        bot_context_set('new_client_notify', $pending);
     }
 }
 
@@ -439,10 +455,9 @@ function bot_send(PDO $pdo, array $cfg, string $wa, string $text): void {
 }
 
 function bot_take_outbox(): array {
-    global $BOT_OUTBOX;
-    $out = $BOT_OUTBOX;
-    $BOT_OUTBOX = [];
-    return $out;
+    $out = bot_context_get('outbox', []);
+    bot_context_set('outbox', []);
+    return is_array($out) ? $out : [];
 }
 
 function bot_send_image(PDO $pdo, string $wa, string $url, string $caption=''): void {
@@ -470,4 +485,3 @@ function bot_send_buttons(PDO $pdo, string $wa, string $body, array $buttons, st
         'footer' => trim($footer)
     ]);
 }
-

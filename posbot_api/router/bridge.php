@@ -1,4 +1,7 @@
 <?php
+$botBridgeStatusFile = (string)bot_context_get('bridge_status_file', '');
+$botBridgeRuntimeDir = (string)bot_context_get('bridge_runtime_dir', '');
+
 if ($action === 'webhook_verify' || ($_SERVER['REQUEST_METHOD']==='GET' && (isset($_GET['hub.mode']) || isset($_GET['hub_mode'])))) {
     $mode = $_GET['hub.mode'] ?? $_GET['hub_mode'] ?? '';
     $token = $_GET['hub.verify_token'] ?? $_GET['hub_verify_token'] ?? '';
@@ -22,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_scan_jobs') {
 
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_status') {
-    $statusFile = $BOT_BRIDGE_STATUS_FILE;
+    $statusFile = $botBridgeStatusFile;
     if (!is_file($statusFile)) {
         $running = bot_is_bridge_process_running();
         echo json_encode([
@@ -172,7 +175,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_reset_session') {
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
     $logText = '';
-    $runtimeLogFile = dirname($BOT_BRIDGE_STATUS_FILE) . '/runtime/bridge.log';
+    $runtimeLogFile = rtrim($botBridgeRuntimeDir, '/') . '/bridge.log';
     if (is_file($runtimeLogFile) && is_readable($runtimeLogFile)) {
         $raw = @file($runtimeLogFile, FILE_IGNORE_NEW_LINES);
         if (is_array($raw) && $raw) {
@@ -200,7 +203,7 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
     if ($logText === '') {
         $logText = 'Sin logs disponibles.';
     }
-    $statusRaw = @file_get_contents($BOT_BRIDGE_STATUS_FILE);
+    $statusRaw = $botBridgeStatusFile !== '' ? @file_get_contents($botBridgeStatusFile) : false;
     $status = json_decode((string)$statusRaw, true);
     echo json_encode([
         'status' => 'success',
@@ -209,4 +212,3 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_logs') {
     ]);
     exit;
 }
-
