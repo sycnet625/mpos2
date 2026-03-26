@@ -62,20 +62,30 @@ async function main() {
         const match = normalized.match(/facebook\.com\/groups\/([^/?#]+)/i);
         return match ? String(match[1]).trim() : '';
       };
+      const cleanName = (text) => {
+        return String(text || '')
+          .replace(/\s+/g, ' ')
+          .replace(/Activo por última vez hace.*$/i, '')
+          .replace(/Active \d.*$/i, '')
+          .trim();
+      };
       const map = new Map();
       const anchors = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
       for (const a of anchors) {
         const href = a.getAttribute('href') || '';
         const id = extractId(href);
-        if (!id || id.toLowerCase() === 'feed') continue;
-        const name = (a.textContent || '').trim().replace(/\s+/g, ' ');
+        if (!id) continue;
+        const idLower = id.toLowerCase();
+        if (['feed', 'discover', 'joins'].includes(idLower)) continue;
+        if (!/^\d+$/.test(id) && !/^permalink$/i.test(id)) continue;
+        const name = cleanName(a.textContent || '');
         const url = normalizeUrl(href);
         const current = map.get(id) || { id, name: '', url };
         if (!current.name && name) current.name = name;
         if (!current.url && url) current.url = url;
         map.set(id, current);
       }
-      return Array.from(map.values()).filter((row) => row.id && row.url);
+      return Array.from(map.values()).filter((row) => row.id && row.url && row.name);
     });
 
     process.stdout.write(JSON.stringify({

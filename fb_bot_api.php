@@ -7,14 +7,14 @@ if (!defined('FB_BOT_API_LIB_ONLY')) {
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
 
+$FB_BROWSER_PROFILE_DIR = '/var/www/fb_bot_browser_profile';
 $FB_QUEUE_FILE = '/tmp/palweb_fb_queue.json';
 $FB_TEMPLATES_FILE = '/tmp/palweb_fb_templates.json';
 $FB_WORKER_LOG_FILE = '/tmp/palweb_fb_worker.log';
 $FB_MANUAL_GROUPS_FILE = '/tmp/palweb_fb_manual_groups.json';
-$FB_BROWSER_COOKIES_FILE = '/tmp/palweb_fb_browser_cookies.json';
-$FB_BROWSER_LOGIN_STATUS_FILE = '/tmp/palweb_fb_browser_login_status.json';
-$FB_BROWSER_LOGIN_RUNNER_LOG = '/tmp/palweb_fb_browser_login_runner.log';
-$FB_BROWSER_PROFILE_DIR = '/var/www/fb_bot_browser_profile';
+$FB_BROWSER_COOKIES_FILE = $FB_BROWSER_PROFILE_DIR . '/browser_cookies.json';
+$FB_BROWSER_LOGIN_STATUS_FILE = $FB_BROWSER_PROFILE_DIR . '/browser_login_status.json';
+$FB_BROWSER_LOGIN_RUNNER_LOG = $FB_BROWSER_PROFILE_DIR . '/browser_login_runner.log';
 $FB_BROWSER_DISPLAY = ':99';
 
 function fb_require_admin_session(): void {
