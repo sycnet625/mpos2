@@ -145,6 +145,40 @@ function resolveKnownChatId(raw) {
   return normalizeTargetId(digits);
 }
 
+function isUsefulContactName(raw) {
+  const name = String(raw || '').trim();
+  if (!name) return false;
+  const lowered = name.toLowerCase();
+  if (lowered === 'unknown' || lowered === 'cliente') return false;
+  if (/^\+?\d[\d\s()-]{5,}$/.test(name)) return false;
+  return /[a-záéíóúñ]/i.test(name);
+}
+
+async function resolveIncomingContactName(message) {
+  try {
+    const contact = await message.getContact();
+    const candidates = [
+      contact?.name,
+      contact?.shortName,
+      contact?.pushname,
+      contact?.verifiedName,
+      contact?.formattedName
+    ];
+    for (const candidate of candidates) {
+      if (isUsefulContactName(candidate)) return String(candidate).trim();
+    }
+  } catch (_) {}
+
+  const fallbackCandidates = [
+    message?._data?.notifyName,
+    message?._data?.pushname
+  ];
+  for (const candidate of fallbackCandidates) {
+    if (isUsefulContactName(candidate)) return String(candidate).trim();
+  }
+  return 'Cliente';
+}
+
 function writeStatus(state, extra = {}) {
   const payload = {
     state,
@@ -577,7 +611,7 @@ async function processPromoQueueTick() {
 
   for (const job of jobs) {
     if (!job || typeof job !== 'object') continue;
-    if (job.status === 'done' || job.status === 'error') continue;
+    if (job.status === 'done' || job.status === 'error' || job.status === 'paused') continue;
     if ((job.next_run_at || 0) > now) continue;
 
     const scheduled = Number(job.schedule_enabled || 0) === 1;
@@ -764,14 +798,7 @@ async function processIncoming(message) {
   const wa_user_id = normalizeWaUserId(message.from);
   if (!wa_user_id) return;
 
-  let wa_name = String(message._data?.notifyName || message._data?.pushname || '').trim();
-  if (!wa_name || wa_name.toLowerCase() === 'unknown') {
-    try {
-      const contact = await message.getContact();
-      wa_name = String(contact?.pushname || contact?.name || contact?.shortName || '').trim();
-    } catch (_) {}
-  }
-  if (!wa_name) wa_name = 'Cliente';
+  const wa_name = await resolveIncomingContactName(message);
   setBridgeState('message_in', { last_from: String(message.from || ''), last_text_preview: text.slice(0, 80) });
   console.log(`[bridge] inbound from=${String(message.from || '')} type=${msgType} text="${text.slice(0, 80)}"`);
 

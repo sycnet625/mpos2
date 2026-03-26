@@ -26,6 +26,12 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
 .social-media-grid img{width:100%;height:120px;object-fit:cover;border-radius:12px;border:1px solid #dbe3f0}
 .social-preview-body{padding:14px 16px}
 .social-preview-footer{display:flex;gap:16px;padding:12px 16px;border-top:1px solid #eef2f7;color:#64748b;font-size:.9rem}
+.app-toast-stack{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:2000;width:min(760px,calc(100vw - 24px));display:flex;flex-direction:column;gap:10px;pointer-events:none}
+.app-toast{pointer-events:auto;border-radius:18px;padding:18px 22px;box-shadow:0 18px 42px rgba(15,23,42,.24);color:#fff;font-size:1.08rem;font-weight:600;line-height:1.45;cursor:pointer;user-select:none;opacity:0;transform:translateY(24px) scale(.98);transition:opacity .24s ease,transform .24s ease}
+.app-toast.show{opacity:1;transform:translateY(0) scale(1)}
+.app-toast.hide{opacity:0;transform:translateY(18px) scale(.98)}
+.app-toast.info{background:linear-gradient(135deg,#16a34a,#15803d)}
+.app-toast.error{background:linear-gradient(135deg,#dc2626,#991b1b)}
 </style>
 </head>
 <body class="p-3 p-md-4">
@@ -38,7 +44,7 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
     <button class="btn btn-outline-secondary" onclick="loadAll()"><i class="fas fa-sync"></i> Refrescar</button>
   </div>
 
-  <div id="alertBox"></div>
+  <div id="toastStack" class="app-toast-stack"></div>
 
   <div class="row g-3 mb-3">
     <div class="col-md-3"><div class="card p-3"><div class="text-muted small">Publicaciones hoy</div><div id="s1" class="stat">0</div></div></div>
@@ -75,10 +81,14 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 <div class="small mt-1">Configura una página de Facebook con su <b>Page ID</b> y <b>Page Access Token</b>. Si enlazas Instagram profesional, también publica allí el mismo contenido.</div>
                 <div class="d-flex gap-2 mt-2 flex-wrap">
                   <a class="btn btn-primary btn-sm" href="https://developers.facebook.com/tools/explorer/" target="_blank" rel="noopener"><i class="fas fa-arrow-up-right-from-square"></i> Graph Explorer</a>
+                  <button class="btn btn-outline-primary btn-sm" type="button" onclick="connectFacebookBrowser()"><i class="fab fa-facebook"></i> Conectar Facebook</button>
+                  <button class="btn btn-outline-secondary btn-sm" type="button" onclick="openFacebookViewer(true)"><i class="fas fa-desktop"></i> Abrir login visual</button>
                   <button class="btn btn-outline-dark btn-sm" type="button" onclick="openLogsModal()"><i class="fas fa-file-lines"></i> Ver consola</button>
                   <button class="btn btn-outline-success btn-sm" type="button" onclick="runQueue()"><i class="fas fa-play"></i> Ejecutar cola ahora</button>
+                  <button class="btn btn-outline-primary btn-sm" type="button" onclick="scanBrowserGroups()"><i class="fab fa-facebook"></i> Escanear grupos</button>
                 </div>
                 <div id="fbStatus" class="small text-muted mt-2">Estado: pendiente de configuración.</div>
+                <div id="fbBrowserStatus" class="small text-muted mt-1">Login por navegador inactivo.</div>
               </div>
               <form id="f" class="row g-2">
                 <div class="col-12 form-check form-switch mb-1"><input class="form-check-input" id="enabled" type="checkbox"><label class="form-check-label" for="enabled">Habilitar publicador Facebook</label></div>
@@ -154,6 +164,10 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                 <div class="card-header bg-white fw-semibold py-2">Destinos Facebook: grupos</div>
                 <div class="card-body">
                   <div class="small text-muted mb-2">Los grupos habilitados se usarán como destinos reales de publicación junto con la página configurada.</div>
+                  <div class="row g-2 mb-2">
+                    <div class="col-md-10"><textarea id="fbCookieHeader" class="form-control" rows="2" placeholder="Pega aquí el header Cookie completo de una sesión activa de Facebook para escanear grupos automáticamente"></textarea></div>
+                    <div class="col-md-2 d-grid"><button class="btn btn-outline-secondary" type="button" onclick="saveBrowserCookies()"><i class="fas fa-cookie-bite"></i> Guardar cookies</button></div>
+                  </div>
                   <div id="manualGroupsWrap" class="border rounded p-2 mb-2" style="max-height:180px;overflow:auto">
                     <div class="text-muted small">Sin grupos configurados.</div>
                   </div>
@@ -515,8 +529,44 @@ let editCampaignBannerImages=[];
 let activeCampaignLogId='';
 let promoSearchTimer=null;
 let editPromoSearchTimer=null;
+let fbBrowserLoginPoll=null;
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-const a=(t,m)=>{const e=document.getElementById('alertBox');e.innerHTML=`<div class="alert alert-${t} py-2">${esc(m)}</div>`;setTimeout(()=>e.innerHTML='',3500)};
+function showToast(type,msg){
+  const holder=document.getElementById('toastStack');
+  if(!holder) return;
+  const toast=document.createElement('div');
+  const kind=(type==='danger'||type==='error')?'error':'info';
+  toast.className=`app-toast ${kind}`;
+  toast.innerHTML=esc(msg);
+  let startX=0;
+  let dismissing=false;
+  const dismiss=()=>{
+    if(dismissing) return;
+    dismissing=true;
+    clearTimeout(timer);
+    toast.classList.remove('show');
+    toast.classList.add('hide');
+    setTimeout(()=>toast.remove(),240);
+  };
+  const timer=setTimeout(dismiss,5000);
+  toast.addEventListener('click',dismiss);
+  toast.addEventListener('pointerdown',e=>{startX=e.clientX||0; try{toast.setPointerCapture(e.pointerId);}catch(_){}} );
+  toast.addEventListener('pointerup',e=>{if(Math.abs((e.clientX||0)-startX)>60) dismiss();});
+  holder.appendChild(toast);
+  requestAnimationFrame(()=>toast.classList.add('show'));
+}
+const a=(t,m)=>showToast(t,m);
+function fbViewerUrl(){return `${location.origin}/fbnovnc/vnc_lite.html?autoconnect=1&resize=remote&path=fbnovnc/websockify`;}
+async function openFacebookViewer(ensureLogin=false){
+  window.open(fbViewerUrl(),'_blank','noopener');
+  if(!ensureLogin) return;
+  const d=await p(API+'?action=browser_login',{});
+  if(d.status!=='success'){a('danger',d.msg||'No se pudo iniciar el navegador de Facebook'); return;}
+  a('success',d.msg||'Login de Facebook iniciado. Completa el acceso en la ventana visual.');
+  await loadBrowserLoginStatus();
+  if(fbBrowserLoginPoll) clearInterval(fbBrowserLoginPoll);
+  fbBrowserLoginPoll=setInterval(loadBrowserLoginStatus,3000);
+}
 async function parseApiResponse(r){const txt=await r.text();try{return JSON.parse(txt);}catch(_){return {status:'error',msg:'Respuesta no JSON del servidor',raw:txt};}}
 async function g(u){const r=await fetch(u,{credentials:'same-origin'});return parseApiResponse(r)}
 async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return parseApiResponse(r)}
@@ -567,12 +617,17 @@ function renderCampaignPreview(source='campaign'){
   const mode = source==='my_page' ? (myPagePublishMode.value||'both') : (promoPublishMode.value||'both');
   box.innerHTML = buildPreviewHtml({text: text || (source==='my_page' ? 'Publicación automática diaria de catálogo y reservables.' : ''), products, banners, mode});
 }
-function renderManualGroups(){const wrap=document.getElementById('manualGroupsWrap'); if(!wrap) return; if(!manualGroups.length){wrap.innerHTML='<div class="text-muted small">Sin grupos configurados.</div>'; updateTargetInfo(); return;} wrap.innerHTML=manualGroups.map((g,idx)=>`<div class="border-bottom py-2 small"><div class="d-flex align-items-start gap-2"><div class="flex-grow-1"><div class="fw-semibold">${esc(g.name||('Grupo '+(idx+1)))} ${Number(g.enabled||0)===1?'<span class="badge bg-success ms-1">activo</span>':'<span class="badge bg-secondary ms-1">inactivo</span>'}</div><div class="text-muted">ID: ${esc(g.id||'-')}</div>${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener" class="text-decoration-none">${esc(g.url)}</a>`:'<div class="text-muted">Sin URL</div>'}<div class="text-muted">${String(g.access_token||'').trim()!==''?'Token específico guardado':'Usa token principal si existe'}</div></div><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-${Number(g.enabled||0)===1?'warning':'success'}" type="button" onclick="toggleManualGroup(${idx})"><i class="fas fa-power-off"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="removeManualGroup(${idx})"><i class="fas fa-trash"></i></button></div></div></div>`).join(''); updateTargetInfo();}
+function renderManualGroups(){const wrap=document.getElementById('manualGroupsWrap'); if(!wrap) return; if(!manualGroups.length){wrap.innerHTML='<div class="text-muted small">Sin grupos configurados.</div>'; updateTargetInfo(); return;} wrap.innerHTML=manualGroups.map((g,idx)=>`<div class="border-bottom py-2 small"><div class="d-flex align-items-start gap-2"><div class="flex-grow-1"><div class="fw-semibold">${esc(g.name||('Grupo '+(idx+1)))} ${Number(g.enabled||0)===1?'<span class="badge bg-success ms-1">activo</span>':'<span class="badge bg-secondary ms-1">inactivo</span>'}</div><div class="text-muted">ID: ${esc(g.id||'-')}</div>${g.url?`<a href="${esc(g.url)}" target="_blank" rel="noopener" class="text-decoration-none">${esc(g.url)}</a>`:'<div class="text-muted">Sin URL</div>'}<div class="text-muted">${String(g.access_token||'').trim()!==''?'Token específico guardado':'Usa token principal si existe'}</div></div><div class="d-flex gap-1"><button class="btn btn-sm btn-outline-info" type="button" onclick="testGroup(${idx})"><i class="fas fa-vial"></i></button><button class="btn btn-sm btn-outline-${Number(g.enabled||0)===1?'warning':'success'}" type="button" onclick="toggleManualGroup(${idx})"><i class="fas fa-power-off"></i></button><button class="btn btn-sm btn-outline-danger" type="button" onclick="removeManualGroup(${idx})"><i class="fas fa-trash"></i></button></div></div></div>`).join(''); updateTargetInfo();}
 async function loadManualGroups(){const d=await g(API+'?action=manual_groups'); if(d.status!=='success') return; manualGroups=Array.isArray(d.rows)?d.rows:[]; renderManualGroups();}
 async function saveManualGroups(){const rows=manualGroups.map(g=>({id:String(g.id||'').trim(),name:String(g.name||'').trim(),url:String(g.url||'').trim(),enabled:Number(g.enabled||0)===1?1:0,access_token:g._token_edit||'',keep_token:String(g.access_token||'').trim()!=='' && !g._token_edit?1:0})); const d=await p(API+'?action=manual_groups',{rows}); if(d.status!=='success'){a('danger',d.msg||'No se pudo guardar grupos'); return;} manualGroups=Array.isArray(d.rows)?d.rows:manualGroups; renderManualGroups();}
 function addManualGroup(){const name=(manualGroupName.value||'').trim(); const id=(manualGroupId.value||'').trim(); const url=(manualGroupUrl.value||'').trim(); const token=(manualGroupToken.value||'').trim(); const enabled=manualGroupEnabled.checked?1:0; if(!id){a('danger','Escribe el Group ID');return;} manualGroups.push({name,id,url,enabled,access_token:token?'************':'',_token_edit:token}); manualGroupName.value=''; manualGroupId.value=''; manualGroupUrl.value=''; manualGroupToken.value=''; manualGroupEnabled.checked=true; renderManualGroups(); saveManualGroups();}
 function removeManualGroup(idx){manualGroups.splice(idx,1); renderManualGroups(); saveManualGroups();}
 function toggleManualGroup(idx){manualGroups[idx].enabled=Number(manualGroups[idx].enabled||0)===1?0:1; renderManualGroups(); saveManualGroups();}
+async function loadBrowserLoginStatus(){const d=await g(API+'?action=browser_login_status'); const el=document.getElementById('fbBrowserStatus'); if(!el) return; if(d.status!=='success'){el.textContent='No se pudo consultar estado del login de Facebook'; return;} const state=String(d.state||'idle'); const msg=String(d.message||''); if(state==='running' || state==='starting'){el.textContent=msg||'Login de Facebook en curso...';} else if(state==='success'){el.textContent=msg||'Facebook conectado por navegador.'; if(fbBrowserLoginPoll){clearInterval(fbBrowserLoginPoll); fbBrowserLoginPoll=null;}} else if(state==='error'){el.textContent=msg||'Error conectando Facebook por navegador.'; if(fbBrowserLoginPoll){clearInterval(fbBrowserLoginPoll); fbBrowserLoginPoll=null;}} else {el.textContent='Login por navegador inactivo.';}}
+async function connectFacebookBrowser(){await openFacebookViewer(true);}
+async function saveBrowserCookies(){const cookieHeader=(fbCookieHeader.value||'').trim(); if(!cookieHeader){a('danger','Pega primero el header Cookie'); return;} const d=await p(API+'?action=save_browser_cookies',{cookie_header:cookieHeader}); if(d.status==='success'){a('success',`Cookies guardadas: ${d.count||0}`); fbCookieHeader.value='';} else a('danger',d.msg||'No se pudieron guardar cookies');}
+async function scanBrowserGroups(){const d=await p(API+'?action=browser_groups_scrape',{}); if(d.status==='success'){manualGroups=Array.isArray(d.rows)?d.rows:manualGroups; renderManualGroups(); a('success',`Grupos encontrados: ${d.found||0}`);} else a('danger',d.msg||'No se pudieron escanear grupos');}
+async function testGroup(idx){const gRow=manualGroups[idx]; if(!gRow || !String(gRow.id||'').trim()){a('danger','Grupo inválido'); return;} const d=await p(API+'?action=test_group',{id:String(gRow.id||''),name:String(gRow.name||''),access_token:gRow._token_edit||'',text:`Prueba automática grupo Facebook ${new Date().toISOString()}`}); if(d.status==='success' || d.ok===true){a('success','Grupo validado y publicación enviada'); loadRecentPosts(); loadStats();} else a('danger',d.msg||d.error||'No se pudo publicar en el grupo');}
 function updateStatusLed(){
   const dot=document.getElementById('fbLedDot');
   const txt=document.getElementById('fbLedText');
@@ -679,7 +734,7 @@ function appendLog(text){const box=document.getElementById('logsText'); const st
 async function loadLogsSnapshot(){const d=await g(API+'?action=worker_logs'); if(d.status==='success'){logsText.textContent=(d.logs||'Sin logs persistentes.'); logsStatus.textContent='Logs persistentes del worker y del procesador de campañas';} await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}
 function clearLocalLogConsole(){logsText.textContent=''; logsStatus.textContent='Vista limpiada';}
 async function openLogsModal(){await loadLogsSnapshot(); new bootstrap.Modal(document.getElementById('logsModal')).show();}
-async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadRecentPosts(),loadPromoTemplates(),loadPromoList(),loadMyPagePreview(),loadManualGroups()]); await runQueueSilently();}catch(e){a('danger',e.message||'error')}}
+async function loadAll(){try{await Promise.all([loadCfg(),loadStats(),loadRecentPosts(),loadPromoTemplates(),loadPromoList(),loadMyPagePreview(),loadManualGroups(),loadBrowserLoginStatus()]); await runQueueSilently();}catch(e){a('danger',e.message||'error')}}
 async function runQueueSilently(){const wk=(worker_key.value||currentConfig.worker_key||'').trim(); if(!wk) return; const d=await g(API+'?action=process_queue&worker_key='+encodeURIComponent(wk)); if(d.status==='success' && Number(d.processed||0)>0){appendLog(`Queue automática: ${d.processed} campaña(s) procesada(s).`); await Promise.all([loadPromoList(),loadRecentPosts(),loadStats()]);}}
 document.getElementById('f').addEventListener('submit',saveCfg);
 document.getElementById('promoSearch').addEventListener('input',ev=>{if(promoSearchTimer) clearTimeout(promoSearchTimer); promoSearchTimer=setTimeout(()=>searchPromoProducts(ev.target.value||''),260);});

@@ -1100,12 +1100,13 @@ async function loadPromoList(){
     <td class="small">${esc(r.name||r.id||'')}</td>
     <td class="small">${esc(r.campaign_group||'General')}</td>
     <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td>
-    <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-warning text-dark')}">${esc(r.status||'')}</span></td>
+    <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':(r.status==='scheduled'?'bg-info text-dark':'bg-warning text-dark')))}">${esc(r.status||'')}</span></td>
     <td class="small">${Number(r.current_index||0)}/${(r.targets||[]).length}</td>
     <td class="small">
       <div class="d-flex gap-1">
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button>
         <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
+        <button class="btn btn-sm btn-outline-warning" type="button" title="${r.status==='paused'?'Reanudar':'Pausar'}" onclick="toggleCampaignPause('${esc(r.id||'')}')"><i class="fas ${r.status==='paused'?'fa-play':'fa-pause'}"></i></button>
         <button class="btn btn-sm btn-outline-primary" type="button" title="Editar" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>
         <button class="btn btn-sm btn-outline-danger" type="button" title="Eliminar" onclick="deleteScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-trash"></i></button>
       </div>
@@ -1125,6 +1126,17 @@ async function deleteScheduledCampaign(id){
   if(!confirm(`¿Eliminar campaña "${row.name||row.id}"?`)) return;
   const d=await p(API+'?action=promo_delete',{id});
   if(d.status==='success'){a('success','Campaña eliminada');loadPromoList();} else a('danger',d.msg||'No se pudo eliminar');
+}
+async function toggleCampaignPause(id){
+  const row=promoCampaigns.find(x=>String(x.id)===String(id));
+  if(!row){a('danger','Campaña no encontrada');return;}
+  const paused=String(row.status||'')==='paused';
+  const question=paused
+    ? `¿Quitar pausa a la campaña "${row.name||row.id}"?`
+    : `¿Pausar la campaña "${row.name||row.id}"? Mientras esté en pausa no se ejecutará.`;
+  if(!confirm(question)) return;
+  const d=await p(API+'?action=promo_pause',{id,paused:paused?0:1});
+  if(d.status==='success'){a('success',paused?'Campaña reanudada':'Campaña en pausa');loadPromoList();} else a('danger',d.msg||'No se pudo cambiar la pausa');
 }
 async function forceCampaignNow(id){
   const row=promoCampaigns.find(x=>String(x.id)===String(id));
@@ -1245,12 +1257,13 @@ function renderProgrammingTab(){
             <td class="small">${esc(r.name||r.id||'-')}</td>
             <td class="small">${esc(r.schedule_time||'-')}</td>
             <td class="small">${esc(daysToText(r.schedule_days||[]))}</td>
-            <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':'bg-secondary')))}">${esc(r.status||'-')}</span></td>
+            <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':'bg-secondary'))))}">${esc(r.status||'-')}</span></td>
             <td class="small">${Array.isArray(r.targets)?r.targets.length:0}</td>
             <td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td>
 	            <td class="small">
 	              <div class="d-flex gap-1">
 	                <button class="btn btn-sm btn-outline-success" type="button" title="Enviar ahora" onclick="forceCampaignNow('${esc(r.id||'')}')"><i class="fas fa-bolt"></i></button>
+	                <button class="btn btn-sm btn-outline-warning" type="button" title="${r.status==='paused'?'Reanudar':'Pausar'}" onclick="toggleCampaignPause('${esc(r.id||'')}')"><i class="fas ${r.status==='paused'?'fa-play':'fa-pause'}"></i></button>
 	                <button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button>
 	                <button class="btn btn-sm btn-outline-dark" type="button" title="Ver logs" onclick="openCampaignLogs('${esc(r.id||'')}')"><i class="fas fa-list-check"></i></button>
 	                <button class="btn btn-sm btn-outline-primary" type="button" onclick="editScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-pen"></i></button>

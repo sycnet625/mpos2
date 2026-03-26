@@ -384,6 +384,9 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
     foreach ($jobs as &$job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
         $found = true;
+        if (($job['status'] ?? '') === 'paused') {
+            echo json_encode(['status'=>'error','msg'=>'La campaña está en pausa. Reanúdala antes de enviarla.']); exit;
+        }
         $wasDone = (($job['status'] ?? '') === 'done');
         $reachedEnd = ((int)($job['current_index'] ?? 0) >= count((array)($job['targets'] ?? [])));
         $job['status'] = 'queued';
@@ -489,17 +492,80 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_delete') {
     $before = count($jobs);
     $jobs = array_values(array_filter($jobs, static fn($j) => (string)($j['id'] ?? '') !== $jobId));
     if ($before === count($jobs)) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
-    if (!bot_write_json_file($botPromoQueueFile, ['jobs' => $jobs])) {
+    if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo eliminar campaña']); exit;
     }
     echo json_encode(['status'=>'success']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_pause') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
+    $pause = !empty($in['paused']) ? 1 : 0;
+    if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $found = false;
+    $now = time();
+    foreach ($jobs as &$job) {
+        if ((string)($job['id'] ?? '') !== $jobId) continue;
+        $found = true;
+        $job['log'] = is_array($job['log'] ?? null) ? $job['log'] : [];
+        if ($pause) {
+            if (($job['status'] ?? '') !== 'paused') {
+                $job['paused_prev_status'] = (string)($job['status'] ?? 'queued');
+                $job['paused_at'] = date('c', $now);
+                $job['status'] = 'paused';
+                $job['log'][] = [
+                    'at' => date('c', $now),
+                    'type' => 'paused',
+                    'ok' => true,
+                    'target_id' => '',
+                    'target_name' => '',
+                    'messages_sent' => 0,
+                    'error' => ''
+                ];
+            }
+        } else {
+            unset($job['paused_at']);
+            $targetsCount = count((array)($job['targets'] ?? []));
+            $currentIndex = (int)($job['current_index'] ?? 0);
+            if ($targetsCount > 0 && $currentIndex > 0 && $currentIndex < $targetsCount) {
+                $job['status'] = 'queued';
+                $job['next_run_at'] = $now;
+            } elseif (!empty($job['schedule_enabled'])) {
+                $job['status'] = 'scheduled';
+                $job['next_run_at'] = $now + 20;
+            } else {
+                $job['status'] = 'queued';
+                $job['next_run_at'] = $now;
+            }
+            unset($job['paused_prev_status']);
+            $job['log'][] = [
+                'at' => date('c', $now),
+                'type' => 'resumed',
+                'ok' => true,
+                'target_id' => '',
+                'target_name' => '',
+                'messages_sent' => 0,
+                'error' => ''
+            ];
+        }
+        break;
+    }
+    unset($job);
+    if (!$found) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
+    if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
+        echo json_encode(['status'=>'error','msg'=>'No se pudo actualizar la pausa de la campaña']); exit;
+    }
+    echo json_encode(['status'=>'success','paused'=>$pause]); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_clone') {
     $in = json_decode(file_get_contents('php://input'), true) ?: [];
     $jobId = substr(trim((string)($in['id'] ?? '')), 0, 120);
     if ($jobId === '') { echo json_encode(['status'=>'error','msg'=>'id requerido']); exit; }
-    $queue = bot_read_json_file($botPromoQueueFile, ['jobs' => []]);
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     $source = null;
     foreach ($jobs as $job) {
@@ -510,7 +576,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_clone') {
     if (!$source) { echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit; }
     $clone = bot_clone_promo_job($source);
     $jobs[] = $clone;
-    if (!bot_write_json_file($botPromoQueueFile, ['jobs' => $jobs])) {
+    if (!bot_repo_write('promo_queue_file', ['jobs' => $jobs])) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo clonar campaña']); exit;
     }
     echo json_encode(['status'=>'success','id'=>$clone['id'],'name'=>$clone['name']]); exit;

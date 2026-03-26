@@ -11,6 +11,11 @@ $FB_QUEUE_FILE = '/tmp/palweb_fb_queue.json';
 $FB_TEMPLATES_FILE = '/tmp/palweb_fb_templates.json';
 $FB_WORKER_LOG_FILE = '/tmp/palweb_fb_worker.log';
 $FB_MANUAL_GROUPS_FILE = '/tmp/palweb_fb_manual_groups.json';
+$FB_BROWSER_COOKIES_FILE = '/tmp/palweb_fb_browser_cookies.json';
+$FB_BROWSER_LOGIN_STATUS_FILE = '/tmp/palweb_fb_browser_login_status.json';
+$FB_BROWSER_LOGIN_RUNNER_LOG = '/tmp/palweb_fb_browser_login_runner.log';
+$FB_BROWSER_PROFILE_DIR = '/var/www/fb_bot_browser_profile';
+$FB_BROWSER_DISPLAY = ':99';
 
 function fb_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
@@ -47,11 +52,35 @@ function fb_worker_log(string $message): void {
     @file_put_contents($file, '[' . date('c') . '] ' . $message . PHP_EOL, FILE_APPEND | LOCK_EX);
 }
 
+function fb_pid_alive($pid): bool {
+    $pid = (int)$pid;
+    return $pid > 1 && is_dir('/proc/' . $pid);
+}
+
 function fb_tail_file(string $file, int $maxLines = 300): string {
     if (!is_file($file)) return '';
     $raw = @file($file, FILE_IGNORE_NEW_LINES);
     if (!is_array($raw)) return '';
     return implode(PHP_EOL, array_slice($raw, -max(1, $maxLines)));
+}
+
+function fb_parse_cookie_header(string $header): array {
+    $cookies = [];
+    foreach (explode(';', $header) as $part) {
+        $piece = trim($part);
+        if ($piece === '' || !str_contains($piece, '=')) continue;
+        [$name, $value] = array_map('trim', explode('=', $piece, 2));
+        if ($name === '') continue;
+        $cookies[] = [
+            'name' => $name,
+            'value' => $value,
+            'domain' => '.facebook.com',
+            'path' => '/',
+            'httpOnly' => false,
+            'secure' => true,
+        ];
+    }
+    return $cookies;
 }
 
 function fb_normalize_publish_mode($mode): string {
@@ -686,7 +715,8 @@ $action = $_GET['action'] ?? '';
 
 $adminActions = [
     'get_config','save_config','stats','recent_posts','promo_products','promo_my_page_payload','promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
-    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','promo_import','test_post','worker_logs','manual_groups'
+    'promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_clone','promo_import','test_post','worker_logs','manual_groups',
+    'save_browser_cookies','browser_groups_scrape','browser_login','browser_login_status','test_group'
 ];
 if (in_array($action, $adminActions, true)) fb_require_admin_session();
 
@@ -798,6 +828,162 @@ if ($action === 'manual_groups') {
         }, $rows);
         echo json_encode(['status' => 'success', 'rows' => $safeRows]); exit;
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save_browser_cookies') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $cookieHeader = trim((string)($in['cookie_header'] ?? ''));
+    if ($cookieHeader === '') {
+        echo json_encode(['status' => 'error', 'msg' => 'Pega primero el header Cookie']); exit;
+    }
+    $cookies = fb_parse_cookie_header($cookieHeader);
+    if (!$cookies) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudieron extraer cookies válidas']); exit;
+    }
+    if (!fb_write_json_file($FB_BROWSER_COOKIES_FILE, ['cookies' => $cookies, 'updated_at' => date('c')])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudieron guardar cookies']); exit;
+    }
+    echo json_encode(['status' => 'success', 'count' => count($cookies)]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'browser_groups_scrape') {
+    $cookieData = fb_read_json_file($FB_BROWSER_COOKIES_FILE, ['cookies' => []]);
+    $cookies = is_array($cookieData['cookies'] ?? null) ? $cookieData['cookies'] : [];
+    if (!$cookies) {
+        echo json_encode(['status' => 'error', 'msg' => 'No hay cookies guardadas para Facebook']); exit;
+    }
+    $script = __DIR__ . '/fb_group_scraper.js';
+    if (!is_file($script)) {
+        echo json_encode(['status' => 'error', 'msg' => 'No existe el scraper de grupos']); exit;
+    }
+    $cmd = 'node ' . escapeshellarg($script) . ' ' . escapeshellarg($FB_BROWSER_COOKIES_FILE) . ' 2>&1';
+    $output = [];
+    $code = 0;
+    exec($cmd, $output, $code);
+    $raw = trim(implode("\n", $output));
+    $json = json_decode($raw, true);
+    if ($code !== 0 || !is_array($json)) {
+        echo json_encode(['status' => 'error', 'msg' => 'Fallo ejecutando scraper', 'raw' => $raw]); exit;
+    }
+    if (($json['status'] ?? 'error') !== 'success') {
+        echo json_encode(['status' => 'error', 'msg' => (string)($json['msg'] ?? 'No se pudieron obtener grupos'), 'raw' => $json]); exit;
+    }
+    $found = is_array($json['rows'] ?? null) ? $json['rows'] : [];
+    $stored = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
+    $rows = is_array($stored['rows'] ?? null) ? $stored['rows'] : [];
+    $indexed = [];
+    foreach ($rows as $row) {
+        $id = (string)($row['id'] ?? '');
+        if ($id !== '') $indexed[$id] = $row;
+    }
+    foreach ($found as $row) {
+        $id = substr(trim((string)($row['id'] ?? '')), 0, 80);
+        if ($id === '') continue;
+        $prev = $indexed[$id] ?? [];
+        $indexed[$id] = [
+            'id' => $id,
+            'name' => substr(trim((string)($row['name'] ?? ($prev['name'] ?? $id))), 0, 180),
+            'url' => substr(trim((string)($row['url'] ?? ($prev['url'] ?? ''))), 0, 500),
+            'enabled' => !empty($prev['enabled']) ? 1 : 0,
+            'access_token' => trim((string)($prev['access_token'] ?? '')),
+        ];
+    }
+    $merged = array_values($indexed);
+    if (!fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $merged])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar la lista escaneada']); exit;
+    }
+    $safeRows = array_map(static function ($row) {
+        return [
+            'id' => (string)($row['id'] ?? ''),
+            'name' => (string)($row['name'] ?? ''),
+            'url' => (string)($row['url'] ?? ''),
+            'enabled' => !empty($row['enabled']) ? 1 : 0,
+            'access_token' => trim((string)($row['access_token'] ?? '')) !== '' ? '************' : ''
+        ];
+    }, $merged);
+    echo json_encode(['status' => 'success', 'rows' => $safeRows, 'found' => count($found)]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'browser_login') {
+    $script = __DIR__ . '/fb_group_login.js';
+    if (!is_file($script)) {
+        echo json_encode(['status' => 'error', 'msg' => 'No existe el script de login de Facebook']); exit;
+    }
+    $statusData = fb_read_json_file($FB_BROWSER_LOGIN_STATUS_FILE, []);
+    $runningPid = (int)($statusData['pid'] ?? 0);
+    if (($statusData['status'] ?? '') === 'running' && fb_pid_alive($runningPid)) {
+        echo json_encode(['status' => 'success', 'msg' => 'Ya existe un login en curso', 'running' => 1, 'pid' => $runningPid, 'viewer_url' => '/fbnovnc/vnc_lite.html?autoconnect=1&resize=remote&path=fbnovnc/websockify']); exit;
+    }
+    @file_put_contents($FB_BROWSER_LOGIN_STATUS_FILE, json_encode([
+        'status' => 'starting',
+        'message' => 'Iniciando navegador de Facebook...',
+        'updated_at' => date('c'),
+        'pid' => 0
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    @mkdir($FB_BROWSER_PROFILE_DIR, 0775, true);
+    @mkdir($FB_BROWSER_PROFILE_DIR . '/.config', 0775, true);
+    @mkdir($FB_BROWSER_PROFILE_DIR . '/.cache', 0775, true);
+    @mkdir('/tmp/palweb-fb-runtime', 0775, true);
+    $cmd = 'nohup env DISPLAY=' . escapeshellarg((string)$FB_BROWSER_DISPLAY)
+        . ' HOME=/var/www'
+        . ' PUPPETEER_CACHE_DIR=/var/www/wa_web_bridge/.cache/puppeteer'
+        . ' XDG_CONFIG_HOME=' . escapeshellarg($FB_BROWSER_PROFILE_DIR . '/.config')
+        . ' XDG_CACHE_HOME=' . escapeshellarg($FB_BROWSER_PROFILE_DIR . '/.cache')
+        . ' XDG_RUNTIME_DIR=/tmp/palweb-fb-runtime '
+        . 'node '
+        . escapeshellarg($script) . ' '
+        . escapeshellarg($FB_BROWSER_COOKIES_FILE) . ' '
+        . escapeshellarg($FB_BROWSER_PROFILE_DIR) . ' '
+        . escapeshellarg($FB_BROWSER_LOGIN_STATUS_FILE)
+        . ' > ' . escapeshellarg($FB_BROWSER_LOGIN_RUNNER_LOG) . ' 2>&1 & echo $!';
+    $pid = (int)trim((string)shell_exec($cmd));
+    @file_put_contents($FB_BROWSER_LOGIN_STATUS_FILE, json_encode([
+        'status' => 'starting',
+        'message' => 'Iniciando navegador de Facebook...',
+        'updated_at' => date('c'),
+        'pid' => $pid
+    ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    echo json_encode(['status' => 'success', 'msg' => 'Login de Facebook iniciado', 'pid' => $pid, 'viewer_url' => '/fbnovnc/vnc_lite.html?autoconnect=1&resize=remote&path=fbnovnc/websockify']); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'browser_login_status') {
+    $statusData = fb_read_json_file($FB_BROWSER_LOGIN_STATUS_FILE, []);
+    if (!$statusData) {
+        echo json_encode(['status' => 'success', 'state' => 'idle', 'message' => 'Sin login en curso']); exit;
+    }
+    $state = (string)($statusData['status'] ?? 'idle');
+    $pid = (int)($statusData['pid'] ?? 0);
+    if (in_array($state, ['running','starting'], true) && !fb_pid_alive($pid)) {
+        $statusData['status'] = 'error';
+        $statusData['message'] = 'El navegador visual no está activo. Vuelve a iniciarlo.';
+        $statusData['updated_at'] = date('c');
+        @file_put_contents($FB_BROWSER_LOGIN_STATUS_FILE, json_encode($statusData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+    }
+    echo json_encode(['status' => 'success', 'state' => (string)($statusData['status'] ?? 'idle'), 'message' => (string)($statusData['message'] ?? ''), 'details' => $statusData]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_group') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $groupId = substr(trim((string)($in['id'] ?? '')), 0, 80);
+    if ($groupId === '') {
+        echo json_encode(['status' => 'error', 'msg' => 'Group ID requerido']); exit;
+    }
+    $groupName = substr(trim((string)($in['name'] ?? $groupId)), 0, 180);
+    $groupToken = trim((string)($in['access_token'] ?? ''));
+    $job = [
+        'id' => 'fbgroup_test_' . date('Ymd_His'),
+        'text' => trim((string)($in['text'] ?? ('Prueba automática grupo Facebook ' . date('Y-m-d H:i:s')))),
+        'banner_images' => [],
+        'outro_text' => '',
+        'products' => [],
+    ];
+    $res = fb_publish_campaign($pdo, $cfg, $job, [
+        'id' => $groupId,
+        'name' => $groupName,
+        'type' => 'group',
+        'token' => $groupToken,
+    ]);
+    echo json_encode($res); exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'promo_products') {
