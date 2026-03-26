@@ -30,7 +30,16 @@ async function main() {
   const browser = await puppeteer.launch({
     headless: 'new',
     userDataDir,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-crashpad',
+      '--disable-breakpad',
+      '--no-first-run',
+      '--disable-extensions'
+    ]
   });
 
   try {

@@ -856,7 +856,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'browser_groups_scrape'
     if (!is_file($script)) {
         echo json_encode(['status' => 'error', 'msg' => 'No existe el scraper de grupos']); exit;
     }
-    $cmd = 'node ' . escapeshellarg($script) . ' ' . escapeshellarg($FB_BROWSER_COOKIES_FILE) . ' 2>&1';
+    @mkdir($FB_BROWSER_PROFILE_DIR . '/.config', 0775, true);
+    @mkdir($FB_BROWSER_PROFILE_DIR . '/.cache', 0775, true);
+    @mkdir('/tmp/palweb-fb-runtime', 0775, true);
+    $cmd = 'env HOME=/var/www'
+        . ' PUPPETEER_CACHE_DIR=/var/www/wa_web_bridge/.cache/puppeteer'
+        . ' XDG_CONFIG_HOME=' . escapeshellarg($FB_BROWSER_PROFILE_DIR . '/.config')
+        . ' XDG_CACHE_HOME=' . escapeshellarg($FB_BROWSER_PROFILE_DIR . '/.cache')
+        . ' XDG_RUNTIME_DIR=/tmp/palweb-fb-runtime'
+        . ' node ' . escapeshellarg($script) . ' ' . escapeshellarg($FB_BROWSER_COOKIES_FILE) . ' 2>&1';
     $output = [];
     $code = 0;
     exec($cmd, $output, $code);
