@@ -84,6 +84,7 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
                   <button class="btn btn-outline-primary btn-sm" type="button" onclick="connectFacebookBrowser()"><i class="fab fa-facebook"></i> Conectar Facebook</button>
                   <button class="btn btn-outline-secondary btn-sm" type="button" onclick="openFacebookViewer(true)"><i class="fas fa-desktop"></i> Abrir login visual</button>
                   <button class="btn btn-outline-dark btn-sm" type="button" onclick="openLogsModal()"><i class="fas fa-file-lines"></i> Ver consola</button>
+                  <button class="btn btn-outline-danger btn-sm" type="button" onclick="openToastHistoryModal()"><i class="fas fa-triangle-exclamation"></i> Ver errores</button>
                   <button class="btn btn-outline-success btn-sm" type="button" onclick="runQueue()"><i class="fas fa-play"></i> Ejecutar cola ahora</button>
                   <button class="btn btn-outline-primary btn-sm" type="button" onclick="scanBrowserGroups()"><i class="fab fa-facebook"></i> Escanear grupos</button>
                 </div>
@@ -418,6 +419,25 @@ pre.fb-console{white-space:pre-wrap;background:#0f172a;color:#dbeafe;padding:10p
   </div>
 </div>
 
+<div class="modal fade" id="toastHistoryModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title mb-0"><i class="fas fa-triangle-exclamation"></i> Historial de mensajes y errores</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body">
+        <div id="toastHistorySummary" class="small text-muted mb-2">Sin eventos registrados.</div>
+        <pre id="toastHistoryText" class="fb-console mb-0">Sin actividad.</pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-danger btn-sm" type="button" onclick="clearToastHistory()"><i class="fas fa-trash"></i> Limpiar historial</button>
+        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="renderToastHistory()"><i class="fas fa-sync"></i> Refrescar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="campaignLogsModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl modal-dialog-scrollable">
     <div class="modal-content">
@@ -530,10 +550,43 @@ let activeCampaignLogId='';
 let promoSearchTimer=null;
 let editPromoSearchTimer=null;
 let fbBrowserLoginPoll=null;
+let toastHistory=[];
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+function logToastHistory(type,msg){
+  toastHistory.push({
+    at:new Date().toISOString(),
+    type:(type==='danger'||type==='error')?'error':'info',
+    message:String(msg||'')
+  });
+  if(toastHistory.length>300) toastHistory=toastHistory.slice(-300);
+}
+function renderToastHistory(){
+  const summary=document.getElementById('toastHistorySummary');
+  const text=document.getElementById('toastHistoryText');
+  if(!summary || !text) return;
+  if(!toastHistory.length){
+    summary.textContent='Sin eventos registrados.';
+    text.textContent='Sin actividad.';
+    return;
+  }
+  const errors=toastHistory.filter(x=>x.type==='error').length;
+  const infos=toastHistory.length-errors;
+  summary.textContent=`Eventos: ${toastHistory.length} | Info: ${infos} | Errores: ${errors}`;
+  text.textContent=toastHistory.slice().reverse().map(x=>`[${x.at}] [${String(x.type||'info').toUpperCase()}] ${x.message}`).join('\n');
+}
+function openToastHistoryModal(){
+  renderToastHistory();
+  const m=new bootstrap.Modal(document.getElementById('toastHistoryModal'));
+  m.show();
+}
+function clearToastHistory(){
+  toastHistory=[];
+  renderToastHistory();
+}
 function showToast(type,msg){
   const holder=document.getElementById('toastStack');
   if(!holder) return;
+  logToastHistory(type,msg);
   const toast=document.createElement('div');
   const kind=(type==='danger'||type==='error')?'error':'info';
   toast.className=`app-toast ${kind}`;
