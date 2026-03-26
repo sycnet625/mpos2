@@ -635,6 +635,19 @@ function fb_publish_campaign(PDO $pdo, array $cfg, array $job, array $target): a
     return ['ok' => true, 'post_id' => (string)($res['data']['id'] ?? ''), 'messages_sent' => count($media) + 1, 'facebook_sent' => count($media) + 1];
 }
 
+function fb_manual_group_safe_row(array $row): array {
+    return [
+        'id' => (string)($row['id'] ?? ''),
+        'name' => (string)($row['name'] ?? ''),
+        'url' => (string)($row['url'] ?? ''),
+        'enabled' => !empty($row['enabled']) ? 1 : 0,
+        'access_token' => trim((string)($row['access_token'] ?? '')) !== '' ? '************' : '',
+        'publish_status' => substr(trim((string)($row['publish_status'] ?? 'unknown')), 0, 30) ?: 'unknown',
+        'last_test_at' => (string)($row['last_test_at'] ?? ''),
+        'last_test_msg' => substr(trim((string)($row['last_test_msg'] ?? '')), 0, 500),
+    ];
+}
+
 function fb_process_queue(PDO $pdo, array $cfg): array {
     $queue = fb_read_json_file($GLOBALS['FB_QUEUE_FILE'], ['jobs' => []]);
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
@@ -810,13 +823,16 @@ if ($action === 'manual_groups') {
             $url = substr(trim((string)($row['url'] ?? '')), 0, 500);
             $enabled = !empty($row['enabled']) ? 1 : 0;
             $token = trim((string)($row['access_token'] ?? ''));
-            $rows[] = [
+            $rows[] = fb_manual_group_safe_row([
                 'id' => $id,
                 'name' => $name,
                 'url' => $url,
                 'enabled' => $enabled,
-                'access_token' => $token !== '' ? '************' : ''
-            ];
+                'access_token' => $token,
+                'publish_status' => substr(trim((string)($row['publish_status'] ?? 'unknown')), 0, 30) ?: 'unknown',
+                'last_test_at' => (string)($row['last_test_at'] ?? ''),
+                'last_test_msg' => substr(trim((string)($row['last_test_msg'] ?? '')), 0, 500),
+            ]);
         }
         echo json_encode(['status' => 'success', 'rows' => $rows]); exit;
     }
@@ -831,29 +847,36 @@ if ($action === 'manual_groups') {
             $token = trim((string)($row['access_token'] ?? ''));
             if ($id === '' && $name === '' && $url === '') continue;
             $storedToken = $token;
+            $publishStatus = substr(trim((string)($row['publish_status'] ?? 'unknown')), 0, 30) ?: 'unknown';
+            $lastTestAt = substr(trim((string)($row['last_test_at'] ?? '')), 0, 40);
+            $lastTestMsg = substr(trim((string)($row['last_test_msg'] ?? '')), 0, 500);
             if ($storedToken === '' && !empty($row['keep_token'])) {
                 $prevData = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
                 foreach ((array)($prevData['rows'] ?? []) as $prev) {
                     if ((string)($prev['id'] ?? '') === $id && $id !== '') {
                         $storedToken = trim((string)($prev['access_token'] ?? ''));
+                        $publishStatus = $publishStatus !== 'unknown' ? $publishStatus : (substr(trim((string)($prev['publish_status'] ?? 'unknown')), 0, 30) ?: 'unknown');
+                        $lastTestAt = $lastTestAt !== '' ? $lastTestAt : substr(trim((string)($prev['last_test_at'] ?? '')), 0, 40);
+                        $lastTestMsg = $lastTestMsg !== '' ? $lastTestMsg : substr(trim((string)($prev['last_test_msg'] ?? '')), 0, 500);
                         break;
                     }
                 }
             }
-            $rows[] = ['id' => $id, 'name' => $name, 'url' => $url, 'enabled' => $enabled, 'access_token' => $storedToken];
+            $rows[] = [
+                'id' => $id,
+                'name' => $name,
+                'url' => $url,
+                'enabled' => $enabled,
+                'access_token' => $storedToken,
+                'publish_status' => $publishStatus,
+                'last_test_at' => $lastTestAt,
+                'last_test_msg' => $lastTestMsg,
+            ];
         }
         if (!fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $rows])) {
             echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar listado manual']); exit;
         }
-        $safeRows = array_map(static function ($row) {
-            return [
-                'id' => (string)($row['id'] ?? ''),
-                'name' => (string)($row['name'] ?? ''),
-                'url' => (string)($row['url'] ?? ''),
-                'enabled' => !empty($row['enabled']) ? 1 : 0,
-                'access_token' => trim((string)($row['access_token'] ?? '')) !== '' ? '************' : ''
-            ];
-        }, $rows);
+        $safeRows = array_map('fb_manual_group_safe_row', $rows);
         echo json_encode(['status' => 'success', 'rows' => $safeRows]); exit;
     }
 }
@@ -922,21 +945,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'browser_groups_scrape'
             'url' => substr(trim((string)($row['url'] ?? ($prev['url'] ?? ''))), 0, 500),
             'enabled' => !empty($prev['enabled']) ? 1 : 0,
             'access_token' => trim((string)($prev['access_token'] ?? '')),
+            'publish_status' => substr(trim((string)($prev['publish_status'] ?? 'unknown')), 0, 30) ?: 'unknown',
+            'last_test_at' => substr(trim((string)($prev['last_test_at'] ?? '')), 0, 40),
+            'last_test_msg' => substr(trim((string)($prev['last_test_msg'] ?? '')), 0, 500),
         ];
     }
     $merged = array_values($indexed);
     if (!fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $merged])) {
         echo json_encode(['status' => 'error', 'msg' => 'No se pudo guardar la lista escaneada']); exit;
     }
-    $safeRows = array_map(static function ($row) {
-        return [
-            'id' => (string)($row['id'] ?? ''),
-            'name' => (string)($row['name'] ?? ''),
-            'url' => (string)($row['url'] ?? ''),
-            'enabled' => !empty($row['enabled']) ? 1 : 0,
-            'access_token' => trim((string)($row['access_token'] ?? '')) !== '' ? '************' : ''
-        ];
-    }, $merged);
+    $safeRows = array_map('fb_manual_group_safe_row', $merged);
     echo json_encode(['status' => 'success', 'rows' => $safeRows, 'found' => count($found)]); exit;
 }
 
@@ -1019,6 +1037,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'test_group') {
         'type' => 'group',
         'token' => $groupToken,
     ]);
+    $stored = fb_read_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => []]);
+    $rows = is_array($stored['rows'] ?? null) ? $stored['rows'] : [];
+    $changed = false;
+    foreach ($rows as &$row) {
+        if ((string)($row['id'] ?? '') !== $groupId) continue;
+        $row['publish_status'] = !empty($res['ok']) ? 'publicable' : 'no_publicable';
+        $row['last_test_at'] = date('c');
+        $row['last_test_msg'] = substr(trim((string)($res['error'] ?? $res['msg'] ?? ($res['post_id'] ?? 'OK'))), 0, 500);
+        $changed = true;
+        break;
+    }
+    unset($row);
+    if ($changed) {
+        @fb_write_json_file($FB_MANUAL_GROUPS_FILE, ['rows' => $rows]);
+        $res['rows'] = array_map('fb_manual_group_safe_row', $rows);
+    }
     echo json_encode($res); exit;
 }
 
