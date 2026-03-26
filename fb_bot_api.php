@@ -11,11 +11,17 @@ $FB_BROWSER_PROFILE_DIR = '/var/www/fb_bot_browser_profile';
 $FB_QUEUE_FILE = '/tmp/palweb_fb_queue.json';
 $FB_TEMPLATES_FILE = '/tmp/palweb_fb_templates.json';
 $FB_WORKER_LOG_FILE = '/tmp/palweb_fb_worker.log';
-$FB_MANUAL_GROUPS_FILE = '/tmp/palweb_fb_manual_groups.json';
+$FB_MANUAL_GROUPS_FILE = $FB_BROWSER_PROFILE_DIR . '/manual_groups.json';
+$FB_MANUAL_GROUPS_LEGACY_FILE = '/tmp/palweb_fb_manual_groups.json';
 $FB_BROWSER_COOKIES_FILE = $FB_BROWSER_PROFILE_DIR . '/browser_cookies.json';
 $FB_BROWSER_LOGIN_STATUS_FILE = $FB_BROWSER_PROFILE_DIR . '/browser_login_status.json';
 $FB_BROWSER_LOGIN_RUNNER_LOG = $FB_BROWSER_PROFILE_DIR . '/browser_login_runner.log';
 $FB_BROWSER_DISPLAY = ':99';
+
+@mkdir($FB_BROWSER_PROFILE_DIR, 0775, true);
+if (!is_file($FB_MANUAL_GROUPS_FILE) && is_file($FB_MANUAL_GROUPS_LEGACY_FILE)) {
+    @copy($FB_MANUAL_GROUPS_LEGACY_FILE, $FB_MANUAL_GROUPS_FILE);
+}
 
 function fb_require_admin_session(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) session_start();
