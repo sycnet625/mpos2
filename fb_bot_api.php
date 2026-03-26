@@ -583,8 +583,30 @@ function fb_publish_campaign(PDO $pdo, array $cfg, array $job, array $target): a
     if ($pageId === '') return ['ok' => false, 'error' => 'Falta page_id'];
     $message = fb_build_message($job);
     $media = fb_collect_media($job);
+    $authFallbackNeeded = static function(array $res): bool {
+        if (($res['ok'] ?? false) === true) return false;
+        $msg = strtolower(trim((string)($res['error'] ?? '')));
+        if ($msg === '') return false;
+        return str_contains($msg, 'error validating access token')
+            || str_contains($msg, 'session has expired')
+            || str_contains($msg, 'oauth')
+            || str_contains($msg, 'access token');
+    };
+    $graphCall = static function(string $path, array $params, string $method = 'POST') use ($cfg, $tokenOverride, $authFallbackNeeded): array {
+        $firstToken = $tokenOverride !== '' ? $tokenOverride : null;
+        $res = fb_graph_request($cfg, $path, $params, $method, $firstToken);
+        if ($tokenOverride !== '' && $authFallbackNeeded($res)) {
+            $retry = fb_graph_request($cfg, $path, $params, $method, null);
+            if (($retry['ok'] ?? false) === true) {
+                $retry['token_fallback'] = 'page_access_token';
+                return $retry;
+            }
+            return $retry;
+        }
+        return $res;
+    };
     if (!$media) {
-        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', ['message' => $message], 'POST', $tokenOverride !== '' ? $tokenOverride : null);
+        $res = $graphCall('/' . rawurlencode($pageId) . '/feed', ['message' => $message], 'POST');
         if (!$res['ok']) return $res;
         fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['id'] ?? ''), $message, 'success', '');
         return ['ok' => true, 'post_id' => (string)($res['data']['id'] ?? ''), 'messages_sent' => 1, 'facebook_sent' => 1];
@@ -593,21 +615,21 @@ function fb_publish_campaign(PDO $pdo, array $cfg, array $job, array $target): a
         $params = $targetType === 'group'
             ? ['url' => $media[0], 'message' => $message]
             : ['url' => $media[0], 'caption' => $message];
-        $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', $params, 'POST', $tokenOverride !== '' ? $tokenOverride : null);
+        $res = $graphCall('/' . rawurlencode($pageId) . '/photos', $params, 'POST');
         if (!$res['ok']) return $res;
         fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['post_id'] ?? $res['data']['id'] ?? ''), $message, 'success', '');
         return ['ok' => true, 'post_id' => (string)($res['data']['post_id'] ?? $res['data']['id'] ?? ''), 'messages_sent' => 1, 'facebook_sent' => 1];
     }
     $attached = [];
     foreach ($media as $idx => $url) {
-        $upload = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/photos', ['url' => $url, 'published' => 'false'], 'POST', $tokenOverride !== '' ? $tokenOverride : null);
+        $upload = $graphCall('/' . rawurlencode($pageId) . '/photos', ['url' => $url, 'published' => 'false'], 'POST');
         if (!$upload['ok']) return $upload;
         $mediaId = (string)($upload['data']['id'] ?? '');
         if ($mediaId === '') return ['ok' => false, 'error' => 'Meta no devolvió media id'];
         $attached['attached_media[' . $idx . ']'] = json_encode(['media_fbid' => $mediaId], JSON_UNESCAPED_UNICODE);
     }
     $params = ['message' => $message] + $attached;
-    $res = fb_graph_request($cfg, '/' . rawurlencode($pageId) . '/feed', $params, 'POST', $tokenOverride !== '' ? $tokenOverride : null);
+    $res = $graphCall('/' . rawurlencode($pageId) . '/feed', $params, 'POST');
     if (!$res['ok']) return $res;
     fb_log_post($pdo, 'facebook', (string)($job['id'] ?? ''), $pageId, $pageName, (string)($res['data']['id'] ?? ''), $message, 'success', '');
     return ['ok' => true, 'post_id' => (string)($res['data']['id'] ?? ''), 'messages_sent' => count($media) + 1, 'facebook_sent' => count($media) + 1];
