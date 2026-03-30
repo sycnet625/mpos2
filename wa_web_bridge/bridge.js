@@ -11,6 +11,7 @@ const API_BASE = process.env.POS_BOT_API_BASE || (POS_BOT_HOST ? `https://${POS_
 const LOOPBACK_API_BASE = process.env.POS_BOT_LOOPBACK_API_BASE || 'http://127.0.0.1';
 const API_PATH = process.env.POS_BOT_API_PATH || '/pos_bot_api.php?action=web_incoming';
 const API_JOBS_PATH = process.env.POS_BOT_JOBS_PATH || '/pos_bot_api.php?action=bridge_scan_jobs';
+const API_STATE_PATH = process.env.POS_BOT_STATE_PATH || '/pos_bot_api.php?action=bridge_autoreply_state';
 const API_URL = process.env.POS_BOT_API_URL || `${API_BASE}${API_PATH}`;
 const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || (() => {
   if (process.env.POS_BOT_API_URL) {
@@ -22,6 +23,17 @@ const API_JOBS_URL = process.env.POS_BOT_JOBS_URL || (() => {
     } catch (_) {}
   }
   return `${API_BASE}${API_JOBS_PATH}`;
+})();
+const API_STATE_URL = process.env.POS_BOT_STATE_URL || (() => {
+  if (process.env.POS_BOT_API_URL) {
+    try {
+      const derived = new URL(process.env.POS_BOT_API_URL);
+      derived.pathname = '/pos_bot_api.php';
+      derived.search = 'action=bridge_autoreply_state';
+      return derived.toString();
+    } catch (_) {}
+  }
+  return `${API_BASE}${API_STATE_PATH}`;
 })();
 const API_ORIGIN = (() => {
   const publicOrigin = String(process.env.POS_BOT_PUBLIC_ORIGIN || '').trim();
@@ -109,6 +121,7 @@ let currentBridgeState = 'starting';
 let currentStateMeta = {};
 const processedMessageIds = new Map();
 let controlCommandBusy = false;
+let autoreplyStateCache = { expiresAt: 0, data: null };
 
 function normalizeWaUserId(rawFrom) {
   const base = String(rawFrom || '').split('@')[0] || '';
@@ -321,6 +334,25 @@ async function apiFetch(url, options = {}) {
     }
   }
   throw lastErr || new Error(`fetch failed for ${url}`);
+}
+
+async function getAutoreplyState() {
+  const now = Date.now();
+  if (autoreplyStateCache.data && autoreplyStateCache.expiresAt > now) {
+    return autoreplyStateCache.data;
+  }
+  const res = await apiFetch(API_STATE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verify_token: VERIFY_TOKEN })
+  });
+  const data = await res.json();
+  const state = data && typeof data === 'object' ? (data.state || null) : null;
+  autoreplyStateCache = {
+    expiresAt: now + 30000,
+    data: state
+  };
+  return state;
 }
 
 function removePathIfExists(targetPath) {
@@ -713,6 +745,19 @@ async function processOutboundQueueTick() {
   let changed = false;
   for (const job of jobs) {
     if (String(job.status || 'queued') !== 'queued') continue;
+    if (String(job.job_kind || '') === 'cart_recovery') {
+      try {
+        const state = await getAutoreplyState();
+        if (!state || !Number(state.effective_enabled || 0)) {
+          job.status = 'skipped';
+          job.error = 'Autorepuesta desactivada; recordatorio de carrito descartado';
+          changed = true;
+          continue;
+        }
+      } catch (err) {
+        console.error('[bridge] No se pudo validar estado de autorepuesta para recordatorio:', err.message || err);
+      }
+    }
     const targetId = resolveKnownChatId(job.target_id || job.wa_user_id || '');
     if (!targetId) {
       job.status = 'error';
@@ -740,7 +785,7 @@ async function processOutboundQueueTick() {
     }
   }
   if (changed) {
-    const kept = jobs.filter((job) => !['sent'].includes(String(job.status || '')));
+    const kept = jobs.filter((job) => !['sent', 'skipped'].includes(String(job.status || '')));
     writeJsonFile(OUTBOX_QUEUE_FILE, { jobs: kept });
   }
 }

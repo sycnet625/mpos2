@@ -52,9 +52,15 @@ function bot_conversation_update(PDO $pdo, string $wa, callable $mutator): array
 }
 
 function bot_enqueue_cart_recovery_jobs(PDO $pdo, array $cfg, array $appCfg): int {
+    $replyState = bot_autoreply_state($cfg);
+    if (empty($replyState['effective_enabled'])) {
+        return 0;
+    }
     $rows = $pdo->query("SELECT wa_user_id, wa_name, cart_json, last_seen FROM pos_bot_sessions ORDER BY last_seen DESC LIMIT 150")->fetchAll(PDO::FETCH_ASSOC);
     $enqueued = 0;
     $now = time();
+    $tz = new DateTimeZone('America/Havana');
+    $todayKey = (new DateTimeImmutable('now', $tz))->format('Y-m-d');
     foreach ($rows as $row) {
         $cart = json_decode((string)($row['cart_json'] ?? ''), true);
         if (!is_array($cart)) continue;
@@ -65,28 +71,48 @@ function bot_enqueue_cart_recovery_jobs(PDO $pdo, array $cfg, array $appCfg): in
         $lastActivityTs = strtotime((string)($cart['last_cart_activity_at'] ?? '')) ?: $lastSeenTs;
         if ($lastActivityTs <= 0 || ($now - $lastActivityTs) < 20 * 60) continue;
         $lastReminderTs = strtotime((string)($cart['last_cart_reminder_at'] ?? '')) ?: 0;
-        if ($lastReminderTs > 0 && ($now - $lastReminderTs) < 6 * 3600) continue;
+        if ($lastReminderTs > 0 && ($now - $lastReminderTs) < 10 * 3600) continue;
+        $firstDayKey = trim((string)($cart['cart_recovery_first_day'] ?? ''));
+        $dayKey = trim((string)($cart['cart_recovery_day_key'] ?? ''));
+        $dayCount = max(0, (int)($cart['cart_recovery_day_count'] ?? 0));
+        if ($firstDayKey !== '') {
+            try {
+                $firstDay = new DateTimeImmutable($firstDayKey . ' 00:00:00', $tz);
+                $todayDay = new DateTimeImmutable($todayKey . ' 00:00:00', $tz);
+                if ((int)$firstDay->diff($todayDay)->format('%a') >= 3) continue;
+            } catch (Throwable $_) {}
+        }
+        if ($dayKey !== $todayKey) {
+            $dayKey = $todayKey;
+            $dayCount = 0;
+        }
+        if ($dayCount >= 2) continue;
         $name = bot_customer_display_name($cart, (string)($row['wa_name'] ?? 'Cliente'));
         $text = bot_pick([
-            "Hola {$name}, dejaste un pedido a medias. Si quieres, te ayudo a terminarlo ahora mismo.",
-            "{$name}, tu carrito sigue guardado. Puedes retomarlo cuando quieras.",
-            "Seguimos teniendo guardado tu carrito, {$name}. Si quieres, lo cerramos enseguida."
+            "Hola {$name}, dejaste un pedido a medias. Si quieres, te ayudo a terminarlo ahora mismo o puedes cancelar la compra.",
+            "{$name}, tu carrito sigue guardado. Puedes retomarlo cuando quieras o cancelar la compra si ya no lo deseas.",
+            "Seguimos teniendo guardado tu carrito, {$name}. Si quieres, lo cerramos enseguida o cancelas la compra con un toque."
         ], $row['wa_user_id'] . date('YmdH'));
         $text .= "\n" . bot_site_promo($cfg, $appCfg, $row['wa_user_id'] . 'recovery');
         bot_enqueue_bridge_job([
             'target_id' => (string)$row['wa_user_id'],
             'type' => 'text',
-            'text' => $text
+            'text' => $text,
+            'job_kind' => 'cart_recovery'
         ]);
         bot_enqueue_bridge_job([
             'target_id' => (string)$row['wa_user_id'],
             'type' => 'buttons',
             'text' => 'Retoma tu compra con un toque:',
-            'buttons' => ['Carrito', 'Confirmar', 'Comprar en web'],
+            'buttons' => ['Carrito', 'Confirmar', 'Cancelar compra'],
             'title' => 'Carrito pendiente',
-            'footer' => preg_replace('~^https?://~i', '', bot_site_url($appCfg))
+            'footer' => preg_replace('~^https?://~i', '', bot_site_url($appCfg)),
+            'job_kind' => 'cart_recovery'
         ]);
         $cart['last_cart_reminder_at'] = date('c', $now);
+        if ($firstDayKey === '') $cart['cart_recovery_first_day'] = $todayKey;
+        $cart['cart_recovery_day_key'] = $todayKey;
+        $cart['cart_recovery_day_count'] = $dayCount + 1;
         bot_save_cart($pdo, (string)$row['wa_user_id'], (string)($row['wa_name'] ?? ''), $cart);
         $enqueued++;
     }

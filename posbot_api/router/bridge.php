@@ -23,6 +23,17 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_scan_jobs') {
     echo json_encode(['status' => 'success', 'enqueued' => $count]); exit;
 }
 
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='bridge_autoreply_state') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $provided = (string)($in['verify_token'] ?? '');
+    if (!bot_verify_token_matches($cfg, $provided)) {
+        http_response_code(403);
+        echo json_encode(['status'=>'error','msg'=>'invalid token']); exit;
+    }
+    $state = bot_autoreply_state($cfg);
+    echo json_encode(['status' => 'success', 'state' => $state]); exit;
+}
+
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='bridge_status') {
     $statusFile = $botBridgeStatusFile;

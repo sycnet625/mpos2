@@ -6,12 +6,15 @@ function bot_send_quick_actions(PDO $pdo, array $cfg, array $appCfg, string $wa,
         ? 'Retoma tu compra con un toque:'
         : 'Usa estos botones para ir más rápido:';
     bot_send_buttons($pdo, $wa, $body1, ['Menu', 'Repetir pedido', 'Carrito'], $title, $footer);
-    bot_send_buttons($pdo, $wa, 'Más opciones:', ['Confirmar', 'Comprar en web'], $title, $footer);
+    bot_send_buttons($pdo, $wa, 'Más opciones:', $context === 'recovery' ? ['Confirmar', 'Cancelar compra'] : ['Confirmar', 'Comprar en web'], $title, $footer);
 }
 
 function bot_mark_cart_activity(array &$cart): void {
     $cart['last_cart_activity_at'] = date('c');
     $cart['last_cart_reminder_at'] = '';
+    $cart['cart_recovery_first_day'] = '';
+    $cart['cart_recovery_day_key'] = '';
+    $cart['cart_recovery_day_count'] = 0;
 }
 
 function bot_default_cart(string $name=''): array {
@@ -38,6 +41,9 @@ function bot_default_cart(string $name=''): array {
         'bot_paused' => 0,
         'last_cart_activity_at' => '',
         'last_cart_reminder_at' => '',
+        'cart_recovery_first_day' => '',
+        'cart_recovery_day_key' => '',
+        'cart_recovery_day_count' => 0,
         'last_manual_reply_at' => ''
     ];
 }
@@ -50,6 +56,7 @@ function bot_merge_cart_shape(array $cart, string $name=''): array {
     if (!is_array($cart['last_order'] ?? null)) $cart['last_order'] = $base['last_order'];
     if (!is_array($cart['pending_choice'] ?? null)) $cart['pending_choice'] = null;
     $cart['bot_paused'] = !empty($cart['bot_paused']) ? 1 : 0;
+    $cart['cart_recovery_day_count'] = max(0, (int)($cart['cart_recovery_day_count'] ?? 0));
     if (($cart['customer_name'] ?? '') === '' && $name !== '') $cart['customer_name'] = $name;
     return $cart;
 }
@@ -108,8 +115,30 @@ function bot_extract_name(string $text): string {
     foreach ($patterns as $p) $raw = preg_replace($p, '', $raw) ?? $raw;
     $val = bot_clean_value($raw);
     if ($val === '' || mb_strlen($val) < 2) return '';
-    if (in_array(bot_norm($val), ['confirmar','menu','carrito','cancelar','pedido'], true)) return '';
+    if (!bot_is_plausible_person_name($val)) return '';
     return mb_substr($val, 0, 120);
+}
+
+function bot_is_plausible_person_name(string $text): bool {
+    $val = bot_clean_value($text);
+    if ($val === '' || mb_strlen($val) < 2) return false;
+    if (preg_match('/\d/', $val)) return false;
+    $norm = bot_norm($val);
+    if ($norm === '') return false;
+    $invalidExact = ['confirmar','menu','carrito','cancelar','pedido','cliente'];
+    if (in_array($norm, $invalidExact, true)) return false;
+    $invalidStarts = [
+        'quiero','dame','ponme','mandame','manda','agrega','agregar','anade','añade',
+        'me das','me pones','preparame','prepárame','lo mismo','repetir','comprar',
+        'direccion','dirección','entrega','delivery','recoger','reserva'
+    ];
+    foreach ($invalidStarts as $prefix) {
+        if ($norm === $prefix || str_starts_with($norm, $prefix . ' ')) return false;
+    }
+    if (preg_match('/\b(croqueta|croquetas|pizza|refresco|espagueti|espaguetis|combo|pedido|reserva|producto|productos|menu|menu|catalogo|catalogo|delivery|domicilio|tienda)\b/u', $norm)) {
+        return false;
+    }
+    return (bool)preg_match('/[[:alpha:]]/u', $val);
 }
 
 function bot_extract_address(string $text): string {
