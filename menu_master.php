@@ -24,6 +24,7 @@ $menuCategories = [
         ["icon" => "fa-calendar-check", "name" => "Reservas", "url" => "reservas.php"],
         ["icon" => "fa-utensils", "name" => "Pantalla Cocina", "url" => "kds.php"],
         ["icon" => "fa-user-plus", "name" => "Clientes CRM", "url" => "crm_clients.php"],
+        ["icon" => "fa-handshake-angle", "name" => "Red de Afiliados", "url" => "affiliate_network.php"],
         
         
     ],
