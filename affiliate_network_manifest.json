@@ -1,0 +1,18 @@
+{
+  "name": "La Lámpara del Genio",
+  "short_name": "LAG",
+  "start_url": "/affiliate_network.php",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0a0800",
+  "theme_color": "#ff8c00",
+  "description": "Red de afiliados del ERP con soporte offline y sincronización al volver internet.",
+  "icons": [
+    {
+      "src": "/affiliate_network_icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
