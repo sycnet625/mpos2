@@ -86,6 +86,9 @@
             });
         }
 
+        var openFlowBtn = event.target.closest('[data-open-flow]');
+        if (openFlowBtn) return ns.loadLeadFinancialFlow(openFlowBtn.getAttribute('data-open-flow'));
+
         var removeImageBtn = event.target.closest('[data-remove-product-image]');
         if (removeImageBtn) {
             state.ownerNewProduct.removeImage = true;

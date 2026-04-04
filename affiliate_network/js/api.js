@@ -78,6 +78,7 @@ window.RAC = window.RAC || {};
             auditEvents: state.auditEvents,
             integrations: state.integrations,
             integrationSettings: state.integrationSettings,
+            currentLeadFlow: state.currentLeadFlow,
             summary: state.summary
         }));
     };
@@ -314,6 +315,16 @@ window.RAC = window.RAC || {};
             ns.toast('Integraciones actualizadas.', 'success');
         } catch (e) {
             ns.toast('No fue posible guardar las integraciones.', 'error');
+        }
+    };
+
+    ns.loadLeadFinancialFlow = async function (leadId) {
+        try {
+            var json = await ns.api('lead_financial_flow&id=' + encodeURIComponent(leadId), 'GET');
+            state.currentLeadFlow = json.data || null;
+            ns.openLeadFlowModal();
+        } catch (e) {
+            ns.toast('No fue posible cargar el flujo financiero del lead.', 'error');
         }
     };
 

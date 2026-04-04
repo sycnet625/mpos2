@@ -76,6 +76,29 @@ window.RAC = window.RAC || {};
         ns.$('integrationModalWrap').classList.add('active');
     };
 
+    ns.openLeadFlowModal = function () {
+        var flow = state.currentLeadFlow;
+        if (!flow) {
+            return;
+        }
+        ns.$('flowModalWrap').innerHTML = '<div class="modal active"><header><h3>💸 Flujo financiero del lead</h3><button class="close" data-close-modal="flowModalWrap">×</button></header>'
+            + '<div class="card mini"><div class="item-title">' + ns.esc(flow.product) + '</div><div class="sub">' + ns.esc(flow.traceCode) + ' · ' + ns.esc(flow.status) + '</div>'
+            + '<div class="two-col" style="margin-top:12px"><div><div class="sub">Dueño</div><div class="money">' + ns.esc(flow.owner) + '</div></div><div><div class="sub">Gestor</div><div class="money">' + ns.esc(flow.gestor) + '</div></div></div>'
+            + '<div class="two-col" style="margin-top:12px"><div><div class="sub">Comisión total</div><div class="money">' + ns.formatCUP(flow.commission) + '</div></div><div><div class="sub">Garantía bloqueada</div><div class="money">' + ns.formatCUP(flow.lockedCommission) + '</div></div></div>'
+            + '<div class="two-col" style="margin-top:12px"><div><div class="sub">Pago gestor</div><div class="money">' + ns.formatCUP(flow.gestorShare) + '</div></div><div><div class="sub">Revenue plataforma</div><div class="money">' + ns.formatCUP(flow.platformShare) + '</div></div></div></div>'
+            + '<div class="section-title" style="margin-top:18px"><h3>Línea de tiempo</h3></div><div class="list">'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Trigger de contacto</div><div class="sub">' + ns.esc(flow.triggeredAt || '—') + '</div></div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Apertura de contacto</div><div class="sub">' + ns.esc(flow.contactOpenedAt || '—') + '</div></div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Cierre vendido</div><div class="sub">' + ns.esc(flow.soldAt || '—') + '</div></div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">No concretado</div><div class="sub">' + ns.esc(flow.noSaleAt || '—') + '</div></div></div></div>'
+            + '</div><div class="section-title" style="margin-top:18px"><h3>Movimientos de wallet</h3></div><div class="list">'
+            + (flow.movements || []).map(function (m) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(ns.movementLabel(m.movementType)) + '</div><div class="sub">' + ns.esc(m.note || '') + ' · ' + ns.esc(m.createdAt) + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(m.amount) + '</div><div class="sub">Disp ' + ns.formatCUP(m.deltaAvailable) + ' · Bloq ' + ns.formatCUP(m.deltaBlocked) + '</div></div></div></div>';
+            }).join('')
+            + '</div></div>';
+        ns.$('flowModalWrap').classList.add('active');
+    };
+
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
         var isEdit = !!p.id;
@@ -231,7 +254,7 @@ window.RAC = window.RAC || {};
                 + ns.kpi('✨', 'Revenue LAG', ns.formatCUP(state.summary.revenue), 'Plataforma', '#ff8c00')
                 + ns.kpi('🏪', 'Dueños activos', String(state.summary.ownersActive), 'Tiendas visibles', '#ff4500')
                 + ns.kpi('🤝', 'Gestores activos', String(state.summary.gestoresActive), 'Red comercial', '#ffd700')
-                + '</div><div class="grid two"><div class="card"><div class="item-title">Top productos por interes</div><div class="list" style="margin-top:12px">' + topProducts.map(function (p, i) {
+                + '</div><div class="actions" style="margin:12px 0 18px"><a class="btn ghost" href="/affiliate_network_api.php?action=export_leads">⬇️ Exportar leads CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_wallet">⬇️ Exportar wallet CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_rankings">⬇️ Exportar rankings CSV</a></div><div class="grid two"><div class="card"><div class="item-title">Top productos por interes</div><div class="list" style="margin-top:12px">' + topProducts.map(function (p, i) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">#' + (i + 1) + ' ' + ns.esc(p.name) + '</div><div class="sub">' + ns.esc(p.category) + '</div></div><div style="text-align:right"><div class="money">' + ns.esc(p.clicks) + '</div><div class="sub">clics</div></div></div></div>';
                 }).join('') + '</div></div><div class="card"><div class="item-title">Top gestores</div><div class="list" style="margin-top:12px">' + topGestores.map(function (g, i) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">#' + (i + 1) + ' ' + ns.esc(g.name) + '</div><div class="sub">⭐ ' + ns.esc(g.rating) + ' · Rep ' + ns.esc(g.reputationScore) + '</div></div><div class="money">' + ns.formatCUP(g.earnings) + '</div></div></div>';
@@ -250,7 +273,7 @@ window.RAC = window.RAC || {};
             }).join('') + '</div></div></div>';
         } else if (state.adminTab === 'transactions') {
             body = '<div class="section-title"><h3>Transacciones RAC</h3></div><div class="list">' + state.leads.map(function (lead) {
-                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · Gestor ' + ns.esc(lead.gestorId) + ' · ' + ns.esc(lead.date) + '</div></div><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="text-align:right"><div class="sub">Comision total</div><div class="money">' + ns.formatCUP(lead.commission) + '</div></div><div style="text-align:right"><div class="sub">Plataforma</div><div class="money">' + ns.formatCUP(lead.platformShare || 0) + '</div></div>' + ns.badge(lead.status) + '</div></div></div>';
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · Gestor ' + ns.esc(lead.gestorId) + ' · ' + ns.esc(lead.date) + '</div></div><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="text-align:right"><div class="sub">Comision total</div><div class="money">' + ns.formatCUP(lead.commission) + '</div></div><div style="text-align:right"><div class="sub">Plataforma</div><div class="money">' + ns.formatCUP(lead.platformShare || 0) + '</div></div>' + ns.badge(lead.status) + '</div></div><div class="actions"><button class="btn ghost" data-open-flow="' + ns.esc(lead.id) + '">🧾 Ver flujo</button></div></div>';
             }).join('') + '</div>';
         } else {
             body = '<div class="section-title"><h3>Monitor de auditoria</h3></div><div class="list">' + state.alerts.map(function (a) {

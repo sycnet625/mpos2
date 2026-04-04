@@ -572,6 +572,171 @@ function aff_save_integration_settings(PDO $pdo, array $input): array {
     return aff_integration_settings($pdo);
 }
 
+function aff_csv_escape(string $value): string {
+    $value = str_replace('"', '""', $value);
+    return '"' . $value . '"';
+}
+
+function aff_export_csv(array $headers, array $rows): string {
+    $lines = [];
+    $lines[] = implode(',', array_map('aff_csv_escape', $headers));
+    foreach ($rows as $row) {
+        $line = [];
+        foreach ($row as $value) {
+            if (is_bool($value)) {
+                $value = $value ? '1' : '0';
+            } elseif ($value === null) {
+                $value = '';
+            }
+            $line[] = aff_csv_escape((string)$value);
+        }
+        $lines[] = implode(',', $line);
+    }
+    return implode("\n", $lines) . "\n";
+}
+
+function aff_export_leads_csv(PDO $pdo): string {
+    $st = $pdo->query("SELECT l.id, l.trace_code, l.product_id, p.name AS product_name, o.owner_code, o.owner_name, l.gestor_id, g.name AS gestor_name, l.client_name, l.client_phone, l.status, l.commission, l.locked_commission, l.gestor_share, l.platform_share, l.lead_date, l.triggered_at, l.contact_opened_at, l.sold_at, l.no_sale_at
+        FROM affiliate_leads l
+        JOIN affiliate_products p ON p.id=l.product_id
+        JOIN affiliate_owners o ON o.id=l.owner_id
+        JOIN affiliate_gestores g ON g.id=l.gestor_id
+        ORDER BY l.created_at DESC, l.id DESC");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[] = [
+            $row['id'],
+            $row['trace_code'],
+            $row['product_id'],
+            $row['product_name'],
+            $row['owner_code'],
+            $row['owner_name'],
+            $row['gestor_id'],
+            $row['gestor_name'],
+            $row['client_name'],
+            $row['client_phone'],
+            $row['status'],
+            $row['commission'],
+            $row['locked_commission'],
+            $row['gestor_share'],
+            $row['platform_share'],
+            $row['lead_date'],
+            $row['triggered_at'],
+            $row['contact_opened_at'],
+            $row['sold_at'],
+            $row['no_sale_at'],
+        ];
+    }
+    return aff_export_csv(
+        ['lead_id', 'trace_code', 'product_id', 'product', 'owner_code', 'owner', 'gestor_id', 'gestor', 'client_name', 'client_phone', 'status', 'commission', 'locked_commission', 'gestor_share', 'platform_share', 'lead_date', 'triggered_at', 'contact_opened_at', 'sold_at', 'no_sale_at'],
+        $rows
+    );
+}
+
+function aff_export_wallet_csv(PDO $pdo): string {
+    $st = $pdo->query("SELECT m.id, o.owner_code, o.owner_name, m.lead_id, m.movement_type, m.amount, m.delta_available, m.delta_blocked, m.available_before, m.available_after, m.blocked_before, m.blocked_after, m.note, m.created_at
+        FROM affiliate_wallet_movements m
+        JOIN affiliate_owners o ON o.id=m.owner_id
+        ORDER BY m.id DESC");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[] = [
+            $row['id'],
+            $row['owner_code'],
+            $row['owner_name'],
+            $row['lead_id'],
+            $row['movement_type'],
+            $row['amount'],
+            $row['delta_available'],
+            $row['delta_blocked'],
+            $row['available_before'],
+            $row['available_after'],
+            $row['blocked_before'],
+            $row['blocked_after'],
+            $row['note'],
+            $row['created_at'],
+        ];
+    }
+    return aff_export_csv(
+        ['movement_id', 'owner_code', 'owner', 'lead_id', 'movement_type', 'amount', 'delta_available', 'delta_blocked', 'available_before', 'available_after', 'blocked_before', 'blocked_after', 'note', 'created_at'],
+        $rows
+    );
+}
+
+function aff_export_rankings_csv(PDO $pdo): string {
+    $rows = [];
+    foreach (aff_admin_link_rankings($pdo) as $row) {
+        $rows[] = [
+            $row['maskedRef'],
+            $row['product'],
+            $row['owner'],
+            $row['gestor'],
+            $row['clicks'],
+            $row['leads'],
+            $row['sold'],
+            $row['ctr'],
+            $row['closeRate'],
+            $row['gestorEarned'],
+            $row['platformEarned'],
+            $row['lastOpenedAt'],
+            $row['link'],
+        ];
+    }
+    return aff_export_csv(
+        ['masked_ref', 'product', 'owner', 'gestor', 'clicks', 'leads', 'sold', 'ctr', 'close_rate', 'gestor_earned', 'platform_earned', 'last_opened_at', 'link'],
+        $rows
+    );
+}
+
+function aff_lead_financial_flow(PDO $pdo, string $leadId): array {
+    $st = $pdo->prepare("SELECT l.*, p.name AS product_name, o.owner_code, o.owner_name, g.name AS gestor_name
+        FROM affiliate_leads l
+        JOIN affiliate_products p ON p.id=l.product_id
+        JOIN affiliate_owners o ON o.id=l.owner_id
+        JOIN affiliate_gestores g ON g.id=l.gestor_id
+        WHERE l.id=? LIMIT 1");
+    $st->execute([$leadId]);
+    $lead = $st->fetch();
+    if (!$lead) {
+        throw new RuntimeException('lead_not_found');
+    }
+    $mv = $pdo->prepare("SELECT movement_type, amount, delta_available, delta_blocked, note, created_at
+        FROM affiliate_wallet_movements
+        WHERE lead_id=?
+        ORDER BY id ASC");
+    $mv->execute([$leadId]);
+    $movements = [];
+    foreach ($mv->fetchAll() as $row) {
+        $movements[] = [
+            'movementType' => (string)$row['movement_type'],
+            'amount' => round((float)$row['amount'], 2),
+            'deltaAvailable' => round((float)$row['delta_available'], 2),
+            'deltaBlocked' => round((float)$row['delta_blocked'], 2),
+            'note' => (string)$row['note'],
+            'createdAt' => (string)$row['created_at'],
+        ];
+    }
+    return [
+        'id' => (string)$lead['id'],
+        'traceCode' => (string)$lead['trace_code'],
+        'status' => (string)$lead['status'],
+        'owner' => trim((string)$lead['owner_code'] . ' · ' . (string)$lead['owner_name']),
+        'gestor' => trim((string)$lead['gestor_id'] . ' · ' . (string)$lead['gestor_name']),
+        'product' => (string)$lead['product_name'],
+        'clientName' => (string)($lead['client_name'] ?? ''),
+        'clientPhone' => (string)($lead['client_phone'] ?? ''),
+        'commission' => round((float)$lead['commission'], 2),
+        'lockedCommission' => round((float)$lead['locked_commission'], 2),
+        'gestorShare' => round((float)$lead['gestor_share'], 2),
+        'platformShare' => round((float)$lead['platform_share'], 2),
+        'triggeredAt' => (string)($lead['triggered_at'] ?? ''),
+        'contactOpenedAt' => (string)($lead['contact_opened_at'] ?? ''),
+        'soldAt' => (string)($lead['sold_at'] ?? ''),
+        'noSaleAt' => (string)($lead['no_sale_at'] ?? ''),
+        'movements' => $movements,
+    ];
+}
+
 function aff_market_insights(PDO $pdo): array {
     return [
         'zones' => $pdo->query("SELECT geo_zone AS zone, COUNT(*) AS owners, ROUND(AVG(reputation_score),2) AS reputation FROM affiliate_owners WHERE geo_zone IS NOT NULL AND geo_zone<>'' GROUP BY geo_zone ORDER BY owners DESC, zone ASC LIMIT 10")->fetchAll(),
@@ -718,6 +883,18 @@ function aff_store_product_image(string $productId, string $imageData): array {
         'image_webp_url' => '/uploads/rac/products/' . $base . '.webp',
         'image_thumb_url' => '/uploads/rac/products/' . $base . '_thumb.webp',
     ];
+}
+
+function aff_generate_lead_id(PDO $pdo): string {
+    for ($i = 0; $i < 8; $i += 1) {
+        $candidate = 'L' . date('YmdHis') . strtoupper(bin2hex(random_bytes(2)));
+        $st = $pdo->prepare("SELECT COUNT(*) FROM affiliate_leads WHERE id=?");
+        $st->execute([$candidate]);
+        if ((int)$st->fetchColumn() === 0) {
+            return $candidate;
+        }
+    }
+    return 'L' . date('YmdHis') . strtoupper(bin2hex(random_bytes(4)));
 }
 
 function aff_delete_product_image(string $productId): array {
@@ -1413,7 +1590,7 @@ function aff_trigger_contact(PDO $pdo, string $productId, string $ref, array $in
         if ((float)$ownerRow['available_balance'] < $commission) {
             throw new RuntimeException('owner_insufficient_balance');
         }
-        $leadId = 'L' . date('His') . substr((string)time(), -4);
+        $leadId = aff_generate_lead_id($pdo);
         $traceCode = '#RAC-' . strtoupper(substr(hash('sha1', $leadId . $ref), 0, 6));
         $gestorShare = round($commission * 0.8, 2);
         $platformShare = round($commission - $gestorShare, 2);

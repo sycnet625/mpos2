@@ -34,6 +34,7 @@ window.RAC = window.RAC || {};
         auditEvents: [],
         integrations: { telegramConfigured: false },
         integrationSettings: { telegramBotToken: '', telegramConfigured: false, defaultGestorId: 'G001', defaultGestorName: 'Carlos Méndez', defaultGestorChatId: '' },
+        currentLeadFlow: null,
         summary: { volumeTotal: 0, revenue: 0, ownersActive: 0, gestoresActive: 0, leadsToday: 0, salesToday: 0 },
         queue: [],
         cacheKey: 'rac_affiliate_cache_v4',

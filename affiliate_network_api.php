@@ -41,6 +41,32 @@ try {
         exit;
     }
 
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_leads') {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="rac_leads.csv"');
+        echo aff_export_leads_csv($pdo);
+        exit;
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_wallet') {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="rac_wallet.csv"');
+        echo aff_export_wallet_csv($pdo);
+        exit;
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_rankings') {
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="rac_rankings.csv"');
+        echo aff_export_rankings_csv($pdo);
+        exit;
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'lead_financial_flow') {
+        echo json_encode(['status' => 'success', 'data' => aff_lead_financial_flow($pdo, (string)($_GET['id'] ?? ''))], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_create') {
         aff_require_csrf();
         echo json_encode(['status' => 'success', 'row' => aff_create_product($pdo, $input)], JSON_UNESCAPED_UNICODE);
