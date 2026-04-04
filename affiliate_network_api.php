@@ -71,6 +71,22 @@ try {
         exit;
     }
 
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_users') {
+        aff_require_roles(['admin']);
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="rac_users.csv"');
+        echo aff_export_users_csv($pdo);
+        exit;
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_access_audit') {
+        aff_require_roles(['admin']);
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="rac_access_audit.csv"');
+        echo aff_export_access_audit_csv($pdo);
+        exit;
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'lead_financial_flow') {
         aff_require_roles(['admin']);
         echo json_encode(['status' => 'success', 'data' => aff_lead_financial_flow($pdo, (string)($_GET['id'] ?? ''))], JSON_UNESCAPED_UNICODE);
@@ -186,6 +202,12 @@ try {
         aff_require_csrf();
         aff_require_roles(['admin']);
         echo json_encode(['status' => 'success', 'row' => aff_admin_reset_user_password($pdo, (int)($input['id'] ?? 0), (string)($input['password'] ?? ''))], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'user_delete') {
+        aff_require_csrf();
+        aff_require_roles(['admin']);
+        echo json_encode(['status' => 'success', 'row' => aff_delete_user($pdo, (int)($input['id'] ?? 0))], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'user_change_password') {

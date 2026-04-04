@@ -938,6 +938,49 @@ function aff_export_rankings_csv(PDO $pdo): string {
     );
 }
 
+function aff_export_users_csv(PDO $pdo): string {
+    $rows = [];
+    foreach (aff_user_admin_list($pdo) as $row) {
+        $rows[] = [
+            $row['id'],
+            $row['username'],
+            $row['displayName'],
+            $row['role'],
+            $row['ownerId'],
+            $row['ownerCode'],
+            $row['gestorId'],
+            $row['gestorName'],
+            $row['status'],
+            $row['createdAt'],
+        ];
+    }
+    return aff_export_csv(
+        ['id', 'username', 'display_name', 'role', 'owner_id', 'owner_code', 'gestor_id', 'gestor_name', 'status', 'created_at'],
+        $rows
+    );
+}
+
+function aff_export_access_audit_csv(PDO $pdo): string {
+    $rows = [];
+    foreach (aff_access_audit_events($pdo) as $row) {
+        $ctx = $row['context'] ?? [];
+        $rows[] = [
+            $row['eventType'],
+            $row['severity'],
+            $row['message'],
+            $ctx['username'] ?? '',
+            $ctx['role'] ?? '',
+            $ctx['user_id'] ?? '',
+            $ctx['masked_code'] ?? '',
+            $row['createdAt'],
+        ];
+    }
+    return aff_export_csv(
+        ['event_type', 'severity', 'message', 'username', 'role', 'user_id', 'masked_code', 'created_at'],
+        $rows
+    );
+}
+
 function aff_health_status_path(): string {
     return __DIR__ . '/../tmp/rac_health_status.json';
 }
@@ -1342,6 +1385,26 @@ function aff_recent_audit_events(PDO $pdo): array {
     return $st->fetchAll();
 }
 
+function aff_access_audit_events(PDO $pdo): array {
+    $st = $pdo->query("SELECT event_type AS eventType, severity, message, created_at AS createdAt, context_json AS contextJson
+        FROM affiliate_audit_events
+        WHERE event_type IN ('affiliate_login','affiliate_user_password_changed','affiliate_user_password_reset','affiliate_user_deleted','affiliate_user_upserted')
+        ORDER BY id DESC
+        LIMIT 120");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $ctx = json_decode((string)($row['contextJson'] ?? ''), true);
+        $rows[] = [
+            'eventType' => (string)$row['eventType'],
+            'severity' => (string)$row['severity'],
+            'message' => (string)$row['message'],
+            'createdAt' => (string)$row['createdAt'],
+            'context' => is_array($ctx) ? $ctx : [],
+        ];
+    }
+    return $rows;
+}
+
 function aff_subscription_metrics(PDO $pdo): array {
     return [
         'expectedMrr' => (float)$pdo->query("SELECT COALESCE(SUM(monthly_fee),0) FROM affiliate_owners WHERE status='active'")->fetchColumn(),
@@ -1400,6 +1463,29 @@ function aff_user_admin_list(PDO $pdo): array {
         LEFT JOIN affiliate_gestores g ON g.id=u.gestor_id
         ORDER BY FIELD(u.role,'admin','owner','gestor'), u.username ASC");
     return $st->fetchAll();
+}
+
+function aff_user_role_summary(PDO $pdo): array {
+    $st = $pdo->query("SELECT role, status, COUNT(*) AS total FROM affiliate_users GROUP BY role, status ORDER BY role, status");
+    $summary = [
+        'admin' => ['active' => 0, 'suspended' => 0, 'total' => 0],
+        'owner' => ['active' => 0, 'suspended' => 0, 'total' => 0],
+        'gestor' => ['active' => 0, 'suspended' => 0, 'total' => 0],
+    ];
+    foreach ($st->fetchAll() as $row) {
+        $role = (string)$row['role'];
+        $status = (string)$row['status'];
+        $total = (int)$row['total'];
+        if (!isset($summary[$role])) {
+            $summary[$role] = ['active' => 0, 'suspended' => 0, 'total' => 0];
+        }
+        if (!isset($summary[$role][$status])) {
+            $summary[$role][$status] = 0;
+        }
+        $summary[$role][$status] += $total;
+        $summary[$role]['total'] += $total;
+    }
+    return $summary;
 }
 
 function aff_upsert_owner(PDO $pdo, array $input): array {
@@ -1564,6 +1650,33 @@ function aff_change_password(PDO $pdo, string $currentPassword, string $newPassw
         'context' => ['user_id' => $userId, 'username' => (string)$user['username']],
     ]);
     return ['changed' => true];
+}
+
+function aff_delete_user(PDO $pdo, int $id): array {
+    if ($id <= 0) {
+        throw new InvalidArgumentException('invalid_user_id');
+    }
+    $currentUserId = aff_current_user_id();
+    if ($currentUserId && $currentUserId === $id) {
+        throw new RuntimeException('cannot_delete_current_user');
+    }
+    $st = $pdo->prepare("SELECT id, username, role, owner_id, gestor_id FROM affiliate_users WHERE id=? LIMIT 1");
+    $st->execute([$id]);
+    $user = $st->fetch();
+    if (!$user) {
+        throw new RuntimeException('user_not_found');
+    }
+    $del = $pdo->prepare("DELETE FROM affiliate_users WHERE id=?");
+    $del->execute([$id]);
+    aff_record_audit($pdo, [
+        'owner_id' => $user['owner_id'] !== null ? (int)$user['owner_id'] : null,
+        'gestor_id' => $user['gestor_id'] !== null ? (string)$user['gestor_id'] : null,
+        'event_type' => 'affiliate_user_deleted',
+        'severity' => 'warning',
+        'message' => 'Usuario RAC eliminado desde admin',
+        'context' => ['user_id' => $id, 'username' => (string)$user['username'], 'role' => (string)$user['role']],
+    ]);
+    return ['deleted' => true, 'id' => $id];
 }
 
 function aff_request_wallet_topup(PDO $pdo, array $input): array {
@@ -2145,6 +2258,8 @@ function aff_bootstrap(PDO $pdo): array {
         'ownerAdminList' => $role === 'admin' ? aff_owner_admin_list($pdo) : [],
         'gestorAdminList' => $role === 'admin' ? aff_gestor_admin_list($pdo) : [],
         'affiliateUsers' => $role === 'admin' ? aff_user_admin_list($pdo) : [],
+        'userRoleSummary' => $role === 'admin' ? aff_user_role_summary($pdo) : ['admin' => ['active' => 0, 'suspended' => 0, 'total' => 0], 'owner' => ['active' => 0, 'suspended' => 0, 'total' => 0], 'gestor' => ['active' => 0, 'suspended' => 0, 'total' => 0]],
+        'accessAudit' => $role === 'admin' ? aff_access_audit_events($pdo) : [],
         'subscriptionMetrics' => $role === 'admin' ? aff_subscription_metrics($pdo) : ['expectedMrr' => 0, 'overdueOwners' => 0, 'managedOwners' => 0, 'adsActiveOwners' => 0, 'pendingTopups' => 0],
         'sponsoredProducts' => $role === 'admin' ? aff_sponsored_products($pdo) : [],
         'advancedAudit' => $role === 'admin' ? aff_advanced_audit_signals($pdo) : ['owners' => [], 'gestores' => []],
