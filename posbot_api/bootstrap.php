@@ -28,7 +28,6 @@ function bot_verify_token_matches(array $cfg, string $provided): bool {
     if ($cfgToken !== '') $allowed[] = $cfgToken;
     $envToken = trim((string)(getenv('POS_BOT_VERIFY_TOKEN') ?: ''));
     if ($envToken !== '') $allowed[] = $envToken;
-    $allowed[] = 'palweb_bot_verify';
     foreach (array_values(array_unique($allowed)) as $token) {
         if ($token !== '' && hash_equals($token, $provided)) return true;
     }

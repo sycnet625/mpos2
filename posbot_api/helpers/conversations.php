@@ -39,7 +39,8 @@ function bot_conversation_update(PDO $pdo, string $wa, callable $mutator): array
     $st->execute([$wa]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
     $name = (string)($row['wa_name'] ?? '');
-    $cart = is_array(json_decode((string)($row['cart_json'] ?? ''), true)) ? json_decode((string)($row['cart_json'] ?? ''), true) : [];
+    $cart = json_decode((string)($row['cart_json'] ?? ''), true);
+    if (!is_array($cart)) $cart = [];
     $cart = bot_merge_cart_shape($cart, $name);
     $cart = $mutator($cart) ?: $cart;
     if ($row) {
