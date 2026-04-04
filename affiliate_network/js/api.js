@@ -1,0 +1,279 @@
+window.RAC = window.RAC || {};
+(function (ns) {
+    var state = ns.state;
+
+    ns.fileToWebpDataUrl = function (file) {
+        return new Promise(function (resolve, reject) {
+            if (!file) {
+                resolve('');
+                return;
+            }
+            var reader = new FileReader();
+            reader.onerror = function () { reject(new Error('file_read_failed')); };
+            reader.onload = function () {
+                var img = new Image();
+                img.onerror = function () { reject(new Error('image_decode_failed')); };
+                img.onload = function () {
+                    var maxSide = 1400;
+                    var w = img.width;
+                    var h = img.height;
+                    if (w > h && w > maxSide) {
+                        h = Math.round(h * (maxSide / w));
+                        w = maxSide;
+                    } else if (h >= w && h > maxSide) {
+                        w = Math.round(w * (maxSide / h));
+                        h = maxSide;
+                    }
+                    var canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    var ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, w, h);
+                    resolve(canvas.toDataURL('image/webp', 0.84));
+                };
+                img.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    };
+
+    ns.apiUrl = function (action) {
+        return '/affiliate_network_api.php?action=' + encodeURIComponent(action);
+    };
+
+    ns.api = async function (action, method, payload) {
+        var headers = {};
+        if (method === 'POST') {
+            headers['Content-Type'] = 'application/json';
+            headers['X-CSRF-Token'] = state.csrf;
+        }
+        var res = await fetch(ns.apiUrl(action), {
+            method: method || 'GET',
+            headers: headers,
+            body: method === 'POST' ? JSON.stringify(payload || {}) : undefined,
+            credentials: 'same-origin'
+        });
+        var json = await res.json();
+        if (!res.ok || json.status !== 'success') {
+            throw new Error(json.msg || 'request_failed');
+        }
+        return json;
+    };
+
+    ns.cacheData = function () {
+        localStorage.setItem(state.cacheKey, JSON.stringify({
+            owner: state.owner,
+            products: state.products,
+            leads: state.leads,
+            gestores: state.gestores,
+            alerts: state.alerts,
+            owners: state.owners,
+            traceLinks: state.traceLinks,
+            pricingSuggestions: state.pricingSuggestions,
+            marketInsights: state.marketInsights,
+            walletMovements: state.walletMovements,
+            walletReconciliation: state.walletReconciliation,
+            auditEvents: state.auditEvents,
+            summary: state.summary
+        }));
+    };
+
+    ns.loadCache = function () {
+        try {
+            var raw = localStorage.getItem(state.cacheKey);
+            if (!raw) return false;
+            Object.assign(state, JSON.parse(raw) || {});
+            return true;
+        } catch (e) {
+            return false;
+        }
+    };
+
+    ns.loadQueue = function () {
+        try {
+            state.queue = JSON.parse(localStorage.getItem(state.queueKey) || '[]') || [];
+        } catch (e) {
+            state.queue = [];
+        }
+    };
+
+    ns.saveQueue = function () {
+        localStorage.setItem(state.queueKey, JSON.stringify(state.queue));
+    };
+
+    ns.enqueueMutation = function (item) {
+        state.queue.push(item);
+        ns.saveQueue();
+        ns.updateSyncBadge();
+    };
+
+    ns.isStandalone = function () {
+        return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    };
+
+    ns.updateInstallNotice = function () {
+        var box = ns.$('pwaInstallNotice');
+        if (box) {
+            box.classList.toggle('hidden', ns.isStandalone() || !state.installPrompt);
+        }
+    };
+
+    ns.installPwa = async function () {
+        if (!state.installPrompt) return;
+        state.installPrompt.prompt();
+        try {
+            await state.installPrompt.userChoice;
+        } catch (e) {}
+        state.installPrompt = null;
+        ns.updateInstallNotice();
+    };
+
+    ns.updateNetBadge = function () {
+        var el = ns.$('netStatus');
+        if (!el) return;
+        if (navigator.onLine) {
+            el.textContent = '● En linea';
+            el.className = 'status-online';
+        } else {
+            el.textContent = '● Offline';
+            el.className = 'status-offline';
+        }
+    };
+
+    ns.updateSyncBadge = function () {
+        var el = ns.$('syncStatus');
+        if (el) {
+            el.textContent = state.queue.length ? state.queue.length + ' cambio(s) pendiente(s) de sincronizar' : 'Sin cambios pendientes';
+        }
+    };
+
+    ns.flushQueue = async function () {
+        if (!navigator.onLine || !state.queue.length) {
+            ns.updateSyncBadge();
+            return;
+        }
+        var pending = state.queue.slice();
+        state.queue = [];
+        ns.saveQueue();
+        for (var i = 0; i < pending.length; i += 1) {
+            try {
+                await ns.api(pending[i].type, 'POST', pending[i].payload);
+            } catch (e) {
+                state.queue.push(pending[i]);
+            }
+        }
+        ns.saveQueue();
+        ns.updateSyncBadge();
+        await ns.loadBootstrap();
+    };
+
+    ns.loadBootstrap = async function () {
+        try {
+            var json = await ns.api('bootstrap', 'GET');
+            Object.assign(state, json.data || {});
+            ns.cacheData();
+            ns.render();
+        } catch (e) {
+            if (ns.loadCache()) {
+                ns.render();
+                ns.toast('Mostrando datos locales en modo offline.', 'info');
+            } else {
+                ns.toast('No fue posible cargar datos del modulo.', 'error');
+            }
+        }
+    };
+
+    ns.saveNewProduct = async function () {
+        var p = state.ownerNewProduct;
+        if (!String(p.name).trim() || !String(p.price).trim() || !String(p.stock).trim() || !String(p.commission).trim()) {
+            ns.toast('Completa nombre, precio, stock y comision.', 'error');
+            return;
+        }
+        var payload = {
+            name: p.name.trim(),
+            category: p.category || 'Tecnologia',
+            price: Number(p.price),
+            stock: Number(p.stock),
+            commission: Number(p.commission),
+            description: p.description || '',
+            image: '📦',
+            brand: 'Nuevo',
+            image_data: p.imageData || ''
+        };
+        if (!navigator.onLine) {
+            state.products.unshift({
+                id: 'TMP-' + Date.now(),
+                name: payload.name,
+                category: payload.category,
+                price: payload.price,
+                stock: payload.stock,
+                commission: payload.commission,
+                commissionPct: Number(((payload.commission / Math.max(payload.price, 1)) * 100).toFixed(1)),
+                image: '📦',
+                imageUrl: p.imagePreview || '',
+                imageWebpUrl: p.imagePreview || '',
+                hasImage: !!p.imagePreview,
+                brand: 'Nuevo',
+                description: payload.description,
+                clicks: 0,
+                leads: 0,
+                sales: 0,
+                trending: 0
+            });
+            ns.enqueueMutation({ type: 'product_create', payload: payload });
+            ns.cacheData();
+            ns.closeModal('productModalWrap');
+            ns.renderOwner();
+            ns.toast('Producto guardado offline. Se sincronizara al volver internet.', 'info');
+            return;
+        }
+        try {
+            await ns.api('product_create', 'POST', payload);
+            state.ownerNewProduct = { name: '', category: 'Tecnologia', price: '', stock: '', commission: '', description: '', imageData: '', imagePreview: '' };
+            ns.closeModal('productModalWrap');
+            await ns.loadBootstrap();
+            ns.toast('Producto publicado en el catalogo.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible publicar el producto.', 'error');
+        }
+    };
+
+    ns.updateLeadStatus = async function (id, status) {
+        var payload = { id: id, status: status };
+        if (!navigator.onLine) {
+            state.leads = state.leads.map(function (lead) {
+                return lead.id === id ? Object.assign({}, lead, { status: status }) : lead;
+            });
+            ns.enqueueMutation({ type: 'lead_update_status', payload: payload });
+            ns.cacheData();
+            ns.render();
+            ns.toast('Estado del lead guardado offline.', 'info');
+            return;
+        }
+        try {
+            await ns.api('lead_update_status', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.toast('Lead actualizado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible actualizar el lead.', 'error');
+        }
+    };
+
+    ns.generateLink = async function (productId) {
+        var product = state.products.find(function (item) { return item.id === productId; });
+        if (!product) return;
+        if (!navigator.onLine) {
+            ns.toast('La creacion segura del enlace requiere conexion.', 'error');
+            return;
+        }
+        try {
+            var json = await ns.api('trace_link_create', 'POST', { product_id: productId, gestor_id: 'G001' });
+            var row = json.row || {};
+            ns.$('linkModalWrap').innerHTML = '<div class="modal active"><header><h3>🔗 Enlace del Gestor generado</h3><button class="close" data-close-modal="linkModalWrap">×</button></header><div style="text-align:center;margin-bottom:18px"><div style="font-size:50px">' + ns.esc(product.image) + '</div><div class="item-title" style="margin-top:8px">' + ns.esc(product.name) + '</div></div><div class="card" style="background:rgba(255,140,0,.08);border-color:rgba(255,140,0,.25);margin-bottom:14px"><div class="sub">Tu enlace unico de traza</div><div class="code" style="margin-top:8px">' + ns.esc(row.link || '') + '</div><div class="sub" style="margin-top:8px">Ref ' + ns.esc(row.masked_ref || '') + '</div></div><div class="two-col" style="margin-bottom:14px"><div class="card" style="text-align:center"><div class="sub">Tu comision (80%)</div><div class="money" style="font-size:20px">' + ns.formatCUP(Number(product.commission || 0) * 0.8) + '</div></div><div class="card" style="text-align:center"><div class="sub">Precio al cliente</div><div style="font-size:20px;font-weight:900">' + ns.formatCUP(product.price) + '</div></div></div><div class="footer-actions"><button class="btn primary" style="flex:1" data-copy-link="' + ns.esc(row.link || '') + '">📋 Copiar enlace</button><button class="btn ghost" style="flex:1;color:#25d366;border-color:rgba(37,211,102,.25)" data-copy-link="' + ns.esc(row.link || '') + '">💬 WhatsApp</button></div></div>';
+            ns.$('linkModalWrap').classList.add('active');
+            await ns.loadBootstrap();
+        } catch (e) {
+            ns.toast(e.message || 'No fue posible generar el enlace.', 'error');
+        }
+    };
+})(window.RAC);

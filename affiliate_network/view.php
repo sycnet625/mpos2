@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ff8c00">
+  <meta name="rac-csrf" content="<?= htmlspecialchars($affiliateView['csrf'], ENT_QUOTES, 'UTF-8') ?>">
   <title><?= htmlspecialchars($affiliateView['title'], ENT_QUOTES, 'UTF-8') ?></title>
   <link rel="manifest" href="<?= htmlspecialchars($affiliateView['manifest'], ENT_QUOTES, 'UTF-8') ?>">
   <link rel="icon" href="<?= htmlspecialchars($affiliateView['icon'], ENT_QUOTES, 'UTF-8') ?>" type="image/svg+xml">
@@ -38,6 +39,8 @@
   });
 })();
 </script>
-<script src="<?= htmlspecialchars($affiliateView['script'], ENT_QUOTES, 'UTF-8') ?>" defer></script>
+<?php foreach (($affiliateView['scripts'] ?? []) as $script): ?>
+<script src="<?= htmlspecialchars($script, ENT_QUOTES, 'UTF-8') ?>" defer></script>
+<?php endforeach; ?>
 </body>
 </html>

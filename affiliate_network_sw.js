@@ -1,10 +1,13 @@
-const CACHE_NAME = 'rac-affiliate-v3';
+const CACHE_NAME = 'rac-affiliate-v4';
 const APP_SHELL = [
   '/affiliate_network.php',
   '/affiliate_network_help.php',
   '/affiliate_network_manifest.json',
   '/affiliate_network_icon.svg',
   '/affiliate_network/styles.css',
+  '/affiliate_network/js/core.js',
+  '/affiliate_network/js/api.js',
+  '/affiliate_network/js/render.js',
   '/affiliate_network/app.js',
   '/assets/css/all.min.css',
   '/assets/webfonts/fa-solid-900.woff2',
