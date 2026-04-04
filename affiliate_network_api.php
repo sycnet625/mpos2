@@ -104,6 +104,26 @@ try {
         echo json_encode(['status' => 'success', 'row' => aff_save_integration_settings($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'owner_upsert') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_upsert_owner($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'gestor_upsert') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_upsert_gestor($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'wallet_topup_request') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_request_wallet_topup($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'wallet_topup_review') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_review_wallet_topup($pdo, (int)($input['id'] ?? 0), (string)($input['decision'] ?? ''), (string)($input['note'] ?? ''))], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'refer_bootstrap') {
         $productId = (string)($_GET['product'] ?? '');

@@ -73,6 +73,12 @@ window.RAC = window.RAC || {};
             linkRankings: state.linkRankings,
             pricingSuggestions: state.pricingSuggestions,
             marketInsights: state.marketInsights,
+            walletTopups: state.walletTopups,
+            ownerAdminList: state.ownerAdminList,
+            gestorAdminList: state.gestorAdminList,
+            subscriptionMetrics: state.subscriptionMetrics,
+            sponsoredProducts: state.sponsoredProducts,
+            advancedAudit: state.advancedAudit,
             walletMovements: state.walletMovements,
             walletReconciliation: state.walletReconciliation,
             auditEvents: state.auditEvents,
@@ -316,6 +322,45 @@ window.RAC = window.RAC || {};
             ns.toast('Integraciones actualizadas.', 'success');
         } catch (e) {
             ns.toast('No fue posible guardar las integraciones.', 'error');
+        }
+    };
+    ns.saveOwner = async function (payload) {
+        try {
+            await ns.api('owner_upsert', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('entityModalWrap');
+            ns.toast('Dueño guardado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible guardar el dueño.', 'error');
+        }
+    };
+    ns.saveGestor = async function (payload) {
+        try {
+            await ns.api('gestor_upsert', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('entityModalWrap');
+            ns.toast('Gestor guardado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible guardar el gestor.', 'error');
+        }
+    };
+    ns.requestWalletTopup = async function (payload) {
+        try {
+            await ns.api('wallet_topup_request', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('walletModalWrap');
+            ns.toast('Solicitud de recarga enviada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible registrar la recarga.', 'error');
+        }
+    };
+    ns.reviewWalletTopup = async function (id, decision) {
+        try {
+            await ns.api('wallet_topup_review', 'POST', { id: id, decision: decision });
+            await ns.loadBootstrap();
+            ns.toast(decision === 'approved' ? 'Recarga aprobada.' : 'Recarga rechazada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible revisar la recarga.', 'error');
         }
     };
 

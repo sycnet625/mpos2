@@ -89,6 +89,79 @@
         var openFlowBtn = event.target.closest('[data-open-flow]');
         if (openFlowBtn) return ns.loadLeadFinancialFlow(openFlowBtn.getAttribute('data-open-flow'));
 
+        var newOwnerBtn = event.target.closest('[data-open-owner-new]');
+        if (newOwnerBtn) {
+            state.ownerDraft = { id: 0, owner_code: '', owner_name: '', phone: '', whatsapp_number: '', geo_zone: '', subscription_plan: 'basic', managed_service: 0, monthly_fee: '', subscription_due_at: '', advertising_budget: '', ads_active: 0, status: 'active' };
+            return ns.openOwnerModal();
+        }
+
+        var editOwnerBtn = event.target.closest('[data-edit-owner]');
+        if (editOwnerBtn) {
+            var owner = (state.ownerAdminList || []).find(function (row) {
+                return String(row.id) === String(editOwnerBtn.getAttribute('data-edit-owner'));
+            });
+            if (!owner) return ns.toast('No se pudo cargar el dueño.', 'error');
+            state.ownerDraft = {
+                id: owner.id || 0,
+                owner_code: owner.owner_code || '',
+                owner_name: owner.owner_name || '',
+                phone: owner.phone || '',
+                whatsapp_number: owner.whatsapp_number || '',
+                geo_zone: owner.geo_zone || '',
+                subscription_plan: owner.subscription_plan || 'basic',
+                managed_service: Number(owner.managed_service || 0),
+                monthly_fee: owner.monthly_fee || '',
+                subscription_due_at: owner.subscription_due_at || '',
+                advertising_budget: owner.advertising_budget || '',
+                ads_active: Number(owner.ads_active || 0),
+                status: owner.status || 'active'
+            };
+            return ns.openOwnerModal();
+        }
+
+        var saveOwnerBtn = event.target.closest('[data-save-owner]');
+        if (saveOwnerBtn) return ns.saveOwner(state.ownerDraft);
+
+        var newGestorBtn = event.target.closest('[data-open-gestor-new]');
+        if (newGestorBtn) {
+            state.gestorDraft = { id: '', name: '', phone: '', telegram_chat_id: '', masked_code: '', status: 'active' };
+            return ns.openGestorModal();
+        }
+
+        var editGestorBtn = event.target.closest('[data-edit-gestor]');
+        if (editGestorBtn) {
+            var gestor = (state.gestorAdminList || []).find(function (row) {
+                return String(row.id) === String(editGestorBtn.getAttribute('data-edit-gestor'));
+            });
+            if (!gestor) return ns.toast('No se pudo cargar el gestor.', 'error');
+            state.gestorDraft = {
+                id: gestor.id || '',
+                name: gestor.name || '',
+                phone: gestor.phone || '',
+                telegram_chat_id: gestor.telegram_chat_id || '',
+                masked_code: gestor.masked_code || '',
+                status: gestor.status || 'active'
+            };
+            return ns.openGestorModal();
+        }
+
+        var saveGestorBtn = event.target.closest('[data-save-gestor]');
+        if (saveGestorBtn) return ns.saveGestor(state.gestorDraft);
+
+        var openTopupBtn = event.target.closest('[data-open-topup]');
+        if (openTopupBtn) {
+            state.topupDraft = { amount: '', payment_method: 'Transfermóvil', reference_code: '', note: '' };
+            return ns.openTopupModal();
+        }
+
+        var saveTopupBtn = event.target.closest('[data-save-topup]');
+        if (saveTopupBtn) return ns.requestWalletTopup(state.topupDraft);
+
+        var topupReviewBtn = event.target.closest('[data-topup-review]');
+        if (topupReviewBtn) {
+            return ns.reviewWalletTopup(topupReviewBtn.getAttribute('data-topup-review'), topupReviewBtn.getAttribute('data-decision'));
+        }
+
         var removeImageBtn = event.target.closest('[data-remove-product-image]');
         if (removeImageBtn) {
             state.ownerNewProduct.removeImage = true;
@@ -127,6 +200,27 @@
         var integrationField = event.target.closest('[data-integration-field]');
         if (integrationField) {
             state.integrationSettings[integrationField.getAttribute('data-integration-field')] = integrationField.value;
+            return;
+        }
+        var ownerField = event.target.closest('[data-owner-field]');
+        if (ownerField) {
+            state.ownerDraft[ownerField.getAttribute('data-owner-field')] = ownerField.type === 'checkbox'
+                ? (ownerField.checked ? 1 : 0)
+                : ownerField.value;
+            return;
+        }
+        var gestorField = event.target.closest('[data-gestor-field]');
+        if (gestorField) {
+            state.gestorDraft[gestorField.getAttribute('data-gestor-field')] = gestorField.type === 'checkbox'
+                ? (gestorField.checked ? 1 : 0)
+                : gestorField.value;
+            return;
+        }
+        var topupField = event.target.closest('[data-topup-field]');
+        if (topupField) {
+            state.topupDraft[topupField.getAttribute('data-topup-field')] = topupField.type === 'checkbox'
+                ? (topupField.checked ? 1 : 0)
+                : topupField.value;
             return;
         }
         if (event.target.id === 'gestorSearch') {

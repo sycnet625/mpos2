@@ -102,6 +102,10 @@ function aff_ensure_tables(PDO $pdo): void {
     aff_add_column_if_missing($pdo, 'affiliate_owners', 'managed_service', "TINYINT(1) NOT NULL DEFAULT 0 AFTER subscription_plan");
     aff_add_column_if_missing($pdo, 'affiliate_owners', 'reputation_score', "DECIMAL(5,2) NOT NULL DEFAULT 80 AFTER managed_service");
     aff_add_column_if_missing($pdo, 'affiliate_owners', 'fraud_risk', "VARCHAR(20) NOT NULL DEFAULT 'BAJO' AFTER reputation_score");
+    aff_add_column_if_missing($pdo, 'affiliate_owners', 'monthly_fee', "DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER fraud_risk");
+    aff_add_column_if_missing($pdo, 'affiliate_owners', 'subscription_due_at', "DATETIME NULL AFTER monthly_fee");
+    aff_add_column_if_missing($pdo, 'affiliate_owners', 'advertising_budget', "DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER subscription_due_at");
+    aff_add_column_if_missing($pdo, 'affiliate_owners', 'ads_active', "TINYINT(1) NOT NULL DEFAULT 0 AFTER advertising_budget");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_gestores (
         id VARCHAR(20) PRIMARY KEY,
@@ -205,6 +209,19 @@ function aff_ensure_tables(PDO $pdo): void {
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT fk_aff_wallet_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_wallet_topups (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        payment_method VARCHAR(40) NOT NULL,
+        reference_code VARCHAR(120) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        note VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        reviewed_at DATETIME NULL,
+        reviewed_by VARCHAR(80) NULL,
+        CONSTRAINT fk_aff_topup_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_audit_events (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -244,14 +261,14 @@ function aff_ensure_tables(PDO $pdo): void {
 
 function aff_seed_demo_data(PDO $pdo): void {
     $owners = [
-        ['D-0042', 'ElectroHavana', '+53 5555-0042', '5355550042', 'La Habana', 'basic', 0, 91, 'BAJO', 47500, 12750, 60250, 'active'],
-        ['D-0078', 'Electrónica Sur', '+53 5555-0078', '5355550078', 'Santiago', 'managed', 1, 62, 'ALTO', 25000, 18000, 43000, 'active'],
-        ['D-0031', 'Tienda Miramar', '+53 5555-0031', '5355550031', 'La Habana', 'basic', 0, 40, 'ALTO', 0, 0, 0, 'suspended'],
-        ['D-0055', 'La Habana Electronics', '+53 5555-0055', '5355550055', 'La Habana', 'pro', 0, 74, 'MEDIO', 31000, 9000, 40000, 'active'],
+        ['D-0042', 'ElectroHavana', '+53 5555-0042', '5355550042', 'La Habana', 'basic', 0, 91, 'BAJO', 47500, 12750, 60250, 'active', 1500, date('Y-m-d H:i:s', strtotime('+10 days')), 2000, 1],
+        ['D-0078', 'Electrónica Sur', '+53 5555-0078', '5355550078', 'Santiago', 'managed', 1, 62, 'ALTO', 25000, 18000, 43000, 'active', 4500, date('Y-m-d H:i:s', strtotime('+3 days')), 5000, 1],
+        ['D-0031', 'Tienda Miramar', '+53 5555-0031', '5355550031', 'La Habana', 'basic', 0, 40, 'ALTO', 0, 0, 0, 'suspended', 1500, date('Y-m-d H:i:s', strtotime('-5 days')), 0, 0],
+        ['D-0055', 'La Habana Electronics', '+53 5555-0055', '5355550055', 'La Habana', 'pro', 0, 74, 'MEDIO', 31000, 9000, 40000, 'active', 3000, date('Y-m-d H:i:s', strtotime('+20 days')), 3500, 1],
     ];
-    $stOwner = $pdo->prepare("INSERT INTO affiliate_owners (owner_code, owner_name, phone, whatsapp_number, geo_zone, subscription_plan, managed_service, reputation_score, fraud_risk, available_balance, blocked_balance, total_balance, status)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE owner_name=VALUES(owner_name), phone=VALUES(phone), whatsapp_number=VALUES(whatsapp_number), geo_zone=VALUES(geo_zone), subscription_plan=VALUES(subscription_plan), managed_service=VALUES(managed_service), reputation_score=VALUES(reputation_score), fraud_risk=VALUES(fraud_risk), available_balance=VALUES(available_balance), blocked_balance=VALUES(blocked_balance), total_balance=VALUES(total_balance), status=VALUES(status)");
+    $stOwner = $pdo->prepare("INSERT INTO affiliate_owners (owner_code, owner_name, phone, whatsapp_number, geo_zone, subscription_plan, managed_service, reputation_score, fraud_risk, available_balance, blocked_balance, total_balance, status, monthly_fee, subscription_due_at, advertising_budget, ads_active)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE owner_name=VALUES(owner_name), phone=VALUES(phone), whatsapp_number=VALUES(whatsapp_number), geo_zone=VALUES(geo_zone), subscription_plan=VALUES(subscription_plan), managed_service=VALUES(managed_service), reputation_score=VALUES(reputation_score), fraud_risk=VALUES(fraud_risk), available_balance=VALUES(available_balance), blocked_balance=VALUES(blocked_balance), total_balance=VALUES(total_balance), status=VALUES(status), monthly_fee=VALUES(monthly_fee), subscription_due_at=VALUES(subscription_due_at), advertising_budget=VALUES(advertising_budget), ads_active=VALUES(ads_active)");
     foreach ($owners as $row) {
         $stOwner->execute($row);
     }
@@ -326,6 +343,12 @@ function aff_seed_demo_data(PDO $pdo): void {
                 $st->execute([$ownerId, 'seed_blocked', $blocked, 0, $blocked, $available, $available, 0, $blocked, 'Garantía inicial demo', json_encode(['seed' => true])]);
             }
         }
+    }
+    if ((int)$pdo->query("SELECT COUNT(*) FROM affiliate_wallet_topups")->fetchColumn() === 0) {
+        $stTopup = $pdo->prepare("INSERT INTO affiliate_wallet_topups (owner_id, amount, payment_method, reference_code, status, note, created_at, reviewed_at, reviewed_by) VALUES (?,?,?,?,?,?,?,?,?)");
+        $stTopup->execute([$ownerMap['D-0042'], 5000, 'Transfermóvil', 'TM-1001', 'approved', 'Recarga demo aprobada', date('Y-m-d H:i:s', strtotime('-2 days')), date('Y-m-d H:i:s', strtotime('-2 days +10 minutes')), 'admin']);
+        $stTopup->execute([$ownerMap['D-0078'], 3500, 'EnZona', 'EZ-2001', 'pending', 'Pendiente de conciliación', date('Y-m-d H:i:s', strtotime('-3 hours')), null, null]);
+        $stTopup->execute([$ownerMap['D-0055'], 2200, 'Transfermóvil', 'TM-1002', 'rejected', 'Referencia inválida', date('Y-m-d H:i:s', strtotime('-1 day')), date('Y-m-d H:i:s', strtotime('-1 day +30 minutes')), 'admin']);
     }
 
     aff_refresh_audit_alerts($pdo);
@@ -811,6 +834,199 @@ function aff_market_insights(PDO $pdo): array {
         'categories' => $pdo->query("SELECT category, SUM(clicks) AS clicks, SUM(leads) AS leads, SUM(sales) AS sales FROM affiliate_products WHERE active=1 GROUP BY category ORDER BY clicks DESC, category ASC LIMIT 8")->fetchAll(),
         'plans' => $pdo->query("SELECT subscription_plan AS plan, COUNT(*) AS total FROM affiliate_owners GROUP BY subscription_plan ORDER BY total DESC, plan ASC")->fetchAll(),
     ];
+}
+
+function aff_wallet_topups(PDO $pdo): array {
+    $st = $pdo->query("SELECT t.id, o.owner_code AS ownerCode, o.owner_name AS ownerName, t.amount, t.payment_method AS paymentMethod, t.reference_code AS referenceCode, t.status, t.note, t.created_at AS createdAt, t.reviewed_at AS reviewedAt, t.reviewed_by AS reviewedBy
+        FROM affiliate_wallet_topups t
+        JOIN affiliate_owners o ON o.id=t.owner_id
+        ORDER BY FIELD(t.status,'pending','approved','rejected'), t.id DESC
+        LIMIT 100");
+    return $st->fetchAll();
+}
+
+function aff_subscription_metrics(PDO $pdo): array {
+    return [
+        'expectedMrr' => (float)$pdo->query("SELECT COALESCE(SUM(monthly_fee),0) FROM affiliate_owners WHERE status='active'")->fetchColumn(),
+        'overdueOwners' => (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE subscription_due_at IS NOT NULL AND subscription_due_at < NOW() AND status='active'")->fetchColumn(),
+        'managedOwners' => (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE managed_service=1 AND status='active'")->fetchColumn(),
+        'adsActiveOwners' => (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE ads_active=1 AND status='active'")->fetchColumn(),
+        'pendingTopups' => (int)$pdo->query("SELECT COUNT(*) FROM affiliate_wallet_topups WHERE status='pending'")->fetchColumn(),
+    ];
+}
+
+function aff_sponsored_products(PDO $pdo): array {
+    $st = $pdo->query("SELECT p.id, p.name, p.sponsor_rank AS sponsorRank, p.clicks, p.leads, p.sales, o.owner_code AS ownerCode, o.owner_name AS ownerName
+        FROM affiliate_products p
+        JOIN affiliate_owners o ON o.id=p.owner_id
+        WHERE p.active=1 AND (p.is_featured=1 OR p.sponsor_rank > 0 OR o.ads_active=1)
+        ORDER BY p.sponsor_rank DESC, p.clicks DESC, p.sales DESC
+        LIMIT 12");
+    return $st->fetchAll();
+}
+
+function aff_advanced_audit_signals(PDO $pdo): array {
+    return [
+        'owners' => $pdo->query("SELECT o.owner_code AS ownerCode, o.owner_name AS ownerName, o.fraud_risk AS fraudRisk, ROUND(COALESCE(SUM(CASE WHEN l.status='sold' THEN 1 ELSE 0 END) / NULLIF(COUNT(l.id),0),0) * 100,2) AS conversionRate, COUNT(l.id) AS leads, SUM(CASE WHEN l.status='no_sale' THEN 1 ELSE 0 END) AS noSaleCount
+            FROM affiliate_owners o
+            LEFT JOIN affiliate_leads l ON l.owner_id=o.id
+            GROUP BY o.id, o.owner_code, o.owner_name, o.fraud_risk
+            HAVING leads >= 4
+            ORDER BY FIELD(o.fraud_risk,'ALTO','MEDIO','BAJO'), noSaleCount DESC, leads DESC
+            LIMIT 12")->fetchAll(),
+        'gestores' => $pdo->query("SELECT g.id, g.name, g.reputation_score AS reputationScore, COUNT(l.id) AS leads, SUM(CASE WHEN l.status='sold' THEN 1 ELSE 0 END) AS soldCount, SUM(CASE WHEN l.status='no_sale' THEN 1 ELSE 0 END) AS noSaleCount
+            FROM affiliate_gestores g
+            LEFT JOIN affiliate_leads l ON l.gestor_id=g.id
+            GROUP BY g.id, g.name, g.reputation_score
+            HAVING leads >= 3
+            ORDER BY noSaleCount DESC, leads DESC, g.reputation_score ASC
+            LIMIT 12")->fetchAll(),
+    ];
+}
+
+function aff_owner_admin_list(PDO $pdo): array {
+    $st = $pdo->query("SELECT id, owner_code AS ownerCode, owner_name AS ownerName, phone, whatsapp_number AS whatsappNumber, geo_zone AS geoZone, subscription_plan AS subscriptionPlan, managed_service AS managedService, monthly_fee AS monthlyFee, subscription_due_at AS subscriptionDueAt, advertising_budget AS advertisingBudget, ads_active AS adsActive, available_balance AS availableBalance, blocked_balance AS blockedBalance, total_balance AS totalBalance, status, reputation_score AS reputationScore, fraud_risk AS fraudRisk
+        FROM affiliate_owners ORDER BY owner_code ASC");
+    return $st->fetchAll();
+}
+
+function aff_gestor_admin_list(PDO $pdo): array {
+    $st = $pdo->query("SELECT id, name, phone, telegram_chat_id AS telegramChatId, masked_code AS maskedCode, earnings, links, conversions, rating, reputation_score AS reputationScore, status
+        FROM affiliate_gestores ORDER BY id ASC");
+    return $st->fetchAll();
+}
+
+function aff_upsert_owner(PDO $pdo, array $input): array {
+    $id = (int)($input['id'] ?? 0);
+    $ownerCode = substr(trim((string)($input['owner_code'] ?? '')), 0, 20);
+    $ownerName = substr(trim((string)($input['owner_name'] ?? '')), 0, 120);
+    if ($ownerCode === '' || $ownerName === '') {
+        throw new InvalidArgumentException('owner_code_and_name_required');
+    }
+    $phone = substr(trim((string)($input['phone'] ?? '')), 0, 40);
+    $whatsapp = substr(trim((string)($input['whatsapp_number'] ?? '')), 0, 40);
+    $zone = substr(trim((string)($input['geo_zone'] ?? '')), 0, 120);
+    $plan = substr(trim((string)($input['subscription_plan'] ?? 'basic')), 0, 40) ?: 'basic';
+    $managed = !empty($input['managed_service']) ? 1 : 0;
+    $monthlyFee = round((float)($input['monthly_fee'] ?? 0), 2);
+    $dueAt = trim((string)($input['subscription_due_at'] ?? ''));
+    $adsBudget = round((float)($input['advertising_budget'] ?? 0), 2);
+    $adsActive = !empty($input['ads_active']) ? 1 : 0;
+    $status = in_array((string)($input['status'] ?? 'active'), ['active','suspended'], true) ? (string)$input['status'] : 'active';
+    if ($id > 0) {
+        $st = $pdo->prepare("UPDATE affiliate_owners SET owner_code=?, owner_name=?, phone=?, whatsapp_number=?, geo_zone=?, subscription_plan=?, managed_service=?, monthly_fee=?, subscription_due_at=?, advertising_budget=?, ads_active=?, status=? WHERE id=?");
+        $st->execute([$ownerCode,$ownerName,$phone,$whatsapp,$zone,$plan,$managed,$monthlyFee,$dueAt !== '' ? $dueAt : null,$adsBudget,$adsActive,$status,$id]);
+    } else {
+        $st = $pdo->prepare("INSERT INTO affiliate_owners (owner_code, owner_name, phone, whatsapp_number, geo_zone, subscription_plan, managed_service, reputation_score, fraud_risk, available_balance, blocked_balance, total_balance, status, monthly_fee, subscription_due_at, advertising_budget, ads_active, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        $st->execute([$ownerCode,$ownerName,$phone,$whatsapp,$zone,$plan,$managed,80,'BAJO',0,0,0,$status,$monthlyFee,$dueAt !== '' ? $dueAt : null,$adsBudget,$adsActive,aff_now()]);
+        $id = (int)$pdo->lastInsertId();
+    }
+    aff_record_audit($pdo, [
+        'owner_id' => $id,
+        'event_type' => 'owner_upserted',
+        'severity' => 'info',
+        'message' => 'Dueño RAC guardado desde panel admin',
+        'context' => ['owner_code' => $ownerCode, 'plan' => $plan, 'ads_active' => $adsActive],
+    ]);
+    foreach (aff_owner_admin_list($pdo) as $row) {
+        if ((int)$row['id'] === $id) return $row;
+    }
+    throw new RuntimeException('owner_not_found');
+}
+
+function aff_upsert_gestor(PDO $pdo, array $input): array {
+    $id = substr(trim((string)($input['id'] ?? '')), 0, 20);
+    $name = substr(trim((string)($input['name'] ?? '')), 0, 120);
+    if ($id === '' || $name === '') {
+        throw new InvalidArgumentException('gestor_id_and_name_required');
+    }
+    $phone = substr(trim((string)($input['phone'] ?? '')), 0, 40);
+    $chatId = substr(trim((string)($input['telegram_chat_id'] ?? '')), 0, 80);
+    $masked = substr(trim((string)($input['masked_code'] ?? ('GEN-' . strtoupper($id)))), 0, 60);
+    $status = in_array((string)($input['status'] ?? 'active'), ['active','suspended'], true) ? (string)$input['status'] : 'active';
+    $st = $pdo->prepare("INSERT INTO affiliate_gestores (id, name, phone, telegram_chat_id, masked_code, reputation_score, earnings, links, conversions, rating, status, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE name=VALUES(name), phone=VALUES(phone), telegram_chat_id=VALUES(telegram_chat_id), masked_code=VALUES(masked_code), status=VALUES(status)");
+    $st->execute([$id,$name,$phone,$chatId,$masked,80,0,0,0,5.0,$status,aff_now()]);
+    aff_record_audit($pdo, [
+        'gestor_id' => $id,
+        'event_type' => 'gestor_upserted',
+        'severity' => 'info',
+        'message' => 'Gestor RAC guardado desde panel admin',
+        'context' => ['masked_code' => $masked, 'status' => $status],
+    ]);
+    foreach (aff_gestor_admin_list($pdo) as $row) {
+        if ((string)$row['id'] === $id) return $row;
+    }
+    throw new RuntimeException('gestor_not_found');
+}
+
+function aff_request_wallet_topup(PDO $pdo, array $input): array {
+    $owner = aff_owner($pdo);
+    $amount = round((float)($input['amount'] ?? 0), 2);
+    $method = substr(trim((string)($input['payment_method'] ?? 'Transfermóvil')), 0, 40);
+    $reference = substr(trim((string)($input['reference_code'] ?? '')), 0, 120);
+    $note = substr(trim((string)($input['note'] ?? '')), 0, 255);
+    if ($amount <= 0 || $reference === '') {
+        throw new InvalidArgumentException('topup_amount_and_reference_required');
+    }
+    $st = $pdo->prepare("INSERT INTO affiliate_wallet_topups (owner_id, amount, payment_method, reference_code, status, note, created_at) VALUES (?,?,?,?,?,?,?)");
+    $st->execute([(int)$owner['id'], $amount, $method, $reference, 'pending', $note, aff_now()]);
+    $id = (int)$pdo->lastInsertId();
+    aff_record_audit($pdo, [
+        'owner_id' => (int)$owner['id'],
+        'event_type' => 'wallet_topup_requested',
+        'severity' => 'info',
+        'message' => 'Dueño solicitó recarga de wallet',
+        'context' => ['topup_id' => $id, 'amount' => $amount, 'method' => $method],
+    ]);
+    foreach (aff_wallet_topups($pdo) as $row) {
+        if ((int)$row['id'] === $id) return $row;
+    }
+    throw new RuntimeException('topup_not_found');
+}
+
+function aff_review_wallet_topup(PDO $pdo, int $id, string $decision, string $note = ''): array {
+    $decision = $decision === 'approved' ? 'approved' : 'rejected';
+    $pdo->beginTransaction();
+    try {
+        $st = $pdo->prepare("SELECT * FROM affiliate_wallet_topups WHERE id=? FOR UPDATE");
+        $st->execute([$id]);
+        $topup = $st->fetch();
+        if (!$topup) {
+            throw new RuntimeException('topup_not_found');
+        }
+        if ((string)$topup['status'] !== 'pending') {
+            throw new RuntimeException('topup_already_reviewed');
+        }
+        $ownerSt = $pdo->prepare("SELECT * FROM affiliate_owners WHERE id=? FOR UPDATE");
+        $ownerSt->execute([(int)$topup['owner_id']]);
+        $owner = $ownerSt->fetch();
+        if (!$owner) {
+            throw new RuntimeException('owner_not_found');
+        }
+        if ($decision === 'approved') {
+            aff_apply_wallet_move($pdo, $owner, 'manual_topup', (float)$topup['amount'], (float)$topup['amount'], 0, null, 'Recarga aprobada por administración', ['topup_id' => $id]);
+        }
+        $upd = $pdo->prepare("UPDATE affiliate_wallet_topups SET status=?, note=?, reviewed_at=?, reviewed_by=? WHERE id=?");
+        $upd->execute([$decision, $note !== '' ? $note : (string)$topup['note'], aff_now(), 'admin', $id]);
+        aff_record_audit($pdo, [
+            'owner_id' => (int)$topup['owner_id'],
+            'event_type' => 'wallet_topup_reviewed',
+            'severity' => $decision === 'approved' ? 'info' : 'warning',
+            'message' => 'Recarga de wallet ' . ($decision === 'approved' ? 'aprobada' : 'rechazada'),
+            'context' => ['topup_id' => $id, 'amount' => (float)$topup['amount']],
+        ]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+    foreach (aff_wallet_topups($pdo) as $row) {
+        if ((int)$row['id'] === $id) return $row;
+    }
+    throw new RuntimeException('topup_not_found');
 }
 
 function aff_owner_product_stats(PDO $pdo, int $ownerId): array {
@@ -1309,6 +1525,12 @@ function aff_bootstrap(PDO $pdo): array {
         'linkRankings' => $linkRankings,
         'pricingSuggestions' => $pricing,
         'marketInsights' => $insights,
+        'walletTopups' => aff_wallet_topups($pdo),
+        'ownerAdminList' => aff_owner_admin_list($pdo),
+        'gestorAdminList' => aff_gestor_admin_list($pdo),
+        'subscriptionMetrics' => aff_subscription_metrics($pdo),
+        'sponsoredProducts' => aff_sponsored_products($pdo),
+        'advancedAudit' => aff_advanced_audit_signals($pdo),
         'walletReconciliation' => $walletCheck,
         'summary' => [
             'volumeTotal' => $volume,

@@ -23,6 +23,8 @@
 <div id="linkModalWrap" class="modal-backdrop"></div>
 <div id="integrationModalWrap" class="modal-backdrop"></div>
 <div id="flowModalWrap" class="modal-backdrop"></div>
+<div id="entityModalWrap" class="modal-backdrop"></div>
+<div id="walletModalWrap" class="modal-backdrop"></div>
 <script>
 (function(){
   const wishes=['🏠','🚗','🧀','🧺','🛋️','🧊','🍞','🥛','🍎','🍗','🪑','📺','🛏️','🚲','🧴','🍳','🥖','🫒','🍅','🧽','🪣','🚪','🪟','🧸','🛒','🧈','🥫','🫓','🍚','🧼'];
