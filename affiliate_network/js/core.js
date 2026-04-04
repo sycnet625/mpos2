@@ -8,7 +8,7 @@ window.RAC = window.RAC || {};
         gestorFilter: { category: 'Todos', sort: 'trending', q: '', page: 1 },
         ownerLeadPage: 1,
         gestorLinksPage: 1,
-        ownerNewProduct: { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false },
+        ownerNewProduct: { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', isFeatured: false, sponsorRank: 0, description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false },
         owner: {
             code: 'D-0042',
             name: 'ElectroHavana',
@@ -25,6 +25,8 @@ window.RAC = window.RAC || {};
         alerts: [],
         owners: [],
         traceLinks: [],
+        ownerProductStats: [],
+        linkRankings: [],
         pricingSuggestions: [],
         marketInsights: { zones: [], categories: [], plans: [] },
         walletMovements: [],

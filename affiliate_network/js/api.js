@@ -69,6 +69,8 @@ window.RAC = window.RAC || {};
             alerts: state.alerts,
             owners: state.owners,
             traceLinks: state.traceLinks,
+            ownerProductStats: state.ownerProductStats,
+            linkRankings: state.linkRankings,
             pricingSuggestions: state.pricingSuggestions,
             marketInsights: state.marketInsights,
             walletMovements: state.walletMovements,
@@ -198,6 +200,8 @@ window.RAC = window.RAC || {};
             commission: Number(p.commission),
             brand: (p.brand || 'Nuevo').trim(),
             coupon_label: (p.couponLabel || '').trim(),
+            is_featured: Number(p.isFeatured || 0) > 0 ? 1 : 0,
+            sponsor_rank: Number(p.sponsorRank || 0),
             description: p.description || '',
             image: '📦',
             image_data: p.imageData || '',
@@ -220,12 +224,14 @@ window.RAC = window.RAC || {};
                 hasImage: payload.remove_image ? false : !!p.imagePreview,
                 brand: payload.brand || 'Nuevo',
                 couponLabel: payload.coupon_label || '',
+                isFeatured: Number(payload.is_featured || 0) > 0 ? 1 : 0,
+                sponsorRank: payload.sponsor_rank || 0,
                 description: payload.description,
                 clicks: 0,
                 leads: 0,
                 sales: 0,
                 trending: 0,
-                active: 1
+                active: isEdit ? Number((state.products.find(function (item) { return item.id === payload.id; }) || {}).active || 0) : 1
             };
             if (isEdit) {
                 state.products = state.products.map(function (item) {
@@ -237,14 +243,14 @@ window.RAC = window.RAC || {};
             ns.enqueueMutation({ type: isEdit ? 'product_update' : 'product_create', payload: payload });
             ns.cacheData();
             ns.closeModal('productModalWrap');
-            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
+            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', isFeatured: false, sponsorRank: 0, description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
             ns.renderOwner();
             ns.toast(isEdit ? 'Cambios del producto guardados offline.' : 'Producto guardado offline. Se sincronizara al volver internet.', 'info');
             return;
         }
         try {
             await ns.api(isEdit ? 'product_update' : 'product_create', 'POST', payload);
-            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
+            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', isFeatured: false, sponsorRank: 0, description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
             ns.closeModal('productModalWrap');
             await ns.loadBootstrap();
             ns.toast(isEdit ? 'Producto actualizado.' : 'Producto publicado en el catalogo.', 'success');
@@ -305,7 +311,8 @@ window.RAC = window.RAC || {};
         try {
             var json = await ns.api('trace_link_create', 'POST', { product_id: productId, gestor_id: 'G001' });
             var row = json.row || {};
-            ns.$('linkModalWrap').innerHTML = '<div class="modal active"><header><h3>🔗 Enlace del Gestor generado</h3><button class="close" data-close-modal="linkModalWrap">×</button></header><div style="text-align:center;margin-bottom:18px"><div style="font-size:50px">' + ns.esc(product.image) + '</div><div class="item-title" style="margin-top:8px">' + ns.esc(product.name) + '</div></div><div class="card" style="background:rgba(255,140,0,.08);border-color:rgba(255,140,0,.25);margin-bottom:14px"><div class="sub">Tu enlace unico de traza</div><div class="code" style="margin-top:8px">' + ns.esc(row.link || '') + '</div><div class="sub" style="margin-top:8px">Ref ' + ns.esc(row.masked_ref || '') + '</div></div><div class="two-col" style="margin-bottom:14px"><div class="card" style="text-align:center"><div class="sub">Tu comision (80%)</div><div class="money" style="font-size:20px">' + ns.formatCUP(Number(product.commission || 0) * 0.8) + '</div></div><div class="card" style="text-align:center"><div class="sub">Precio al cliente</div><div style="font-size:20px;font-weight:900">' + ns.formatCUP(product.price) + '</div></div></div><div class="footer-actions"><button class="btn primary" style="flex:1" data-copy-link="' + ns.esc(row.link || '') + '">📋 Copiar enlace</button><button class="btn ghost" style="flex:1;color:#25d366;border-color:rgba(37,211,102,.25)" data-copy-link="' + ns.esc(row.link || '') + '">💬 WhatsApp</button></div></div>';
+            var waShare = 'https://wa.me/?text=' + encodeURIComponent((product.name || 'Producto RAC') + ' ' + (row.link || ''));
+            ns.$('linkModalWrap').innerHTML = '<div class="modal active"><header><h3>🔗 Enlace del Gestor generado</h3><button class="close" data-close-modal="linkModalWrap">×</button></header><div style="text-align:center;margin-bottom:18px"><div style="font-size:50px">' + ns.esc(product.image) + '</div><div class="item-title" style="margin-top:8px">' + ns.esc(product.name) + '</div></div><div class="card" style="background:rgba(255,140,0,.08);border-color:rgba(255,140,0,.25);margin-bottom:14px"><div class="sub">Tu enlace unico de traza</div><div class="code" style="margin-top:8px">' + ns.esc(row.link || '') + '</div><div class="sub" style="margin-top:8px">Ref ' + ns.esc(row.masked_ref || '') + '</div></div><div class="two-col" style="margin-bottom:14px"><div class="card" style="text-align:center"><div class="sub">Tu comision (80%)</div><div class="money" style="font-size:20px">' + ns.formatCUP(Number(product.commission || 0) * 0.8) + '</div></div><div class="card" style="text-align:center"><div class="sub">Precio al cliente</div><div style="font-size:20px;font-weight:900">' + ns.formatCUP(product.price) + '</div></div></div><div class="footer-actions"><button class="btn primary" style="flex:1" data-copy-link="' + ns.esc(row.link || '') + '">📋 Copiar enlace</button><a class="btn ghost" style="flex:1;color:#25d366;border-color:rgba(37,211,102,.25);text-align:center" href="' + ns.esc(waShare) + '" target="_blank" rel="noopener">💬 Compartir</a></div></div>';
             ns.$('linkModalWrap').classList.add('active');
             await ns.loadBootstrap();
         } catch (e) {

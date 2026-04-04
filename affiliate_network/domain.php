@@ -426,11 +426,11 @@ function aff_price_suggestions(PDO $pdo, int $ownerId): array {
 }
 
 function aff_trace_links_for_gestor(PDO $pdo, string $gestorId): array {
-    $st = $pdo->prepare("SELECT t.product_id AS productId, p.name AS product, t.ref_token AS refToken, t.masked_ref AS maskedRef, t.clicks, t.contact_opens AS contactOpens, p.commission, COALESCE(l.earned, 0) AS earned
+    $st = $pdo->prepare("SELECT t.product_id AS productId, p.name AS product, t.ref_token AS refToken, t.masked_ref AS maskedRef, t.clicks, t.contact_opens AS contactOpens, t.last_opened_at AS lastOpenedAt, p.commission, COALESCE(l.earned, 0) AS earned, COALESCE(l.sold_count, 0) AS soldCount
         FROM affiliate_trace_links t
         JOIN affiliate_products p ON p.id=t.product_id
         LEFT JOIN (
-            SELECT ref_token, ROUND(SUM(CASE WHEN status='sold' THEN gestor_share ELSE 0 END), 2) AS earned
+            SELECT ref_token, ROUND(SUM(CASE WHEN status='sold' THEN gestor_share ELSE 0 END), 2) AS earned, SUM(CASE WHEN status='sold' THEN 1 ELSE 0 END) AS sold_count
             FROM affiliate_leads
             GROUP BY ref_token
         ) l ON l.ref_token=t.ref_token
@@ -447,8 +447,12 @@ function aff_trace_links_for_gestor(PDO $pdo, string $gestorId): array {
             'maskedRef' => (string)$row['maskedRef'],
             'clicks' => (int)$row['clicks'],
             'leads' => (int)$row['contactOpens'],
+            'sold' => (int)$row['soldCount'],
+            'ctr' => (int)$row['clicks'] > 0 ? round(((int)$row['contactOpens'] / (int)$row['clicks']) * 100, 1) : 0,
+            'closeRate' => (int)$row['contactOpens'] > 0 ? round(((int)$row['soldCount'] / (int)$row['contactOpens']) * 100, 1) : 0,
             'earned' => (float)$row['earned'],
             'commission' => (float)$row['commission'],
+            'lastOpenedAt' => (string)($row['lastOpenedAt'] ?? ''),
         ];
     }
     return $rows;
@@ -460,6 +464,73 @@ function aff_market_insights(PDO $pdo): array {
         'categories' => $pdo->query("SELECT category, SUM(clicks) AS clicks, SUM(leads) AS leads, SUM(sales) AS sales FROM affiliate_products WHERE active=1 GROUP BY category ORDER BY clicks DESC, category ASC LIMIT 8")->fetchAll(),
         'plans' => $pdo->query("SELECT subscription_plan AS plan, COUNT(*) AS total FROM affiliate_owners GROUP BY subscription_plan ORDER BY total DESC, plan ASC")->fetchAll(),
     ];
+}
+
+function aff_owner_product_stats(PDO $pdo, int $ownerId): array {
+    $st = $pdo->prepare("SELECT
+        p.id,
+        p.clicks,
+        p.leads,
+        p.sales,
+        ROUND(CASE WHEN p.leads > 0 THEN (p.sales / p.leads) * 100 ELSE 0 END, 1) AS conversionRate,
+        COALESCE(SUM(CASE WHEN l.status='sold' THEN l.gestor_share ELSE 0 END), 0) AS gestorPaid,
+        COALESCE(SUM(CASE WHEN l.status='sold' THEN l.platform_share ELSE 0 END), 0) AS platformEarned
+        FROM affiliate_products p
+        LEFT JOIN affiliate_leads l ON l.product_id = p.id
+        WHERE p.owner_id=?
+        GROUP BY p.id, p.clicks, p.leads, p.sales
+        ORDER BY p.clicks DESC, p.sales DESC, p.name ASC");
+    $st->execute([$ownerId]);
+    return $st->fetchAll();
+}
+
+function aff_admin_link_rankings(PDO $pdo): array {
+    $st = $pdo->query("SELECT
+        t.masked_ref AS maskedRef,
+        t.ref_token AS refToken,
+        t.clicks,
+        t.contact_opens AS contactOpens,
+        t.last_opened_at AS lastOpenedAt,
+        p.id AS productId,
+        p.name AS product,
+        g.id AS gestorId,
+        g.name AS gestor,
+        o.owner_code AS ownerCode,
+        o.owner_name AS ownerName,
+        COALESCE(SUM(CASE WHEN l.status='sold' THEN 1 ELSE 0 END), 0) AS soldCount,
+        COALESCE(SUM(CASE WHEN l.status='sold' THEN l.gestor_share ELSE 0 END), 0) AS gestorEarned,
+        COALESCE(SUM(CASE WHEN l.status='sold' THEN l.platform_share ELSE 0 END), 0) AS platformEarned
+        FROM affiliate_trace_links t
+        JOIN affiliate_products p ON p.id=t.product_id
+        JOIN affiliate_gestores g ON g.id=t.gestor_id
+        JOIN affiliate_owners o ON o.id=t.owner_id
+        LEFT JOIN affiliate_leads l ON l.ref_token=t.ref_token
+        GROUP BY t.id, t.masked_ref, t.ref_token, t.clicks, t.contact_opens, t.last_opened_at, p.id, p.name, g.id, g.name, o.owner_code, o.owner_name
+        ORDER BY t.contact_opens DESC, t.clicks DESC, soldCount DESC, gestorEarned DESC
+        LIMIT 25");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $clicks = (int)$row['clicks'];
+        $opens = (int)$row['contactOpens'];
+        $sold = (int)$row['soldCount'];
+        $rows[] = [
+            'maskedRef' => (string)$row['maskedRef'],
+            'link' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode((string)$row['productId']) . '&ref=' . rawurlencode((string)$row['refToken']),
+            'product' => (string)$row['product'],
+            'gestor' => (string)$row['gestor'],
+            'gestorId' => (string)$row['gestorId'],
+            'owner' => trim((string)$row['ownerCode'] . ' · ' . (string)$row['ownerName']),
+            'clicks' => $clicks,
+            'leads' => $opens,
+            'sold' => $sold,
+            'ctr' => $clicks > 0 ? round(($opens / $clicks) * 100, 1) : 0,
+            'closeRate' => $opens > 0 ? round(($sold / $opens) * 100, 1) : 0,
+            'gestorEarned' => round((float)$row['gestorEarned'], 2),
+            'platformEarned' => round((float)$row['platformEarned'], 2),
+            'lastOpenedAt' => (string)($row['lastOpenedAt'] ?? ''),
+        ];
+    }
+    return $rows;
 }
 
 function aff_product_media(array $product): array {
@@ -825,6 +896,8 @@ function aff_bootstrap(PDO $pdo): array {
     $events = $pdo->prepare("SELECT event_type AS eventType, severity, message, created_at AS createdAt FROM affiliate_audit_events WHERE owner_id=? OR owner_id IS NULL ORDER BY id DESC LIMIT 30");
     $events->execute([(int)$owner['id']]);
     $traceLinks = aff_trace_links_for_gestor($pdo, AFF_DEFAULT_GESTOR);
+    $ownerProductStats = aff_owner_product_stats($pdo, (int)$owner['id']);
+    $linkRankings = aff_admin_link_rankings($pdo);
     $pricing = aff_price_suggestions($pdo, (int)$owner['id']);
     $insights = aff_market_insights($pdo);
 
@@ -873,6 +946,8 @@ function aff_bootstrap(PDO $pdo): array {
         'walletMovements' => $movements->fetchAll(),
         'auditEvents' => $events->fetchAll(),
         'traceLinks' => $traceLinks,
+        'ownerProductStats' => $ownerProductStats,
+        'linkRankings' => $linkRankings,
         'pricingSuggestions' => $pricing,
         'marketInsights' => $insights,
         'walletReconciliation' => $walletCheck,
@@ -906,9 +981,11 @@ function aff_create_product(PDO $pdo, array $input): array {
     $icon = (string)($input['image'] ?? '📦');
     $brand = substr(trim((string)($input['brand'] ?? 'Nuevo')), 0, 80) ?: 'Nuevo';
     $couponLabel = substr(trim((string)($input['coupon_label'] ?? '')), 0, 120);
+    $isFeatured = !empty($input['is_featured']) ? 1 : 0;
+    $sponsorRank = max(0, (int)($input['sponsor_rank'] ?? 0));
     $media = aff_store_product_image($id, $imageData);
-    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, image_thumb_url, brand, description, coupon_label, clicks, leads, sales, trending, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
-    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $media['image_thumb_url'], $brand, $description, $couponLabel, 0, 0, 0, 0, aff_now()]);
+    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, image_thumb_url, brand, description, coupon_label, clicks, leads, sales, trending, is_featured, sponsor_rank, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
+    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $media['image_thumb_url'], $brand, $description, $couponLabel, 0, 0, 0, 0, $isFeatured, $sponsorRank, aff_now()]);
     aff_record_audit($pdo, [
         'owner_id' => (int)$owner['id'],
         'product_id' => $id,
@@ -932,6 +1009,8 @@ function aff_create_product(PDO $pdo, array $input): array {
         'hasImage' => $media['image_url'] !== '',
         'brand' => $brand,
         'couponLabel' => $couponLabel,
+        'isFeatured' => $isFeatured,
+        'sponsorRank' => $sponsorRank,
         'description' => $description,
         'clicks' => 0,
         'leads' => 0,
@@ -962,6 +1041,8 @@ function aff_update_product(PDO $pdo, array $input): array {
     $description = trim((string)($input['description'] ?? $current['description']));
     $brand = substr(trim((string)($input['brand'] ?? $current['brand'])), 0, 80) ?: 'Nuevo';
     $couponLabel = substr(trim((string)($input['coupon_label'] ?? ($current['coupon_label'] ?? ''))), 0, 120);
+    $isFeatured = !empty($input['is_featured']) ? 1 : 0;
+    $sponsorRank = max(0, (int)($input['sponsor_rank'] ?? ($current['sponsor_rank'] ?? 0)));
     $imageData = (string)($input['image_data'] ?? '');
     $removeImage = !empty($input['remove_image']);
     if ($name === '' || $price <= 0 || $commission <= 0) {
@@ -982,7 +1063,7 @@ function aff_update_product(PDO $pdo, array $input): array {
     }
 
     $upd = $pdo->prepare("UPDATE affiliate_products
-        SET name=?, category=?, price=?, stock=?, commission=?, commission_pct=?, image_url=?, image_webp_url=?, image_thumb_url=?, brand=?, description=?, coupon_label=?
+        SET name=?, category=?, price=?, stock=?, commission=?, commission_pct=?, image_url=?, image_webp_url=?, image_thumb_url=?, brand=?, description=?, coupon_label=?, is_featured=?, sponsor_rank=?
         WHERE id=? AND owner_id=?");
     $upd->execute([
         $name,
@@ -997,6 +1078,8 @@ function aff_update_product(PDO $pdo, array $input): array {
         $brand,
         $description,
         $couponLabel,
+        $isFeatured,
+        $sponsorRank,
         $id,
         (int)$owner['id']
     ]);
@@ -1025,6 +1108,8 @@ function aff_update_product(PDO $pdo, array $input): array {
         'hasImage' => $media['image_url'] !== '' || $media['image_webp_url'] !== '',
         'brand' => $brand,
         'couponLabel' => $couponLabel,
+        'isFeatured' => $isFeatured,
+        'sponsorRank' => $sponsorRank,
         'description' => $description,
         'clicks' => (int)$current['clicks'],
         'leads' => (int)$current['leads'],
@@ -1050,7 +1135,7 @@ function aff_toggle_product_active(PDO $pdo, string $id, int $active): array {
         'message' => $active ? 'Producto RAC reactivado' : 'Producto RAC desactivado',
         'context' => ['active' => $active],
     ]);
-    $q = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, coupon_label AS couponLabel, active FROM affiliate_products WHERE id=? AND owner_id=? LIMIT 1");
+    $q = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, coupon_label AS couponLabel, is_featured AS isFeatured, sponsor_rank AS sponsorRank, active FROM affiliate_products WHERE id=? AND owner_id=? LIMIT 1");
     $q->execute([$id, (int)$owner['id']]);
     $row = $q->fetch();
     if (!$row) {
