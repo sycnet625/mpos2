@@ -845,6 +845,89 @@ function aff_export_csv(array $headers, array $rows): string {
     return implode("\n", $lines) . "\n";
 }
 
+function aff_xlsx_col_name(int $index): string {
+    $name = '';
+    $index++;
+    while ($index > 0) {
+        $mod = ($index - 1) % 26;
+        $name = chr(65 + $mod) . $name;
+        $index = (int)(($index - $mod) / 26);
+        $index--;
+    }
+    return $name;
+}
+
+function aff_xlsx_escape($value): string {
+    return htmlspecialchars((string)($value ?? ''), ENT_XML1 | ENT_COMPAT, 'UTF-8');
+}
+
+function aff_xlsx_sheet_xml(array $headers, array $rows): string {
+    $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+    $xml .= '<row r="1">';
+    foreach ($headers as $i => $header) {
+        $cell = aff_xlsx_col_name($i) . '1';
+        $xml .= '<c r="' . $cell . '" t="inlineStr"><is><t>' . aff_xlsx_escape($header) . '</t></is></c>';
+    }
+    $xml .= '</row>';
+    foreach ($rows as $rIndex => $row) {
+        $excelRow = $rIndex + 2;
+        $xml .= '<row r="' . $excelRow . '">';
+        foreach (array_values($row) as $cIndex => $value) {
+            $cell = aff_xlsx_col_name($cIndex) . $excelRow;
+            $xml .= '<c r="' . $cell . '" t="inlineStr"><is><t>' . aff_xlsx_escape($value) . '</t></is></c>';
+        }
+        $xml .= '</row>';
+    }
+    $xml .= '</sheetData></worksheet>';
+    return $xml;
+}
+
+function aff_export_xlsx_binary(string $sheetName, array $headers, array $rows): string {
+    if (!class_exists('ZipArchive')) {
+        throw new RuntimeException('ziparchive_not_available');
+    }
+    $tmp = tempnam(sys_get_temp_dir(), 'rac_xlsx_');
+    if ($tmp === false) {
+        throw new RuntimeException('xlsx_temp_file_failed');
+    }
+    $zip = new ZipArchive();
+    if ($zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+        @unlink($tmp);
+        throw new RuntimeException('xlsx_open_failed');
+    }
+    $sheetSafe = preg_replace('/[^A-Za-z0-9 _-]/', '', $sheetName) ?: 'Sheet1';
+    $zip->addFromString('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        . '<Default Extension="xml" ContentType="application/xml"/>'
+        . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        . '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
+        . '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>'
+        . '</Types>');
+    $zip->addFromString('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>'
+        . '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>'
+        . '</Relationships>');
+    $zip->addFromString('docProps/core.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">'
+        . '<dc:title>RAC Export</dc:title><dc:creator>Palweb RAC</dc:creator><cp:lastModifiedBy>Palweb RAC</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">' . gmdate('Y-m-d\TH:i:s\Z') . '</dcterms:created></cp:coreProperties>');
+    $zip->addFromString('docProps/app.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Palweb RAC</Application></Properties>');
+    $zip->addFromString('xl/workbook.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' . aff_xlsx_escape($sheetSafe) . '" sheetId="1" r:id="rId1"/></sheets></workbook>');
+    $zip->addFromString('xl/_rels/workbook.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>');
+    $zip->addFromString('xl/worksheets/sheet1.xml', aff_xlsx_sheet_xml($headers, $rows));
+    $zip->close();
+    $binary = (string)file_get_contents($tmp);
+    @unlink($tmp);
+    return $binary;
+}
+
 function aff_export_leads_csv(PDO $pdo): string {
     $st = $pdo->query("SELECT l.id, l.trace_code, l.product_id, p.name AS product_name, o.owner_code, o.owner_name, l.gestor_id, g.name AS gestor_name, l.client_name, l.client_phone, l.status, l.commission, l.locked_commission, l.gestor_share, l.platform_share, l.lead_date, l.triggered_at, l.contact_opened_at, l.sold_at, l.no_sale_at
         FROM affiliate_leads l
@@ -883,6 +966,26 @@ function aff_export_leads_csv(PDO $pdo): string {
     );
 }
 
+function aff_leads_export_rows(PDO $pdo): array {
+    $st = $pdo->query("SELECT l.id, l.trace_code, l.product_id, p.name AS product_name, o.owner_code, o.owner_name, l.gestor_id, g.name AS gestor_name, l.client_name, l.client_phone, l.status, l.commission, l.locked_commission, l.gestor_share, l.platform_share, l.lead_date, l.triggered_at, l.contact_opened_at, l.sold_at, l.no_sale_at
+        FROM affiliate_leads l
+        JOIN affiliate_products p ON p.id=l.product_id
+        JOIN affiliate_owners o ON o.id=l.owner_id
+        JOIN affiliate_gestores g ON g.id=l.gestor_id
+        ORDER BY l.created_at DESC, l.id DESC");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[] = [
+            $row['id'], $row['trace_code'], $row['product_id'], $row['product_name'], $row['owner_code'], $row['owner_name'], $row['gestor_id'], $row['gestor_name'], $row['client_name'], $row['client_phone'], $row['status'], $row['commission'], $row['locked_commission'], $row['gestor_share'], $row['platform_share'], $row['lead_date'], $row['triggered_at'], $row['contact_opened_at'], $row['sold_at'], $row['no_sale_at'],
+        ];
+    }
+    return $rows;
+}
+
+function aff_export_leads_xlsx(PDO $pdo): string {
+    return aff_export_xlsx_binary('RAC Leads', ['lead_id', 'trace_code', 'product_id', 'product', 'owner_code', 'owner', 'gestor_id', 'gestor', 'client_name', 'client_phone', 'status', 'commission', 'locked_commission', 'gestor_share', 'platform_share', 'lead_date', 'triggered_at', 'contact_opened_at', 'sold_at', 'no_sale_at'], aff_leads_export_rows($pdo));
+}
+
 function aff_export_wallet_csv(PDO $pdo): string {
     $st = $pdo->query("SELECT m.id, o.owner_code, o.owner_name, m.lead_id, m.movement_type, m.amount, m.delta_available, m.delta_blocked, m.available_before, m.available_after, m.blocked_before, m.blocked_after, m.note, m.created_at
         FROM affiliate_wallet_movements m
@@ -913,6 +1016,24 @@ function aff_export_wallet_csv(PDO $pdo): string {
     );
 }
 
+function aff_wallet_export_rows(PDO $pdo): array {
+    $st = $pdo->query("SELECT m.id, o.owner_code, o.owner_name, m.lead_id, m.movement_type, m.amount, m.delta_available, m.delta_blocked, m.available_before, m.available_after, m.blocked_before, m.blocked_after, m.note, m.created_at
+        FROM affiliate_wallet_movements m
+        JOIN affiliate_owners o ON o.id=m.owner_id
+        ORDER BY m.id DESC");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[] = [
+            $row['id'], $row['owner_code'], $row['owner_name'], $row['lead_id'], $row['movement_type'], $row['amount'], $row['delta_available'], $row['delta_blocked'], $row['available_before'], $row['available_after'], $row['blocked_before'], $row['blocked_after'], $row['note'], $row['created_at'],
+        ];
+    }
+    return $rows;
+}
+
+function aff_export_wallet_xlsx(PDO $pdo): string {
+    return aff_export_xlsx_binary('RAC Wallet', ['movement_id', 'owner_code', 'owner', 'lead_id', 'movement_type', 'amount', 'delta_available', 'delta_blocked', 'available_before', 'available_after', 'blocked_before', 'blocked_after', 'note', 'created_at'], aff_wallet_export_rows($pdo));
+}
+
 function aff_export_rankings_csv(PDO $pdo): string {
     $rows = [];
     foreach (aff_admin_link_rankings($pdo) as $row) {
@@ -938,6 +1059,20 @@ function aff_export_rankings_csv(PDO $pdo): string {
     );
 }
 
+function aff_rankings_export_rows(PDO $pdo): array {
+    $rows = [];
+    foreach (aff_admin_link_rankings($pdo) as $row) {
+        $rows[] = [
+            $row['maskedRef'], $row['product'], $row['owner'], $row['gestor'], $row['clicks'], $row['leads'], $row['sold'], $row['ctr'], $row['closeRate'], $row['gestorEarned'], $row['platformEarned'], $row['lastOpenedAt'], $row['link'],
+        ];
+    }
+    return $rows;
+}
+
+function aff_export_rankings_xlsx(PDO $pdo): string {
+    return aff_export_xlsx_binary('RAC Rankings', ['masked_ref', 'product', 'owner', 'gestor', 'clicks', 'leads', 'sold', 'ctr', 'close_rate', 'gestor_earned', 'platform_earned', 'last_opened_at', 'link'], aff_rankings_export_rows($pdo));
+}
+
 function aff_export_users_csv(PDO $pdo): string {
     $rows = [];
     foreach (aff_user_admin_list($pdo) as $row) {
@@ -960,6 +1095,20 @@ function aff_export_users_csv(PDO $pdo): string {
     );
 }
 
+function aff_users_export_rows(PDO $pdo): array {
+    $rows = [];
+    foreach (aff_user_admin_list($pdo) as $row) {
+        $rows[] = [
+            $row['id'], $row['username'], $row['displayName'], $row['role'], $row['ownerId'], $row['ownerCode'], $row['gestorId'], $row['gestorName'], $row['status'], $row['createdAt'],
+        ];
+    }
+    return $rows;
+}
+
+function aff_export_users_xlsx(PDO $pdo): string {
+    return aff_export_xlsx_binary('RAC Users', ['id', 'username', 'display_name', 'role', 'owner_id', 'owner_code', 'gestor_id', 'gestor_name', 'status', 'created_at'], aff_users_export_rows($pdo));
+}
+
 function aff_export_access_audit_csv(PDO $pdo): string {
     $rows = [];
     foreach (aff_access_audit_events($pdo) as $row) {
@@ -979,6 +1128,21 @@ function aff_export_access_audit_csv(PDO $pdo): string {
         ['event_type', 'severity', 'message', 'username', 'role', 'user_id', 'masked_code', 'created_at'],
         $rows
     );
+}
+
+function aff_access_audit_export_rows(PDO $pdo): array {
+    $rows = [];
+    foreach (aff_access_audit_events($pdo) as $row) {
+        $ctx = $row['context'] ?? [];
+        $rows[] = [
+            $row['eventType'], $row['severity'], $row['message'], $ctx['username'] ?? '', $ctx['role'] ?? '', $ctx['user_id'] ?? '', $ctx['masked_code'] ?? '', $row['createdAt'],
+        ];
+    }
+    return $rows;
+}
+
+function aff_export_access_audit_xlsx(PDO $pdo): string {
+    return aff_export_xlsx_binary('RAC Access Audit', ['event_type', 'severity', 'message', 'username', 'role', 'user_id', 'masked_code', 'created_at'], aff_access_audit_export_rows($pdo));
 }
 
 function aff_health_status_path(): string {

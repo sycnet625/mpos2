@@ -54,12 +54,26 @@ try {
         echo aff_export_leads_csv($pdo);
         exit;
     }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_leads_xlsx') {
+        aff_require_roles(['admin']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="rac_leads.xlsx"');
+        echo aff_export_leads_xlsx($pdo);
+        exit;
+    }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_wallet') {
         aff_require_roles(['admin']);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_wallet.csv"');
         echo aff_export_wallet_csv($pdo);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_wallet_xlsx') {
+        aff_require_roles(['admin']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="rac_wallet.xlsx"');
+        echo aff_export_wallet_xlsx($pdo);
         exit;
     }
 
@@ -70,6 +84,13 @@ try {
         echo aff_export_rankings_csv($pdo);
         exit;
     }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_rankings_xlsx') {
+        aff_require_roles(['admin']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="rac_rankings.xlsx"');
+        echo aff_export_rankings_xlsx($pdo);
+        exit;
+    }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_users') {
         aff_require_roles(['admin']);
@@ -78,12 +99,26 @@ try {
         echo aff_export_users_csv($pdo);
         exit;
     }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_users_xlsx') {
+        aff_require_roles(['admin']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="rac_users.xlsx"');
+        echo aff_export_users_xlsx($pdo);
+        exit;
+    }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_access_audit') {
         aff_require_roles(['admin']);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_access_audit.csv"');
         echo aff_export_access_audit_csv($pdo);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_access_audit_xlsx') {
+        aff_require_roles(['admin']);
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="rac_access_audit.xlsx"');
+        echo aff_export_access_audit_xlsx($pdo);
         exit;
     }
 
