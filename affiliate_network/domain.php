@@ -706,6 +706,10 @@ function aff_read_health_status(): array {
             'next' => '',
             'last' => '',
         ],
+        'service' => [
+            'active' => false,
+            'journal' => [],
+        ],
         'summary' => [
             'checks' => 0,
             'okChecks' => 0,
@@ -722,13 +726,19 @@ function aff_read_health_status(): array {
     if (function_exists('shell_exec')) {
         $enabled = trim((string)@shell_exec('systemctl is-enabled rac-health.timer 2>/dev/null'));
         $active = trim((string)@shell_exec('systemctl is-active rac-health.timer 2>/dev/null'));
+        $serviceActive = trim((string)@shell_exec('systemctl is-active rac-health.service 2>/dev/null'));
         $next = trim((string)@shell_exec("systemctl list-timers --all --no-pager rac-health.timer 2>/dev/null | awk 'NR==2{print $1\" \"$2\" \"$3\" \"$4\" \"$5}'"));
         $last = trim((string)@shell_exec("systemctl list-timers --all --no-pager rac-health.timer 2>/dev/null | awk 'NR==2{print $7\" \"$8\" \"$9\" \"$10\" \"$11}'"));
+        $journalRaw = trim((string)@shell_exec('journalctl -u rac-health.service -n 8 --no-pager 2>/dev/null'));
         $base['timer'] = [
             'enabled' => $enabled === 'enabled',
             'active' => $active === 'active',
             'next' => $next === '-' ? '' : $next,
             'last' => $last === '-' ? '' : $last,
+        ];
+        $base['service'] = [
+            'active' => $serviceActive === 'active',
+            'journal' => $journalRaw === '' ? [] : preg_split("/\r\n|\n|\r/", $journalRaw),
         ];
     }
     $checks = is_array($base['output'] ?? null) ? count($base['output']) : 0;
