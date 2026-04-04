@@ -112,6 +112,7 @@ function aff_ensure_tables(PDO $pdo): void {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     aff_add_column_if_missing($pdo, 'affiliate_products', 'image_url', "VARCHAR(255) NULL AFTER icon");
     aff_add_column_if_missing($pdo, 'affiliate_products', 'image_webp_url', "VARCHAR(255) NULL AFTER image_url");
+    aff_add_column_if_missing($pdo, 'affiliate_products', 'image_thumb_url', "VARCHAR(255) NULL AFTER image_webp_url");
     aff_add_column_if_missing($pdo, 'affiliate_products', 'is_featured', "TINYINT(1) NOT NULL DEFAULT 0 AFTER trending");
     aff_add_column_if_missing($pdo, 'affiliate_products', 'sponsor_rank', "INT NOT NULL DEFAULT 0 AFTER is_featured");
     aff_add_column_if_missing($pdo, 'affiliate_products', 'price_mode', "VARCHAR(20) NOT NULL DEFAULT 'fixed' AFTER sponsor_rank");
@@ -464,9 +465,11 @@ function aff_market_insights(PDO $pdo): array {
 function aff_product_media(array $product): array {
     $webp = trim((string)($product['image_webp_url'] ?? ''));
     $img = trim((string)($product['image_url'] ?? ''));
+    $thumb = trim((string)($product['image_thumb_url'] ?? ''));
     return [
         'imageUrl' => $img,
         'imageWebpUrl' => $webp,
+        'imageThumbUrl' => $thumb,
         'hasImage' => $webp !== '' || $img !== '',
     ];
 }
@@ -498,12 +501,37 @@ function aff_store_product_image(string $productId, string $imageData): array {
     }
     $base = 'rac_' . preg_replace('/[^A-Za-z0-9_-]/', '', $productId);
     $webpFs = $dirFs . '/' . $base . '.webp';
+    $thumbFs = $dirFs . '/' . $base . '_thumb.webp';
     if (file_put_contents($webpFs, $bin) === false) {
         throw new RuntimeException('image_write_failed');
+    }
+    $thumbOk = false;
+    if (function_exists('imagecreatefromwebp') && function_exists('imagewebp')) {
+        $imgRes = @imagecreatefromwebp($webpFs);
+        if ($imgRes) {
+            $srcW = imagesx($imgRes);
+            $srcH = imagesy($imgRes);
+            $maxW = 480;
+            $maxH = 360;
+            $ratio = min($maxW / max($srcW, 1), $maxH / max($srcH, 1), 1);
+            $dstW = max(1, (int)round($srcW * $ratio));
+            $dstH = max(1, (int)round($srcH * $ratio));
+            $thumbRes = imagecreatetruecolor($dstW, $dstH);
+            imagealphablending($thumbRes, true);
+            imagesavealpha($thumbRes, true);
+            imagecopyresampled($thumbRes, $imgRes, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+            $thumbOk = @imagewebp($thumbRes, $thumbFs, 78);
+            imagedestroy($thumbRes);
+            imagedestroy($imgRes);
+        }
+    }
+    if (!$thumbOk) {
+        @copy($webpFs, $thumbFs);
     }
     return [
         'image_url' => '/uploads/rac/products/' . $base . '.webp',
         'image_webp_url' => '/uploads/rac/products/' . $base . '.webp',
+        'image_thumb_url' => '/uploads/rac/products/' . $base . '_thumb.webp',
     ];
 }
 
@@ -770,7 +798,7 @@ function aff_bootstrap(PDO $pdo): array {
     $owner = aff_owner($pdo);
     $walletCheck = aff_repair_owner_wallet_from_ledger($pdo, (int)$owner['id']);
     $owner = aff_owner($pdo);
-    $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel FROM affiliate_products WHERE owner_id=? AND active=1 ORDER BY is_featured DESC, sponsor_rank DESC, created_at ASC");
+    $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel FROM affiliate_products WHERE owner_id=? AND active=1 ORDER BY is_featured DESC, sponsor_rank DESC, created_at ASC");
     $products->execute([(int)$owner['id']]);
     $leads = $pdo->prepare("SELECT id, product_id AS productId, gestor_id AS gestorId, client, client_name AS clientName, client_phone AS clientPhone, DATE_FORMAT(lead_date, '%Y-%m-%d') AS date, status, commission, locked_commission AS lockedCommission, gestor_share AS gestorShare, platform_share AS platformShare, trace_code AS traceCode, (SELECT name FROM affiliate_products p WHERE p.id = affiliate_leads.product_id LIMIT 1) AS product FROM affiliate_leads WHERE owner_id=? ORDER BY lead_date DESC, id DESC LIMIT 200");
     $leads->execute([(int)$owner['id']]);
@@ -863,8 +891,8 @@ function aff_create_product(PDO $pdo, array $input): array {
     $icon = (string)($input['image'] ?? '📦');
     $brand = substr(trim((string)($input['brand'] ?? 'Nuevo')), 0, 80) ?: 'Nuevo';
     $media = aff_store_product_image($id, $imageData);
-    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, brand, description, clicks, leads, sales, trending, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
-    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $brand, $description, 0, 0, 0, 0, aff_now()]);
+    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
+    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $media['image_thumb_url'], $brand, $description, 0, 0, 0, 0, aff_now()]);
     aff_record_audit($pdo, [
         'owner_id' => (int)$owner['id'],
         'product_id' => $id,
@@ -884,6 +912,7 @@ function aff_create_product(PDO $pdo, array $input): array {
         'image' => $icon,
         'imageUrl' => $media['image_url'],
         'imageWebpUrl' => $media['image_webp_url'],
+        'imageThumbUrl' => $media['image_thumb_url'],
         'hasImage' => $media['image_url'] !== '',
         'brand' => $brand,
         'description' => $description,

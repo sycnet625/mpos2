@@ -3,11 +3,12 @@ window.RAC = window.RAC || {};
     var state = ns.state;
 
     ns.productVisual = function (product) {
-        if (product && product.hasImage && (product.imageWebpUrl || product.imageUrl)) {
-            if (product.imageWebpUrl) {
-                return '<div class="product-media"><picture><source srcset="' + ns.esc(product.imageWebpUrl) + '" type="image/webp"><img loading="lazy" src="' + ns.esc(product.imageUrl || product.imageWebpUrl) + '" alt="' + ns.esc(product.name || 'Producto RAC') + '"></picture></div>';
+        if (product && product.hasImage && (product.imageThumbUrl || product.imageWebpUrl || product.imageUrl)) {
+            var primary = product.imageThumbUrl || product.imageUrl || product.imageWebpUrl;
+            if (product.imageWebpUrl || product.imageThumbUrl) {
+                return '<div class="product-media"><picture><source srcset="' + ns.esc(product.imageThumbUrl || product.imageWebpUrl) + '" type="image/webp"><img loading="lazy" src="' + ns.esc(primary) + '" alt="' + ns.esc(product.name || 'Producto RAC') + '"></picture></div>';
             }
-            return '<div class="product-media"><img loading="lazy" src="' + ns.esc(product.imageUrl) + '" alt="' + ns.esc(product.name || 'Producto RAC') + '"></div>';
+            return '<div class="product-media"><img loading="lazy" src="' + ns.esc(primary) + '" alt="' + ns.esc(product.name || 'Producto RAC') + '"></div>';
         }
         return '<div class="emoji">' + ns.esc(product.image) + '</div>';
     };
