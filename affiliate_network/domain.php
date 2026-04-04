@@ -38,6 +38,34 @@ function aff_link_secret(): string {
     return $secret;
 }
 
+function aff_get_setting(PDO $pdo, string $key, string $default = ''): string {
+    $st = $pdo->prepare("SELECT setting_value FROM affiliate_settings WHERE setting_key=? LIMIT 1");
+    $st->execute([$key]);
+    $value = $st->fetchColumn();
+    return is_string($value) ? $value : $default;
+}
+
+function aff_set_setting(PDO $pdo, string $key, string $value): void {
+    $st = $pdo->prepare("INSERT INTO affiliate_settings (setting_key, setting_value) VALUES (?, ?)
+        ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value), updated_at=CURRENT_TIMESTAMP");
+    $st->execute([$key, $value]);
+}
+
+function aff_telegram_bot_token(PDO $pdo = null): string {
+    $env = getenv('AFFILIATE_TELEGRAM_BOT_TOKEN');
+    if (is_string($env) && trim($env) !== '') {
+        return trim($env);
+    }
+    if ($pdo instanceof PDO) {
+        return trim(aff_get_setting($pdo, 'telegram_bot_token', ''));
+    }
+    return '';
+}
+
+function aff_telegram_enabled(PDO $pdo = null): bool {
+    return aff_telegram_bot_token($pdo) !== '';
+}
+
 function aff_column_exists(PDO $pdo, string $table, string $column): bool {
     $st = $pdo->prepare("SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
     $st->execute([$table, $column]);
@@ -206,6 +234,12 @@ function aff_ensure_tables(PDO $pdo): void {
         CONSTRAINT fk_aff_trace_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE CASCADE,
         CONSTRAINT fk_aff_trace_gestor FOREIGN KEY (gestor_id) REFERENCES affiliate_gestores(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_settings (
+        setting_key VARCHAR(80) PRIMARY KEY,
+        setting_value TEXT NULL,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 function aff_seed_demo_data(PDO $pdo): void {
@@ -342,6 +376,54 @@ function aff_record_audit(PDO $pdo, array $event): void {
     ]);
 }
 
+function aff_notify_gestor_commission(PDO $pdo, array $lead, array $product, float $gestorShare): void {
+    $token = aff_telegram_bot_token($pdo);
+    if ($token === '') {
+        return;
+    }
+    $gestorId = (string)($lead['gestor_id'] ?? '');
+    if ($gestorId === '') {
+        return;
+    }
+    $st = $pdo->prepare("SELECT telegram_chat_id, name FROM affiliate_gestores WHERE id=? LIMIT 1");
+    $st->execute([$gestorId]);
+    $gestor = $st->fetch();
+    $chatId = trim((string)($gestor['telegram_chat_id'] ?? ''));
+    if ($chatId === '') {
+        return;
+    }
+    $message = "✨ Comisión RAC ganada\n"
+        . "Gestor: " . (string)($gestor['name'] ?? $gestorId) . "\n"
+        . "Producto: " . (string)($product['name'] ?? ($lead['product_id'] ?? '')) . "\n"
+        . "Código: " . (string)($lead['trace_code'] ?? '') . "\n"
+        . "Monto: " . number_format($gestorShare, 2, '.', '') . " CUP";
+    $payload = json_encode([
+        'chat_id' => $chatId,
+        'text' => $message,
+    ], JSON_UNESCAPED_UNICODE);
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => $payload,
+            'timeout' => 8,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $url = 'https://api.telegram.org/bot' . rawurlencode($token) . '/sendMessage';
+    $result = @file_get_contents($url, false, $ctx);
+    aff_record_audit($pdo, [
+        'owner_id' => (int)($lead['owner_id'] ?? 0),
+        'gestor_id' => $gestorId,
+        'product_id' => (string)($lead['product_id'] ?? ''),
+        'lead_id' => (string)($lead['id'] ?? ''),
+        'event_type' => $result === false ? 'telegram_notify_failed' : 'telegram_notified',
+        'severity' => $result === false ? 'warning' : 'info',
+        'message' => $result === false ? 'No fue posible notificar comisión por Telegram' : 'Comisión notificada al gestor por Telegram',
+        'context' => ['chat_id' => $chatId],
+    ]);
+}
+
 function aff_recompute_owner_health(PDO $pdo, int $ownerId): void {
     $st = $pdo->prepare("SELECT COUNT(*) FROM affiliate_leads WHERE owner_id=?");
     $st->execute([$ownerId]);
@@ -456,6 +538,38 @@ function aff_trace_links_for_gestor(PDO $pdo, string $gestorId): array {
         ];
     }
     return $rows;
+}
+
+function aff_integration_settings(PDO $pdo): array {
+    $defaultGestorId = AFF_DEFAULT_GESTOR;
+    $st = $pdo->prepare("SELECT id, name, telegram_chat_id FROM affiliate_gestores WHERE id=? LIMIT 1");
+    $st->execute([$defaultGestorId]);
+    $gestor = $st->fetch() ?: ['id' => $defaultGestorId, 'name' => $defaultGestorId, 'telegram_chat_id' => ''];
+    $token = aff_telegram_bot_token($pdo);
+    return [
+        'telegramBotToken' => $token,
+        'telegramConfigured' => $token !== '',
+        'defaultGestorId' => (string)$gestor['id'],
+        'defaultGestorName' => (string)$gestor['name'],
+        'defaultGestorChatId' => (string)($gestor['telegram_chat_id'] ?? ''),
+    ];
+}
+
+function aff_save_integration_settings(PDO $pdo, array $input): array {
+    $token = trim((string)($input['telegram_bot_token'] ?? ''));
+    $gestorId = trim((string)($input['default_gestor_id'] ?? AFF_DEFAULT_GESTOR));
+    $chatId = trim((string)($input['default_gestor_chat_id'] ?? ''));
+    aff_set_setting($pdo, 'telegram_bot_token', $token);
+    $st = $pdo->prepare("UPDATE affiliate_gestores SET telegram_chat_id=? WHERE id=?");
+    $st->execute([$chatId, $gestorId]);
+    aff_record_audit($pdo, [
+        'gestor_id' => $gestorId,
+        'event_type' => 'integration_settings_updated',
+        'severity' => 'info',
+        'message' => 'Configuración de integraciones RAC actualizada',
+        'context' => ['telegram_configured' => $token !== '', 'chat_id' => $chatId !== ''],
+    ]);
+    return aff_integration_settings($pdo);
 }
 
 function aff_market_insights(PDO $pdo): array {
@@ -960,6 +1074,10 @@ function aff_bootstrap(PDO $pdo): array {
             'salesToday' => $salesToday,
             'expiredHolds' => $expiredHolds,
         ],
+        'integrations' => [
+            'telegramConfigured' => aff_telegram_enabled($pdo),
+        ],
+        'integrationSettings' => aff_integration_settings($pdo),
         'server_time' => date('c')
     ];
 }
@@ -1183,6 +1301,7 @@ function aff_update_lead_status(PDO $pdo, string $id, string $status): array {
             $pdo->prepare("UPDATE affiliate_gestores SET earnings = earnings + ?, conversions = conversions + 1 WHERE id=?")->execute([$gestorShare, $lead['gestor_id']]);
             $pdo->prepare("UPDATE affiliate_products SET sales = sales + 1 WHERE id=?")->execute([$lead['product_id']]);
             $pdo->prepare("UPDATE affiliate_leads SET sold_at=?, no_sale_at=NULL WHERE id=?")->execute([aff_now(), $lead['id']]);
+            aff_notify_gestor_commission($pdo, $lead, $product, $gestorShare);
         } elseif ($status === 'no_sale' && $prevStatus !== 'no_sale' && $locked > 0) {
             aff_apply_wallet_move($pdo, $ownerRow, 'release_hold', $locked, $locked, -$locked, (string)$lead['id'], 'Liberación de garantía por venta no concretada', []);
             $pdo->prepare("UPDATE affiliate_leads SET no_sale_at=?, sold_at=NULL WHERE id=?")->execute([aff_now(), $lead['id']]);

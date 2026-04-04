@@ -73,6 +73,12 @@ try {
         exit;
     }
 
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'integration_settings_update') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_save_integration_settings($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'refer_bootstrap') {
         $productId = (string)($_GET['product'] ?? '');
         $ref = (string)($_GET['ref'] ?? '');

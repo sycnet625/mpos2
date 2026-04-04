@@ -32,11 +32,16 @@ window.RAC = window.RAC || {};
         walletMovements: [],
         walletReconciliation: { calculatedAvailable: 0, calculatedBlocked: 0, actualAvailable: 0, actualBlocked: 0, availableMismatch: 0, blockedMismatch: 0, ok: true },
         auditEvents: [],
+        integrations: { telegramConfigured: false },
+        integrationSettings: { telegramBotToken: '', telegramConfigured: false, defaultGestorId: 'G001', defaultGestorName: 'Carlos Méndez', defaultGestorChatId: '' },
         summary: { volumeTotal: 0, revenue: 0, ownersActive: 0, gestoresActive: 0, leadsToday: 0, salesToday: 0 },
         queue: [],
         cacheKey: 'rac_affiliate_cache_v4',
         queueKey: 'rac_affiliate_queue_v4',
         installPrompt: null,
+        syncInFlight: false,
+        lastSyncAt: '',
+        syncError: '',
         csrf: (document.querySelector('meta[name="rac-csrf"]') || {}).content || ''
     };
 

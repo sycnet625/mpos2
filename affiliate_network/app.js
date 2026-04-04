@@ -74,6 +74,18 @@
         var saveBtn = event.target.closest('[data-save-product]');
         if (saveBtn) return ns.saveNewProduct();
 
+        var openIntegrationsBtn = event.target.closest('[data-open-integrations]');
+        if (openIntegrationsBtn) return ns.openIntegrationModal();
+
+        var saveIntegrationsBtn = event.target.closest('[data-save-integrations]');
+        if (saveIntegrationsBtn) {
+            return ns.saveIntegrationSettings({
+                telegram_bot_token: state.integrationSettings.telegramBotToken || '',
+                default_gestor_id: state.integrationSettings.defaultGestorId || 'G001',
+                default_gestor_chat_id: state.integrationSettings.defaultGestorChatId || ''
+            });
+        }
+
         var removeImageBtn = event.target.closest('[data-remove-product-image]');
         if (removeImageBtn) {
             state.ownerNewProduct.removeImage = true;
@@ -107,6 +119,11 @@
         var productField = event.target.closest('[data-product-field]');
         if (productField) {
             state.ownerNewProduct[productField.getAttribute('data-product-field')] = productField.value;
+            return;
+        }
+        var integrationField = event.target.closest('[data-integration-field]');
+        if (integrationField) {
+            state.integrationSettings[integrationField.getAttribute('data-integration-field')] = integrationField.value;
             return;
         }
         if (event.target.id === 'gestorSearch') {

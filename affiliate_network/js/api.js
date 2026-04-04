@@ -76,6 +76,8 @@ window.RAC = window.RAC || {};
             walletMovements: state.walletMovements,
             walletReconciliation: state.walletReconciliation,
             auditEvents: state.auditEvents,
+            integrations: state.integrations,
+            integrationSettings: state.integrationSettings,
             summary: state.summary
         }));
     };
@@ -145,16 +147,34 @@ window.RAC = window.RAC || {};
     ns.updateSyncBadge = function () {
         var el = ns.$('syncStatus');
         if (el) {
-            el.textContent = state.queue.length ? state.queue.length + ' cambio(s) pendiente(s) de sincronizar' : 'Sin cambios pendientes';
+            if (state.syncInFlight) {
+                el.textContent = 'Sincronizando cambios pendientes...';
+            } else if (state.queue.length) {
+                el.textContent = state.queue.length + ' cambio(s) pendiente(s) de sincronizar';
+            } else if (state.lastSyncAt) {
+                el.textContent = 'Última sync: ' + state.lastSyncAt;
+            } else {
+                el.textContent = 'Sin cambios pendientes';
+            }
         }
     };
 
     ns.flushQueue = async function () {
-        if (!navigator.onLine || !state.queue.length) {
+        if (state.syncInFlight || !navigator.onLine || !state.queue.length) {
             ns.updateSyncBadge();
             return;
         }
-        var pending = state.queue.slice();
+        state.syncInFlight = true;
+        state.syncError = '';
+        ns.updateSyncBadge();
+        var seen = {};
+        var pending = [];
+        state.queue.forEach(function (item) {
+            var key = item.type + '::' + JSON.stringify(item.payload || {});
+            if (seen[key]) return;
+            seen[key] = true;
+            pending.push(item);
+        });
         state.queue = [];
         ns.saveQueue();
         for (var i = 0; i < pending.length; i += 1) {
@@ -162,11 +182,17 @@ window.RAC = window.RAC || {};
                 await ns.api(pending[i].type, 'POST', pending[i].payload);
             } catch (e) {
                 state.queue.push(pending[i]);
+                state.syncError = e && e.message ? e.message : 'sync_failed';
             }
         }
         ns.saveQueue();
+        state.syncInFlight = false;
+        state.lastSyncAt = new Date().toLocaleString('es-CU');
         ns.updateSyncBadge();
         await ns.loadBootstrap();
+        if (state.syncError) {
+            ns.toast('Quedaron cambios pendientes de sincronizar.', 'error');
+        }
     };
 
     ns.loadBootstrap = async function () {
@@ -277,6 +303,17 @@ window.RAC = window.RAC || {};
             ns.toast(payload.active ? 'Producto reactivado.' : 'Producto desactivado.', 'success');
         } catch (e) {
             ns.toast('No fue posible cambiar el estado del producto.', 'error');
+        }
+    };
+
+    ns.saveIntegrationSettings = async function (payload) {
+        try {
+            await ns.api('integration_settings_update', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('integrationModalWrap');
+            ns.toast('Integraciones actualizadas.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible guardar las integraciones.', 'error');
         }
     };
 

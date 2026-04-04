@@ -62,6 +62,20 @@ window.RAC = window.RAC || {};
         wrap.innerHTML = '';
     };
 
+    ns.integrationField = function (key, label, value, type) {
+        return '<div class="field"><label>' + label + '</label><input class="input" type="' + (type || 'text') + '" value="' + ns.esc(value) + '" data-integration-field="' + key + '"></div>';
+    };
+
+    ns.openIntegrationModal = function () {
+        var s = state.integrationSettings || {};
+        ns.$('integrationModalWrap').innerHTML = '<div class="modal active"><header><h3>🔔 Integraciones RAC</h3><button class="close" data-close-modal="integrationModalWrap">×</button></header>'
+            + ns.integrationField('telegramBotToken', 'Telegram Bot Token', s.telegramBotToken || '')
+            + '<div class="field"><label>Gestor por defecto</label><input class="input" type="text" value="' + ns.esc((s.defaultGestorId || '') + ' · ' + (s.defaultGestorName || '')) + '" disabled></div>'
+            + ns.integrationField('defaultGestorChatId', 'Telegram Chat ID del gestor', s.defaultGestorChatId || '')
+            + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-integrations>💾 Guardar integraciones</button></div></div>';
+        ns.$('integrationModalWrap').classList.add('active');
+    };
+
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
         var isEdit = !!p.id;
@@ -227,7 +241,7 @@ window.RAC = window.RAC || {};
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(String(p.plan).toUpperCase()) + '</div></div><div class="money">' + ns.esc(p.total) + '</div></div></div>';
                 }).join('') + '</div></div></div><div class="card" style="margin-top:18px"><div class="item-title">Ranking de enlaces RAC</div><div class="list" style="margin-top:12px">' + state.linkRankings.slice(0, 8).map(function (link) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(link.product) + '</div><div class="sub">' + ns.esc(link.owner) + ' · Gestor ' + ns.esc(link.gestor) + ' · Ref ' + ns.esc(link.maskedRef) + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(link.gestorEarned || 0) + '</div><div class="sub">Gestor</div></div></div><div class="two-col" style="margin-top:12px"><div><div class="sub">Clics / Leads / Ventas</div><div class="money">' + ns.esc(link.clicks || 0) + ' / ' + ns.esc(link.leads || 0) + ' / ' + ns.esc(link.sold || 0) + '</div></div><div><div class="sub">CTR / Cierre</div><div class="money">' + ns.esc(link.ctr || 0) + '% / ' + ns.esc(link.closeRate || 0) + '%</div></div></div></div>';
-                }).join('') + '</div></div>';
+                }).join('') + '</div></div><div class="card" style="margin-top:18px"><div class="item-title">Estado de integraciones</div><div class="list" style="margin-top:12px"><div class="item"><div class="item-head"><div><div class="item-title">Telegram</div><div class="sub">Bot configurado: ' + (state.integrations.telegramConfigured ? 'sí' : 'no') + ' · Gestor: ' + ns.esc((state.integrationSettings.defaultGestorId || '') + ' · ' + (state.integrationSettings.defaultGestorName || '')) + '</div></div><div>' + ns.badge(state.integrations.telegramConfigured ? 'active' : 'pending') + '</div></div><div class="sub" style="margin-top:10px">Chat ID configurado: ' + (state.integrationSettings.defaultGestorChatId ? 'sí' : 'no') + '</div><div class="actions"><button class="btn ghost" data-open-integrations>⚙️ Configurar Telegram</button></div></div></div></div>';
         } else if (state.adminTab === 'users') {
             body = '<div class="grid two"><div class="card"><div class="item-title">Dueños registrados</div><div class="list" style="margin-top:12px">' + state.owners.map(function (owner) {
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(owner.owner_name || owner.ownerName || owner.owner_code) + '</div><div class="sub">Plan ' + ns.esc(owner.subscriptionPlan || 'basic') + ' · Riesgo ' + ns.esc(owner.fraudRisk || 'BAJO') + '</div></div>' + ns.badge(owner.status) + '</div></div>';

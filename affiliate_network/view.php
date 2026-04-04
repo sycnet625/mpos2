@@ -21,6 +21,7 @@
 <div id="affBackBtn" class="back-btn hidden"><button class="btn ghost" data-go-home><i class="fa-solid fa-arrow-left"></i> Inicio</button></div>
 <div id="productModalWrap" class="modal-backdrop"></div>
 <div id="linkModalWrap" class="modal-backdrop"></div>
+<div id="integrationModalWrap" class="modal-backdrop"></div>
 <script>
 (function(){
   const wishes=['🏠','🚗','🧀','🧺','🛋️','🧊','🍞','🥛','🍎','🍗','🪑','📺','🛏️','🚲','🧴','🍳','🥖','🫒','🍅','🧽','🪣','🚪','🪟','🧸','🛒','🧈','🥫','🫓','🍚','🧼'];
