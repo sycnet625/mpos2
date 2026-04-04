@@ -224,6 +224,9 @@
         var resetUserPasswordBtn = event.target.closest('[data-reset-user-password]');
         if (resetUserPasswordBtn) return ns.openPasswordModal('reset', resetUserPasswordBtn.getAttribute('data-reset-user-password'));
 
+        var deleteUserBtn = event.target.closest('[data-delete-user]');
+        if (deleteUserBtn) return ns.deleteUser(deleteUserBtn.getAttribute('data-delete-user'));
+
         var changePasswordBtn = event.target.closest('[data-change-password]');
         if (changePasswordBtn) {
             if ((state.passwordDraft.new_password || '') !== (state.passwordDraft.confirm_password || '')) {
@@ -323,10 +326,20 @@
             state.financeDraft[financeField.getAttribute('data-finance-field')] = financeField.value;
             return;
         }
+        var userFilterField = event.target.closest('[data-user-filter]');
+        if (userFilterField) {
+            state.userFilter[userFilterField.getAttribute('data-user-filter')] = userFilterField.value;
+            return ns.renderAdmin();
+        }
         if (event.target.id === 'gestorSearch') {
             state.gestorFilter.q = event.target.value;
             state.gestorFilter.page = 1;
             ns.renderGestor();
+            return;
+        }
+        if (event.target.id === 'userSearch') {
+            state.userFilter.q = event.target.value;
+            ns.renderAdmin();
         }
     });
 
@@ -361,6 +374,18 @@
     });
 
     window.addEventListener('offline', ns.updateNetBadge);
+
+    document.addEventListener('change', function (event) {
+        if (event.target.id !== 'racPaymentExtractFile' || !event.target.files || !event.target.files[0]) {
+            return;
+        }
+        var reader = new FileReader();
+        reader.onload = function (loadEvent) {
+            state.financeDraft.csv_text = String((loadEvent.target && loadEvent.target.result) || '');
+            ns.openFinanceModal();
+        };
+        reader.readAsText(event.target.files[0], 'UTF-8');
+    });
 
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {

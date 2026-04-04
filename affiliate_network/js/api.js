@@ -80,6 +80,8 @@ window.RAC = window.RAC || {};
             ownerAdminList: state.ownerAdminList,
             gestorAdminList: state.gestorAdminList,
             affiliateUsers: state.affiliateUsers,
+            userRoleSummary: state.userRoleSummary,
+            accessAudit: state.accessAudit,
             subscriptionMetrics: state.subscriptionMetrics,
             sponsoredProducts: state.sponsoredProducts,
             advancedAudit: state.advancedAudit,
@@ -432,6 +434,15 @@ window.RAC = window.RAC || {};
             ns.toast('Contraseña reseteada.', 'success');
         } catch (e) {
             ns.toast('No fue posible resetear la contraseña.', 'error');
+        }
+    };
+    ns.deleteUser = async function (id) {
+        try {
+            await ns.api('user_delete', 'POST', { id: id });
+            await ns.loadBootstrap();
+            ns.toast('Usuario eliminado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible eliminar el usuario.', 'error');
         }
     };
     ns.changeOwnPassword = async function (payload) {

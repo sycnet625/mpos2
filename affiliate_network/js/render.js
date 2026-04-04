@@ -171,6 +171,7 @@ window.RAC = window.RAC || {};
             ns.$('walletModalWrap').innerHTML = '<div class="modal active"><header><h3>📥 Importar extracto</h3><button class="close" data-close-modal="walletModalWrap">×</button></header>'
                 + '<div class="field"><label>Canal</label><select class="select" data-finance-field="payment_channel"><option value="Transfermóvil"' + (d.payment_channel === 'Transfermóvil' ? ' selected' : '') + '>Transfermóvil</option><option value="EnZona"' + (d.payment_channel === 'EnZona' ? ' selected' : '') + '>EnZona</option></select></div>'
                 + '<div class="field"><label>CSV pegado</label><textarea class="textarea" data-finance-field="csv_text" placeholder="reference_code,amount,payer_name,paid_at,note">' + ns.esc(d.csv_text || '') + '</textarea></div>'
+                + '<div class="field"><label>Archivo CSV</label><input class="input" type="file" id="racPaymentExtractFile" accept=".csv,text/csv,.txt"></div>'
                 + '<div class="sub" style="margin-bottom:12px">Formato esperado: referencia,monto,pagador,fecha,note</div>'
                 + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-payment-import>📥 Importar extracto</button></div></div>';
         } else {
@@ -354,6 +355,17 @@ window.RAC = window.RAC || {};
             var topProducts = state.products.slice().sort(function (a, b) { return Number(b.clicks) - Number(a.clicks); }).slice(0, 5);
             var topGestores = state.gestores.slice().sort(function (a, b) { return Number(b.earnings) - Number(a.earnings); }).slice(0, 5);
             var health = state.health || {};
+            var externalPayments = state.externalPayments || [];
+            var matchedPayments = externalPayments.filter(function (payment) { return payment.status === 'matched'; }).length;
+            var unmatchedPayments = externalPayments.filter(function (payment) { return payment.status === 'unmatched'; }).length;
+            var pendingPayments = externalPayments.filter(function (payment) { return payment.status === 'pending'; }).length;
+            var matchRate = externalPayments.length ? (((matchedPayments / externalPayments.length) * 100).toFixed(1) + '%') : '0.0%';
+            var byChannel = {};
+            externalPayments.forEach(function (payment) {
+                var channel = payment.paymentChannel || 'Sin canal';
+                byChannel[channel] = (byChannel[channel] || 0) + 1;
+            });
+            var topChannel = Object.keys(byChannel).sort(function (a, b) { return byChannel[b] - byChannel[a]; })[0] || 'Sin datos';
             var healthOutput = (health.output || []).slice(0, 8);
             var healthJournal = ((health.service && health.service.journal) || []).slice(0, 8);
             body = '<div class="grid kpis">'
@@ -361,6 +373,10 @@ window.RAC = window.RAC || {};
                 + ns.kpi('✨', 'Revenue LAG', ns.formatCUP(state.summary.revenue), 'Plataforma', '#ff8c00')
                 + ns.kpi('🏪', 'Dueños activos', String(state.summary.ownersActive), 'Tiendas visibles', '#ff4500')
                 + ns.kpi('🤝', 'Gestores activos', String(state.summary.gestoresActive), 'Red comercial', '#ffd700')
+                + ns.kpi('🏦', 'Pagos externos', String(externalPayments.length), 'Extracto + webhook', '#ffd700')
+                + ns.kpi('🎯', 'Match rate', matchRate, matchedPayments + ' conciliados', '#28a745')
+                + ns.kpi('🕓', 'Pendientes match', String(pendingPayments + unmatchedPayments), 'Pendientes o sin casar', '#ef5350')
+                + ns.kpi('🏷️', 'Canal líder', topChannel, String(byChannel[topChannel] || 0) + ' pagos', '#ff8c00')
                 + '</div><div class="actions" style="margin:12px 0 18px"><a class="btn ghost" href="/affiliate_network_api.php?action=export_leads">⬇️ Exportar leads CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_wallet">⬇️ Exportar wallet CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_rankings">⬇️ Exportar rankings CSV</a><a class="btn ghost" href="/affiliate_network_health.php" target="_blank" rel="noopener">🩺 Ver health JSON</a></div><div class="grid kpis">'
                 + ns.kpi('🩺', 'Health general', health.ok === true ? 'OK' : (health.ok === false ? 'FAIL' : 'N/D'), health.timestamp || 'Sin ejecución', health.ok === true ? '#28a745' : '#ef5350')
                 + ns.kpi('⏱️', 'Timer activo', health.timer && health.timer.active ? 'Sí' : 'No', health.timer && health.timer.next ? ('Próximo ' + health.timer.next) : 'Sin próxima ejecución', health.timer && health.timer.active ? '#ffd700' : '#ef5350')
@@ -408,7 +424,7 @@ window.RAC = window.RAC || {};
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(evt.eventType) + '</div><div class="sub">' + ns.esc(evt.message) + '</div></div><div class="sub">' + ns.esc(evt.createdAt) + '</div></div><div class="sub" style="margin-top:8px">' + ns.esc([ctx.username, ctx.role, ctx.user_id, ctx.masked_code].filter(Boolean).join(' · ')) + '</div></div>';
             }).join('') + '</div></div></div>';
         } else if (state.adminTab === 'transactions') {
-            body = '<div class="section-title"><h3>Transacciones RAC</h3><div class="actions"><button class="btn ghost" data-open-payment-import>📥 Importar extracto</button><button class="btn ghost" data-open-finance-reconcile>🔗 Conciliar pago</button><button class="btn ghost" data-run-auto-reconcile>⚡ Conciliar lote</button><button class="btn ghost" data-open-billing-charge>🧾 Nuevo cargo</button><button class="btn ghost" data-generate-billing>⚙️ Generar cargos</button></div></div><div class="list">' + state.leads.map(function (lead) {
+            body = '<div class="section-title"><h3>Transacciones RAC</h3><div class="actions"><button class="btn ghost" data-open-payment-import>📥 Importar extracto</button><button class="btn ghost" data-open-finance-reconcile>🔗 Conciliar pago</button><button class="btn ghost" data-run-auto-reconcile>⚡ Conciliar lote</button><button class="btn ghost" data-open-billing-charge>🧾 Nuevo cargo</button><button class="btn ghost" data-generate-billing>⚙️ Generar cargos</button></div></div><div class="grid kpis">' + ns.kpi('🏦', 'Pagos importados', String((state.externalPayments || []).length), 'Webhook + CSV', '#ffd700') + ns.kpi('✅', 'Conciliados', String((state.externalPayments || []).filter(function (item) { return item.status === 'matched'; }).length), 'Con referencia válida', '#28a745') + ns.kpi('🕓', 'Pendientes', String((state.externalPayments || []).filter(function (item) { return item.status === 'pending'; }).length), 'Esperando match', '#ff8c00') + ns.kpi('⚠️', 'Sin casar', String((state.externalPayments || []).filter(function (item) { return item.status === 'unmatched'; }).length), 'Revisión manual', '#ef5350') + '</div><div class="list">' + state.leads.map(function (lead) {
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · Gestor ' + ns.esc(lead.gestorId) + ' · ' + ns.esc(lead.date) + '</div></div><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="text-align:right"><div class="sub">Comision total</div><div class="money">' + ns.formatCUP(lead.commission) + '</div></div><div style="text-align:right"><div class="sub">Plataforma</div><div class="money">' + ns.formatCUP(lead.platformShare || 0) + '</div></div>' + ns.badge(lead.status) + '</div></div><div class="actions"><button class="btn ghost" data-open-flow="' + ns.esc(lead.id) + '">🧾 Ver flujo</button></div></div>';
             }).join('') + '</div><div class="grid two"><div class="card" style="margin-top:18px"><div class="item-title">Recargas pendientes</div><div class="list" style="margin-top:12px">' + ((state.walletTopups || []).filter(function (t) { return t.status === 'pending'; })).map(function (t) {
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(t.ownerCode + ' · ' + t.ownerName) + '</div><div class="sub">' + ns.esc(t.paymentMethod) + ' · Ref ' + ns.esc(t.referenceCode) + ' · ' + ns.esc(t.createdAt) + '</div></div><div class="money">' + ns.formatCUP(t.amount) + '</div></div><div class="actions"><button class="btn primary" data-topup-review="' + ns.esc(t.id) + '" data-decision="approved">✓ Aprobar</button><button class="btn ghost" data-topup-review="' + ns.esc(t.id) + '" data-decision="rejected">✗ Rechazar</button></div></div>';
