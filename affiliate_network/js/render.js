@@ -108,6 +108,41 @@ window.RAC = window.RAC || {};
         ns.$('entityModalWrap').classList.add('active');
     };
 
+    ns.openUserModal = function () {
+        var d = state.userDraft;
+        ns.$('entityModalWrap').innerHTML = '<div class="modal active"><header><h3>👤 Usuario RAC</h3><button class="close" data-close-modal="entityModalWrap">×</button></header>'
+            + '<div class="field"><label>Usuario</label><input class="input" data-user-field="username" value="' + ns.esc(d.username) + '"></div>'
+            + '<div class="field"><label>Nombre visible</label><input class="input" data-user-field="display_name" value="' + ns.esc(d.display_name) + '"></div>'
+            + '<div class="field"><label>Rol</label><select class="select" data-user-field="role"><option value="admin"' + (d.role === 'admin' ? ' selected' : '') + '>admin</option><option value="owner"' + (d.role === 'owner' ? ' selected' : '') + '>owner</option><option value="gestor"' + (d.role === 'gestor' ? ' selected' : '') + '>gestor</option></select></div>'
+            + '<div class="field"><label>Dueño asociado</label><select class="select" data-user-field="owner_id"><option value="">-- ninguno --</option>' + (state.ownerAdminList || []).map(function (owner) {
+                return '<option value="' + ns.esc(owner.id) + '"' + (String(d.owner_id || '') === String(owner.id) ? ' selected' : '') + '>' + ns.esc((owner.ownerCode || '') + ' · ' + (owner.ownerName || '')) + '</option>';
+            }).join('') + '</select></div>'
+            + '<div class="field"><label>Gestor asociado</label><select class="select" data-user-field="gestor_id"><option value="">-- ninguno --</option>' + (state.gestorAdminList || []).map(function (gestor) {
+                return '<option value="' + ns.esc(gestor.id) + '"' + (String(d.gestor_id || '') === String(gestor.id) ? ' selected' : '') + '>' + ns.esc((gestor.id || '') + ' · ' + (gestor.name || '')) + '</option>';
+            }).join('') + '</select></div>'
+            + '<div class="field"><label>Estado</label><select class="select" data-user-field="status"><option value="active"' + (d.status === 'active' ? ' selected' : '') + '>active</option><option value="suspended"' + (d.status === 'suspended' ? ' selected' : '') + '>suspended</option></select></div>'
+            + '<div class="field"><label>' + (d.id ? 'Nueva contraseña opcional' : 'Contraseña inicial') + '</label><input class="input" type="password" data-user-field="password" value=""></div>'
+            + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-user>💾 Guardar usuario</button></div></div>';
+        ns.$('entityModalWrap').classList.add('active');
+    };
+
+    ns.openPasswordModal = function (mode, targetUserId) {
+        if (mode === 'reset') {
+            state.passwordDraft = { current_password: '', new_password: '', confirm_password: '', target_user_id: targetUserId || 0, reset_password: '' };
+            ns.$('authModalWrap').innerHTML = '<div class="modal active"><header><h3>🔐 Resetear contraseña</h3><button class="close" data-close-modal="authModalWrap">×</button></header>'
+                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="reset_password" value=""></div>'
+                + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-user-password-reset>🔁 Resetear contraseña</button></div></div>';
+        } else {
+            state.passwordDraft = { current_password: '', new_password: '', confirm_password: '', target_user_id: 0, reset_password: '' };
+            ns.$('authModalWrap').innerHTML = '<div class="modal active"><header><h3>🔑 Cambiar contraseña</h3><button class="close" data-close-modal="authModalWrap">×</button></header>'
+                + '<div class="field"><label>Contraseña actual</label><input class="input" type="password" data-password-field="current_password" value=""></div>'
+                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="new_password" value=""></div>'
+                + '<div class="field"><label>Confirmar nueva contraseña</label><input class="input" type="password" data-password-field="confirm_password" value=""></div>'
+                + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-change-password>💾 Cambiar contraseña</button></div></div>';
+        }
+        ns.$('authModalWrap').classList.add('active');
+    };
+
     ns.openTopupModal = function () {
         var d = state.topupDraft;
         ns.$('walletModalWrap').innerHTML = '<div class="modal active"><header><h3>💳 Solicitar recarga</h3><button class="close" data-close-modal="walletModalWrap">×</button></header>'
@@ -116,6 +151,36 @@ window.RAC = window.RAC || {};
             + '<div class="field"><label>Referencia</label><input class="input" data-topup-field="reference_code" value="' + ns.esc(d.reference_code) + '"></div>'
             + '<div class="field"><label>Nota</label><input class="input" data-topup-field="note" value="' + ns.esc(d.note) + '"></div>'
             + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-topup>📨 Enviar solicitud</button></div></div>';
+        ns.$('walletModalWrap').classList.add('active');
+    };
+
+    ns.openFinanceModal = function () {
+        var d = state.financeDraft;
+        if (d.mode === 'charge') {
+            ns.$('walletModalWrap').innerHTML = '<div class="modal active"><header><h3>🧾 Crear cargo RAC</h3><button class="close" data-close-modal="walletModalWrap">×</button></header>'
+                + '<div class="field"><label>Dueño</label><select class="select" data-finance-field="owner_id"><option value="">-- seleccionar --</option>' + (state.ownerAdminList || []).map(function (owner) {
+                    return '<option value="' + ns.esc(owner.id) + '"' + (String(d.owner_id || '') === String(owner.id) ? ' selected' : '') + '>' + ns.esc((owner.ownerCode || '') + ' · ' + (owner.ownerName || '')) + '</option>';
+                }).join('') + '</select></div>'
+                + '<div class="field"><label>Tipo</label><select class="select" data-finance-field="charge_type"><option value="subscription"' + (d.charge_type === 'subscription' ? ' selected' : '') + '>subscription</option><option value="advertising"' + (d.charge_type === 'advertising' ? ' selected' : '') + '>advertising</option></select></div>'
+                + '<div class="field"><label>Monto</label><input class="input" type="number" data-finance-field="amount" value="' + ns.esc(d.amount) + '"></div>'
+                + '<div class="field"><label>Referencia</label><input class="input" data-finance-field="reference_code" value="' + ns.esc(d.reference_code) + '"></div>'
+                + '<div class="field"><label>Vence</label><input class="input" data-finance-field="due_at" value="' + ns.esc(d.due_at) + '"></div>'
+                + '<div class="field"><label>Nota</label><input class="input" data-finance-field="note" value="' + ns.esc(d.note) + '"></div>'
+                + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-billing-charge>💾 Crear cargo</button></div></div>';
+        } else if (d.mode === 'import') {
+            ns.$('walletModalWrap').innerHTML = '<div class="modal active"><header><h3>📥 Importar extracto</h3><button class="close" data-close-modal="walletModalWrap">×</button></header>'
+                + '<div class="field"><label>Canal</label><select class="select" data-finance-field="payment_channel"><option value="Transfermóvil"' + (d.payment_channel === 'Transfermóvil' ? ' selected' : '') + '>Transfermóvil</option><option value="EnZona"' + (d.payment_channel === 'EnZona' ? ' selected' : '') + '>EnZona</option></select></div>'
+                + '<div class="field"><label>CSV pegado</label><textarea class="textarea" data-finance-field="csv_text" placeholder="reference_code,amount,payer_name,paid_at,note">' + ns.esc(d.csv_text || '') + '</textarea></div>'
+                + '<div class="sub" style="margin-bottom:12px">Formato esperado: referencia,monto,pagador,fecha,note</div>'
+                + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-payment-import>📥 Importar extracto</button></div></div>';
+        } else {
+            ns.$('walletModalWrap').innerHTML = '<div class="modal active"><header><h3>🔗 Conciliar pago por referencia</h3><button class="close" data-close-modal="walletModalWrap">×</button></header>'
+                + '<div class="field"><label>Canal</label><select class="select" data-finance-field="payment_channel"><option value="Transfermóvil"' + (d.payment_channel === 'Transfermóvil' ? ' selected' : '') + '>Transfermóvil</option><option value="EnZona"' + (d.payment_channel === 'EnZona' ? ' selected' : '') + '>EnZona</option></select></div>'
+                + '<div class="field"><label>Referencia</label><input class="input" data-finance-field="reference_code" value="' + ns.esc(d.reference_code) + '"></div>'
+                + '<div class="field"><label>Monto</label><input class="input" type="number" data-finance-field="amount" value="' + ns.esc(d.amount) + '"></div>'
+                + '<div class="field"><label>Nota</label><input class="input" data-finance-field="note" value="' + ns.esc(d.note) + '"></div>'
+                + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-payment-reconcile>✅ Conciliar</button></div></div>';
+        }
         ns.$('walletModalWrap').classList.add('active');
     };
 
@@ -209,6 +274,7 @@ window.RAC = window.RAC || {};
                 }).join('') + '</div>' + ns.pager('ownerLead', leadPage.current, leadPage.total);
         } else {
             var ownerTopups = (state.walletTopups || []).filter(function (t) { return t.ownerCode === state.owner.code; });
+            var ownerCharges = (state.billingCharges || []).filter(function (c) { return c.ownerCode === state.owner.code; });
             body = '<div class="grid kpis">'
                 + ns.kpi('💳', 'Disponible', ns.formatCUP(state.owner.wallet.available), 'Visible al marketplace', '#ffd700')
                 + ns.kpi('🔒', 'Bloqueado', ns.formatCUP(state.owner.wallet.blocked), 'Garantia retenida', '#ff8c00')
@@ -218,6 +284,10 @@ window.RAC = window.RAC || {};
                 + (ownerTopups.length ? ownerTopups.map(function (t) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.formatCUP(t.amount) + ' · ' + ns.esc(t.paymentMethod) + '</div><div class="sub">' + ns.esc(t.referenceCode) + ' · ' + ns.esc(t.createdAt) + '</div></div><div>' + ns.badge(t.status === 'approved' ? 'active' : (t.status === 'rejected' ? 'no_sale' : 'pending')) + '</div></div></div>';
                 }).join('') : '<div class="item"><div class="sub">No hay recargas registradas.</div></div>')
+                + '</div><div class="section-title"><h3>Cobros RAC</h3></div><div class="list">'
+                + (ownerCharges.length ? ownerCharges.map(function (c) {
+                    return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(c.chargeType) + ' · ' + ns.esc(c.referenceCode) + '</div><div class="sub">' + ns.esc(c.note || '') + ' · Vence ' + ns.esc(c.dueAt || 'N/D') + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(c.amount) + '</div>' + ns.badge(c.status === 'paid' ? 'active' : 'pending') + '</div></div></div>';
+                }).join('') : '<div class="item"><div class="sub">Sin cargos pendientes o pagados para este dueño.</div></div>')
                 + '</div><div class="grid two"><div class="card"><div class="item-title">Conciliacion del ledger</div><div class="list" style="margin-top:12px"><div class="item"><div class="item-head"><div><div class="item-title">Disponible calculado</div></div><div class="money">' + ns.formatCUP(state.walletReconciliation.calculatedAvailable) + '</div></div></div><div class="item"><div class="item-head"><div><div class="item-title">Bloqueado calculado</div></div><div class="money">' + ns.formatCUP(state.walletReconciliation.calculatedBlocked) + '</div></div></div><div class="item"><div class="item-head"><div><div class="item-title">Descuadre disponible</div></div><div class="money">' + ns.formatCUP(state.walletReconciliation.availableMismatch) + '</div></div></div><div class="item"><div class="item-head"><div><div class="item-title">Descuadre bloqueado</div></div><div class="money">' + ns.formatCUP(state.walletReconciliation.blockedMismatch) + '</div></div></div></div><div class="sub" style="margin-top:12px">' + (state.walletReconciliation.ok ? 'Ledger conciliado.' : 'Hay diferencias entre saldo calculado y saldo persistido.') + '</div></div><div class="card"><div class="item-title">Estado operativo</div><div class="list" style="margin-top:12px"><div class="item"><div class="item-head"><div><div class="item-title">Garantias vencidas liberadas</div></div><div class="money">' + ns.esc(state.summary.expiredHolds || 0) + '</div></div></div><div class="item"><div class="item-head"><div><div class="item-title">Riesgo actual</div></div><div>' + ns.badge(state.owner.fraudRisk === 'BAJO' ? 'active' : 'pending') + '</div></div></div></div></div></div><div class="section-title"><h3>Movimientos de wallet</h3></div><div class="list">'
                 + state.walletMovements.map(function (m) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(ns.movementLabel(m.movementType)) + '</div><div class="sub">' + ns.esc(m.note || '') + ' · ' + ns.esc(m.createdAt) + '</div></div><div class="money">' + ns.formatCUP(m.amount) + '</div></div></div>';
@@ -318,13 +388,21 @@ window.RAC = window.RAC || {};
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(owner.ownerName || owner.ownerCode) + '</div><div class="sub">' + ns.esc(owner.ownerCode) + ' · Plan ' + ns.esc(owner.subscriptionPlan || 'basic') + ' · Fee ' + ns.formatCUP(owner.monthlyFee || 0) + '</div></div><div style="text-align:right"><div>' + ns.badge(owner.status) + '</div><div class="sub">Ads ' + (Number(owner.adsActive || 0) === 1 ? 'sí' : 'no') + '</div></div></div><div class="actions"><button class="btn ghost" data-edit-owner="' + ns.esc(owner.id) + '">🛠️ Editar</button></div></div>';
             }).join('') + '</div></div><div class="card"><div class="section-title"><h3>Gestores</h3><button class="btn primary" data-open-gestor-new>+ Gestor</button></div><div class="list" style="margin-top:12px">' + (state.gestorAdminList || []).map(function (g) {
                 return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(g.name) + '</div><div class="sub">' + ns.esc(g.id) + ' · Links ' + ns.esc(g.links) + ' · Rep ' + ns.esc(g.reputationScore) + '</div></div><div class="money">' + ns.formatCUP(g.earnings) + '</div></div><div class="actions"><button class="btn ghost" data-edit-gestor="' + ns.esc(g.id) + '">🛠️ Editar</button></div></div>';
-            }).join('') + '</div></div></div>';
-        } else if (state.adminTab === 'transactions') {
-            body = '<div class="section-title"><h3>Transacciones RAC</h3></div><div class="list">' + state.leads.map(function (lead) {
-                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · Gestor ' + ns.esc(lead.gestorId) + ' · ' + ns.esc(lead.date) + '</div></div><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="text-align:right"><div class="sub">Comision total</div><div class="money">' + ns.formatCUP(lead.commission) + '</div></div><div style="text-align:right"><div class="sub">Plataforma</div><div class="money">' + ns.formatCUP(lead.platformShare || 0) + '</div></div>' + ns.badge(lead.status) + '</div></div><div class="actions"><button class="btn ghost" data-open-flow="' + ns.esc(lead.id) + '">🧾 Ver flujo</button></div></div>';
-            }).join('') + '</div><div class="card" style="margin-top:18px"><div class="item-title">Recargas pendientes</div><div class="list" style="margin-top:12px">' + ((state.walletTopups || []).filter(function (t) { return t.status === 'pending'; })).map(function (t) {
-                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(t.ownerCode + ' · ' + t.ownerName) + '</div><div class="sub">' + ns.esc(t.paymentMethod) + ' · Ref ' + ns.esc(t.referenceCode) + ' · ' + ns.esc(t.createdAt) + '</div></div><div class="money">' + ns.formatCUP(t.amount) + '</div></div><div class="actions"><button class="btn primary" data-topup-review="' + ns.esc(t.id) + '" data-decision="approved">✓ Aprobar</button><button class="btn ghost" data-topup-review="' + ns.esc(t.id) + '" data-decision="rejected">✗ Rechazar</button></div></div>';
+            }).join('') + '</div></div></div><div class="card" style="margin-top:18px"><div class="section-title"><h3>Usuarios RAC</h3><button class="btn primary" data-open-user-new>+ Usuario</button></div><div class="list" style="margin-top:12px">' + (state.affiliateUsers || []).map(function (u) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(u.displayName || u.username) + '</div><div class="sub">' + ns.esc(u.username) + ' · Rol ' + ns.esc(u.role) + (u.ownerCode ? ' · ' + ns.esc(u.ownerCode) : '') + (u.gestorId ? ' · ' + ns.esc(u.gestorId) : '') + '</div></div><div>' + ns.badge(u.status) + '</div></div><div class="actions"><button class="btn ghost" data-edit-user="' + ns.esc(u.id) + '">🛠️ Editar</button><button class="btn ghost" data-reset-user-password="' + ns.esc(u.id) + '">🔐 Reset pass</button></div></div>';
             }).join('') + '</div></div>';
+        } else if (state.adminTab === 'transactions') {
+            body = '<div class="section-title"><h3>Transacciones RAC</h3><div class="actions"><button class="btn ghost" data-open-payment-import>📥 Importar extracto</button><button class="btn ghost" data-open-finance-reconcile>🔗 Conciliar pago</button><button class="btn ghost" data-run-auto-reconcile>⚡ Conciliar lote</button><button class="btn ghost" data-open-billing-charge>🧾 Nuevo cargo</button><button class="btn ghost" data-generate-billing>⚙️ Generar cargos</button></div></div><div class="list">' + state.leads.map(function (lead) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · Gestor ' + ns.esc(lead.gestorId) + ' · ' + ns.esc(lead.date) + '</div></div><div style="display:flex;gap:16px;flex-wrap:wrap"><div style="text-align:right"><div class="sub">Comision total</div><div class="money">' + ns.formatCUP(lead.commission) + '</div></div><div style="text-align:right"><div class="sub">Plataforma</div><div class="money">' + ns.formatCUP(lead.platformShare || 0) + '</div></div>' + ns.badge(lead.status) + '</div></div><div class="actions"><button class="btn ghost" data-open-flow="' + ns.esc(lead.id) + '">🧾 Ver flujo</button></div></div>';
+            }).join('') + '</div><div class="grid two"><div class="card" style="margin-top:18px"><div class="item-title">Recargas pendientes</div><div class="list" style="margin-top:12px">' + ((state.walletTopups || []).filter(function (t) { return t.status === 'pending'; })).map(function (t) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(t.ownerCode + ' · ' + t.ownerName) + '</div><div class="sub">' + ns.esc(t.paymentMethod) + ' · Ref ' + ns.esc(t.referenceCode) + ' · ' + ns.esc(t.createdAt) + '</div></div><div class="money">' + ns.formatCUP(t.amount) + '</div></div><div class="actions"><button class="btn primary" data-topup-review="' + ns.esc(t.id) + '" data-decision="approved">✓ Aprobar</button><button class="btn ghost" data-topup-review="' + ns.esc(t.id) + '" data-decision="rejected">✗ Rechazar</button></div></div>';
+            }).join('') + '</div></div><div class="card" style="margin-top:18px"><div class="item-title">Cobros RAC</div><div class="list" style="margin-top:12px">' + ((state.billingCharges || []).map(function (c) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(c.ownerCode + ' · ' + c.chargeType) + '</div><div class="sub">Ref ' + ns.esc(c.referenceCode) + ' · Vence ' + ns.esc(c.dueAt || 'N/D') + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(c.amount) + '</div>' + ns.badge(c.status === 'paid' ? 'active' : 'pending') + '</div></div></div>';
+            }).join('')) + '</div></div></div><div class="card" style="margin-top:18px"><div class="item-title">Pagos externos recibidos</div><div class="list" style="margin-top:12px">' + ((state.externalPayments || []).map(function (p) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(p.referenceCode) + '</div><div class="sub">' + ns.esc(p.paymentChannel) + ' · ' + ns.esc(p.sourceType) + ' · ' + ns.esc(p.paidAt || p.createdAt) + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(p.amount) + '</div>' + ns.badge(p.status === 'matched' ? 'active' : (p.status === 'unmatched' ? 'no_sale' : 'pending')) + '</div></div></div>';
+            }).join('')) + '</div></div><div class="card" style="margin-top:18px"><div class="item-title">Conciliaciones recientes</div><div class="list" style="margin-top:12px">' + ((state.paymentReconciliations || []).map(function (r) {
+                return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(r.referenceCode) + '</div><div class="sub">' + ns.esc(r.paymentChannel) + ' · ' + ns.esc(r.targetType) + ' · ' + ns.esc(r.createdAt) + '</div></div><div class="money">' + ns.formatCUP(r.amount) + '</div></div></div>';
+            }).join('')) + '</div></div>';
         } else {
             body = '<div class="section-title"><h3>Monitor de auditoria</h3></div><div class="list">' + state.alerts.map(function (a) {
                 return '<div class="item" style="border-color:' + ns.esc(a.color) + '40;background:' + ns.esc(a.color) + '10"><div class="item-head"><div><div class="item-title">' + ns.esc(a.dueno) + '</div><div class="sub">' + ns.esc(a.metric) + ' · Riesgo ' + ns.esc(a.risk) + '</div></div><div>' + ns.badge(a.type === 'inactive' ? 'pending' : 'no_sale') + '</div></div><div class="sub" style="margin-top:10px">' + (a.type === 'fraud' ? 'El dueño esta bajo vigilancia por baja conversion frente al volumen de leads.' : 'El dueño no tiene saldo suficiente o fue suspendido.') + '</div></div>';

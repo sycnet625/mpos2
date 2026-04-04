@@ -1,7 +1,8 @@
 window.RAC = window.RAC || {};
 (function (ns) {
+    var initialRole = ((document.querySelector('meta[name="rac-initial-role"]') || {}).content || 'admin');
     ns.state = {
-        role: 'dueno',
+        role: initialRole,
         ownerTab: 'dashboard',
         gestorTab: 'marketplace',
         adminTab: 'dashboard',
@@ -30,8 +31,12 @@ window.RAC = window.RAC || {};
         pricingSuggestions: [],
         marketInsights: { zones: [], categories: [], plans: [] },
         walletTopups: [],
+        billingCharges: [],
+        paymentReconciliations: [],
+        externalPayments: [],
         ownerAdminList: [],
         gestorAdminList: [],
+        affiliateUsers: [],
         subscriptionMetrics: { expectedMrr: 0, overdueOwners: 0, managedOwners: 0, adsActiveOwners: 0, pendingTopups: 0 },
         sponsoredProducts: [],
         advancedAudit: { owners: [], gestores: [] },
@@ -45,6 +50,9 @@ window.RAC = window.RAC || {};
         ownerDraft: { id: 0, owner_code: '', owner_name: '', phone: '', whatsapp_number: '', geo_zone: '', subscription_plan: 'basic', managed_service: 0, monthly_fee: '', subscription_due_at: '', advertising_budget: '', ads_active: 0, status: 'active' },
         gestorDraft: { id: '', name: '', phone: '', telegram_chat_id: '', masked_code: '', status: 'active' },
         topupDraft: { amount: '', payment_method: 'Transfermóvil', reference_code: '', note: '' },
+        userDraft: { id: 0, username: '', display_name: '', role: 'owner', owner_id: '', gestor_id: '', status: 'active', password: '' },
+        passwordDraft: { current_password: '', new_password: '', confirm_password: '', target_user_id: 0, reset_password: '' },
+        financeDraft: { mode: 'reconcile', payment_channel: 'Transfermóvil', reference_code: '', amount: '', note: '', owner_id: '', charge_type: 'subscription', due_at: '', csv_text: '' },
         summary: { volumeTotal: 0, revenue: 0, ownersActive: 0, gestoresActive: 0, leadsToday: 0, salesToday: 0 },
         queue: [],
         cacheKey: 'rac_affiliate_cache_v4',

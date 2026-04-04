@@ -7,6 +7,92 @@ if (!defined('AFF_DEFAULT_GESTOR')) {
     define('AFF_DEFAULT_GESTOR', 'G001');
 }
 
+function aff_session_start_if_needed(): void {
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
+}
+
+function aff_auth_context(): array {
+    aff_session_start_if_needed();
+    if (!empty($_SESSION['admin_logged_in'])) {
+        return [
+            'authenticated' => true,
+            'user_id' => null,
+            'role' => 'admin',
+            'username' => 'erp_admin',
+            'display_name' => 'ERP Admin',
+            'owner_id' => null,
+            'gestor_id' => null,
+            'source' => 'erp_admin',
+        ];
+    }
+    $auth = $_SESSION['affiliate_auth'] ?? null;
+    if (!is_array($auth) || empty($auth['authenticated'])) {
+        return [
+            'authenticated' => false,
+            'user_id' => null,
+            'role' => '',
+            'username' => '',
+            'display_name' => '',
+            'owner_id' => null,
+            'gestor_id' => null,
+            'source' => 'none',
+        ];
+    }
+    return [
+        'authenticated' => true,
+        'user_id' => isset($auth['user_id']) ? (int)$auth['user_id'] : null,
+        'role' => (string)($auth['role'] ?? ''),
+        'username' => (string)($auth['username'] ?? ''),
+        'display_name' => (string)($auth['display_name'] ?? ''),
+        'owner_id' => isset($auth['owner_id']) ? (int)$auth['owner_id'] : null,
+        'gestor_id' => isset($auth['gestor_id']) ? (string)$auth['gestor_id'] : null,
+        'source' => 'rac',
+    ];
+}
+
+function aff_is_authenticated(): bool {
+    return aff_auth_context()['authenticated'] === true;
+}
+
+function aff_auth_role(): string {
+    return (string)aff_auth_context()['role'];
+}
+
+function aff_role_allowed(array $roles): bool {
+    $ctx = aff_auth_context();
+    if (!$ctx['authenticated']) {
+        return false;
+    }
+    return in_array($ctx['role'], $roles, true);
+}
+
+function aff_allowed_ui_roles(): array {
+    $role = aff_auth_role();
+    if ($role === 'admin') {
+        return ['dueno', 'gestor', 'admin'];
+    }
+    if ($role === 'owner') {
+        return ['dueno'];
+    }
+    if ($role === 'gestor') {
+        return ['gestor'];
+    }
+    return [];
+}
+
+function aff_ui_role_from_auth(): string {
+    $role = aff_auth_role();
+    if ($role === 'owner') {
+        return 'dueno';
+    }
+    if ($role === 'gestor') {
+        return 'gestor';
+    }
+    return 'admin';
+}
+
 function aff_now(): string {
     return date('Y-m-d H:i:s');
 }
@@ -85,6 +171,18 @@ function aff_table_exists(PDO $pdo, string $table): bool {
 }
 
 function aff_ensure_tables(PDO $pdo): void {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(80) NOT NULL UNIQUE,
+        password_hash VARCHAR(255) NOT NULL,
+        role ENUM('admin','owner','gestor') NOT NULL,
+        display_name VARCHAR(120) NOT NULL,
+        owner_id INT NULL,
+        gestor_id VARCHAR(20) NULL,
+        status ENUM('active','suspended') NOT NULL DEFAULT 'active',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_owners (
         id INT AUTO_INCREMENT PRIMARY KEY,
         owner_code VARCHAR(20) NOT NULL UNIQUE,
@@ -223,6 +321,53 @@ function aff_ensure_tables(PDO $pdo): void {
         CONSTRAINT fk_aff_topup_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_billing_charges (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NOT NULL,
+        charge_type VARCHAR(30) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        reference_code VARCHAR(120) NOT NULL UNIQUE,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        note VARCHAR(255) NULL,
+        due_at DATETIME NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        paid_at DATETIME NULL,
+        settled_by VARCHAR(80) NULL,
+        CONSTRAINT fk_aff_charge_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_payment_reconciliations (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NULL,
+        payment_channel VARCHAR(40) NOT NULL,
+        reference_code VARCHAR(120) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        target_type VARCHAR(30) NOT NULL,
+        target_id BIGINT NOT NULL DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'matched',
+        note VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_external_payments (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        owner_id INT NULL,
+        payment_channel VARCHAR(40) NOT NULL,
+        reference_code VARCHAR(120) NOT NULL,
+        amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+        payer_name VARCHAR(120) NULL,
+        raw_payload_json JSON NULL,
+        source_type VARCHAR(20) NOT NULL DEFAULT 'extract',
+        matched_target_type VARCHAR(30) NULL,
+        matched_target_id BIGINT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        note VARCHAR(255) NULL,
+        paid_at DATETIME NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_aff_external_payment_owner FOREIGN KEY (owner_id) REFERENCES affiliate_owners(id) ON DELETE SET NULL,
+        UNIQUE KEY uniq_aff_external_payment_ref (reference_code, amount, payment_channel)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_audit_events (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         owner_id INT NULL,
@@ -351,12 +496,40 @@ function aff_seed_demo_data(PDO $pdo): void {
         $stTopup->execute([$ownerMap['D-0055'], 2200, 'Transfermóvil', 'TM-1002', 'rejected', 'Referencia inválida', date('Y-m-d H:i:s', strtotime('-1 day')), date('Y-m-d H:i:s', strtotime('-1 day +30 minutes')), 'admin']);
     }
 
+    if ((int)$pdo->query("SELECT COUNT(*) FROM affiliate_billing_charges")->fetchColumn() === 0) {
+        $stCharge = $pdo->prepare("INSERT INTO affiliate_billing_charges (owner_id, charge_type, amount, reference_code, status, note, due_at, created_at, paid_at, settled_by) VALUES (?,?,?,?,?,?,?,?,?,?)");
+        $stCharge->execute([$ownerMap['D-0078'], 'subscription', 4500, 'RAC-SUB-D0078-0001', 'pending', 'Cuota mensual managed', date('Y-m-d H:i:s', strtotime('+3 days')), date('Y-m-d H:i:s', strtotime('-2 days')), null, null]);
+        $stCharge->execute([$ownerMap['D-0042'], 'advertising', 2000, 'RAC-ADS-D0042-0001', 'paid', 'Campaña destacada RAC', date('Y-m-d H:i:s', strtotime('-5 days')), date('Y-m-d H:i:s', strtotime('-6 days')), date('Y-m-d H:i:s', strtotime('-5 days')), 'admin']);
+    }
+
+    if ((int)$pdo->query("SELECT COUNT(*) FROM affiliate_external_payments")->fetchColumn() === 0) {
+        $stExt = $pdo->prepare("INSERT IGNORE INTO affiliate_external_payments (owner_id, payment_channel, reference_code, amount, payer_name, raw_payload_json, source_type, status, note, paid_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)");
+        $stExt->execute([$ownerMap['D-0042'] ?? null, 'Transfermóvil', 'TM-1001', 5000, 'Cliente Demo', json_encode(['seed' => true]), 'extract', 'matched', 'Extracto demo conciliado', date('Y-m-d H:i:s', strtotime('-2 days')), date('Y-m-d H:i:s', strtotime('-2 days'))]);
+        $stExt->execute([$ownerMap['D-0078'] ?? null, 'Transfermóvil', 'RAC-SUB-D0078-0001', 4500, 'Electrónica Sur', json_encode(['seed' => true]), 'gateway', 'pending', 'Pendiente de conciliación', date('Y-m-d H:i:s', strtotime('-20 minutes')), date('Y-m-d H:i:s', strtotime('-20 minutes'))]);
+    }
+
+    if ((int)$pdo->query("SELECT COUNT(*) FROM affiliate_users")->fetchColumn() === 0) {
+        $hash = password_hash('123456', PASSWORD_DEFAULT);
+        $stUser = $pdo->prepare("INSERT INTO affiliate_users (username, password_hash, role, display_name, owner_id, gestor_id, status, created_at) VALUES (?,?,?,?,?,?,?,?)");
+        $stUser->execute(['racadmin', $hash, 'admin', 'Administrador RAC', null, null, 'active', aff_now()]);
+        $stUser->execute(['dueno.d0042', $hash, 'owner', 'ElectroHavana', $ownerMap['D-0042'] ?? null, null, 'active', aff_now()]);
+        $stUser->execute(['dueno.d0078', $hash, 'owner', 'Electrónica Sur', $ownerMap['D-0078'] ?? null, null, 'active', aff_now()]);
+        $stUser->execute(['gestor.g001', $hash, 'gestor', 'Carlos Méndez', null, 'G001', 'active', aff_now()]);
+        $stUser->execute(['gestor.g002', $hash, 'gestor', 'Lisandra Pérez', null, 'G002', 'active', aff_now()]);
+    }
+
     aff_refresh_audit_alerts($pdo);
 }
 
 function aff_owner(PDO $pdo): array {
-    $st = $pdo->prepare("SELECT * FROM affiliate_owners WHERE owner_code=? LIMIT 1");
-    $st->execute([AFF_OWNER_CODE]);
+    $ctx = aff_auth_context();
+    if (!empty($ctx['owner_id'])) {
+        $st = $pdo->prepare("SELECT * FROM affiliate_owners WHERE id=? LIMIT 1");
+        $st->execute([(int)$ctx['owner_id']]);
+    } else {
+        $st = $pdo->prepare("SELECT * FROM affiliate_owners WHERE owner_code=? LIMIT 1");
+        $st->execute([AFF_OWNER_CODE]);
+    }
     $row = $st->fetch();
     if (!$row) {
         throw new RuntimeException('owner_not_found');
@@ -563,8 +736,62 @@ function aff_trace_links_for_gestor(PDO $pdo, string $gestorId): array {
     return $rows;
 }
 
+function aff_current_gestor_id(PDO $pdo): string {
+    $ctx = aff_auth_context();
+    if (!empty($ctx['gestor_id'])) {
+        return (string)$ctx['gestor_id'];
+    }
+    $default = trim((string)aff_get_setting($pdo, 'default_gestor_id', AFF_DEFAULT_GESTOR));
+    return $default !== '' ? $default : AFF_DEFAULT_GESTOR;
+}
+
+function aff_login(PDO $pdo, string $username, string $password): array {
+    aff_session_start_if_needed();
+    $username = trim($username);
+    if ($username === '' || $password === '') {
+        throw new InvalidArgumentException('username_password_required');
+    }
+    $st = $pdo->prepare("SELECT id, username, password_hash, role, display_name, owner_id, gestor_id, status FROM affiliate_users WHERE username=? LIMIT 1");
+    $st->execute([$username]);
+    $user = $st->fetch();
+    if (!$user || (string)$user['status'] !== 'active' || !password_verify($password, (string)$user['password_hash'])) {
+        throw new RuntimeException('invalid_credentials');
+    }
+    $_SESSION['affiliate_auth'] = [
+        'authenticated' => true,
+        'user_id' => (int)$user['id'],
+        'username' => (string)$user['username'],
+        'display_name' => (string)$user['display_name'],
+        'role' => (string)$user['role'],
+        'owner_id' => $user['owner_id'] !== null ? (int)$user['owner_id'] : null,
+        'gestor_id' => $user['gestor_id'] !== null ? (string)$user['gestor_id'] : null,
+    ];
+    if (empty($_SESSION['affiliate_csrf_token'])) {
+        $_SESSION['affiliate_csrf_token'] = bin2hex(random_bytes(24));
+    }
+    aff_record_audit($pdo, [
+        'owner_id' => $user['owner_id'] !== null ? (int)$user['owner_id'] : null,
+        'gestor_id' => $user['gestor_id'] !== null ? (string)$user['gestor_id'] : null,
+        'event_type' => 'affiliate_login',
+        'severity' => 'info',
+        'message' => 'Inicio de sesión RAC',
+        'context' => ['username' => (string)$user['username'], 'role' => (string)$user['role']],
+    ]);
+    return aff_auth_context();
+}
+
+function aff_logout(): void {
+    aff_session_start_if_needed();
+    unset($_SESSION['affiliate_auth']);
+}
+
+function aff_current_user_id(): ?int {
+    $ctx = aff_auth_context();
+    return isset($ctx['user_id']) ? (int)$ctx['user_id'] : null;
+}
+
 function aff_integration_settings(PDO $pdo): array {
-    $defaultGestorId = AFF_DEFAULT_GESTOR;
+    $defaultGestorId = aff_current_gestor_id($pdo);
     $st = $pdo->prepare("SELECT id, name, telegram_chat_id FROM affiliate_gestores WHERE id=? LIMIT 1");
     $st->execute([$defaultGestorId]);
     $gestor = $st->fetch() ?: ['id' => $defaultGestorId, 'name' => $defaultGestorId, 'telegram_chat_id' => ''];
@@ -845,6 +1072,276 @@ function aff_wallet_topups(PDO $pdo): array {
     return $st->fetchAll();
 }
 
+function aff_billing_charges(PDO $pdo): array {
+    $st = $pdo->query("SELECT c.id, o.owner_code AS ownerCode, o.owner_name AS ownerName, c.charge_type AS chargeType, c.amount, c.reference_code AS referenceCode, c.status, c.note, c.due_at AS dueAt, c.created_at AS createdAt, c.paid_at AS paidAt, c.settled_by AS settledBy
+        FROM affiliate_billing_charges c
+        JOIN affiliate_owners o ON o.id=c.owner_id
+        ORDER BY FIELD(c.status,'pending','paid','cancelled'), c.id DESC
+        LIMIT 120");
+    return $st->fetchAll();
+}
+
+function aff_owner_billing_charges(PDO $pdo, int $ownerId): array {
+    $st = $pdo->prepare("SELECT c.id, o.owner_code AS ownerCode, o.owner_name AS ownerName, c.charge_type AS chargeType, c.amount, c.reference_code AS referenceCode, c.status, c.note, c.due_at AS dueAt, c.created_at AS createdAt, c.paid_at AS paidAt, c.settled_by AS settledBy
+        FROM affiliate_billing_charges c
+        JOIN affiliate_owners o ON o.id=c.owner_id
+        WHERE c.owner_id=?
+        ORDER BY c.id DESC
+        LIMIT 120");
+    $st->execute([$ownerId]);
+    return $st->fetchAll();
+}
+
+function aff_payment_reconciliations(PDO $pdo): array {
+    $st = $pdo->query("SELECT id, owner_id AS ownerId, payment_channel AS paymentChannel, reference_code AS referenceCode, amount, target_type AS targetType, target_id AS targetId, status, note, created_at AS createdAt
+        FROM affiliate_payment_reconciliations
+        ORDER BY id DESC
+        LIMIT 120");
+    return $st->fetchAll();
+}
+
+function aff_external_payments(PDO $pdo): array {
+    $st = $pdo->query("SELECT id, payment_channel AS paymentChannel, reference_code AS referenceCode, amount, payer_name AS payerName, source_type AS sourceType, matched_target_type AS matchedTargetType, matched_target_id AS matchedTargetId, status, note, paid_at AS paidAt, created_at AS createdAt
+        FROM affiliate_external_payments
+        ORDER BY FIELD(status,'pending','matched','unmatched','duplicate'), id DESC
+        LIMIT 150");
+    return $st->fetchAll();
+}
+
+function aff_store_external_payment(PDO $pdo, array $payload): array {
+    $channel = substr(trim((string)($payload['payment_channel'] ?? 'Transfermóvil')), 0, 40);
+    $reference = substr(trim((string)($payload['reference_code'] ?? '')), 0, 120);
+    $amount = round((float)($payload['amount'] ?? 0), 2);
+    $payer = substr(trim((string)($payload['payer_name'] ?? '')), 0, 120);
+    $sourceType = in_array((string)($payload['source_type'] ?? 'extract'), ['extract', 'gateway'], true) ? (string)$payload['source_type'] : 'extract';
+    $note = substr(trim((string)($payload['note'] ?? '')), 0, 255);
+    $paidAt = trim((string)($payload['paid_at'] ?? ''));
+    if ($reference === '' || $amount <= 0) {
+        throw new InvalidArgumentException('external_payment_fields_required');
+    }
+    $exists = $pdo->prepare("SELECT id, status, matched_target_type AS matchedTargetType, matched_target_id AS matchedTargetId FROM affiliate_external_payments WHERE reference_code=? AND amount=? AND payment_channel=? LIMIT 1");
+    $exists->execute([$reference, $amount, $channel]);
+    $row = $exists->fetch();
+    if ($row) {
+        return [
+            'id' => (int)$row['id'],
+            'paymentChannel' => $channel,
+            'referenceCode' => $reference,
+            'amount' => $amount,
+            'status' => 'duplicate',
+            'matchedTargetType' => $row['matchedTargetType'] ?? null,
+            'matchedTargetId' => $row['matchedTargetId'] ?? null,
+        ];
+    }
+    $st = $pdo->prepare("INSERT INTO affiliate_external_payments (payment_channel, reference_code, amount, payer_name, raw_payload_json, source_type, status, note, paid_at, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)");
+    $st->execute([$channel, $reference, $amount, $payer, json_encode($payload, JSON_UNESCAPED_UNICODE), $sourceType, 'pending', $note, $paidAt !== '' ? $paidAt : null, aff_now()]);
+    return [
+        'id' => (int)$pdo->lastInsertId(),
+        'paymentChannel' => $channel,
+        'referenceCode' => $reference,
+        'amount' => $amount,
+        'status' => 'pending',
+        'matchedTargetType' => null,
+        'matchedTargetId' => null,
+    ];
+}
+
+function aff_generate_billing_charges(PDO $pdo): array {
+    $created = ['subscription' => 0, 'advertising' => 0];
+    $owners = $pdo->query("SELECT id, owner_code, monthly_fee, advertising_budget, subscription_due_at, ads_active, status FROM affiliate_owners WHERE status='active'")->fetchAll();
+    $find = $pdo->prepare("SELECT id FROM affiliate_billing_charges WHERE owner_id=? AND charge_type=? AND status='pending' LIMIT 1");
+    $insert = $pdo->prepare("INSERT INTO affiliate_billing_charges (owner_id, charge_type, amount, reference_code, status, note, due_at, created_at) VALUES (?,?,?,?,?,?,?,?)");
+    foreach ($owners as $owner) {
+        $ownerId = (int)$owner['id'];
+        $ownerCode = (string)$owner['owner_code'];
+        $dueAt = (string)($owner['subscription_due_at'] ?? '');
+        $monthlyFee = round((float)($owner['monthly_fee'] ?? 0), 2);
+        if ($monthlyFee > 0 && $dueAt !== '' && strtotime($dueAt) <= time()) {
+            $find->execute([$ownerId, 'subscription']);
+            if (!$find->fetchColumn()) {
+                $ref = 'RAC-SUB-' . preg_replace('/[^A-Z0-9]/', '', strtoupper($ownerCode)) . '-' . date('Ym');
+                $insert->execute([$ownerId, 'subscription', $monthlyFee, $ref, 'pending', 'Cuota mensual RAC', $dueAt, aff_now()]);
+                $created['subscription']++;
+            }
+        }
+        $adsBudget = round((float)($owner['advertising_budget'] ?? 0), 2);
+        if ((int)($owner['ads_active'] ?? 0) === 1 && $adsBudget > 0) {
+            $find->execute([$ownerId, 'advertising']);
+            if (!$find->fetchColumn()) {
+                $ref = 'RAC-ADS-' . preg_replace('/[^A-Z0-9]/', '', strtoupper($ownerCode)) . '-' . date('Ym');
+                $insert->execute([$ownerId, 'advertising', $adsBudget, $ref, 'pending', 'Publicidad interna RAC', aff_now(), aff_now()]);
+                $created['advertising']++;
+            }
+        }
+    }
+    return $created;
+}
+
+function aff_create_billing_charge(PDO $pdo, array $input): array {
+    $ownerId = (int)($input['owner_id'] ?? 0);
+    $chargeType = in_array((string)($input['charge_type'] ?? ''), ['subscription', 'advertising'], true) ? (string)$input['charge_type'] : '';
+    $amount = round((float)($input['amount'] ?? 0), 2);
+    $reference = substr(trim((string)($input['reference_code'] ?? '')), 0, 120);
+    $note = substr(trim((string)($input['note'] ?? '')), 0, 255);
+    $dueAt = trim((string)($input['due_at'] ?? ''));
+    if ($ownerId <= 0 || $chargeType === '' || $amount <= 0 || $reference === '') {
+        throw new InvalidArgumentException('billing_charge_fields_required');
+    }
+    $st = $pdo->prepare("INSERT INTO affiliate_billing_charges (owner_id, charge_type, amount, reference_code, status, note, due_at, created_at) VALUES (?,?,?,?,?,?,?,?)");
+    $st->execute([$ownerId, $chargeType, $amount, $reference, 'pending', $note, $dueAt !== '' ? $dueAt : null, aff_now()]);
+    aff_record_audit($pdo, [
+        'owner_id' => $ownerId,
+        'event_type' => 'billing_charge_created',
+        'severity' => 'info',
+        'message' => 'Cargo financiero RAC creado',
+        'context' => ['charge_type' => $chargeType, 'amount' => $amount, 'reference_code' => $reference],
+    ]);
+    foreach (aff_billing_charges($pdo) as $row) {
+        if ((int)$row['id'] === (int)$pdo->lastInsertId()) return $row;
+    }
+    throw new RuntimeException('billing_charge_not_found');
+}
+
+function aff_reconcile_payment_reference(PDO $pdo, array $input): array {
+    $channel = substr(trim((string)($input['payment_channel'] ?? 'Transfermóvil')), 0, 40);
+    $reference = substr(trim((string)($input['reference_code'] ?? '')), 0, 120);
+    $amount = round((float)($input['amount'] ?? 0), 2);
+    $note = substr(trim((string)($input['note'] ?? '')), 0, 255);
+    if ($reference === '' || $amount <= 0) {
+        throw new InvalidArgumentException('reference_and_amount_required');
+    }
+
+    $topup = $pdo->prepare("SELECT * FROM affiliate_wallet_topups WHERE reference_code=? AND status='pending' ORDER BY id DESC LIMIT 1");
+    $topup->execute([$reference]);
+    $topupRow = $topup->fetch();
+    if ($topupRow) {
+        aff_review_wallet_topup($pdo, (int)$topupRow['id'], 'approved', $note !== '' ? $note : 'Conciliado por referencia externa');
+        $ins = $pdo->prepare("INSERT INTO affiliate_payment_reconciliations (owner_id, payment_channel, reference_code, amount, target_type, target_id, status, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+        $ins->execute([(int)$topupRow['owner_id'], $channel, $reference, $amount, 'wallet_topup', (int)$topupRow['id'], 'matched', $note, aff_now()]);
+        $upExt = $pdo->prepare("UPDATE affiliate_external_payments SET matched_target_type='wallet_topup', matched_target_id=?, status='matched', note=COALESCE(NULLIF(?, ''), note) WHERE reference_code=? AND amount=? AND payment_channel=?");
+        $upExt->execute([(int)$topupRow['id'], $note, $reference, $amount, $channel]);
+        return ['targetType' => 'wallet_topup', 'targetId' => (int)$topupRow['id'], 'referenceCode' => $reference, 'amount' => $amount];
+    }
+
+    $charge = $pdo->prepare("SELECT * FROM affiliate_billing_charges WHERE reference_code=? AND status='pending' ORDER BY id DESC LIMIT 1");
+    $charge->execute([$reference]);
+    $chargeRow = $charge->fetch();
+    if ($chargeRow) {
+        $up = $pdo->prepare("UPDATE affiliate_billing_charges SET status='paid', paid_at=?, settled_by=? WHERE id=?");
+        $up->execute([aff_now(), aff_auth_context()['username'] ?: 'admin', (int)$chargeRow['id']]);
+        $ins = $pdo->prepare("INSERT INTO affiliate_payment_reconciliations (owner_id, payment_channel, reference_code, amount, target_type, target_id, status, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+        $ins->execute([(int)$chargeRow['owner_id'], $channel, $reference, $amount, 'billing_charge', (int)$chargeRow['id'], 'matched', $note, aff_now()]);
+        $upExt = $pdo->prepare("UPDATE affiliate_external_payments SET owner_id=?, matched_target_type='billing_charge', matched_target_id=?, status='matched', note=COALESCE(NULLIF(?, ''), note) WHERE reference_code=? AND amount=? AND payment_channel=?");
+        $upExt->execute([(int)$chargeRow['owner_id'], (int)$chargeRow['id'], $note, $reference, $amount, $channel]);
+        aff_record_audit($pdo, [
+            'owner_id' => (int)$chargeRow['owner_id'],
+            'event_type' => 'billing_charge_paid',
+            'severity' => 'info',
+            'message' => 'Cargo RAC conciliado por referencia externa',
+            'context' => ['charge_id' => (int)$chargeRow['id'], 'reference_code' => $reference, 'amount' => $amount],
+        ]);
+        return ['targetType' => 'billing_charge', 'targetId' => (int)$chargeRow['id'], 'referenceCode' => $reference, 'amount' => $amount];
+    }
+
+    $ins = $pdo->prepare("INSERT INTO affiliate_payment_reconciliations (owner_id, payment_channel, reference_code, amount, target_type, target_id, status, note, created_at) VALUES (?,?,?,?,?,?,?,?,?)");
+    $ins->execute([null, $channel, $reference, $amount, 'unmatched', 0, 'unmatched', $note !== '' ? $note : 'Referencia sin match', aff_now()]);
+    $upExt = $pdo->prepare("UPDATE affiliate_external_payments SET status='unmatched', note=COALESCE(NULLIF(?, ''), note) WHERE reference_code=? AND amount=? AND payment_channel=?");
+    $upExt->execute([$note !== '' ? $note : 'Referencia sin match', $reference, $amount, $channel]);
+    throw new RuntimeException('reference_not_matched');
+}
+
+function aff_import_payment_extract(PDO $pdo, array $input): array {
+    $channel = substr(trim((string)($input['payment_channel'] ?? 'Transfermóvil')), 0, 40);
+    $csv = (string)($input['csv_text'] ?? '');
+    if (trim($csv) === '') {
+        throw new InvalidArgumentException('csv_text_required');
+    }
+    $lines = preg_split("/\r\n|\n|\r/", trim($csv));
+    $inserted = 0;
+    $duplicates = 0;
+    foreach ($lines as $idx => $line) {
+        $line = trim($line);
+        if ($line === '') {
+            continue;
+        }
+        if ($idx === 0 && preg_match('/reference/i', $line)) {
+            continue;
+        }
+        $parts = str_getcsv($line);
+        if (count($parts) < 2) {
+            continue;
+        }
+        $payload = [
+            'payment_channel' => $channel,
+            'reference_code' => trim((string)($parts[0] ?? '')),
+            'amount' => (float)str_replace(',', '.', trim((string)($parts[1] ?? '0'))),
+            'payer_name' => trim((string)($parts[2] ?? '')),
+            'paid_at' => trim((string)($parts[3] ?? '')),
+            'note' => trim((string)($parts[4] ?? '')),
+            'source_type' => 'extract',
+        ];
+        $row = aff_store_external_payment($pdo, $payload);
+        if (($row['status'] ?? '') === 'duplicate') {
+            $duplicates++;
+        } else {
+            $inserted++;
+        }
+    }
+    aff_record_audit($pdo, [
+        'event_type' => 'payment_extract_imported',
+        'severity' => 'info',
+        'message' => 'Extracto RAC importado',
+        'context' => ['inserted' => $inserted, 'duplicates' => $duplicates],
+    ]);
+    return ['inserted' => $inserted, 'duplicates' => $duplicates];
+}
+
+function aff_auto_reconcile_pending_imports(PDO $pdo): array {
+    $st = $pdo->query("SELECT id, payment_channel, reference_code, amount, note FROM affiliate_external_payments WHERE status='pending' ORDER BY id ASC LIMIT 200");
+    $matched = 0;
+    $unmatched = 0;
+    foreach ($st->fetchAll() as $row) {
+        try {
+            aff_reconcile_payment_reference($pdo, [
+                'payment_channel' => (string)$row['payment_channel'],
+                'reference_code' => (string)$row['reference_code'],
+                'amount' => (float)$row['amount'],
+                'note' => (string)($row['note'] ?? ''),
+            ]);
+            $matched++;
+        } catch (Throwable $e) {
+            $unmatched++;
+        }
+    }
+    aff_record_audit($pdo, [
+        'event_type' => 'payment_batch_reconciled',
+        'severity' => 'info',
+        'message' => 'Conciliación automática por lote ejecutada',
+        'context' => ['matched' => $matched, 'unmatched' => $unmatched],
+    ]);
+    return ['matched' => $matched, 'unmatched' => $unmatched];
+}
+
+function aff_payment_webhook_token(): string {
+    return trim((string)(getenv('AFFILIATE_PAYMENT_WEBHOOK_TOKEN') ?: ''));
+}
+
+function aff_owner_wallet_topups(PDO $pdo, int $ownerId): array {
+    $st = $pdo->prepare("SELECT t.id, o.owner_code AS ownerCode, o.owner_name AS ownerName, t.amount, t.payment_method AS paymentMethod, t.reference_code AS referenceCode, t.status, t.note, t.created_at AS createdAt, t.reviewed_at AS reviewedAt, t.reviewed_by AS reviewedBy
+        FROM affiliate_wallet_topups t
+        JOIN affiliate_owners o ON o.id=t.owner_id
+        WHERE t.owner_id=?
+        ORDER BY t.id DESC
+        LIMIT 100");
+    $st->execute([$ownerId]);
+    return $st->fetchAll();
+}
+
+function aff_recent_audit_events(PDO $pdo): array {
+    $st = $pdo->query("SELECT event_type AS eventType, severity, message, created_at AS createdAt FROM affiliate_audit_events ORDER BY id DESC LIMIT 40");
+    return $st->fetchAll();
+}
+
 function aff_subscription_metrics(PDO $pdo): array {
     return [
         'expectedMrr' => (float)$pdo->query("SELECT COALESCE(SUM(monthly_fee),0) FROM affiliate_owners WHERE status='active'")->fetchColumn(),
@@ -893,6 +1390,15 @@ function aff_owner_admin_list(PDO $pdo): array {
 function aff_gestor_admin_list(PDO $pdo): array {
     $st = $pdo->query("SELECT id, name, phone, telegram_chat_id AS telegramChatId, masked_code AS maskedCode, earnings, links, conversions, rating, reputation_score AS reputationScore, status
         FROM affiliate_gestores ORDER BY id ASC");
+    return $st->fetchAll();
+}
+
+function aff_user_admin_list(PDO $pdo): array {
+    $st = $pdo->query("SELECT u.id, u.username, u.role, u.display_name AS displayName, u.owner_id AS ownerId, o.owner_code AS ownerCode, u.gestor_id AS gestorId, g.name AS gestorName, u.status, u.created_at AS createdAt
+        FROM affiliate_users u
+        LEFT JOIN affiliate_owners o ON o.id=u.owner_id
+        LEFT JOIN affiliate_gestores g ON g.id=u.gestor_id
+        ORDER BY FIELD(u.role,'admin','owner','gestor'), u.username ASC");
     return $st->fetchAll();
 }
 
@@ -960,6 +1466,104 @@ function aff_upsert_gestor(PDO $pdo, array $input): array {
         if ((string)$row['id'] === $id) return $row;
     }
     throw new RuntimeException('gestor_not_found');
+}
+
+function aff_upsert_user(PDO $pdo, array $input): array {
+    $id = (int)($input['id'] ?? 0);
+    $username = substr(trim((string)($input['username'] ?? '')), 0, 80);
+    $role = (string)($input['role'] ?? '');
+    $displayName = substr(trim((string)($input['display_name'] ?? '')), 0, 120);
+    $ownerId = !empty($input['owner_id']) ? (int)$input['owner_id'] : null;
+    $gestorId = trim((string)($input['gestor_id'] ?? '')) ?: null;
+    $status = in_array((string)($input['status'] ?? 'active'), ['active','suspended'], true) ? (string)$input['status'] : 'active';
+    $password = (string)($input['password'] ?? '');
+    if ($username === '' || $displayName === '' || !in_array($role, ['admin','owner','gestor'], true)) {
+        throw new InvalidArgumentException('user_fields_required');
+    }
+    if ($role === 'owner' && !$ownerId) {
+        throw new InvalidArgumentException('owner_user_requires_owner');
+    }
+    if ($role === 'gestor' && !$gestorId) {
+        throw new InvalidArgumentException('gestor_user_requires_gestor');
+    }
+    if ($role !== 'owner') {
+        $ownerId = null;
+    }
+    if ($role !== 'gestor') {
+        $gestorId = null;
+    }
+    if ($id > 0) {
+        $st = $pdo->prepare("UPDATE affiliate_users SET username=?, role=?, display_name=?, owner_id=?, gestor_id=?, status=? WHERE id=?");
+        $st->execute([$username, $role, $displayName, $ownerId, $gestorId, $status, $id]);
+        if ($password !== '') {
+            $hash = password_hash($password, PASSWORD_DEFAULT);
+            $pwd = $pdo->prepare("UPDATE affiliate_users SET password_hash=? WHERE id=?");
+            $pwd->execute([$hash, $id]);
+        }
+    } else {
+        if ($password === '') {
+            throw new InvalidArgumentException('password_required');
+        }
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $st = $pdo->prepare("INSERT INTO affiliate_users (username, password_hash, role, display_name, owner_id, gestor_id, status, created_at) VALUES (?,?,?,?,?,?,?,?)");
+        $st->execute([$username, $hash, $role, $displayName, $ownerId, $gestorId, $status, aff_now()]);
+        $id = (int)$pdo->lastInsertId();
+    }
+    aff_record_audit($pdo, [
+        'owner_id' => $ownerId,
+        'gestor_id' => $gestorId,
+        'event_type' => 'affiliate_user_upserted',
+        'severity' => 'info',
+        'message' => 'Usuario RAC guardado desde admin',
+        'context' => ['username' => $username, 'role' => $role, 'status' => $status],
+    ]);
+    foreach (aff_user_admin_list($pdo) as $row) {
+        if ((int)$row['id'] === $id) return $row;
+    }
+    throw new RuntimeException('user_not_found');
+}
+
+function aff_admin_reset_user_password(PDO $pdo, int $id, string $newPassword): array {
+    $newPassword = trim($newPassword);
+    if ($id <= 0 || strlen($newPassword) < 6) {
+        throw new InvalidArgumentException('invalid_password_reset');
+    }
+    $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $st = $pdo->prepare("UPDATE affiliate_users SET password_hash=? WHERE id=?");
+    $st->execute([$hash, $id]);
+    aff_record_audit($pdo, [
+        'event_type' => 'affiliate_user_password_reset',
+        'severity' => 'warning',
+        'message' => 'Contraseña RAC reseteada por admin',
+        'context' => ['user_id' => $id],
+    ]);
+    return ['id' => $id, 'reset' => true];
+}
+
+function aff_change_password(PDO $pdo, string $currentPassword, string $newPassword): array {
+    $userId = aff_current_user_id();
+    if (!$userId) {
+        throw new RuntimeException('not_authenticated');
+    }
+    if (strlen(trim($newPassword)) < 6) {
+        throw new InvalidArgumentException('new_password_too_short');
+    }
+    $st = $pdo->prepare("SELECT id, username, password_hash FROM affiliate_users WHERE id=? LIMIT 1");
+    $st->execute([$userId]);
+    $user = $st->fetch();
+    if (!$user || !password_verify($currentPassword, (string)$user['password_hash'])) {
+        throw new RuntimeException('invalid_current_password');
+    }
+    $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $up = $pdo->prepare("UPDATE affiliate_users SET password_hash=? WHERE id=?");
+    $up->execute([$hash, $userId]);
+    aff_record_audit($pdo, [
+        'event_type' => 'affiliate_user_password_changed',
+        'severity' => 'info',
+        'message' => 'Usuario RAC cambió su contraseña',
+        'context' => ['user_id' => $userId, 'username' => (string)$user['username']],
+    ]);
+    return ['changed' => true];
 }
 
 function aff_request_wallet_topup(PDO $pdo, array $input): array {
@@ -1456,13 +2060,22 @@ function aff_create_trace_link(PDO $pdo, string $productId, string $gestorId): a
 function aff_bootstrap(PDO $pdo): array {
     $expiredHolds = aff_expire_stale_holds($pdo);
     aff_refresh_audit_alerts($pdo);
+    $auth = aff_auth_context();
+    $role = (string)$auth['role'];
     $owner = aff_owner($pdo);
     $walletCheck = aff_repair_owner_wallet_from_ledger($pdo, (int)$owner['id']);
     $owner = aff_owner($pdo);
-    $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel, active FROM affiliate_products WHERE owner_id=? ORDER BY active DESC, is_featured DESC, sponsor_rank DESC, created_at ASC");
-    $products->execute([(int)$owner['id']]);
-    $leads = $pdo->prepare("SELECT id, product_id AS productId, gestor_id AS gestorId, client, client_name AS clientName, client_phone AS clientPhone, DATE_FORMAT(lead_date, '%Y-%m-%d') AS date, status, commission, locked_commission AS lockedCommission, gestor_share AS gestorShare, platform_share AS platformShare, trace_code AS traceCode, (SELECT name FROM affiliate_products p WHERE p.id = affiliate_leads.product_id LIMIT 1) AS product FROM affiliate_leads WHERE owner_id=? ORDER BY lead_date DESC, id DESC LIMIT 200");
-    $leads->execute([(int)$owner['id']]);
+    if ($role === 'gestor') {
+        $products = $pdo->prepare("SELECT p.id, p.name, p.category, p.price, p.stock, p.commission, p.commission_pct AS commissionPct, p.icon AS image, p.image_url, p.image_webp_url, p.image_thumb_url, p.brand, p.description, p.clicks, p.leads, p.sales, p.trending, p.is_featured AS isFeatured, p.sponsor_rank AS sponsorRank, p.coupon_label AS couponLabel, p.active FROM affiliate_products p JOIN affiliate_owners o ON o.id=p.owner_id WHERE p.active=1 AND o.status='active' AND o.available_balance > 0 ORDER BY p.is_featured DESC, p.sponsor_rank DESC, p.trending DESC, p.clicks DESC, p.created_at ASC");
+        $products->execute();
+        $leads = $pdo->prepare("SELECT id, product_id AS productId, gestor_id AS gestorId, client, client_name AS clientName, client_phone AS clientPhone, DATE_FORMAT(lead_date, '%Y-%m-%d') AS date, status, commission, locked_commission AS lockedCommission, gestor_share AS gestorShare, platform_share AS platformShare, trace_code AS traceCode, (SELECT name FROM affiliate_products p WHERE p.id = affiliate_leads.product_id LIMIT 1) AS product FROM affiliate_leads WHERE gestor_id=? ORDER BY lead_date DESC, id DESC LIMIT 200");
+        $leads->execute([aff_current_gestor_id($pdo)]);
+    } else {
+        $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel, active FROM affiliate_products WHERE owner_id=? ORDER BY active DESC, is_featured DESC, sponsor_rank DESC, created_at ASC");
+        $products->execute([(int)$owner['id']]);
+        $leads = $pdo->prepare("SELECT id, product_id AS productId, gestor_id AS gestorId, client, client_name AS clientName, client_phone AS clientPhone, DATE_FORMAT(lead_date, '%Y-%m-%d') AS date, status, commission, locked_commission AS lockedCommission, gestor_share AS gestorShare, platform_share AS platformShare, trace_code AS traceCode, (SELECT name FROM affiliate_products p WHERE p.id = affiliate_leads.product_id LIMIT 1) AS product FROM affiliate_leads WHERE owner_id=? ORDER BY lead_date DESC, id DESC LIMIT 200");
+        $leads->execute([(int)$owner['id']]);
+    }
     $gestores = $pdo->query("SELECT id, name, earnings, links, conversions, rating, status, reputation_score AS reputationScore, masked_code AS maskedCode FROM affiliate_gestores ORDER BY earnings DESC, id ASC");
     $alerts = $pdo->query("SELECT owner_label AS dueno, alert_type AS type, metric, risk, color FROM affiliate_audit_alerts WHERE active=1 ORDER BY id ASC");
     $owners = $pdo->query("SELECT owner_code, owner_name, status, reputation_score AS reputationScore, fraud_risk AS fraudRisk, subscription_plan AS subscriptionPlan, managed_service AS managedService FROM affiliate_owners ORDER BY owner_code ASC");
@@ -1470,7 +2083,7 @@ function aff_bootstrap(PDO $pdo): array {
     $movements->execute([(int)$owner['id']]);
     $events = $pdo->prepare("SELECT event_type AS eventType, severity, message, created_at AS createdAt FROM affiliate_audit_events WHERE owner_id=? OR owner_id IS NULL ORDER BY id DESC LIMIT 30");
     $events->execute([(int)$owner['id']]);
-    $traceLinks = aff_trace_links_for_gestor($pdo, AFF_DEFAULT_GESTOR);
+    $traceLinks = aff_trace_links_for_gestor($pdo, aff_current_gestor_id($pdo));
     $ownerProductStats = aff_owner_product_stats($pdo, (int)$owner['id']);
     $linkRankings = aff_admin_link_rankings($pdo);
     $pricing = aff_price_suggestions($pdo, (int)$owner['id']);
@@ -1516,21 +2129,25 @@ function aff_bootstrap(PDO $pdo): array {
         }, $products->fetchAll()),
         'leads' => $leads->fetchAll(),
         'gestores' => $gestores->fetchAll(),
-        'alerts' => $alerts->fetchAll(),
-        'owners' => $owners->fetchAll(),
+        'alerts' => $role === 'admin' ? $alerts->fetchAll() : [],
+        'owners' => $role === 'admin' ? $owners->fetchAll() : [],
         'walletMovements' => $movements->fetchAll(),
-        'auditEvents' => $events->fetchAll(),
+        'auditEvents' => $role === 'admin' ? aff_recent_audit_events($pdo) : $events->fetchAll(),
         'traceLinks' => $traceLinks,
         'ownerProductStats' => $ownerProductStats,
-        'linkRankings' => $linkRankings,
+        'linkRankings' => $role === 'admin' ? $linkRankings : [],
         'pricingSuggestions' => $pricing,
         'marketInsights' => $insights,
-        'walletTopups' => aff_wallet_topups($pdo),
-        'ownerAdminList' => aff_owner_admin_list($pdo),
-        'gestorAdminList' => aff_gestor_admin_list($pdo),
-        'subscriptionMetrics' => aff_subscription_metrics($pdo),
-        'sponsoredProducts' => aff_sponsored_products($pdo),
-        'advancedAudit' => aff_advanced_audit_signals($pdo),
+        'walletTopups' => $role === 'admin' ? aff_wallet_topups($pdo) : aff_owner_wallet_topups($pdo, (int)$owner['id']),
+        'billingCharges' => $role === 'admin' ? aff_billing_charges($pdo) : aff_owner_billing_charges($pdo, (int)$owner['id']),
+        'paymentReconciliations' => $role === 'admin' ? aff_payment_reconciliations($pdo) : [],
+        'externalPayments' => $role === 'admin' ? aff_external_payments($pdo) : [],
+        'ownerAdminList' => $role === 'admin' ? aff_owner_admin_list($pdo) : [],
+        'gestorAdminList' => $role === 'admin' ? aff_gestor_admin_list($pdo) : [],
+        'affiliateUsers' => $role === 'admin' ? aff_user_admin_list($pdo) : [],
+        'subscriptionMetrics' => $role === 'admin' ? aff_subscription_metrics($pdo) : ['expectedMrr' => 0, 'overdueOwners' => 0, 'managedOwners' => 0, 'adsActiveOwners' => 0, 'pendingTopups' => 0],
+        'sponsoredProducts' => $role === 'admin' ? aff_sponsored_products($pdo) : [],
+        'advancedAudit' => $role === 'admin' ? aff_advanced_audit_signals($pdo) : ['owners' => [], 'gestores' => []],
         'walletReconciliation' => $walletCheck,
         'summary' => [
             'volumeTotal' => $volume,
@@ -1542,10 +2159,17 @@ function aff_bootstrap(PDO $pdo): array {
             'expiredHolds' => $expiredHolds,
         ],
         'integrations' => [
-            'telegramConfigured' => aff_telegram_enabled($pdo),
+            'telegramConfigured' => $role === 'admin' ? aff_telegram_enabled($pdo) : false,
         ],
-        'integrationSettings' => aff_integration_settings($pdo),
-        'health' => aff_read_health_status(),
+        'integrationSettings' => $role === 'admin' ? aff_integration_settings($pdo) : ['telegramBotToken' => '', 'telegramConfigured' => false, 'defaultGestorId' => aff_current_gestor_id($pdo), 'defaultGestorName' => '', 'defaultGestorChatId' => ''],
+        'health' => $role === 'admin' ? aff_read_health_status() : ['ok' => null, 'timestamp' => '', 'mode' => '', 'exit_code' => null, 'output' => [], 'timer' => ['enabled' => false, 'active' => false, 'next' => '', 'last' => ''], 'service' => ['active' => false, 'journal' => []], 'summary' => ['checks' => 0, 'okChecks' => 0, 'failedChecks' => 0]],
+        'auth' => [
+            'userId' => $auth['user_id'],
+            'role' => $role,
+            'displayName' => (string)$auth['display_name'],
+            'username' => (string)$auth['username'],
+            'allowedUiRoles' => aff_allowed_ui_roles(),
+        ],
         'server_time' => date('c')
     ];
 }

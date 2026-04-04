@@ -74,8 +74,12 @@ window.RAC = window.RAC || {};
             pricingSuggestions: state.pricingSuggestions,
             marketInsights: state.marketInsights,
             walletTopups: state.walletTopups,
+            billingCharges: state.billingCharges,
+            paymentReconciliations: state.paymentReconciliations,
+            externalPayments: state.externalPayments,
             ownerAdminList: state.ownerAdminList,
             gestorAdminList: state.gestorAdminList,
+            affiliateUsers: state.affiliateUsers,
             subscriptionMetrics: state.subscriptionMetrics,
             sponsoredProducts: state.sponsoredProducts,
             advancedAudit: state.advancedAudit,
@@ -334,6 +338,16 @@ window.RAC = window.RAC || {};
             ns.toast('No fue posible guardar el dueño.', 'error');
         }
     };
+    ns.saveUser = async function (payload) {
+        try {
+            await ns.api('user_upsert', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('entityModalWrap');
+            ns.toast('Usuario RAC guardado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible guardar el usuario.', 'error');
+        }
+    };
     ns.saveGestor = async function (payload) {
         try {
             await ns.api('gestor_upsert', 'POST', payload);
@@ -361,6 +375,72 @@ window.RAC = window.RAC || {};
             ns.toast(decision === 'approved' ? 'Recarga aprobada.' : 'Recarga rechazada.', 'success');
         } catch (e) {
             ns.toast('No fue posible revisar la recarga.', 'error');
+        }
+    };
+    ns.createBillingCharge = async function (payload) {
+        try {
+            await ns.api('billing_charge_create', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('walletModalWrap');
+            ns.toast('Cargo financiero creado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible crear el cargo.', 'error');
+        }
+    };
+    ns.reconcilePayment = async function (payload) {
+        try {
+            await ns.api('payment_reconcile', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('walletModalWrap');
+            ns.toast('Pago conciliado por referencia.', 'success');
+        } catch (e) {
+            ns.toast('No se encontró match para la referencia.', 'error');
+        }
+    };
+    ns.generateBilling = async function () {
+        try {
+            await ns.api('billing_generate', 'POST', {});
+            await ns.loadBootstrap();
+            ns.toast('Cargos operativos generados.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible generar cargos.', 'error');
+        }
+    };
+    ns.importPaymentExtract = async function (payload) {
+        try {
+            await ns.api('payment_extract_import', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.closeModal('walletModalWrap');
+            ns.toast('Extracto importado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible importar el extracto.', 'error');
+        }
+    };
+    ns.autoReconcilePayments = async function () {
+        try {
+            await ns.api('payment_auto_reconcile', 'POST', {});
+            await ns.loadBootstrap();
+            ns.toast('Conciliación por lote ejecutada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible ejecutar la conciliación por lote.', 'error');
+        }
+    };
+    ns.resetUserPassword = async function (id, password) {
+        try {
+            await ns.api('user_password_reset', 'POST', { id: id, password: password });
+            ns.closeModal('authModalWrap');
+            ns.toast('Contraseña reseteada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible resetear la contraseña.', 'error');
+        }
+    };
+    ns.changeOwnPassword = async function (payload) {
+        try {
+            await ns.api('user_change_password', 'POST', payload);
+            ns.closeModal('authModalWrap');
+            ns.toast('Contraseña actualizada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible cambiar la contraseña.', 'error');
         }
     };
 

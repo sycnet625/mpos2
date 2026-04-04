@@ -122,6 +122,34 @@
         var saveOwnerBtn = event.target.closest('[data-save-owner]');
         if (saveOwnerBtn) return ns.saveOwner(state.ownerDraft);
 
+        var newUserBtn = event.target.closest('[data-open-user-new]');
+        if (newUserBtn) {
+            state.userDraft = { id: 0, username: '', display_name: '', role: 'owner', owner_id: '', gestor_id: '', status: 'active', password: '' };
+            return ns.openUserModal();
+        }
+
+        var editUserBtn = event.target.closest('[data-edit-user]');
+        if (editUserBtn) {
+            var user = (state.affiliateUsers || []).find(function (row) {
+                return String(row.id) === String(editUserBtn.getAttribute('data-edit-user'));
+            });
+            if (!user) return ns.toast('No se pudo cargar el usuario.', 'error');
+            state.userDraft = {
+                id: user.id || 0,
+                username: user.username || '',
+                display_name: user.displayName || '',
+                role: user.role || 'owner',
+                owner_id: user.ownerId || '',
+                gestor_id: user.gestorId || '',
+                status: user.status || 'active',
+                password: ''
+            };
+            return ns.openUserModal();
+        }
+
+        var saveUserBtn = event.target.closest('[data-save-user]');
+        if (saveUserBtn) return ns.saveUser(state.userDraft);
+
         var newGestorBtn = event.target.closest('[data-open-gestor-new]');
         if (newGestorBtn) {
             state.gestorDraft = { id: '', name: '', phone: '', telegram_chat_id: '', masked_code: '', status: 'active' };
@@ -156,6 +184,61 @@
 
         var saveTopupBtn = event.target.closest('[data-save-topup]');
         if (saveTopupBtn) return ns.requestWalletTopup(state.topupDraft);
+
+        var openFinanceReconcileBtn = event.target.closest('[data-open-finance-reconcile]');
+        if (openFinanceReconcileBtn) {
+            state.financeDraft = { mode: 'reconcile', payment_channel: 'Transfermóvil', reference_code: '', amount: '', note: '', owner_id: '', charge_type: 'subscription', due_at: '', csv_text: '' };
+            return ns.openFinanceModal();
+        }
+
+        var openBillingChargeBtn = event.target.closest('[data-open-billing-charge]');
+        if (openBillingChargeBtn) {
+            state.financeDraft = { mode: 'charge', payment_channel: 'Transfermóvil', reference_code: '', amount: '', note: '', owner_id: '', charge_type: 'subscription', due_at: '', csv_text: '' };
+            return ns.openFinanceModal();
+        }
+
+        var openPaymentImportBtn = event.target.closest('[data-open-payment-import]');
+        if (openPaymentImportBtn) {
+            state.financeDraft = { mode: 'import', payment_channel: 'Transfermóvil', reference_code: '', amount: '', note: '', owner_id: '', charge_type: 'subscription', due_at: '', csv_text: '' };
+            return ns.openFinanceModal();
+        }
+
+        var saveBillingChargeBtn = event.target.closest('[data-save-billing-charge]');
+        if (saveBillingChargeBtn) return ns.createBillingCharge(state.financeDraft);
+
+        var savePaymentReconcileBtn = event.target.closest('[data-save-payment-reconcile]');
+        if (savePaymentReconcileBtn) return ns.reconcilePayment(state.financeDraft);
+
+        var savePaymentImportBtn = event.target.closest('[data-save-payment-import]');
+        if (savePaymentImportBtn) return ns.importPaymentExtract(state.financeDraft);
+
+        var runAutoReconcileBtn = event.target.closest('[data-run-auto-reconcile]');
+        if (runAutoReconcileBtn) return ns.autoReconcilePayments();
+
+        var generateBillingBtn = event.target.closest('[data-generate-billing]');
+        if (generateBillingBtn) return ns.generateBilling();
+
+        var passwordOpenBtn = event.target.closest('[data-open-password-change]');
+        if (passwordOpenBtn) return ns.openPasswordModal('change');
+
+        var resetUserPasswordBtn = event.target.closest('[data-reset-user-password]');
+        if (resetUserPasswordBtn) return ns.openPasswordModal('reset', resetUserPasswordBtn.getAttribute('data-reset-user-password'));
+
+        var changePasswordBtn = event.target.closest('[data-change-password]');
+        if (changePasswordBtn) {
+            if ((state.passwordDraft.new_password || '') !== (state.passwordDraft.confirm_password || '')) {
+                return ns.toast('La confirmación de contraseña no coincide.', 'error');
+            }
+            return ns.changeOwnPassword({
+                current_password: state.passwordDraft.current_password || '',
+                new_password: state.passwordDraft.new_password || ''
+            });
+        }
+
+        var resetPasswordConfirmBtn = event.target.closest('[data-user-password-reset]');
+        if (resetPasswordConfirmBtn) {
+            return ns.resetUserPassword(state.passwordDraft.target_user_id || 0, state.passwordDraft.reset_password || '');
+        }
 
         var topupReviewBtn = event.target.closest('[data-topup-review]');
         if (topupReviewBtn) {
@@ -223,6 +306,23 @@
                 : topupField.value;
             return;
         }
+        var userField = event.target.closest('[data-user-field]');
+        if (userField) {
+            state.userDraft[userField.getAttribute('data-user-field')] = userField.type === 'checkbox'
+                ? (userField.checked ? 1 : 0)
+                : userField.value;
+            return;
+        }
+        var passwordField = event.target.closest('[data-password-field]');
+        if (passwordField) {
+            state.passwordDraft[passwordField.getAttribute('data-password-field')] = passwordField.value;
+            return;
+        }
+        var financeField = event.target.closest('[data-finance-field]');
+        if (financeField) {
+            state.financeDraft[financeField.getAttribute('data-finance-field')] = financeField.value;
+            return;
+        }
         if (event.target.id === 'gestorSearch') {
             state.gestorFilter.q = event.target.value;
             state.gestorFilter.page = 1;
@@ -272,7 +372,11 @@
     ns.loadQueue();
     setTimeout(function () {
         ns.$('splashScreen').classList.add('hidden');
-        ns.$('homeScreen').classList.remove('hidden');
+        if (state.role) {
+            openRole(state.role);
+        } else {
+            ns.$('homeScreen').classList.remove('hidden');
+        }
     }, 1800);
     ns.loadBootstrap().then(ns.flushQueue);
 })(window.RAC);
