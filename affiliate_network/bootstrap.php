@@ -6,6 +6,11 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     header('Location: /login.php');
     exit;
 }
+
+if (!defined('DISABLE_MENU_UNIT_CONVERTER')) {
+    define('DISABLE_MENU_UNIT_CONVERTER', true);
+}
+
 $affiliateView = [
     'title' => 'RAC · Red de Afiliados Cuba',
     'manifest' => '/affiliate_network_manifest.json',

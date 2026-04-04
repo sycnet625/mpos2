@@ -268,7 +268,7 @@ $menuCategories = [
 </div>
 
 <?php
-if (function_exists('render_unit_converter_modal')) {
+if (!defined('DISABLE_MENU_UNIT_CONVERTER') && function_exists('render_unit_converter_modal')) {
     render_unit_converter_modal();
 }
 ?>
