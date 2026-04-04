@@ -1,6 +1,7 @@
-const CACHE_NAME = 'lag-affiliate-v1';
+const CACHE_NAME = 'rac-affiliate-v2';
 const APP_SHELL = [
   '/affiliate_network.php',
+  '/affiliate_network_help.php',
   '/affiliate_network_manifest.json',
   '/affiliate_network_icon.svg',
   '/assets/css/all.min.css',
@@ -33,7 +34,7 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (url.origin === location.origin && (url.pathname === '/affiliate_network.php' || url.pathname === '/affiliate_network_manifest.json' || url.pathname === '/affiliate_network_icon.svg')) {
+  if (url.origin === location.origin && (url.pathname === '/affiliate_network.php' || url.pathname === '/affiliate_network_help.php' || url.pathname === '/affiliate_network_manifest.json' || url.pathname === '/affiliate_network_icon.svg')) {
     event.respondWith(fetch(req).then(res => {
       const copy = res.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
