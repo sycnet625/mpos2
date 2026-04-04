@@ -18,6 +18,12 @@ $summary = [
     'output' => $output,
 ];
 
+$dir = dirname(aff_health_status_path());
+if (!is_dir($dir)) {
+    @mkdir($dir, 0775, true);
+}
+@file_put_contents(aff_health_status_path(), json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
+
 $token = aff_telegram_bot_token($pdo);
 $adminChatId = trim((string)getenv('AFFILIATE_ADMIN_TELEGRAM_CHAT_ID'));
 if ($token !== '' && $adminChatId !== '') {

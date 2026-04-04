@@ -688,6 +688,64 @@ function aff_export_rankings_csv(PDO $pdo): string {
     );
 }
 
+function aff_health_status_path(): string {
+    return __DIR__ . '/../tmp/rac_health_status.json';
+}
+
+function aff_read_health_status(): array {
+    $path = aff_health_status_path();
+    $base = [
+        'ok' => null,
+        'timestamp' => '',
+        'mode' => '',
+        'exit_code' => null,
+        'output' => [],
+        'timer' => [
+            'enabled' => false,
+            'active' => false,
+            'next' => '',
+            'last' => '',
+        ],
+        'summary' => [
+            'checks' => 0,
+            'okChecks' => 0,
+            'failedChecks' => 0,
+        ],
+    ];
+    if (is_file($path)) {
+        $raw = @file_get_contents($path);
+        $data = json_decode((string)$raw, true);
+        if (is_array($data)) {
+            $base = array_replace_recursive($base, $data);
+        }
+    }
+    if (function_exists('shell_exec')) {
+        $enabled = trim((string)@shell_exec('systemctl is-enabled rac-health.timer 2>/dev/null'));
+        $active = trim((string)@shell_exec('systemctl is-active rac-health.timer 2>/dev/null'));
+        $next = trim((string)@shell_exec("systemctl list-timers --all --no-pager rac-health.timer 2>/dev/null | awk 'NR==2{print $1\" \"$2\" \"$3\" \"$4\" \"$5}'"));
+        $last = trim((string)@shell_exec("systemctl list-timers --all --no-pager rac-health.timer 2>/dev/null | awk 'NR==2{print $7\" \"$8\" \"$9\" \"$10\" \"$11}'"));
+        $base['timer'] = [
+            'enabled' => $enabled === 'enabled',
+            'active' => $active === 'active',
+            'next' => $next === '-' ? '' : $next,
+            'last' => $last === '-' ? '' : $last,
+        ];
+    }
+    $checks = is_array($base['output'] ?? null) ? count($base['output']) : 0;
+    $okChecks = 0;
+    foreach (($base['output'] ?? []) as $line) {
+        if (strpos((string)$line, 'OK: ') === 0) {
+            $okChecks++;
+        }
+    }
+    $base['summary'] = [
+        'checks' => $checks,
+        'okChecks' => $okChecks,
+        'failedChecks' => max(0, $checks - $okChecks - (in_array('SMOKE COMPLETO', $base['output'] ?? [], true) ? 1 : 0)),
+    ];
+    return $base;
+}
+
 function aff_lead_financial_flow(PDO $pdo, string $leadId): array {
     $st = $pdo->prepare("SELECT l.*, p.name AS product_name, o.owner_code, o.owner_name, g.name AS gestor_name
         FROM affiliate_leads l
@@ -1255,6 +1313,7 @@ function aff_bootstrap(PDO $pdo): array {
             'telegramConfigured' => aff_telegram_enabled($pdo),
         ],
         'integrationSettings' => aff_integration_settings($pdo),
+        'health' => aff_read_health_status(),
         'server_time' => date('c')
     ];
 }

@@ -99,6 +99,12 @@ window.RAC = window.RAC || {};
         ns.$('flowModalWrap').classList.add('active');
     };
 
+    ns.healthBadge = function (ok) {
+        if (ok === true) return ns.badge('active');
+        if (ok === false) return ns.badge('no_sale');
+        return ns.badge('pending');
+    };
+
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
         var isEdit = !!p.id;
@@ -249,12 +255,21 @@ window.RAC = window.RAC || {};
         if (state.adminTab === 'dashboard') {
             var topProducts = state.products.slice().sort(function (a, b) { return Number(b.clicks) - Number(a.clicks); }).slice(0, 5);
             var topGestores = state.gestores.slice().sort(function (a, b) { return Number(b.earnings) - Number(a.earnings); }).slice(0, 5);
+            var health = state.health || {};
+            var healthOutput = (health.output || []).slice(0, 8);
             body = '<div class="grid kpis">'
                 + ns.kpi('💸', 'Volumen total', ns.formatCUP(state.summary.volumeTotal), 'RAC', '#ffd700')
                 + ns.kpi('✨', 'Revenue LAG', ns.formatCUP(state.summary.revenue), 'Plataforma', '#ff8c00')
                 + ns.kpi('🏪', 'Dueños activos', String(state.summary.ownersActive), 'Tiendas visibles', '#ff4500')
                 + ns.kpi('🤝', 'Gestores activos', String(state.summary.gestoresActive), 'Red comercial', '#ffd700')
-                + '</div><div class="actions" style="margin:12px 0 18px"><a class="btn ghost" href="/affiliate_network_api.php?action=export_leads">⬇️ Exportar leads CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_wallet">⬇️ Exportar wallet CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_rankings">⬇️ Exportar rankings CSV</a></div><div class="grid two"><div class="card"><div class="item-title">Top productos por interes</div><div class="list" style="margin-top:12px">' + topProducts.map(function (p, i) {
+                + '</div><div class="actions" style="margin:12px 0 18px"><a class="btn ghost" href="/affiliate_network_api.php?action=export_leads">⬇️ Exportar leads CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_wallet">⬇️ Exportar wallet CSV</a><a class="btn ghost" href="/affiliate_network_api.php?action=export_rankings">⬇️ Exportar rankings CSV</a><a class="btn ghost" href="/affiliate_network_health.php" target="_blank" rel="noopener">🩺 Ver health JSON</a></div><div class="grid kpis">'
+                + ns.kpi('🩺', 'Health general', health.ok === true ? 'OK' : (health.ok === false ? 'FAIL' : 'N/D'), health.timestamp || 'Sin ejecución', health.ok === true ? '#28a745' : '#ef5350')
+                + ns.kpi('⏱️', 'Timer activo', health.timer && health.timer.active ? 'Sí' : 'No', health.timer && health.timer.next ? ('Próximo ' + health.timer.next) : 'Sin próxima ejecución', health.timer && health.timer.active ? '#ffd700' : '#ef5350')
+                + ns.kpi('📋', 'Checks health', String((health.summary && health.summary.okChecks) || 0), ((health.summary && health.summary.checks) || 0) + ' líneas útiles', '#ff8c00')
+                + ns.kpi('⚠️', 'Checks fallidos', String((health.summary && health.summary.failedChecks) || 0), 'Exit code ' + (health.exit_code == null ? 'N/D' : health.exit_code), (health.summary && health.summary.failedChecks) ? '#ef5350' : '#28a745')
+                + '</div><div class="grid two"><div class="card"><div class="item-title">Estado health RAC</div><div class="list" style="margin-top:12px"><div class="item"><div class="item-head"><div><div class="item-title">Resumen</div><div class="sub">Modo ' + ns.esc(health.mode || 'N/D') + ' · Última ejecución ' + ns.esc(health.timestamp || 'N/D') + '</div></div><div>' + ns.healthBadge(health.ok) + '</div></div><div class="sub" style="margin-top:10px">Timer habilitado: ' + ((health.timer && health.timer.enabled) ? 'sí' : 'no') + ' · Última corrida timer: ' + ns.esc((health.timer && health.timer.last) || 'N/D') + '</div></div><div class="item"><div class="item-head"><div><div class="item-title">Próxima corrida</div><div class="sub">' + ns.esc((health.timer && health.timer.next) || 'No detectada') + '</div></div><div>' + ns.healthBadge(health.timer && health.timer.active) + '</div></div></div></div></div><div class="card"><div class="item-title">Salida reciente del health</div><div class="list" style="margin-top:12px">' + (healthOutput.length ? healthOutput.map(function (line) {
+                    return '<div class="item"><div class="sub" style="white-space:pre-wrap">' + ns.esc(line) + '</div></div>';
+                }).join('') : '<div class="item"><div class="sub">Sin salida registrada.</div></div>') + '</div></div></div><div class="grid two"><div class="card"><div class="item-title">Top productos por interes</div><div class="list" style="margin-top:12px">' + topProducts.map(function (p, i) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">#' + (i + 1) + ' ' + ns.esc(p.name) + '</div><div class="sub">' + ns.esc(p.category) + '</div></div><div style="text-align:right"><div class="money">' + ns.esc(p.clicks) + '</div><div class="sub">clics</div></div></div></div>';
                 }).join('') + '</div></div><div class="card"><div class="item-title">Top gestores</div><div class="list" style="margin-top:12px">' + topGestores.map(function (g, i) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">#' + (i + 1) + ' ' + ns.esc(g.name) + '</div><div class="sub">⭐ ' + ns.esc(g.rating) + ' · Rep ' + ns.esc(g.reputationScore) + '</div></div><div class="money">' + ns.formatCUP(g.earnings) + '</div></div></div>';

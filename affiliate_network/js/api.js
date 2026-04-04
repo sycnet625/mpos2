@@ -78,6 +78,7 @@ window.RAC = window.RAC || {};
             auditEvents: state.auditEvents,
             integrations: state.integrations,
             integrationSettings: state.integrationSettings,
+            health: state.health,
             currentLeadFlow: state.currentLeadFlow,
             summary: state.summary
         }));

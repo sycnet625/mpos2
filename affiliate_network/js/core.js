@@ -34,6 +34,7 @@ window.RAC = window.RAC || {};
         auditEvents: [],
         integrations: { telegramConfigured: false },
         integrationSettings: { telegramBotToken: '', telegramConfigured: false, defaultGestorId: 'G001', defaultGestorName: 'Carlos Méndez', defaultGestorChatId: '' },
+        health: { ok: null, timestamp: '', mode: '', exit_code: null, output: [], timer: { enabled: false, active: false, next: '', last: '' }, summary: { checks: 0, okChecks: 0, failedChecks: 0 } },
         currentLeadFlow: null,
         summary: { volumeTotal: 0, revenue: 0, ownersActive: 0, gestoresActive: 0, leadsToday: 0, salesToday: 0 },
         queue: [],
