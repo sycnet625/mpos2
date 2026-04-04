@@ -267,6 +267,12 @@ $menuCategories = [
     </div>
 </div>
 
+<?php
+if (function_exists('render_unit_converter_modal')) {
+    render_unit_converter_modal();
+}
+?>
+
 <div class="admin-chat-overlay" id="adminChatModal">
     <div class="admin-chat-box">
         <div class="chat-list-p">
