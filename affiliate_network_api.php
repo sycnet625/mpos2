@@ -47,6 +47,18 @@ try {
         exit;
     }
 
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_update') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_update_product($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_toggle_active') {
+        aff_require_csrf();
+        echo json_encode(['status' => 'success', 'row' => aff_toggle_product_active($pdo, (string)($input['id'] ?? ''), (int)($input['active'] ?? 0))], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'lead_update_status') {
         aff_require_csrf();
         echo json_encode(['status' => 'success', 'row' => aff_update_lead_status($pdo, (string)($input['id'] ?? ''), (string)($input['status'] ?? ''))], JSON_UNESCAPED_UNICODE);

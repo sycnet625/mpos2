@@ -63,10 +63,28 @@
         }
 
         var productBtn = event.target.closest('[data-open-product]');
-        if (productBtn) return ns.openProductModal();
+        if (productBtn) {
+            ns.resetProductDraft();
+            return ns.openProductModal();
+        }
+
+        var editProductBtn = event.target.closest('[data-edit-product]');
+        if (editProductBtn) return ns.editProduct(editProductBtn.getAttribute('data-edit-product'));
 
         var saveBtn = event.target.closest('[data-save-product]');
         if (saveBtn) return ns.saveNewProduct();
+
+        var removeImageBtn = event.target.closest('[data-remove-product-image]');
+        if (removeImageBtn) {
+            state.ownerNewProduct.removeImage = true;
+            state.ownerNewProduct.imageData = '';
+            state.ownerNewProduct.imagePreview = '';
+            state.ownerNewProduct.hasImage = false;
+            return ns.openProductModal();
+        }
+
+        var toggleProductBtn = event.target.closest('[data-toggle-product]');
+        if (toggleProductBtn) return ns.toggleProductActive(toggleProductBtn.getAttribute('data-toggle-product'), Number(toggleProductBtn.getAttribute('data-active') || 0));
 
         var leadBtn = event.target.closest('[data-lead-status]');
         if (leadBtn) return ns.updateLeadStatus(leadBtn.dataset.leadStatus, leadBtn.dataset.status);
@@ -103,6 +121,8 @@
             ns.fileToWebpDataUrl(event.target.files[0]).then(function (dataUrl) {
                 state.ownerNewProduct.imageData = dataUrl;
                 state.ownerNewProduct.imagePreview = dataUrl;
+                state.ownerNewProduct.hasImage = true;
+                state.ownerNewProduct.removeImage = false;
                 ns.openProductModal();
             }).catch(function () {
                 ns.toast('No fue posible procesar la imagen.', 'error');

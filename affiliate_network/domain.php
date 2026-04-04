@@ -535,6 +535,21 @@ function aff_store_product_image(string $productId, string $imageData): array {
     ];
 }
 
+function aff_delete_product_image(string $productId): array {
+    $base = 'rac_' . preg_replace('/[^A-Za-z0-9_-]/', '', $productId);
+    $dirFs = __DIR__ . '/../uploads/rac/products';
+    foreach ([$dirFs . '/' . $base . '.webp', $dirFs . '/' . $base . '_thumb.webp'] as $file) {
+        if (is_file($file)) {
+            @unlink($file);
+        }
+    }
+    return [
+        'image_url' => '',
+        'image_webp_url' => '',
+        'image_thumb_url' => '',
+    ];
+}
+
 function aff_wallet_reconciliation(PDO $pdo, int $ownerId): array {
     $st = $pdo->prepare("SELECT
         COALESCE(SUM(delta_available), 0) AS available_delta,
@@ -798,7 +813,7 @@ function aff_bootstrap(PDO $pdo): array {
     $owner = aff_owner($pdo);
     $walletCheck = aff_repair_owner_wallet_from_ledger($pdo, (int)$owner['id']);
     $owner = aff_owner($pdo);
-    $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel FROM affiliate_products WHERE owner_id=? AND active=1 ORDER BY is_featured DESC, sponsor_rank DESC, created_at ASC");
+    $products = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, is_featured AS isFeatured, sponsor_rank AS sponsorRank, coupon_label AS couponLabel, active FROM affiliate_products WHERE owner_id=? ORDER BY active DESC, is_featured DESC, sponsor_rank DESC, created_at ASC");
     $products->execute([(int)$owner['id']]);
     $leads = $pdo->prepare("SELECT id, product_id AS productId, gestor_id AS gestorId, client, client_name AS clientName, client_phone AS clientPhone, DATE_FORMAT(lead_date, '%Y-%m-%d') AS date, status, commission, locked_commission AS lockedCommission, gestor_share AS gestorShare, platform_share AS platformShare, trace_code AS traceCode, (SELECT name FROM affiliate_products p WHERE p.id = affiliate_leads.product_id LIMIT 1) AS product FROM affiliate_leads WHERE owner_id=? ORDER BY lead_date DESC, id DESC LIMIT 200");
     $leads->execute([(int)$owner['id']]);
@@ -890,9 +905,10 @@ function aff_create_product(PDO $pdo, array $input): array {
     $commissionPct = round(($commission / max($price, 1)) * 100, 1);
     $icon = (string)($input['image'] ?? '📦');
     $brand = substr(trim((string)($input['brand'] ?? 'Nuevo')), 0, 80) ?: 'Nuevo';
+    $couponLabel = substr(trim((string)($input['coupon_label'] ?? '')), 0, 120);
     $media = aff_store_product_image($id, $imageData);
-    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
-    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $media['image_thumb_url'], $brand, $description, 0, 0, 0, 0, aff_now()]);
+    $st = $pdo->prepare("INSERT INTO affiliate_products (id, owner_id, name, category, price, stock, commission, commission_pct, icon, image_url, image_webp_url, image_thumb_url, brand, description, coupon_label, clicks, leads, sales, trending, active, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)");
+    $st->execute([$id, (int)$owner['id'], $name, $category, $price, $stock, $commission, $commissionPct, $icon, $media['image_url'], $media['image_webp_url'], $media['image_thumb_url'], $brand, $description, $couponLabel, 0, 0, 0, 0, aff_now()]);
     aff_record_audit($pdo, [
         'owner_id' => (int)$owner['id'],
         'product_id' => $id,
@@ -915,12 +931,132 @@ function aff_create_product(PDO $pdo, array $input): array {
         'imageThumbUrl' => $media['image_thumb_url'],
         'hasImage' => $media['image_url'] !== '',
         'brand' => $brand,
+        'couponLabel' => $couponLabel,
         'description' => $description,
         'clicks' => 0,
         'leads' => 0,
         'sales' => 0,
         'trending' => 0,
+        'active' => 1,
     ];
+}
+
+function aff_update_product(PDO $pdo, array $input): array {
+    $owner = aff_owner($pdo);
+    $id = trim((string)($input['id'] ?? ''));
+    if ($id === '') {
+        throw new InvalidArgumentException('product_id_required');
+    }
+    $st = $pdo->prepare("SELECT * FROM affiliate_products WHERE id=? AND owner_id=? AND active=1 LIMIT 1");
+    $st->execute([$id, (int)$owner['id']]);
+    $current = $st->fetch();
+    if (!$current) {
+        throw new RuntimeException('product_not_found');
+    }
+
+    $name = substr(trim((string)($input['name'] ?? $current['name'])), 0, 190);
+    $category = substr(trim((string)($input['category'] ?? $current['category'])), 0, 80);
+    $price = round((float)($input['price'] ?? $current['price']), 2);
+    $stock = max(0, (int)($input['stock'] ?? $current['stock']));
+    $commission = round((float)($input['commission'] ?? $current['commission']), 2);
+    $description = trim((string)($input['description'] ?? $current['description']));
+    $brand = substr(trim((string)($input['brand'] ?? $current['brand'])), 0, 80) ?: 'Nuevo';
+    $couponLabel = substr(trim((string)($input['coupon_label'] ?? ($current['coupon_label'] ?? ''))), 0, 120);
+    $imageData = (string)($input['image_data'] ?? '');
+    $removeImage = !empty($input['remove_image']);
+    if ($name === '' || $price <= 0 || $commission <= 0) {
+        throw new InvalidArgumentException('Datos del producto incompletos');
+    }
+
+    $commissionPct = round(($commission / max($price, 1)) * 100, 1);
+    $media = [
+        'image_url' => (string)($current['image_url'] ?? ''),
+        'image_webp_url' => (string)($current['image_webp_url'] ?? ''),
+        'image_thumb_url' => (string)($current['image_thumb_url'] ?? ''),
+    ];
+    if ($removeImage) {
+        $media = aff_delete_product_image($id);
+    }
+    if (trim($imageData) !== '') {
+        $media = aff_store_product_image($id, $imageData);
+    }
+
+    $upd = $pdo->prepare("UPDATE affiliate_products
+        SET name=?, category=?, price=?, stock=?, commission=?, commission_pct=?, image_url=?, image_webp_url=?, image_thumb_url=?, brand=?, description=?, coupon_label=?
+        WHERE id=? AND owner_id=?");
+    $upd->execute([
+        $name,
+        $category,
+        $price,
+        $stock,
+        $commission,
+        $commissionPct,
+        $media['image_url'],
+        $media['image_webp_url'],
+        $media['image_thumb_url'],
+        $brand,
+        $description,
+        $couponLabel,
+        $id,
+        (int)$owner['id']
+    ]);
+
+    aff_record_audit($pdo, [
+        'owner_id' => (int)$owner['id'],
+        'product_id' => $id,
+        'event_type' => 'product_updated',
+        'severity' => 'info',
+        'message' => 'Producto RAC actualizado',
+        'context' => ['name' => $name, 'price' => $price, 'commission' => $commission, 'remove_image' => $removeImage],
+    ]);
+
+    return [
+        'id' => $id,
+        'name' => $name,
+        'category' => $category,
+        'price' => $price,
+        'stock' => $stock,
+        'commission' => $commission,
+        'commissionPct' => $commissionPct,
+        'image' => (string)$current['icon'],
+        'imageUrl' => $media['image_url'],
+        'imageWebpUrl' => $media['image_webp_url'],
+        'imageThumbUrl' => $media['image_thumb_url'],
+        'hasImage' => $media['image_url'] !== '' || $media['image_webp_url'] !== '',
+        'brand' => $brand,
+        'couponLabel' => $couponLabel,
+        'description' => $description,
+        'clicks' => (int)$current['clicks'],
+        'leads' => (int)$current['leads'],
+        'sales' => (int)$current['sales'],
+        'trending' => (int)$current['trending'],
+        'active' => (int)$current['active'],
+    ];
+}
+
+function aff_toggle_product_active(PDO $pdo, string $id, int $active): array {
+    $owner = aff_owner($pdo);
+    $active = $active ? 1 : 0;
+    $st = $pdo->prepare("UPDATE affiliate_products SET active=? WHERE id=? AND owner_id=?");
+    $st->execute([$active, $id, (int)$owner['id']]);
+    if ($st->rowCount() < 1) {
+        throw new RuntimeException('product_not_found');
+    }
+    aff_record_audit($pdo, [
+        'owner_id' => (int)$owner['id'],
+        'product_id' => $id,
+        'event_type' => $active ? 'product_activated' : 'product_deactivated',
+        'severity' => 'info',
+        'message' => $active ? 'Producto RAC reactivado' : 'Producto RAC desactivado',
+        'context' => ['active' => $active],
+    ]);
+    $q = $pdo->prepare("SELECT id, name, category, price, stock, commission, commission_pct AS commissionPct, icon AS image, image_url, image_webp_url, image_thumb_url, brand, description, clicks, leads, sales, trending, coupon_label AS couponLabel, active FROM affiliate_products WHERE id=? AND owner_id=? LIMIT 1");
+    $q->execute([$id, (int)$owner['id']]);
+    $row = $q->fetch();
+    if (!$row) {
+        throw new RuntimeException('product_not_found');
+    }
+    return array_merge($row, aff_product_media($row));
 }
 
 function aff_load_lead_for_owner(PDO $pdo, string $id, int $ownerId): array {

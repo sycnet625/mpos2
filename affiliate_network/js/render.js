@@ -28,6 +28,31 @@ window.RAC = window.RAC || {};
         return '<div class="field"><label>' + label + '</label><input class="input" type="' + (type || 'text') + '" value="' + ns.esc(value) + '" data-product-field="' + key + '"></div>';
     };
 
+    ns.resetProductDraft = function () {
+        state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
+    };
+
+    ns.editProduct = function (productId) {
+        var product = state.products.find(function (item) { return item.id === productId; });
+        if (!product) return;
+        state.ownerNewProduct = {
+            id: product.id,
+            name: product.name || '',
+            category: product.category || 'Tecnologia',
+            price: product.price || '',
+            stock: product.stock || '',
+            commission: product.commission || '',
+            brand: product.brand || 'Nuevo',
+            couponLabel: product.couponLabel || '',
+            description: product.description || '',
+            imageData: '',
+            imagePreview: product.imageUrl || product.imageWebpUrl || product.imageThumbUrl || '',
+            hasImage: !!product.hasImage,
+            removeImage: false
+        };
+        ns.openProductModal();
+    };
+
     ns.closeModal = function (id) {
         var wrap = ns.$(id);
         if (!wrap) return;
@@ -37,7 +62,8 @@ window.RAC = window.RAC || {};
 
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
-        ns.$('productModalWrap').innerHTML = '<div class="modal active"><header><h3>🪔 Publicar nuevo producto</h3><button class="close" data-close-modal="productModalWrap">×</button></header>'
+        var isEdit = !!p.id;
+        ns.$('productModalWrap').innerHTML = '<div class="modal active"><header><h3>' + (isEdit ? '🛠️ Editar producto RAC' : '🪔 Publicar nuevo producto') + '</h3><button class="close" data-close-modal="productModalWrap">×</button></header>'
             + ns.field('name', 'Nombre del producto', p.name)
             + '<div class="field"><label>Categoria</label><select class="select" data-product-field="category">'
             + ['Tecnologia', 'Electrodomesticos', 'Muebles', 'Transporte', 'Ropa', 'Alimentacion', 'Otros'].map(function (c) {
@@ -47,10 +73,14 @@ window.RAC = window.RAC || {};
             + ns.field('price', 'Precio (CUP)', p.price, 'number')
             + ns.field('stock', 'Stock disponible', p.stock, 'number')
             + ns.field('commission', 'Comision por venta (CUP)', p.commission, 'number')
+            + ns.field('brand', 'Marca', p.brand)
+            + ns.field('couponLabel', 'Cupón / beneficio RAC', p.couponLabel)
             + '<div class="field"><label>Descripcion</label><textarea class="textarea" data-product-field="description">' + ns.esc(p.description) + '</textarea></div>'
             + '<div class="field"><label>Imagen del producto</label><input class="input" id="racProductImage" type="file" accept="image/png,image/jpeg,image/webp"></div>'
             + (p.imagePreview ? '<div class="product-media" style="margin-bottom:14px"><img loading="lazy" src="' + ns.esc(p.imagePreview) + '" alt="Preview"></div>' : '')
-            + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-product>✨ Publicar producto</button></div></div>';
+            + '<div class="footer-actions">'
+            + (isEdit && (p.hasImage || p.imagePreview) ? '<button class="btn ghost" type="button" data-remove-product-image>🗑️ Quitar imagen</button>' : '')
+            + '<button class="btn primary" style="width:100%" data-save-product>' + (isEdit ? '💾 Guardar cambios' : '✨ Publicar producto') + '</button></div></div>';
         ns.$('productModalWrap').classList.add('active');
     };
 
@@ -83,7 +113,7 @@ window.RAC = window.RAC || {};
             body = '<div class="section-title"><h3>Inventario invisible del dueño</h3><button class="btn primary" data-open-product>+ Nuevo producto</button></div><div class="cards">'
                 + state.products.map(function (p) {
                     return '<div class="card product-card">' + (p.trending ? '<div class="trend">🔥 TREND</div>' : '')
-                        + ns.productVisual(p) + '<div class="item-title" style="margin:10px 0 4px">' + ns.esc(p.name) + '</div><div class="sub">' + ns.esc(p.category) + ' · ' + ns.esc(p.brand) + ' · Stock ' + ns.esc(p.stock) + '</div><div style="margin-top:8px;font-size:15px;font-weight:900;color:var(--amber)">' + ns.formatCUP(p.price) + '</div><div class="two-col" style="margin-top:14px"><div><div class="sub">Comision</div><div class="money">' + ns.formatCUP(p.commission) + '</div></div><div><div class="sub">% visible</div><div style="font-weight:800;color:var(--fire)">' + ns.esc(p.commissionPct) + '%</div></div></div><div class="sub" style="margin-top:12px">' + ns.esc((p.description || '').substring(0, 90)) + '</div></div>';
+                        + ns.productVisual(p) + '<div class="item-title" style="margin:10px 0 4px">' + ns.esc(p.name) + '</div><div class="sub">' + ns.esc(p.category) + ' · ' + ns.esc(p.brand) + ' · Stock ' + ns.esc(p.stock) + '</div><div style="margin-top:8px;font-size:15px;font-weight:900;color:var(--amber)">' + ns.formatCUP(p.price) + '</div><div class="two-col" style="margin-top:14px"><div><div class="sub">Comision</div><div class="money">' + ns.formatCUP(p.commission) + '</div></div><div><div class="sub">% visible</div><div style="font-weight:800;color:var(--fire)">' + ns.esc(p.commissionPct) + '%</div></div></div><div class="sub" style="margin-top:12px">' + ns.esc((p.description || '').substring(0, 90)) + '</div>' + (p.couponLabel ? '<div class="sub" style="margin-top:8px"><strong>Beneficio:</strong> ' + ns.esc(p.couponLabel) + '</div>' : '') + '<div class="actions"><button class="btn ghost" data-edit-product="' + ns.esc(p.id) + '">🛠️ Editar</button><button class="btn ghost" data-toggle-product="' + ns.esc(p.id) + '" data-active="' + (p.active ? '0' : '1') + '">' + (p.active ? '⏸️ Desactivar' : '♻️ Reactivar') + '</button></div>' + (!p.active ? '<div class="sub" style="margin-top:10px;color:#8f2f2f">Producto oculto del marketplace</div>' : '') + '</div>';
                 }).join('')
                 + '</div>';
         } else if (state.ownerTab === 'leads') {
@@ -128,7 +158,7 @@ window.RAC = window.RAC || {};
         var products = state.products.filter(function (p) {
             var categoryOk = state.gestorFilter.category === 'Todos' || p.category === state.gestorFilter.category;
             var text = [p.name, p.brand, p.category, p.description].join(' ').toLowerCase();
-            return categoryOk && (!q || text.indexOf(q) !== -1);
+            return Number(p.active || 0) === 1 && categoryOk && (!q || text.indexOf(q) !== -1);
         }).sort(function (a, b) {
             if (state.gestorFilter.sort === 'commission') return Number(b.commission) - Number(a.commission);
             if (state.gestorFilter.sort === 'clicks') return Number(b.clicks) - Number(a.clicks);

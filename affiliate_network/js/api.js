@@ -190,19 +190,23 @@ window.RAC = window.RAC || {};
             return;
         }
         var payload = {
+            id: p.id || '',
             name: p.name.trim(),
             category: p.category || 'Tecnologia',
             price: Number(p.price),
             stock: Number(p.stock),
             commission: Number(p.commission),
+            brand: (p.brand || 'Nuevo').trim(),
+            coupon_label: (p.couponLabel || '').trim(),
             description: p.description || '',
             image: '📦',
-            brand: 'Nuevo',
-            image_data: p.imageData || ''
+            image_data: p.imageData || '',
+            remove_image: !!p.removeImage
         };
+        var isEdit = !!p.id;
         if (!navigator.onLine) {
-            state.products.unshift({
-                id: 'TMP-' + Date.now(),
+            var optimistic = {
+                id: payload.id || ('TMP-' + Date.now()),
                 name: payload.name,
                 category: payload.category,
                 price: payload.price,
@@ -210,31 +214,63 @@ window.RAC = window.RAC || {};
                 commission: payload.commission,
                 commissionPct: Number(((payload.commission / Math.max(payload.price, 1)) * 100).toFixed(1)),
                 image: '📦',
-                imageUrl: p.imagePreview || '',
-                imageWebpUrl: p.imagePreview || '',
-                hasImage: !!p.imagePreview,
-                brand: 'Nuevo',
+                imageUrl: payload.remove_image ? '' : (p.imagePreview || ''),
+                imageWebpUrl: payload.remove_image ? '' : (p.imagePreview || ''),
+                imageThumbUrl: payload.remove_image ? '' : (p.imagePreview || ''),
+                hasImage: payload.remove_image ? false : !!p.imagePreview,
+                brand: payload.brand || 'Nuevo',
+                couponLabel: payload.coupon_label || '',
                 description: payload.description,
                 clicks: 0,
                 leads: 0,
                 sales: 0,
-                trending: 0
-            });
-            ns.enqueueMutation({ type: 'product_create', payload: payload });
+                trending: 0,
+                active: 1
+            };
+            if (isEdit) {
+                state.products = state.products.map(function (item) {
+                    return item.id === payload.id ? Object.assign({}, item, optimistic) : item;
+                });
+            } else {
+                state.products.unshift(optimistic);
+            }
+            ns.enqueueMutation({ type: isEdit ? 'product_update' : 'product_create', payload: payload });
             ns.cacheData();
             ns.closeModal('productModalWrap');
+            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
             ns.renderOwner();
-            ns.toast('Producto guardado offline. Se sincronizara al volver internet.', 'info');
+            ns.toast(isEdit ? 'Cambios del producto guardados offline.' : 'Producto guardado offline. Se sincronizara al volver internet.', 'info');
             return;
         }
         try {
-            await ns.api('product_create', 'POST', payload);
-            state.ownerNewProduct = { name: '', category: 'Tecnologia', price: '', stock: '', commission: '', description: '', imageData: '', imagePreview: '' };
+            await ns.api(isEdit ? 'product_update' : 'product_create', 'POST', payload);
+            state.ownerNewProduct = { id: '', name: '', category: 'Tecnologia', price: '', stock: '', commission: '', brand: 'Nuevo', couponLabel: '', description: '', imageData: '', imagePreview: '', hasImage: false, removeImage: false };
             ns.closeModal('productModalWrap');
             await ns.loadBootstrap();
-            ns.toast('Producto publicado en el catalogo.', 'success');
+            ns.toast(isEdit ? 'Producto actualizado.' : 'Producto publicado en el catalogo.', 'success');
         } catch (e) {
-            ns.toast('No fue posible publicar el producto.', 'error');
+            ns.toast(isEdit ? 'No fue posible actualizar el producto.' : 'No fue posible publicar el producto.', 'error');
+        }
+    };
+
+    ns.toggleProductActive = async function (id, active) {
+        var payload = { id: id, active: active ? 1 : 0 };
+        if (!navigator.onLine) {
+            state.products = state.products.map(function (item) {
+                return item.id === id ? Object.assign({}, item, { active: payload.active }) : item;
+            });
+            ns.enqueueMutation({ type: 'product_toggle_active', payload: payload });
+            ns.cacheData();
+            ns.renderOwner();
+            ns.toast(payload.active ? 'Producto reactivado offline.' : 'Producto desactivado offline.', 'info');
+            return;
+        }
+        try {
+            await ns.api('product_toggle_active', 'POST', payload);
+            await ns.loadBootstrap();
+            ns.toast(payload.active ? 'Producto reactivado.' : 'Producto desactivado.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible cambiar el estado del producto.', 'error');
         }
     };
 
