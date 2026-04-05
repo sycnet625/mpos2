@@ -1009,11 +1009,33 @@ function aff_send_webpush(PDO $pdo, array $subscription, string $title, string $
     }
     if (in_array($status, [200, 201, 202], true)) {
         $pdo->prepare("UPDATE affiliate_webpush_subscriptions SET last_notified_at=?, status='active' WHERE id=?")->execute([aff_now(), (int)$subscription['id']]);
+        aff_record_audit($pdo, [
+            'event_type' => 'webpush_notified',
+            'severity' => 'info',
+            'message' => 'Web push enviado correctamente',
+            'context' => [
+                'subscription_id' => (int)$subscription['id'],
+                'endpoint' => substr($endpoint, 0, 90),
+                'status_code' => $status,
+                'title' => $title,
+            ],
+        ]);
         return true;
     }
     if (in_array($status, [404, 410], true)) {
         $pdo->prepare("UPDATE affiliate_webpush_subscriptions SET status='invalid' WHERE id=?")->execute([(int)$subscription['id']]);
     }
+    aff_record_audit($pdo, [
+        'event_type' => 'webpush_notify_failed',
+        'severity' => 'warning',
+        'message' => 'No fue posible entregar web push',
+        'context' => [
+            'subscription_id' => (int)($subscription['id'] ?? 0),
+            'endpoint' => substr($endpoint, 0, 90),
+            'status_code' => $status,
+            'title' => $title,
+        ],
+    ]);
     return false;
 }
 
@@ -1023,7 +1045,7 @@ function aff_dispatch_webpush_for_audit(PDO $pdo, array $event): void {
     }
     $type = (string)($event['event_type'] ?? '');
     $message = trim((string)($event['message'] ?? ''));
-    if ($type === '' || $message === '') {
+    if ($type === '' || $message === '' || in_array($type, ['webpush_notified', 'webpush_notify_failed'], true)) {
         return;
     }
     $roleRules = [
@@ -2215,6 +2237,70 @@ function aff_recent_audit_events(PDO $pdo): array {
     return $st->fetchAll();
 }
 
+function aff_webpush_delivery_summary(PDO $pdo): array {
+    $st = $pdo->query("SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_count,
+            SUM(CASE WHEN status='invalid' THEN 1 ELSE 0 END) AS invalid_count,
+            SUM(CASE WHEN last_notified_at IS NOT NULL THEN 1 ELSE 0 END) AS delivered_count
+        FROM affiliate_webpush_subscriptions");
+    $row = $st->fetch() ?: [];
+    $ok = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_audit_events WHERE event_type='webpush_notified'")->fetchColumn();
+    $fail = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_audit_events WHERE event_type='webpush_notify_failed'")->fetchColumn();
+    return [
+        'total' => (int)($row['total'] ?? 0),
+        'active' => (int)($row['active_count'] ?? 0),
+        'invalid' => (int)($row['invalid_count'] ?? 0),
+        'delivered' => (int)($row['delivered_count'] ?? 0),
+        'okEvents' => $ok,
+        'failEvents' => $fail,
+    ];
+}
+
+function aff_webpush_delivery_events(PDO $pdo): array {
+    $st = $pdo->query("SELECT event_type AS eventType, severity, message, context_json AS contextJson, created_at AS createdAt
+        FROM affiliate_audit_events
+        WHERE event_type IN ('webpush_notified','webpush_notify_failed')
+        ORDER BY id DESC
+        LIMIT 40");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $ctx = json_decode((string)($row['contextJson'] ?? ''), true);
+        $rows[] = [
+            'eventType' => (string)$row['eventType'],
+            'severity' => (string)$row['severity'],
+            'message' => (string)$row['message'],
+            'createdAt' => (string)$row['createdAt'],
+            'context' => is_array($ctx) ? $ctx : [],
+        ];
+    }
+    return $rows;
+}
+
+function aff_webpush_subscriptions_admin(PDO $pdo): array {
+    $st = $pdo->query("SELECT s.id, s.endpoint, s.role, s.status, s.created_at AS createdAt, s.last_notified_at AS lastNotifiedAt,
+            u.username, u.display_name AS displayName
+        FROM affiliate_webpush_subscriptions s
+        LEFT JOIN affiliate_users u ON u.id=s.user_id
+        ORDER BY s.id DESC
+        LIMIT 40");
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $rows[] = [
+            'id' => (int)$row['id'],
+            'endpoint' => (string)$row['endpoint'],
+            'endpointShort' => substr((string)$row['endpoint'], 0, 90),
+            'role' => (string)($row['role'] ?? ''),
+            'status' => (string)($row['status'] ?? ''),
+            'createdAt' => (string)($row['createdAt'] ?? ''),
+            'lastNotifiedAt' => (string)($row['lastNotifiedAt'] ?? ''),
+            'username' => (string)($row['username'] ?? ''),
+            'displayName' => (string)($row['displayName'] ?? ''),
+        ];
+    }
+    return $rows;
+}
+
 function aff_access_audit_events(PDO $pdo): array {
     $st = $pdo->query("SELECT event_type AS eventType, severity, message, created_at AS createdAt, context_json AS contextJson
         FROM affiliate_audit_events
@@ -3396,6 +3482,9 @@ function aff_bootstrap(PDO $pdo): array {
         'accessAudit' => $role === 'admin' ? aff_access_audit_events($pdo) : [],
         'activeSessions' => $role === 'admin' ? aff_active_sessions($pdo) : [],
         'recentLockouts' => $role === 'admin' ? aff_recent_lockouts($pdo) : [],
+        'webpushDeliverySummary' => $role === 'admin' ? aff_webpush_delivery_summary($pdo) : ['total' => 0, 'active' => 0, 'invalid' => 0, 'delivered' => 0, 'okEvents' => 0, 'failEvents' => 0],
+        'webpushDeliveryEvents' => $role === 'admin' ? aff_webpush_delivery_events($pdo) : [],
+        'webpushSubscriptions' => $role === 'admin' ? aff_webpush_subscriptions_admin($pdo) : [],
         'subscriptionMetrics' => $role === 'admin' ? aff_subscription_metrics($pdo) : ['expectedMrr' => 0, 'overdueOwners' => 0, 'managedOwners' => 0, 'adsActiveOwners' => 0, 'pendingTopups' => 0],
         'sponsoredProducts' => $role === 'admin' ? aff_sponsored_products($pdo) : [],
         'advancedAudit' => $role === 'admin' ? aff_advanced_audit_signals($pdo) : ['owners' => [], 'gestores' => []],
