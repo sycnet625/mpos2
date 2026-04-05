@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.1 - Assets locales + offline real
+// Versión 8.2 - Assets locales + offline real
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v81';
+const CACHE_NAME = 'palweb-pos-v82';
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
@@ -28,7 +28,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.1 (Online First)...');
+    console.log('[SW-POS] Instalando Service Worker v8.2 (Online First)...');
 
     event.waitUntil(
         caches.open(CACHE_NAME)
@@ -50,7 +50,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.1...');
+    console.log('[SW-POS] Activando Service Worker v8.2...');
     
     event.waitUntil(
         caches.keys()
@@ -124,7 +124,7 @@ async function onlineFirst(request) {
         });
         
         // Si es exitoso, actualizar caché para uso offline
-        if (networkResponse.ok) {
+        if (networkResponse.ok && networkResponse.type !== 'opaqueredirect' && !networkResponse.redirected) {
             const cache = await caches.open(CACHE_NAME);
             
             // Solo cachear recursos estáticos (no PHP dinámico con parámetros)
@@ -153,7 +153,7 @@ async function onlineFirst(request) {
         const cachedResponse = await caches.match(request) ||
                                await caches.match(request, { ignoreSearch: true });
         
-        if (cachedResponse) {
+        if (cachedResponse && cachedResponse.type !== 'opaqueredirect') {
             console.log('[SW-POS] Servido desde caché:', request.url);
             return cachedResponse;
         }
@@ -175,7 +175,7 @@ async function onlineFirst(request) {
         
         // Para otros recursos no encontrados
         return new Response('Offline - Recurso no disponible', { 
-            status: 503, 
+            status: 503,
             statusText: 'Offline' 
         });
     }
@@ -199,11 +199,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v81-online-first' });
+        event.ports[0].postMessage({ version: 'v82-online-first' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.1 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.2 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS
