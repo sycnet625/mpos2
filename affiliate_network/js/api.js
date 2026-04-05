@@ -372,6 +372,46 @@ window.RAC = window.RAC || {};
             ns.toast('No fue posible guardar las integraciones.', 'error');
         }
     };
+    ns.enableWebPush = async function () {
+        if (!('Notification' in window) || !('serviceWorker' in navigator)) {
+            throw new Error('webpush_not_supported');
+        }
+        var perm = await Notification.requestPermission();
+        if (perm !== 'granted') {
+            throw new Error('webpush_permission_denied');
+        }
+        var registration = await navigator.serviceWorker.ready;
+        if (registration.active) {
+            registration.active.postMessage({
+                type: 'rac-show-notification',
+                title: 'RAC activo',
+                body: 'Las notificaciones web quedaron habilitadas en este navegador.'
+            });
+        }
+        var endpoint = 'browser:' + location.origin;
+        var p256dh = '';
+        var auth = '';
+        if (registration.pushManager) {
+            try {
+                var subscription = await registration.pushManager.getSubscription();
+                if (!subscription) {
+                    subscription = await registration.pushManager.subscribe({ userVisibleOnly: true });
+                }
+                if (subscription) {
+                    endpoint = subscription.endpoint || endpoint;
+                    var keyP = subscription.getKey ? subscription.getKey('p256dh') : null;
+                    var keyA = subscription.getKey ? subscription.getKey('auth') : null;
+                    p256dh = keyP ? btoa(String.fromCharCode.apply(null, new Uint8Array(keyP))) : '';
+                    auth = keyA ? btoa(String.fromCharCode.apply(null, new Uint8Array(keyA))) : '';
+                }
+            } catch (e) {}
+        }
+        return ns.api('webpush_subscribe', 'POST', {
+            endpoint: endpoint,
+            p256dh: p256dh,
+            auth: auth
+        });
+    };
     ns.saveOwner = async function (payload) {
         try {
             await ns.api('owner_upsert', 'POST', payload);

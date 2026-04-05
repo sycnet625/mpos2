@@ -72,6 +72,9 @@ window.RAC = window.RAC || {};
             + ns.integrationField('telegramBotToken', 'Telegram Bot Token', s.telegramBotToken || '')
             + '<div class="field"><label>Gestor por defecto</label><input class="input" type="text" value="' + ns.esc((s.defaultGestorId || '') + ' · ' + (s.defaultGestorName || '')) + '" disabled></div>'
             + ns.integrationField('defaultGestorChatId', 'Telegram Chat ID del gestor', s.defaultGestorChatId || '')
+            + ns.integrationField('telegramAdminChatId', 'Telegram Chat ID admin', s.telegramAdminChatId || '')
+            + '<div class="field"><label>Notificaciones web</label><select class="select" data-integration-field="webpushEnabled"><option value="0"' + (s.webpushEnabled ? '' : ' selected') + '>Desactivadas</option><option value="1"' + (s.webpushEnabled ? ' selected' : '') + '>Activadas</option></select></div>'
+            + '<div class="footer-actions"><button class="btn ghost" type="button" data-enable-webpush>🔔 Activar en este navegador</button></div>'
             + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-integrations>💾 Guardar integraciones</button></div></div>';
         ns.$('integrationModalWrap').classList.add('active');
     };

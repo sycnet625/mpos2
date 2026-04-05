@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rac-affiliate-v5';
+const CACHE_NAME = 'rac-affiliate-v6';
 const APP_SHELL = [
   '/affiliate_network.php',
   '/affiliate_network_help.php',
@@ -36,4 +36,29 @@ self.addEventListener('fetch', event => {
     event.respondWith(caches.match(req).then(hit => hit || fetch(req).then(res => { const copy = res.clone(); caches.open(CACHE_NAME).then(cache => cache.put(req, copy)).catch(() => {}); return res; })));
     return;
   }
+});
+self.addEventListener('message', event => {
+  const data = event.data || {};
+  if (data.type === 'rac-show-notification' && self.registration && self.registration.showNotification) {
+    event.waitUntil(self.registration.showNotification(data.title || 'RAC', {
+      body: data.body || '',
+      icon: '/affiliate_network_icon.svg',
+      badge: '/affiliate_network_icon.svg'
+    }));
+  }
+});
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch (e) {}
+  event.waitUntil(self.registration.showNotification(data.title || 'RAC', {
+    body: data.body || 'Nueva notificación RAC',
+    icon: '/affiliate_network_icon.svg',
+    badge: '/affiliate_network_icon.svg',
+    data: { url: data.url || '/affiliate_network.php' }
+  }));
+});
+self.addEventListener('notificationclick', event => {
+  const url = (event.notification && event.notification.data && event.notification.data.url) || '/affiliate_network.php';
+  event.notification.close();
+  event.waitUntil(clients.openWindow(url));
 });

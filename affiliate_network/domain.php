@@ -526,6 +526,18 @@ function aff_ensure_tables(PDO $pdo): void {
         setting_value TEXT NULL,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_webpush_subscriptions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NULL,
+        role VARCHAR(20) NULL,
+        endpoint VARCHAR(255) NOT NULL UNIQUE,
+        p256dh_key TEXT NULL,
+        auth_key TEXT NULL,
+        user_agent VARCHAR(255) NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_notified_at DATETIME NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 }
 
 function aff_seed_demo_data(PDO $pdo): void {
@@ -742,6 +754,123 @@ function aff_notify_gestor_commission(PDO $pdo, array $lead, array $product, flo
         'message' => $result === false ? 'No fue posible notificar comisión por Telegram' : 'Comisión notificada al gestor por Telegram',
         'context' => ['chat_id' => $chatId],
     ]);
+}
+
+function aff_admin_telegram_chat_id(PDO $pdo): string {
+    return trim(aff_get_setting($pdo, 'telegram_admin_chat_id', ''));
+}
+
+function aff_webpush_enabled(PDO $pdo): bool {
+    return trim(aff_get_setting($pdo, 'webpush_enabled', '0')) === '1';
+}
+
+function aff_notify_telegram_chat(PDO $pdo, string $chatId, string $message, array $audit = []): bool {
+    $token = aff_telegram_bot_token($pdo);
+    $chatId = trim($chatId);
+    if ($token === '' || $chatId === '') {
+        return false;
+    }
+    $payload = json_encode([
+        'chat_id' => $chatId,
+        'text' => $message,
+    ], JSON_UNESCAPED_UNICODE);
+    $ctx = stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\n",
+            'content' => $payload,
+            'timeout' => 8,
+            'ignore_errors' => true,
+        ],
+    ]);
+    $url = 'https://api.telegram.org/bot' . rawurlencode($token) . '/sendMessage';
+    $result = @file_get_contents($url, false, $ctx);
+    aff_record_audit($pdo, [
+        'owner_id' => $audit['owner_id'] ?? null,
+        'gestor_id' => $audit['gestor_id'] ?? null,
+        'product_id' => $audit['product_id'] ?? null,
+        'lead_id' => $audit['lead_id'] ?? null,
+        'event_type' => $result === false ? 'telegram_notify_failed' : 'telegram_notified',
+        'severity' => $result === false ? 'warning' : 'info',
+        'message' => $result === false ? 'No fue posible enviar aviso Telegram' : 'Aviso Telegram enviado',
+        'context' => array_merge(['chat_id' => $chatId], $audit['context'] ?? []),
+    ]);
+    return $result !== false;
+}
+
+function aff_notify_admin_alerts(PDO $pdo): void {
+    $chatId = aff_admin_telegram_chat_id($pdo);
+    if ($chatId === '') {
+        return;
+    }
+    $fraud = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_audit_alerts WHERE active=1 AND alert_type='fraud'")->fetchColumn();
+    $lowBalance = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE status='active' AND available_balance < 1000")->fetchColumn();
+    $pendingTopups = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_wallet_topups WHERE status='pending'")->fetchColumn();
+    $pendingCharges = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_billing_charges WHERE status='pending'")->fetchColumn();
+    $lines = [];
+    if ($fraud > 0) $lines[] = '⚠️ Alertas de fraude: ' . $fraud;
+    if ($lowBalance > 0) $lines[] = '💸 Dueños con saldo bajo: ' . $lowBalance;
+    if ($pendingTopups > 0) $lines[] = '🧾 Recargas pendientes: ' . $pendingTopups;
+    if ($pendingCharges > 0) $lines[] = '📌 Cobros RAC pendientes: ' . $pendingCharges;
+    if (!$lines) {
+        return;
+    }
+    aff_notify_telegram_chat($pdo, $chatId, "🔔 Resumen RAC admin\n" . implode("\n", $lines), [
+        'context' => [
+            'fraud' => $fraud,
+            'low_balance' => $lowBalance,
+            'pending_topups' => $pendingTopups,
+            'pending_charges' => $pendingCharges,
+        ],
+    ]);
+}
+
+function aff_notify_owner_low_balance(PDO $pdo, int $ownerId): void {
+    $chatId = aff_admin_telegram_chat_id($pdo);
+    if ($chatId === '') {
+        return;
+    }
+    $st = $pdo->prepare("SELECT owner_code, owner_name, available_balance FROM affiliate_owners WHERE id=? LIMIT 1");
+    $st->execute([$ownerId]);
+    $owner = $st->fetch();
+    if (!$owner || (float)$owner['available_balance'] >= 1000) {
+        return;
+    }
+    aff_notify_telegram_chat($pdo, $chatId, "💸 Saldo bajo RAC\nDueño: " . (string)$owner['owner_code'] . " · " . (string)$owner['owner_name'] . "\nDisponible: " . number_format((float)$owner['available_balance'], 2, '.', '') . " CUP", [
+        'owner_id' => $ownerId,
+        'context' => ['owner_code' => (string)$owner['owner_code']],
+    ]);
+}
+
+function aff_webpush_subscribe(PDO $pdo, array $input): array {
+    $endpoint = substr(trim((string)($input['endpoint'] ?? '')), 0, 255);
+    $p256dh = trim((string)($input['p256dh'] ?? ''));
+    $auth = trim((string)($input['auth'] ?? ''));
+    if ($endpoint === '') {
+        throw new InvalidArgumentException('push_endpoint_required');
+    }
+    $ctx = aff_auth_context();
+    $st = $pdo->prepare("INSERT INTO affiliate_webpush_subscriptions (user_id, role, endpoint, p256dh_key, auth_key, user_agent, status, created_at)
+        VALUES (?,?,?,?,?,?, 'active', ?)
+        ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), role=VALUES(role), p256dh_key=VALUES(p256dh_key), auth_key=VALUES(auth_key), user_agent=VALUES(user_agent), status='active'");
+    $st->execute([
+        $ctx['user_id'] ?? null,
+        $ctx['role'] ?? null,
+        $endpoint,
+        $p256dh,
+        $auth,
+        substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
+        aff_now(),
+    ]);
+    aff_record_audit($pdo, [
+        'owner_id' => isset($ctx['owner_id']) ? (int)$ctx['owner_id'] : null,
+        'gestor_id' => isset($ctx['gestor_id']) ? (string)$ctx['gestor_id'] : null,
+        'event_type' => 'webpush_subscribed',
+        'severity' => 'info',
+        'message' => 'Suscripción web push registrada',
+        'context' => ['endpoint' => substr($endpoint, 0, 80)],
+    ]);
+    return ['subscribed' => true, 'endpoint' => $endpoint];
 }
 
 function aff_recompute_owner_health(PDO $pdo, int $ownerId): void {
@@ -996,6 +1125,8 @@ function aff_integration_settings(PDO $pdo): array {
         'defaultGestorId' => (string)$gestor['id'],
         'defaultGestorName' => (string)$gestor['name'],
         'defaultGestorChatId' => (string)($gestor['telegram_chat_id'] ?? ''),
+        'telegramAdminChatId' => aff_admin_telegram_chat_id($pdo),
+        'webpushEnabled' => aff_webpush_enabled($pdo),
     ];
 }
 
@@ -1003,7 +1134,11 @@ function aff_save_integration_settings(PDO $pdo, array $input): array {
     $token = trim((string)($input['telegram_bot_token'] ?? ''));
     $gestorId = trim((string)($input['default_gestor_id'] ?? AFF_DEFAULT_GESTOR));
     $chatId = trim((string)($input['default_gestor_chat_id'] ?? ''));
+    $adminChatId = trim((string)($input['telegram_admin_chat_id'] ?? ''));
+    $webpushEnabled = !empty($input['webpush_enabled']) ? '1' : '0';
     aff_set_setting($pdo, 'telegram_bot_token', $token);
+    aff_set_setting($pdo, 'telegram_admin_chat_id', $adminChatId);
+    aff_set_setting($pdo, 'webpush_enabled', $webpushEnabled);
     $st = $pdo->prepare("UPDATE affiliate_gestores SET telegram_chat_id=? WHERE id=?");
     $st->execute([$chatId, $gestorId]);
     aff_record_audit($pdo, [
@@ -1011,7 +1146,7 @@ function aff_save_integration_settings(PDO $pdo, array $input): array {
         'event_type' => 'integration_settings_updated',
         'severity' => 'info',
         'message' => 'Configuración de integraciones RAC actualizada',
-        'context' => ['telegram_configured' => $token !== '', 'chat_id' => $chatId !== ''],
+        'context' => ['telegram_configured' => $token !== '', 'chat_id' => $chatId !== '', 'admin_chat' => $adminChatId !== '', 'webpush_enabled' => $webpushEnabled === '1'],
     ]);
     return aff_integration_settings($pdo);
 }
@@ -2719,6 +2854,72 @@ function aff_sponsored_roi(PDO $pdo): array {
     }, $rows);
 }
 
+function aff_public_campaign_products(PDO $pdo, string $campaign): array {
+    if ($campaign === 'featured') {
+        $st = $pdo->query("SELECT p.*, o.owner_name, o.geo_zone, o.reputation_score FROM affiliate_products p JOIN affiliate_owners o ON o.id=p.owner_id WHERE p.active=1 AND p.is_featured=1 ORDER BY p.sponsor_rank DESC, p.clicks DESC, p.name ASC LIMIT 18");
+    } elseif ($campaign === 'managed') {
+        $st = $pdo->query("SELECT p.*, o.owner_name, o.geo_zone, o.reputation_score FROM affiliate_products p JOIN affiliate_owners o ON o.id=p.owner_id WHERE p.active=1 AND o.managed_service=1 ORDER BY p.clicks DESC, p.sales DESC, p.name ASC LIMIT 18");
+    } else {
+        throw new RuntimeException('campaign_not_found');
+    }
+    return array_map(function ($row) {
+        return array_merge([
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'category' => (string)$row['category'],
+            'price' => (float)$row['price'],
+            'stock' => (int)$row['stock'],
+            'image' => (string)$row['icon'],
+            'brand' => (string)$row['brand'],
+            'description' => (string)$row['description'],
+            'couponLabel' => (string)($row['coupon_label'] ?? ''),
+            'ownerName' => (string)$row['owner_name'],
+            'zone' => (string)$row['geo_zone'],
+            'reputationScore' => (float)$row['reputation_score'],
+        ], aff_product_media($row));
+    }, $st->fetchAll());
+}
+
+function aff_public_gestor_landing(PDO $pdo, string $gestorId): array {
+    $gestor = aff_gestor($pdo, $gestorId);
+    $st = $pdo->prepare("SELECT DISTINCT p.*, o.owner_name, o.geo_zone, o.reputation_score, t.ref_token
+        FROM affiliate_trace_links t
+        JOIN affiliate_products p ON p.id=t.product_id
+        JOIN affiliate_owners o ON o.id=p.owner_id
+        WHERE t.gestor_id=? AND p.active=1
+        ORDER BY p.is_featured DESC, p.sponsor_rank DESC, p.clicks DESC, p.name ASC
+        LIMIT 18");
+    $st->execute([$gestorId]);
+    $products = array_map(function ($row) {
+        return array_merge([
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'category' => (string)$row['category'],
+            'price' => (float)$row['price'],
+            'stock' => (int)$row['stock'],
+            'image' => (string)$row['icon'],
+            'brand' => (string)$row['brand'],
+            'description' => (string)$row['description'],
+            'couponLabel' => (string)($row['coupon_label'] ?? ''),
+            'ownerName' => (string)$row['owner_name'],
+            'zone' => (string)$row['geo_zone'],
+            'reputationScore' => (float)$row['reputation_score'],
+            'referLink' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode((string)$row['id']) . '&ref=' . rawurlencode((string)$row['ref_token']),
+        ], aff_product_media($row));
+    }, $st->fetchAll());
+    return [
+        'gestor' => [
+            'id' => (string)$gestor['id'],
+            'name' => (string)$gestor['name'],
+            'maskedCode' => (string)($gestor['masked_code'] ?? ''),
+            'rating' => (float)($gestor['rating'] ?? 0),
+            'links' => (int)($gestor['links'] ?? 0),
+            'conversions' => (int)($gestor['conversions'] ?? 0),
+        ],
+        'products' => $products,
+    ];
+}
+
 function aff_funnel_metrics(PDO $pdo): array {
     $row = $pdo->query("SELECT COUNT(*) AS leads_count,
                                SUM(CASE WHEN status IN ('contacted','negotiating','sold','no_sale') THEN 1 ELSE 0 END) AS contacts_count,
@@ -3188,6 +3389,16 @@ function aff_refer_bootstrap(PDO $pdo, string $productId, string $ref): array {
             'maskedCode' => $gestor['masked_code'],
         ],
         'maskedRef' => aff_mask_ref($ref),
+        'commercial' => [
+            'headline' => 'Compra guiada con traza RAC',
+            'subheadline' => 'Beneficio visible, contacto directo y respaldo de garantía prepaga.',
+            'benefits' => array_values(array_filter([
+                (string)($product['coupon_label'] ?? ''),
+                'Contacto directo con el vendedor',
+                'Código de traza protegido RAC',
+                'Gestor asignado con seguimiento',
+            ])),
+        ],
     ];
 }
 
@@ -3237,6 +3448,8 @@ function aff_trigger_contact(PDO $pdo, string $productId, string $ref, array $in
             'context' => ['trace_code' => $traceCode, 'client_name' => $clientName],
         ]);
         $pdo->commit();
+        aff_notify_owner_low_balance($pdo, (int)$ownerRow['id']);
+        aff_notify_admin_alerts($pdo);
         return [
             'lead_id' => $leadId,
             'trace_code' => $traceCode,

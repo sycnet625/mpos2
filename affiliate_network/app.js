@@ -82,7 +82,17 @@
             return ns.saveIntegrationSettings({
                 telegram_bot_token: state.integrationSettings.telegramBotToken || '',
                 default_gestor_id: state.integrationSettings.defaultGestorId || 'G001',
-                default_gestor_chat_id: state.integrationSettings.defaultGestorChatId || ''
+                default_gestor_chat_id: state.integrationSettings.defaultGestorChatId || '',
+                telegram_admin_chat_id: state.integrationSettings.telegramAdminChatId || '',
+                webpush_enabled: String(state.integrationSettings.webpushEnabled || '0') === '1' ? 1 : 0
+            });
+        }
+        var enableWebpushBtn = event.target.closest('[data-enable-webpush]');
+        if (enableWebpushBtn) {
+            return ns.enableWebPush().then(function () {
+                ns.toast('Notificaciones web activadas en este navegador.', 'success');
+            }).catch(function (err) {
+                ns.toast(err.message || 'No se pudo activar la notificación web.', 'error');
             });
         }
 
