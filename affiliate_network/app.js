@@ -227,6 +227,9 @@
         var deleteUserBtn = event.target.closest('[data-delete-user]');
         if (deleteUserBtn) return ns.deleteUser(deleteUserBtn.getAttribute('data-delete-user'));
 
+        var revokeSessionBtn = event.target.closest('[data-revoke-session]');
+        if (revokeSessionBtn) return ns.revokeSession(revokeSessionBtn.getAttribute('data-revoke-session'));
+
         var changePasswordBtn = event.target.closest('[data-change-password]');
         if (changePasswordBtn) {
             if ((state.passwordDraft.new_password || '') !== (state.passwordDraft.confirm_password || '')) {

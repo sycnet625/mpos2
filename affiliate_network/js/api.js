@@ -81,6 +81,8 @@ window.RAC = window.RAC || {};
             ownerAdminList: state.ownerAdminList,
             gestorAdminList: state.gestorAdminList,
             affiliateUsers: state.affiliateUsers,
+            activeSessions: state.activeSessions,
+            recentLockouts: state.recentLockouts,
             userRoleSummary: state.userRoleSummary,
             accessAudit: state.accessAudit,
             subscriptionMetrics: state.subscriptionMetrics,
@@ -483,6 +485,15 @@ window.RAC = window.RAC || {};
             ns.toast('Usuario eliminado.', 'success');
         } catch (e) {
             ns.toast('No fue posible eliminar el usuario.', 'error');
+        }
+    };
+    ns.revokeSession = async function (sessionId) {
+        try {
+            await ns.api('session_revoke', 'POST', { session_id: sessionId });
+            await ns.loadBootstrap();
+            ns.toast('Sesión revocada.', 'success');
+        } catch (e) {
+            ns.toast('No fue posible revocar la sesión.', 'error');
         }
     };
     ns.changeOwnPassword = async function (payload) {

@@ -252,6 +252,21 @@ window.RAC = window.RAC || {};
         );
     };
 
+    ns.renderAdminSecurityBlocks = function (root) {
+        if (!root || state.adminTab !== 'users') return;
+        var sessions = (state.activeSessions || []).slice(0, 20);
+        var lockouts = (state.recentLockouts || []).slice(0, 20);
+        root.insertAdjacentHTML('beforeend',
+            '<div class="grid two" style="margin-top:18px">'
+            + '<div class="card"><div class="item-title">Sesiones activas RAC</div><div class="list" style="margin-top:12px">'
+            + (sessions.length ? sessions.map(function (s) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc((s.displayName || s.username) + ' · ' + (s.role || '')) + '</div><div class="sub">' + ns.esc(s.ipAddress || 'sin ip') + ' · expira ' + ns.esc(s.expiresAt || '') + '</div></div><div class="sub">' + ns.esc(s.lastSeenAt || '') + '</div></div><div class="actions"><button class="btn ghost" data-revoke-session="' + ns.esc(s.sessionId || '') + '">⛔ Revocar</button></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin sesiones activas.</div></div>')
+            + '</div></div>'
+            + '<div class="card"><div class="item-title">Bloqueos por fallos</div><div class="list" style="margin-top:12px">'
+            + (lockouts.length ? lockouts.map(function (l) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(l.username) + '</div><div class="sub">Fallos ' + ns.esc(l.failedCount) + ' · último ' + ns.esc(l.lastAttempt || '') + '</div></div><div>' + ns.badge(l.active ? 'pending' : 'active') + '</div></div><div class="sub" style="margin-top:8px">Bloqueado hasta ' + ns.esc(l.lockedUntil || 'N/D') + '</div></div>'; }).join('') : '<div class="item"><div class="sub">Sin bloqueos recientes.</div></div>')
+            + '</div></div></div>'
+        );
+    };
+
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
         var isEdit = !!p.id;
@@ -487,6 +502,7 @@ window.RAC = window.RAC || {};
         }
         root.innerHTML = ns.panelHeader('🛡️ Panel de Control · RAC', ns.formatCUP(state.summary.revenue), 'Revenue plataforma') + ns.tabRow('admin', tabs, state.adminTab) + body;
         ns.renderAdminAnalyticsBlocks(root);
+        ns.renderAdminSecurityBlocks(root);
     };
 
     ns.render = function () {

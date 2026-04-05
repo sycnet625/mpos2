@@ -6,11 +6,64 @@ if (!defined('AFF_OWNER_CODE')) {
 if (!defined('AFF_DEFAULT_GESTOR')) {
     define('AFF_DEFAULT_GESTOR', 'G001');
 }
+if (!defined('AFF_SESSION_TTL_SECONDS')) {
+    define('AFF_SESSION_TTL_SECONDS', 8 * 3600);
+}
+if (!defined('AFF_LOCK_WINDOW_SECONDS')) {
+    define('AFF_LOCK_WINDOW_SECONDS', 15 * 60);
+}
+if (!defined('AFF_LOCK_THRESHOLD')) {
+    define('AFF_LOCK_THRESHOLD', 5);
+}
+if (!defined('AFF_LOCK_DURATION_SECONDS')) {
+    define('AFF_LOCK_DURATION_SECONDS', 30 * 60);
+}
 
 function aff_session_start_if_needed(): void {
     if (session_status() !== PHP_SESSION_ACTIVE) {
         session_start();
     }
+}
+
+function aff_session_pdo(): ?PDO {
+    global $pdo;
+    return ($pdo instanceof PDO) ? $pdo : null;
+}
+
+function aff_client_ip(): string {
+    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'] as $key) {
+        $value = $_SERVER[$key] ?? '';
+        if (!is_string($value) || trim($value) === '') {
+            continue;
+        }
+        if ($key === 'HTTP_X_FORWARDED_FOR') {
+            $parts = array_map('trim', explode(',', $value));
+            return (string)($parts[0] ?? '');
+        }
+        return trim($value);
+    }
+    return '';
+}
+
+function aff_user_agent(): string {
+    return substr(trim((string)($_SERVER['HTTP_USER_AGENT'] ?? '')), 0, 255);
+}
+
+function aff_session_expires_at(): string {
+    return date('Y-m-d H:i:s', time() + AFF_SESSION_TTL_SECONDS);
+}
+
+function aff_close_session_record(PDO $pdo, string $sessionId, string $column): void {
+    if ($sessionId === '' || !in_array($column, ['logged_out_at', 'revoked_at'], true)) {
+        return;
+    }
+    $st = $pdo->prepare("UPDATE affiliate_user_sessions SET {$column}=?, last_seen_at=? WHERE session_id=?");
+    $st->execute([aff_now(), aff_now(), $sessionId]);
+}
+
+function aff_clear_rac_session(): void {
+    aff_session_start_if_needed();
+    unset($_SESSION['affiliate_auth'], $_SESSION['affiliate_csrf_token']);
 }
 
 function aff_auth_context(): array {
@@ -40,6 +93,53 @@ function aff_auth_context(): array {
             'source' => 'none',
         ];
     }
+    $expiresAt = (string)($auth['expires_at'] ?? '');
+    $sessionId = (string)($auth['session_id'] ?? session_id());
+    if ($expiresAt !== '' && strtotime($expiresAt) !== false && strtotime($expiresAt) < time()) {
+        $pdo = aff_session_pdo();
+        if ($pdo instanceof PDO) {
+            aff_close_session_record($pdo, $sessionId, 'logged_out_at');
+            aff_record_audit($pdo, [
+                'owner_id' => isset($auth['owner_id']) ? (int)$auth['owner_id'] : null,
+                'gestor_id' => isset($auth['gestor_id']) ? (string)$auth['gestor_id'] : null,
+                'event_type' => 'affiliate_session_expired',
+                'severity' => 'warning',
+                'message' => 'Sesión RAC expirada por tiempo',
+                'context' => ['username' => (string)($auth['username'] ?? ''), 'role' => (string)($auth['role'] ?? '')],
+            ]);
+        }
+        aff_clear_rac_session();
+        return [
+            'authenticated' => false,
+            'user_id' => null,
+            'role' => '',
+            'username' => '',
+            'display_name' => '',
+            'owner_id' => null,
+            'gestor_id' => null,
+            'source' => 'expired',
+        ];
+    }
+    $pdo = aff_session_pdo();
+    if ($pdo instanceof PDO && $sessionId !== '') {
+        $st = $pdo->prepare("SELECT id FROM affiliate_user_sessions WHERE session_id=? AND revoked_at IS NULL AND logged_out_at IS NULL AND expires_at >= NOW() LIMIT 1");
+        $st->execute([$sessionId]);
+        if (!$st->fetchColumn()) {
+            aff_clear_rac_session();
+            return [
+                'authenticated' => false,
+                'user_id' => null,
+                'role' => '',
+                'username' => '',
+                'display_name' => '',
+                'owner_id' => null,
+                'gestor_id' => null,
+                'source' => 'revoked',
+            ];
+        }
+        $pdo->prepare("UPDATE affiliate_user_sessions SET last_seen_at=?, expires_at=? WHERE session_id=?")->execute([aff_now(), aff_session_expires_at(), $sessionId]);
+        $_SESSION['affiliate_auth']['expires_at'] = aff_session_expires_at();
+    }
     return [
         'authenticated' => true,
         'user_id' => isset($auth['user_id']) ? (int)$auth['user_id'] : null,
@@ -48,6 +148,8 @@ function aff_auth_context(): array {
         'display_name' => (string)($auth['display_name'] ?? ''),
         'owner_id' => isset($auth['owner_id']) ? (int)$auth['owner_id'] : null,
         'gestor_id' => isset($auth['gestor_id']) ? (string)$auth['gestor_id'] : null,
+        'session_id' => $sessionId,
+        'expires_at' => $expiresAt,
         'source' => 'rac',
     ];
 }
@@ -181,6 +283,28 @@ function aff_ensure_tables(PDO $pdo): void {
         gestor_id VARCHAR(20) NULL,
         status ENUM('active','suspended') NOT NULL DEFAULT 'active',
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_user_sessions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        session_id VARCHAR(128) NOT NULL UNIQUE,
+        role VARCHAR(20) NOT NULL,
+        ip_address VARCHAR(80) NULL,
+        user_agent VARCHAR(255) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at DATETIME NOT NULL,
+        logged_out_at DATETIME NULL,
+        revoked_at DATETIME NULL,
+        CONSTRAINT fk_aff_user_session_user FOREIGN KEY (user_id) REFERENCES affiliate_users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_login_attempts (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        username VARCHAR(80) NOT NULL,
+        ip_address VARCHAR(80) NULL,
+        user_agent VARCHAR(255) NULL,
+        success TINYINT(1) NOT NULL DEFAULT 0,
+        attempted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS affiliate_owners (
@@ -745,18 +869,74 @@ function aff_current_gestor_id(PDO $pdo): string {
     return $default !== '' ? $default : AFF_DEFAULT_GESTOR;
 }
 
+function aff_register_login_attempt(PDO $pdo, string $username, bool $success): void {
+    $st = $pdo->prepare("INSERT INTO affiliate_login_attempts (username, ip_address, user_agent, success, attempted_at) VALUES (?,?,?,?,?)");
+    $st->execute([substr($username, 0, 80), aff_client_ip(), aff_user_agent(), $success ? 1 : 0, aff_now()]);
+}
+
+function aff_login_lock_status(PDO $pdo, string $username): array {
+    $windowStart = date('Y-m-d H:i:s', time() - AFF_LOCK_WINDOW_SECONDS);
+    $st = $pdo->prepare("SELECT attempted_at FROM affiliate_login_attempts WHERE username=? AND success=0 AND attempted_at >= ? ORDER BY attempted_at DESC LIMIT 20");
+    $st->execute([substr($username, 0, 80), $windowStart]);
+    $rows = $st->fetchAll();
+    $failed = count($rows);
+    $lockedUntil = '';
+    if ($failed >= AFF_LOCK_THRESHOLD) {
+        $latest = strtotime((string)$rows[0]['attempted_at']);
+        if ($latest !== false) {
+            $lockedUntilTs = $latest + AFF_LOCK_DURATION_SECONDS;
+            if ($lockedUntilTs > time()) {
+                $lockedUntil = date('Y-m-d H:i:s', $lockedUntilTs);
+            }
+        }
+    }
+    return [
+        'failed_count' => $failed,
+        'locked' => $lockedUntil !== '',
+        'locked_until' => $lockedUntil,
+    ];
+}
+
+function aff_create_user_session(PDO $pdo, array $user): void {
+    $sessionId = session_id();
+    $expiresAt = aff_session_expires_at();
+    $st = $pdo->prepare("INSERT INTO affiliate_user_sessions (user_id, session_id, role, ip_address, user_agent, created_at, last_seen_at, expires_at) VALUES (?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE user_id=VALUES(user_id), role=VALUES(role), ip_address=VALUES(ip_address), user_agent=VALUES(user_agent), last_seen_at=VALUES(last_seen_at), expires_at=VALUES(expires_at), logged_out_at=NULL, revoked_at=NULL");
+    $st->execute([(int)$user['id'], $sessionId, (string)$user['role'], aff_client_ip(), aff_user_agent(), aff_now(), aff_now(), $expiresAt]);
+    $_SESSION['affiliate_auth']['session_id'] = $sessionId;
+    $_SESSION['affiliate_auth']['expires_at'] = $expiresAt;
+}
+
 function aff_login(PDO $pdo, string $username, string $password): array {
     aff_session_start_if_needed();
     $username = trim($username);
     if ($username === '' || $password === '') {
         throw new InvalidArgumentException('username_password_required');
     }
+    $lock = aff_login_lock_status($pdo, $username);
+    if (!empty($lock['locked'])) {
+        aff_record_audit($pdo, [
+            'event_type' => 'affiliate_login_locked',
+            'severity' => 'warning',
+            'message' => 'Intento de login bloqueado por exceso de fallos',
+            'context' => ['username' => $username, 'locked_until' => $lock['locked_until'], 'ip' => aff_client_ip()],
+        ]);
+        throw new RuntimeException('login_locked_until:' . $lock['locked_until']);
+    }
     $st = $pdo->prepare("SELECT id, username, password_hash, role, display_name, owner_id, gestor_id, status FROM affiliate_users WHERE username=? LIMIT 1");
     $st->execute([$username]);
     $user = $st->fetch();
     if (!$user || (string)$user['status'] !== 'active' || !password_verify($password, (string)$user['password_hash'])) {
+        aff_register_login_attempt($pdo, $username, false);
+        aff_record_audit($pdo, [
+            'event_type' => 'affiliate_login_failed',
+            'severity' => 'warning',
+            'message' => 'Intento fallido de login RAC',
+            'context' => ['username' => $username, 'ip' => aff_client_ip()],
+        ]);
         throw new RuntimeException('invalid_credentials');
     }
+    aff_register_login_attempt($pdo, $username, true);
     $_SESSION['affiliate_auth'] = [
         'authenticated' => true,
         'user_id' => (int)$user['id'],
@@ -769,6 +949,7 @@ function aff_login(PDO $pdo, string $username, string $password): array {
     if (empty($_SESSION['affiliate_csrf_token'])) {
         $_SESSION['affiliate_csrf_token'] = bin2hex(random_bytes(24));
     }
+    aff_create_user_session($pdo, $user);
     aff_record_audit($pdo, [
         'owner_id' => $user['owner_id'] !== null ? (int)$user['owner_id'] : null,
         'gestor_id' => $user['gestor_id'] !== null ? (string)$user['gestor_id'] : null,
@@ -782,7 +963,20 @@ function aff_login(PDO $pdo, string $username, string $password): array {
 
 function aff_logout(): void {
     aff_session_start_if_needed();
-    unset($_SESSION['affiliate_auth']);
+    $pdo = aff_session_pdo();
+    $auth = $_SESSION['affiliate_auth'] ?? [];
+    if ($pdo instanceof PDO && !empty($auth['session_id'])) {
+        aff_close_session_record($pdo, (string)$auth['session_id'], 'logged_out_at');
+        aff_record_audit($pdo, [
+            'owner_id' => isset($auth['owner_id']) ? (int)$auth['owner_id'] : null,
+            'gestor_id' => isset($auth['gestor_id']) ? (string)$auth['gestor_id'] : null,
+            'event_type' => 'affiliate_logout',
+            'severity' => 'info',
+            'message' => 'Cierre de sesión RAC',
+            'context' => ['username' => (string)($auth['username'] ?? ''), 'role' => (string)($auth['role'] ?? '')],
+        ]);
+    }
+    aff_clear_rac_session();
 }
 
 function aff_current_user_id(): ?int {
@@ -1552,7 +1746,7 @@ function aff_recent_audit_events(PDO $pdo): array {
 function aff_access_audit_events(PDO $pdo): array {
     $st = $pdo->query("SELECT event_type AS eventType, severity, message, created_at AS createdAt, context_json AS contextJson
         FROM affiliate_audit_events
-        WHERE event_type IN ('affiliate_login','affiliate_user_password_changed','affiliate_user_password_reset','affiliate_user_deleted','affiliate_user_upserted')
+        WHERE event_type IN ('affiliate_login','affiliate_login_failed','affiliate_login_locked','affiliate_logout','affiliate_session_expired','affiliate_session_revoked','affiliate_user_password_changed','affiliate_user_password_reset','affiliate_user_deleted','affiliate_user_upserted')
         ORDER BY id DESC
         LIMIT 120");
     $rows = [];
@@ -1567,6 +1761,79 @@ function aff_access_audit_events(PDO $pdo): array {
         ];
     }
     return $rows;
+}
+
+function aff_active_sessions(PDO $pdo): array {
+    $st = $pdo->query("SELECT s.id, s.session_id AS sessionId, s.role, s.ip_address AS ipAddress, s.user_agent AS userAgent, s.created_at AS createdAt, s.last_seen_at AS lastSeenAt, s.expires_at AS expiresAt, u.username, u.display_name AS displayName
+        FROM affiliate_user_sessions s
+        JOIN affiliate_users u ON u.id=s.user_id
+        WHERE s.logged_out_at IS NULL AND s.revoked_at IS NULL AND s.expires_at >= NOW()
+        ORDER BY s.last_seen_at DESC
+        LIMIT 50");
+    return $st->fetchAll();
+}
+
+function aff_recent_lockouts(PDO $pdo): array {
+    $windowStart = date('Y-m-d H:i:s', time() - 86400);
+    $st = $pdo->prepare("SELECT username, MAX(attempted_at) AS lastAttempt, COUNT(*) AS failedCount
+        FROM affiliate_login_attempts
+        WHERE success=0 AND attempted_at >= ?
+        GROUP BY username
+        HAVING COUNT(*) >= ?
+        ORDER BY MAX(attempted_at) DESC
+        LIMIT 30");
+    $st->execute([$windowStart, AFF_LOCK_THRESHOLD]);
+    $rows = [];
+    foreach ($st->fetchAll() as $row) {
+        $lastAttempt = strtotime((string)$row['lastAttempt']);
+        $lockedUntil = $lastAttempt ? date('Y-m-d H:i:s', $lastAttempt + AFF_LOCK_DURATION_SECONDS) : '';
+        $rows[] = [
+            'username' => (string)$row['username'],
+            'failedCount' => (int)$row['failedCount'],
+            'lastAttempt' => (string)$row['lastAttempt'],
+            'lockedUntil' => $lockedUntil,
+            'active' => $lockedUntil !== '' && strtotime($lockedUntil) > time(),
+        ];
+    }
+    return $rows;
+}
+
+function aff_revoke_user_session(PDO $pdo, string $sessionId): array {
+    $sessionId = trim($sessionId);
+    if ($sessionId === '') {
+        throw new InvalidArgumentException('invalid_session_id');
+    }
+    $st = $pdo->prepare("SELECT s.user_id, s.role, s.ip_address, s.user_agent, u.username, u.owner_id, u.gestor_id
+        FROM affiliate_user_sessions s
+        JOIN affiliate_users u ON u.id=s.user_id
+        WHERE s.session_id=? AND s.revoked_at IS NULL AND s.logged_out_at IS NULL
+        LIMIT 1");
+    $st->execute([$sessionId]);
+    $row = $st->fetch();
+    if (!$row) {
+        throw new RuntimeException('session_not_found');
+    }
+    aff_close_session_record($pdo, $sessionId, 'revoked_at');
+    aff_record_audit($pdo, [
+        'owner_id' => $row['owner_id'] !== null ? (int)$row['owner_id'] : null,
+        'gestor_id' => $row['gestor_id'] !== null ? (string)$row['gestor_id'] : null,
+        'event_type' => 'affiliate_session_revoked',
+        'severity' => 'warning',
+        'message' => 'Sesión RAC revocada por administrador',
+        'context' => [
+            'username' => (string)$row['username'],
+            'role' => (string)$row['role'],
+            'ip' => (string)($row['ip_address'] ?? ''),
+            'user_agent' => (string)($row['user_agent'] ?? ''),
+            'session_id' => $sessionId,
+        ],
+    ]);
+    return [
+        'sessionId' => $sessionId,
+        'username' => (string)$row['username'],
+        'role' => (string)$row['role'],
+        'revokedAt' => aff_now(),
+    ];
 }
 
 function aff_subscription_metrics(PDO $pdo): array {
@@ -2579,6 +2846,8 @@ function aff_bootstrap(PDO $pdo): array {
         'affiliateUsers' => $role === 'admin' ? aff_user_admin_list($pdo) : [],
         'userRoleSummary' => $role === 'admin' ? aff_user_role_summary($pdo) : ['admin' => ['active' => 0, 'suspended' => 0, 'total' => 0], 'owner' => ['active' => 0, 'suspended' => 0, 'total' => 0], 'gestor' => ['active' => 0, 'suspended' => 0, 'total' => 0]],
         'accessAudit' => $role === 'admin' ? aff_access_audit_events($pdo) : [],
+        'activeSessions' => $role === 'admin' ? aff_active_sessions($pdo) : [],
+        'recentLockouts' => $role === 'admin' ? aff_recent_lockouts($pdo) : [],
         'subscriptionMetrics' => $role === 'admin' ? aff_subscription_metrics($pdo) : ['expectedMrr' => 0, 'overdueOwners' => 0, 'managedOwners' => 0, 'adsActiveOwners' => 0, 'pendingTopups' => 0],
         'sponsoredProducts' => $role === 'admin' ? aff_sponsored_products($pdo) : [],
         'advancedAudit' => $role === 'admin' ? aff_advanced_audit_signals($pdo) : ['owners' => [], 'gestores' => []],
@@ -2602,6 +2871,7 @@ function aff_bootstrap(PDO $pdo): array {
             'role' => $role,
             'displayName' => (string)$auth['display_name'],
             'username' => (string)$auth['username'],
+            'expiresAt' => (string)($auth['expires_at'] ?? ''),
             'allowedUiRoles' => aff_allowed_ui_roles(),
         ],
         'server_time' => date('c')

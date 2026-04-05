@@ -41,21 +41,67 @@ function aff_require_roles(array $roles): void {
     }
 }
 
+function aff_action_permissions(): array {
+    return [
+        'bootstrap' => ['admin', 'owner', 'gestor'],
+        'product_create' => ['admin', 'owner'],
+        'product_update' => ['admin', 'owner'],
+        'product_toggle_active' => ['admin', 'owner'],
+        'lead_update_status' => ['admin', 'owner'],
+        'trace_link_create' => ['admin', 'gestor'],
+        'integration_settings_update' => ['admin'],
+        'owner_upsert' => ['admin'],
+        'gestor_upsert' => ['admin'],
+        'wallet_topup_request' => ['admin', 'owner'],
+        'wallet_topup_review' => ['admin'],
+        'billing_charge_create' => ['admin'],
+        'payment_reconcile' => ['admin'],
+        'billing_generate' => ['admin'],
+        'payment_extract_import' => ['admin'],
+        'payment_auto_reconcile' => ['admin'],
+        'user_upsert' => ['admin'],
+        'user_password_reset' => ['admin'],
+        'user_delete' => ['admin'],
+        'session_revoke' => ['admin'],
+        'user_change_password' => ['admin', 'owner', 'gestor'],
+        'lead_financial_flow' => ['admin'],
+        'export_leads' => ['admin'],
+        'export_leads_xlsx' => ['admin'],
+        'export_wallet' => ['admin'],
+        'export_wallet_xlsx' => ['admin'],
+        'export_rankings' => ['admin'],
+        'export_rankings_xlsx' => ['admin'],
+        'export_users' => ['admin'],
+        'export_users_xlsx' => ['admin'],
+        'export_access_audit' => ['admin'],
+        'export_access_audit_xlsx' => ['admin'],
+    ];
+}
+
+function aff_require_action_permission(string $action): void {
+    $permissions = aff_action_permissions();
+    if (!isset($permissions[$action])) {
+        return;
+    }
+    aff_require_roles($permissions[$action]);
+}
+
 try {
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'bootstrap') {
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'data' => aff_bootstrap($pdo)], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_leads') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_leads.csv"');
         echo aff_export_leads_csv($pdo);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_leads_xlsx') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="rac_leads.xlsx"');
         echo aff_export_leads_xlsx($pdo);
@@ -63,14 +109,14 @@ try {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_wallet') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_wallet.csv"');
         echo aff_export_wallet_csv($pdo);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_wallet_xlsx') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="rac_wallet.xlsx"');
         echo aff_export_wallet_xlsx($pdo);
@@ -78,14 +124,14 @@ try {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_rankings') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_rankings.csv"');
         echo aff_export_rankings_csv($pdo);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_rankings_xlsx') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="rac_rankings.xlsx"');
         echo aff_export_rankings_xlsx($pdo);
@@ -93,14 +139,14 @@ try {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_users') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_users.csv"');
         echo aff_export_users_csv($pdo);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_users_xlsx') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         header('Content-Disposition: attachment; filename="rac_users.xlsx"');
         echo aff_export_users_xlsx($pdo);
@@ -108,7 +154,7 @@ try {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'export_access_audit') {
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="rac_access_audit.csv"');
         echo aff_export_access_audit_csv($pdo);
@@ -130,35 +176,35 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_create') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'owner']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_create_product($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_update') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'owner']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_update_product($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'product_toggle_active') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'owner']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_toggle_product_active($pdo, (string)($input['id'] ?? ''), (int)($input['active'] ?? 0))], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'lead_update_status') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'owner']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_update_lead_status($pdo, (string)($input['id'] ?? ''), (string)($input['status'] ?? ''))], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'trace_link_create') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'gestor']);
+        aff_require_action_permission($action);
         $productId = (string)($input['product_id'] ?? '');
         $gestorId = aff_auth_role() === 'gestor'
             ? aff_current_gestor_id($pdo)
@@ -169,61 +215,61 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'integration_settings_update') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_save_integration_settings($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'owner_upsert') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_upsert_owner($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'gestor_upsert') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_upsert_gestor($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'wallet_topup_request') {
         aff_require_csrf();
-        aff_require_roles(['admin', 'owner']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_request_wallet_topup($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'wallet_topup_review') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_review_wallet_topup($pdo, (int)($input['id'] ?? 0), (string)($input['decision'] ?? ''), (string)($input['note'] ?? ''))], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'billing_charge_create') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_create_billing_charge($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'payment_reconcile') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_reconcile_payment_reference($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'billing_generate') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_generate_billing_charges($pdo)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'payment_extract_import') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_import_payment_extract($pdo, $input)], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'payment_auto_reconcile') {
         aff_require_csrf();
-        aff_require_roles(['admin']);
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_auto_reconcile_pending_imports($pdo)], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -245,8 +291,15 @@ try {
         echo json_encode(['status' => 'success', 'row' => aff_delete_user($pdo, (int)($input['id'] ?? 0))], JSON_UNESCAPED_UNICODE);
         exit;
     }
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'session_revoke') {
+        aff_require_csrf();
+        aff_require_action_permission($action);
+        echo json_encode(['status' => 'success', 'row' => aff_revoke_user_session($pdo, (string)($input['session_id'] ?? ''))], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'user_change_password') {
         aff_require_csrf();
+        aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_change_password($pdo, (string)($input['current_password'] ?? ''), (string)($input['new_password'] ?? ''))], JSON_UNESCAPED_UNICODE);
         exit;
     }
