@@ -387,6 +387,7 @@
     window.addEventListener('online', function () {
         ns.updateNetBadge();
         ns.flushQueue();
+        ns.refreshWebPushSubscription();
         ns.pollNotifications();
     });
 
@@ -423,6 +424,7 @@
                         }
                     });
                 });
+                ns.refreshWebPushSubscription();
             }).catch(function () {});
             ns.updateInstallNotice();
         });

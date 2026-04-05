@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rac-affiliate-v6';
+const CACHE_NAME = 'rac-affiliate-v7';
 const APP_SHELL = [
   '/affiliate_network.php',
   '/affiliate_network_help.php',

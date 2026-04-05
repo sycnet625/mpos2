@@ -66,6 +66,16 @@ window.RAC = window.RAC || {};
         return '<div class="field"><label>' + label + '</label><input class="input" type="' + (type || 'text') + '" value="' + ns.esc(value) + '" data-integration-field="' + key + '"></div>';
     };
 
+    ns.webpushCtaCard = function (title, text) {
+        var s = state.integrationSettings || {};
+        var enabled = !!state.webpushReady;
+        var configured = !!s.vapidConfigured;
+        var note = !configured
+            ? 'VAPID no está configurado todavía.'
+            : (enabled ? 'Este navegador ya quedó suscrito para recibir avisos RAC.' : 'Activa avisos nativos en este navegador o PWA.');
+        return '<div class="card"><div class="item-title">' + ns.esc(title) + '</div><div class="sub" style="margin-top:8px">' + ns.esc(text) + '</div><div class="sub" style="margin-top:10px">' + ns.esc(note) + '</div><div class="actions" style="margin-top:14px"><button class="btn ' + (enabled ? 'ghost' : 'primary') + '" type="button" data-enable-webpush ' + (configured ? '' : 'disabled') + '>' + (enabled ? '🔔 Notificaciones activas' : '🔔 Activar notificaciones') + '</button></div></div>';
+    };
+
     ns.openIntegrationModal = function () {
         var s = state.integrationSettings || {};
         ns.$('integrationModalWrap').innerHTML = '<div class="modal active"><header><h3>🔔 Integraciones RAC</h3><button class="close" data-close-modal="integrationModalWrap">×</button></header>'
@@ -77,6 +87,7 @@ window.RAC = window.RAC || {};
             + ns.integrationField('alertFraudMinLeads', 'Fraude: mínimo de leads', s.alertFraudMinLeads || 6, 'number')
             + ns.integrationField('alertFraudLowConversionPct', 'Fraude: conversión baja %', s.alertFraudLowConversionPct || 12, 'number')
             + '<div class="field"><label>Notificaciones web</label><select class="select" data-integration-field="webpushEnabled"><option value="0"' + (s.webpushEnabled ? '' : ' selected') + '>Desactivadas</option><option value="1"' + (s.webpushEnabled ? ' selected' : '') + '>Activadas</option></select></div>'
+            + '<div class="field"><label>Estado VAPID</label><input class="input" type="text" value="' + ns.esc(s.vapidConfigured ? 'Configurado' : 'No configurado') + '" disabled></div>'
             + '<div class="footer-actions"><button class="btn ghost" type="button" data-enable-webpush>🔔 Activar en este navegador</button></div>'
             + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-integrations>💾 Guardar integraciones</button></div></div>';
         ns.$('integrationModalWrap').classList.add('active');
@@ -310,10 +321,10 @@ window.RAC = window.RAC || {};
                 + ns.kpi('🔒', 'Saldo bloqueado', ns.formatCUP(state.owner.wallet.blocked), 'Garantia RAC', '#ff8c00')
                 + ns.kpi('📈', 'Conversion', ns.fmtPct(state.owner.conversionRate), 'Ventas/Leads', '#ff4500')
                 + ns.kpi('⭐', 'Reputacion', String(state.owner.reputationScore), 'Riesgo ' + state.owner.fraudRisk, '#ffd700')
-                + '</div><div class="grid two"><div class="card"><div class="item-title">Wallet y visibilidad</div><p>Plan ' + ns.esc(state.owner.subscriptionPlan) + ' · Gestion asistida ' + (state.owner.managedService ? 'activa' : 'no contratada') + '. Si el saldo disponible llega a cero, el catalogo desaparece para los gestores.</p><div class="two-col" style="margin-top:12px">' + ns.stat('Disponible', ns.formatCUP(state.owner.wallet.available), 'Marketplace visible') + ns.stat('Bloqueado', ns.formatCUP(state.owner.wallet.blocked), 'Leads abiertos') + '</div></div><div class="card"><div class="item-title">Asistente de precios inteligente</div>'
+                + '</div><div class="grid two">' + ns.webpushCtaCard('Avisos RAC en este dispositivo', 'Recibe notificaciones cuando haya actividad relevante de leads, cobros y wallet.') + '<div class="card"><div class="item-title">Wallet y visibilidad</div><p>Plan ' + ns.esc(state.owner.subscriptionPlan) + ' · Gestion asistida ' + (state.owner.managedService ? 'activa' : 'no contratada') + '. Si el saldo disponible llega a cero, el catalogo desaparece para los gestores.</p><div class="two-col" style="margin-top:12px">' + ns.stat('Disponible', ns.formatCUP(state.owner.wallet.available), 'Marketplace visible') + ns.stat('Bloqueado', ns.formatCUP(state.owner.wallet.blocked), 'Leads abiertos') + '</div></div></div><div class="grid two"><div class="card"><div class="item-title">Asistente de precios inteligente</div>'
                 + (state.pricingSuggestions.length ? '<div class="list" style="margin-top:12px">' + state.pricingSuggestions.slice(0, 4).map(function (item) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(item.category) + '</div><div class="sub">' + ns.esc(item.items) + ' producto(s) comparados</div></div><div style="text-align:right"><div class="money">Moda ' + ns.formatCUP(item.modePrice) + '</div><div class="sub">Ponderado ' + ns.formatCUP(item.weightedPrice) + '</div></div></div></div>';
-                }).join('') + '</div>' : '<p>No hay suficientes productos para sugerir precios.</p>') + '</div></div><div class="card warning"><div>⚠️</div><div><div class="item-title">Proteccion anti-salto</div><div class="sub">Cada contacto abre un lead con garantia bloqueada. La tasa de conversion alimenta la reputacion del dueño y dispara vigilancia cuando se degrada.</div></div></div><div class="section-title"><h3>Leads recientes</h3></div><div class="list">'
+                }).join('') + '</div>' : '<p>No hay suficientes productos para sugerir precios.</p>') + '</div><div class="card warning"><div>⚠️</div><div><div class="item-title">Proteccion anti-salto</div><div class="sub">Cada contacto abre un lead con garantia bloqueada. La tasa de conversion alimenta la reputacion del dueño y dispara vigilancia cuando se degrada.</div></div></div></div><div class="section-title"><h3>Leads recientes</h3></div><div class="list">'
                 + state.leads.slice(0, 4).map(function (lead) {
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · ' + ns.esc(lead.date) + ' · Gestor ' + ns.esc(lead.gestorId) + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(lead.lockedCommission || lead.commission) + '</div>' + ns.badge(lead.status) + '</div></div></div>';
                 }).join('') + '</div>';
@@ -397,7 +408,7 @@ window.RAC = window.RAC || {};
                 + ns.kpi('🔗', 'Links activos', String(gestor.links || 0), 'Trazas generadas', '#ff8c00')
                 + ns.kpi('✅', 'Ventas cerradas', String(gestor.conversions || 0), 'Cierres confirmados', '#ff4500')
                 + ns.kpi('⭐', 'Reputacion', String(gestor.reputationScore || gestor.rating || 0), 'Calidad del gestor', '#ffd700')
-                + '</div><div class="section-title"><h3>Historial de comisiones</h3></div><div class="list">'
+                + '</div><div class="grid two">' + ns.webpushCtaCard('Avisos RAC para gestor', 'Recibe avisos nativos cuando se abran leads y cuando una comisión se confirme.') + '<div class="card"><div class="item-title">Rendimiento comercial</div><div class="two-col" style="margin-top:12px">' + ns.stat('Links', String(gestor.links || 0), 'Trazas activas') + ns.stat('Conversiones', String(gestor.conversions || 0), 'Ventas cerradas') + '</div><div class="sub" style="margin-top:12px">Mantén activas las notificaciones para reaccionar más rápido a nuevos leads y cierres.</div></div></div><div class="section-title"><h3>Historial de comisiones</h3></div><div class="list">'
                 + state.leads.filter(function (lead) { return lead.gestorId === 'G001'; }).map(function (lead) {
                     var value = lead.status === 'sold' ? lead.gestorShare : (lead.status === 'no_sale' ? 0 : lead.gestorShare);
                     return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(lead.product) + '</div><div class="sub">' + ns.esc(lead.traceCode) + ' · ' + ns.esc(lead.date) + '</div></div><div style="text-align:right"><div class="money">' + ns.formatCUP(value) + '</div>' + ns.badge(lead.status) + '</div></div></div>';

@@ -706,6 +706,7 @@ function aff_record_audit(PDO $pdo, array $event): void {
         isset($event['context']) ? json_encode($event['context'], JSON_UNESCAPED_UNICODE) : null,
         aff_now(),
     ]);
+    aff_dispatch_webpush_for_audit($pdo, $event);
 }
 
 function aff_notify_gestor_commission(PDO $pdo, array $lead, array $product, float $gestorShare): void {
@@ -762,6 +763,288 @@ function aff_admin_telegram_chat_id(PDO $pdo): string {
 
 function aff_webpush_enabled(PDO $pdo): bool {
     return trim(aff_get_setting($pdo, 'webpush_enabled', '0')) === '1';
+}
+
+function aff_base64url_encode(string $raw): string {
+    return rtrim(strtr(base64_encode($raw), '+/', '-_'), '=');
+}
+
+function aff_base64url_decode(string $value): string {
+    $value = strtr($value, '-_', '+/');
+    $pad = strlen($value) % 4;
+    if ($pad > 0) {
+        $value .= str_repeat('=', 4 - $pad);
+    }
+    $decoded = base64_decode($value, true);
+    return $decoded === false ? '' : $decoded;
+}
+
+function aff_vapid_subject(PDO $pdo): string {
+    $subject = trim(aff_get_setting($pdo, 'vapid_subject', ''));
+    return $subject !== '' ? $subject : 'https://www.palweb.net';
+}
+
+function aff_vapid_keys(PDO $pdo): array {
+    $public = trim(aff_get_setting($pdo, 'vapid_public_key', ''));
+    $private = trim(aff_get_setting($pdo, 'vapid_private_key', ''));
+    if ($public !== '' && $private !== '') {
+        return ['public' => $public, 'private' => $private];
+    }
+    $resource = openssl_pkey_new([
+        'private_key_type' => OPENSSL_KEYTYPE_EC,
+        'curve_name' => 'prime256v1',
+    ]);
+    if (!$resource) {
+        return ['public' => '', 'private' => ''];
+    }
+    $details = openssl_pkey_get_details($resource);
+    if (!$details || empty($details['ec']['x']) || empty($details['ec']['y']) || empty($details['ec']['d'])) {
+        return ['public' => '', 'private' => ''];
+    }
+    $publicRaw = "\x04" . $details['ec']['x'] . $details['ec']['y'];
+    $privateRaw = $details['ec']['d'];
+    $public = aff_base64url_encode($publicRaw);
+    $private = aff_base64url_encode($privateRaw);
+    aff_set_setting($pdo, 'vapid_public_key', $public);
+    aff_set_setting($pdo, 'vapid_private_key', $private);
+    aff_set_setting($pdo, 'vapid_subject', aff_vapid_subject($pdo));
+    return ['public' => $public, 'private' => $private];
+}
+
+function aff_vapid_public_key(PDO $pdo): string {
+    return aff_vapid_keys($pdo)['public'] ?? '';
+}
+
+function aff_vapid_private_pem(PDO $pdo): string {
+    $privateRaw = aff_base64url_decode(aff_vapid_keys($pdo)['private'] ?? '');
+    if ($privateRaw === '') {
+        return '';
+    }
+    $prefix = hex2bin('30770201010420');
+    $middle = hex2bin('A00A06082A8648CE3D030107A144034200');
+    if ($prefix === false || $middle === false) {
+        return '';
+    }
+    $publicRaw = aff_base64url_decode(aff_vapid_public_key($pdo));
+    if ($publicRaw === '') {
+        return '';
+    }
+    $der = $prefix . $privateRaw . $middle . $publicRaw;
+    return "-----BEGIN EC PRIVATE KEY-----\n" . chunk_split(base64_encode($der), 64, "\n") . "-----END EC PRIVATE KEY-----\n";
+}
+
+function aff_hkdf_expand_raw(string $prk, string $info, int $length): string {
+    $blocks = '';
+    $last = '';
+    for ($i = 1; strlen($blocks) < $length; $i++) {
+        $last = hash_hmac('sha256', $last . $info . chr($i), $prk, true);
+        $blocks .= $last;
+    }
+    return substr($blocks, 0, $length);
+}
+
+function aff_ecdsa_der_to_jose(string $signature, int $partLength = 32): string {
+    $offset = 0;
+    if (ord($signature[$offset]) !== 0x30) {
+        return '';
+    }
+    $offset++;
+    $seqLen = ord($signature[$offset]);
+    if ($seqLen & 0x80) {
+        $bytes = $seqLen & 0x7F;
+        $offset += 1 + $bytes;
+    } else {
+        $offset++;
+    }
+    if (ord($signature[$offset]) !== 0x02) {
+        return '';
+    }
+    $offset++;
+    $rLen = ord($signature[$offset++]);
+    $r = substr($signature, $offset, $rLen);
+    $offset += $rLen;
+    if (ord($signature[$offset]) !== 0x02) {
+        return '';
+    }
+    $offset++;
+    $sLen = ord($signature[$offset++]);
+    $s = substr($signature, $offset, $sLen);
+    $r = ltrim($r, "\x00");
+    $s = ltrim($s, "\x00");
+    return str_pad($r, $partLength, "\x00", STR_PAD_LEFT) . str_pad($s, $partLength, "\x00", STR_PAD_LEFT);
+}
+
+function aff_webpush_public_pem_from_raw(string $rawPublicKey): string {
+    $prefix = hex2bin('3059301306072A8648CE3D020106082A8648CE3D030107034200');
+    if ($prefix === false) {
+        return '';
+    }
+    return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($prefix . $rawPublicKey), 64, "\n") . "-----END PUBLIC KEY-----\n";
+}
+
+function aff_webpush_encrypt_payload(string $payload, string $userPublicRaw, string $authSecretRaw): array {
+    $serverKey = openssl_pkey_new([
+        'private_key_type' => OPENSSL_KEYTYPE_EC,
+        'curve_name' => 'prime256v1',
+    ]);
+    $details = $serverKey ? openssl_pkey_get_details($serverKey) : false;
+    if (!$serverKey || !$details || empty($details['ec']['x']) || empty($details['ec']['y'])) {
+        return ['body' => '', 'serverPublicKey' => ''];
+    }
+    $serverPublicRaw = "\x04" . $details['ec']['x'] . $details['ec']['y'];
+    $userPublic = openssl_pkey_get_public(aff_webpush_public_pem_from_raw($userPublicRaw));
+    if (!$userPublic || !function_exists('openssl_pkey_derive')) {
+        return ['body' => '', 'serverPublicKey' => ''];
+    }
+    $sharedSecret = openssl_pkey_derive($userPublic, $serverKey, 32);
+    if (!is_string($sharedSecret) || strlen($sharedSecret) !== 32) {
+        return ['body' => '', 'serverPublicKey' => ''];
+    }
+    $prkKey = hash_hmac('sha256', $sharedSecret, $authSecretRaw, true);
+    $keyInfo = "WebPush: info\x00" . $userPublicRaw . $serverPublicRaw;
+    $ikm = aff_hkdf_expand_raw($prkKey, $keyInfo, 32);
+    $salt = random_bytes(16);
+    $prk = hash_hmac('sha256', $ikm, $salt, true);
+    $cek = aff_hkdf_expand_raw($prk, "Content-Encoding: aes128gcm\x00", 16);
+    $nonce = aff_hkdf_expand_raw($prk, "Content-Encoding: nonce\x00", 12);
+    $plaintext = $payload . "\x02";
+    $tag = '';
+    $ciphertext = openssl_encrypt($plaintext, 'aes-128-gcm', $cek, OPENSSL_RAW_DATA, $nonce, $tag);
+    if (!is_string($ciphertext) || $tag === '') {
+        return ['body' => '', 'serverPublicKey' => ''];
+    }
+    $header = $salt . pack('N', 4096) . chr(strlen($serverPublicRaw)) . $serverPublicRaw;
+    return ['body' => $header . $ciphertext . $tag, 'serverPublicKey' => aff_base64url_encode($serverPublicRaw)];
+}
+
+function aff_vapid_jwt(PDO $pdo, string $audience): string {
+    $header = aff_base64url_encode(json_encode(['typ' => 'JWT', 'alg' => 'ES256'], JSON_UNESCAPED_SLASHES));
+    $payload = aff_base64url_encode(json_encode([
+        'aud' => $audience,
+        'exp' => time() + 43200,
+        'sub' => aff_vapid_subject($pdo),
+    ], JSON_UNESCAPED_SLASHES));
+    $input = $header . '.' . $payload;
+    $signature = '';
+    $privatePem = aff_vapid_private_pem($pdo);
+    if ($privatePem === '' || !openssl_sign($input, $signature, $privatePem, OPENSSL_ALGO_SHA256)) {
+        return '';
+    }
+    $jose = aff_ecdsa_der_to_jose($signature, 32);
+    if ($jose === '') {
+        return '';
+    }
+    return $input . '.' . aff_base64url_encode($jose);
+}
+
+function aff_active_push_subscriptions(PDO $pdo, string $role, ?int $ownerId = null, ?string $gestorId = null): array {
+    if ($role === 'admin') {
+        $st = $pdo->query("SELECT s.* FROM affiliate_webpush_subscriptions s JOIN affiliate_users u ON u.id=s.user_id WHERE s.status='active' AND u.status='active' AND u.role='admin' ORDER BY s.id DESC");
+        return $st->fetchAll();
+    }
+    if ($role === 'owner' && $ownerId) {
+        $st = $pdo->prepare("SELECT s.* FROM affiliate_webpush_subscriptions s JOIN affiliate_users u ON u.id=s.user_id WHERE s.status='active' AND u.status='active' AND u.role='owner' AND u.owner_id=? ORDER BY s.id DESC");
+        $st->execute([$ownerId]);
+        return $st->fetchAll();
+    }
+    if ($role === 'gestor' && $gestorId !== null && $gestorId !== '') {
+        $st = $pdo->prepare("SELECT s.* FROM affiliate_webpush_subscriptions s JOIN affiliate_users u ON u.id=s.user_id WHERE s.status='active' AND u.status='active' AND u.role='gestor' AND u.gestor_id=? ORDER BY s.id DESC");
+        $st->execute([$gestorId]);
+        return $st->fetchAll();
+    }
+    return [];
+}
+
+function aff_send_webpush(PDO $pdo, array $subscription, string $title, string $body, string $url = '/affiliate_network.php'): bool {
+    if (!aff_webpush_enabled($pdo)) {
+        return false;
+    }
+    $endpoint = trim((string)($subscription['endpoint'] ?? ''));
+    $p256dh = aff_base64url_decode((string)($subscription['p256dh_key'] ?? ''));
+    $auth = aff_base64url_decode((string)($subscription['auth_key'] ?? ''));
+    if ($endpoint === '' || str_starts_with($endpoint, 'browser:') || $p256dh === '' || $auth === '') {
+        return false;
+    }
+    $parts = parse_url($endpoint);
+    if (empty($parts['scheme']) || empty($parts['host'])) {
+        return false;
+    }
+    $audience = $parts['scheme'] . '://' . $parts['host'] . (isset($parts['port']) ? ':' . $parts['port'] : '');
+    $jwt = aff_vapid_jwt($pdo, $audience);
+    $vapidPublic = aff_vapid_public_key($pdo);
+    if ($jwt === '' || $vapidPublic === '') {
+        return false;
+    }
+    $payload = json_encode([
+        'title' => $title,
+        'body' => $body,
+        'url' => $url,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $encrypted = aff_webpush_encrypt_payload((string)$payload, $p256dh, $auth);
+    if ($encrypted['body'] === '') {
+        return false;
+    }
+    $headers = [
+        'TTL: 120',
+        'Urgency: normal',
+        'Content-Encoding: aes128gcm',
+        'Content-Type: application/octet-stream',
+        'Authorization: vapid t=' . $jwt . ', k=' . $vapidPublic,
+        'Content-Length: ' . strlen($encrypted['body']),
+    ];
+    $status = 0;
+    if (function_exists('curl_init')) {
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => $encrypted['body'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 12,
+            CURLOPT_HEADER => false,
+        ]);
+        curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        curl_close($ch);
+    }
+    if (in_array($status, [200, 201, 202], true)) {
+        $pdo->prepare("UPDATE affiliate_webpush_subscriptions SET last_notified_at=?, status='active' WHERE id=?")->execute([aff_now(), (int)$subscription['id']]);
+        return true;
+    }
+    if (in_array($status, [404, 410], true)) {
+        $pdo->prepare("UPDATE affiliate_webpush_subscriptions SET status='invalid' WHERE id=?")->execute([(int)$subscription['id']]);
+    }
+    return false;
+}
+
+function aff_dispatch_webpush_for_audit(PDO $pdo, array $event): void {
+    if (!aff_webpush_enabled($pdo)) {
+        return;
+    }
+    $type = (string)($event['event_type'] ?? '');
+    $message = trim((string)($event['message'] ?? ''));
+    if ($type === '' || $message === '') {
+        return;
+    }
+    $roleRules = [
+        'admin' => ['telegram_notified', 'telegram_notify_failed', 'wallet_topup_requested', 'wallet_topup_reviewed', 'billing_charge_created', 'billing_charge_paid', 'lead_triggered', 'affiliate_login_locked', 'affiliate_session_revoked'],
+        'owner' => ['wallet_topup_reviewed', 'billing_charge_paid', 'lead_triggered'],
+        'gestor' => ['telegram_notified', 'lead_triggered'],
+    ];
+    foreach ($roleRules as $role => $types) {
+        if (!in_array($type, $types, true)) {
+            continue;
+        }
+        $targets = aff_active_push_subscriptions(
+            $pdo,
+            $role,
+            isset($event['owner_id']) ? (int)$event['owner_id'] : null,
+            isset($event['gestor_id']) ? (string)$event['gestor_id'] : null
+        );
+        foreach ($targets as $subscription) {
+            aff_send_webpush($pdo, $subscription, 'RAC · ' . $type, $message, '/affiliate_network.php');
+        }
+    }
 }
 
 function aff_notify_telegram_chat(PDO $pdo, string $chatId, string $message, array $audit = []): bool {
@@ -907,6 +1190,12 @@ function aff_webpush_subscribe(PDO $pdo, array $input): array {
         'message' => 'Suscripción web push registrada',
         'context' => ['endpoint' => substr($endpoint, 0, 80)],
     ]);
+    $stFetch = $pdo->prepare("SELECT * FROM affiliate_webpush_subscriptions WHERE endpoint=? LIMIT 1");
+    $stFetch->execute([$endpoint]);
+    $row = $stFetch->fetch();
+    if ($row) {
+        aff_send_webpush($pdo, $row, 'RAC activo', 'Las notificaciones push quedaron activadas en este navegador.', '/affiliate_network.php');
+    }
     return ['subscribed' => true, 'endpoint' => $endpoint];
 }
 
@@ -1164,6 +1453,8 @@ function aff_integration_settings(PDO $pdo): array {
         'defaultGestorChatId' => (string)($gestor['telegram_chat_id'] ?? ''),
         'telegramAdminChatId' => aff_admin_telegram_chat_id($pdo),
         'webpushEnabled' => aff_webpush_enabled($pdo),
+        'vapidPublicKey' => aff_vapid_public_key($pdo),
+        'vapidConfigured' => aff_vapid_public_key($pdo) !== '',
         'alertLowBalanceThreshold' => aff_alert_settings($pdo)['lowBalanceThreshold'],
         'alertFraudMinLeads' => aff_alert_settings($pdo)['fraudMinLeads'],
         'alertFraudLowConversionPct' => aff_alert_settings($pdo)['fraudLowConversion'],

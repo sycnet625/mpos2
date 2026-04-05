@@ -41,6 +41,17 @@ window.RAC = window.RAC || {};
         return '/affiliate_network_api.php?action=' + encodeURIComponent(action);
     };
 
+    ns.urlBase64ToUint8Array = function (base64String) {
+        var padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+        var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+        var raw = window.atob(base64);
+        var outputArray = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) {
+            outputArray[i] = raw.charCodeAt(i);
+        }
+        return outputArray;
+    };
+
     ns.api = async function (action, method, payload) {
         var headers = {};
         if (method === 'POST') {
@@ -257,6 +268,9 @@ window.RAC = window.RAC || {};
             Object.assign(state, json.data || {});
             ns.cacheData();
             ns.render();
+            if (navigator.onLine) {
+                ns.refreshWebPushSubscription();
+            }
         } catch (e) {
             if (ns.loadCache()) {
                 ns.render();
@@ -376,43 +390,65 @@ window.RAC = window.RAC || {};
         if (!('Notification' in window) || !('serviceWorker' in navigator)) {
             throw new Error('webpush_not_supported');
         }
-        var perm = await Notification.requestPermission();
+        var publicKey = ((state.integrationSettings || {}).vapidPublicKey || '').trim();
+        if (!publicKey) {
+            throw new Error('webpush_vapid_not_configured');
+        }
+        var perm = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
         if (perm !== 'granted') {
             throw new Error('webpush_permission_denied');
         }
         var registration = await navigator.serviceWorker.ready;
-        if (registration.active) {
-            registration.active.postMessage({
-                type: 'rac-show-notification',
-                title: 'RAC activo',
-                body: 'Las notificaciones web quedaron habilitadas en este navegador.'
+        if (!registration.pushManager) {
+            throw new Error('webpush_not_supported');
+        }
+        var subscription = await registration.pushManager.getSubscription();
+        if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+                userVisibleOnly: true,
+                applicationServerKey: ns.urlBase64ToUint8Array(publicKey)
             });
         }
-        var endpoint = 'browser:' + location.origin;
-        var p256dh = '';
-        var auth = '';
-        if (registration.pushManager) {
-            try {
-                var subscription = await registration.pushManager.getSubscription();
-                if (!subscription) {
-                    subscription = await registration.pushManager.subscribe({ userVisibleOnly: true });
-                }
-                if (subscription) {
-                    endpoint = subscription.endpoint || endpoint;
-                    var keyP = subscription.getKey ? subscription.getKey('p256dh') : null;
-                    var keyA = subscription.getKey ? subscription.getKey('auth') : null;
-                    p256dh = keyP ? btoa(String.fromCharCode.apply(null, new Uint8Array(keyP))) : '';
-                    auth = keyA ? btoa(String.fromCharCode.apply(null, new Uint8Array(keyA))) : '';
-                }
-            } catch (e) {}
+        var endpoint = subscription.endpoint || '';
+        var keyP = subscription.getKey ? subscription.getKey('p256dh') : null;
+        var keyA = subscription.getKey ? subscription.getKey('auth') : null;
+        if (!endpoint || !keyP || !keyA) {
+            throw new Error('webpush_subscription_invalid');
         }
+        state.webpushReady = true;
         return ns.api('webpush_subscribe', 'POST', {
             endpoint: endpoint,
-            p256dh: p256dh,
-            auth: auth
+            p256dh: btoa(String.fromCharCode.apply(null, new Uint8Array(keyP))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''),
+            auth: btoa(String.fromCharCode.apply(null, new Uint8Array(keyA))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
         });
     };
+
+    ns.refreshWebPushSubscription = async function () {
+        try {
+            if (!navigator.serviceWorker || !navigator.onLine) return;
+            var publicKey = ((state.integrationSettings || {}).vapidPublicKey || '').trim();
+            if (!publicKey) return;
+            var registration = await navigator.serviceWorker.ready;
+            if (!registration.pushManager) return;
+            var subscription = await registration.pushManager.getSubscription();
+            if (!subscription) return;
+            var endpoint = subscription.endpoint || '';
+            var keyP = subscription.getKey ? subscription.getKey('p256dh') : null;
+            var keyA = subscription.getKey ? subscription.getKey('auth') : null;
+            if (!endpoint || !keyP || !keyA) return;
+            state.webpushReady = true;
+            await ns.api('webpush_subscribe', 'POST', {
+                endpoint: endpoint,
+                p256dh: btoa(String.fromCharCode.apply(null, new Uint8Array(keyP))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, ''),
+                auth: btoa(String.fromCharCode.apply(null, new Uint8Array(keyA))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+            });
+        } catch (e) {}
+    };
+
     ns.pollNotifications = async function () {
+        if (state.webpushReady && ((state.integrationSettings || {}).vapidPublicKey || '')) {
+            return;
+        }
         try {
             var since = state.lastNotificationAt || '';
             var url = ns.apiUrl('notifications_poll') + (since ? '&since=' + encodeURIComponent(since) : '');
