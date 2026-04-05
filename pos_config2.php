@@ -1075,38 +1075,88 @@ unset($treeCompany);
                 <?php if (!empty($metodo['es_especial'])): ?><input type="hidden" name="metodo_es_especial[]" value="<?php echo $idx; ?>"><?php endif; ?>
             <?php endforeach; ?>
 
+            <?php
+            $ticketLogoPath = trim((string)($currentConfig['ticket_logo'] ?? ''));
+            $ticketLogoExists = $ticketLogoPath !== '' && file_exists(__DIR__ . '/' . $ticketLogoPath);
+            $ticketToggles = [
+                ['ticket_mostrar_cajero', 'chkMostrarCajero', 'fas fa-user-tie', 'Cajero', !empty($currentConfig['ticket_mostrar_cajero'])],
+                ['ticket_mostrar_canal', 'chkMostrarCanal', 'fas fa-tag', 'Canal de origen', !empty($currentConfig['ticket_mostrar_canal'])],
+                ['ticket_mostrar_uuid', 'chkMostrarUuid', 'fas fa-fingerprint', 'UUID de venta', !empty($currentConfig['ticket_mostrar_uuid'])],
+                ['ticket_mostrar_items_count', 'chkMostrarItemsCount', 'fas fa-list-ol', 'Total de ítems', !empty($currentConfig['ticket_mostrar_items_count'])],
+                ['ticket_mostrar_qr', 'chkMostrarQr', 'fas fa-qrcode', 'Código QR', !empty($currentConfig['ticket_mostrar_qr'])],
+            ];
+            ?>
             <div class="card">
                 <div class="card-header fw-bold text-primary">🧾 Diseño del ticket</div>
-                <div class="card-body row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Logo ticket</label>
-                        <?php $ticketLogoPath = trim((string)($currentConfig['ticket_logo'] ?? '')); ?>
-                        <?php if ($ticketLogoPath !== ''): ?>
-                            <div class="mb-2">
-                                <img src="<?php echo htmlspecialchars($ticketLogoPath); ?>" alt="Logo ticket" class="img-thumbnail" style="max-height:90px;">
+                <div class="card-body">
+                    <div class="row g-4">
+                        <div class="col-xl-7">
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-image me-1"></i>Logo</h6>
+                                <?php if ($ticketLogoExists): ?>
+                                    <div class="d-flex align-items-center gap-3 mb-2 p-2 border rounded bg-light">
+                                        <img src="<?php echo htmlspecialchars($ticketLogoPath); ?>?v=<?php echo filemtime(__DIR__ . '/' . $ticketLogoPath); ?>" style="max-height:70px; max-width:180px; border-radius:4px;" alt="Logo actual">
+                                        <div>
+                                            <span class="badge bg-success mb-2"><i class="fas fa-check me-1"></i>Logo activo</span>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="ticket_logo_remove" id="ticket_logo_remove" value="1" onchange="updateTicketPreview()">
+                                                <label class="form-check-label small text-danger fw-semibold" for="ticket_logo_remove">Eliminar logo actual</label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="mb-2 p-2 border rounded bg-light text-muted small">
+                                        <i class="fas fa-ban me-1"></i> Sin logo. Se mostrará solo el nombre del negocio.
+                                    </div>
+                                <?php endif; ?>
+                                <input type="file" name="ticket_logo" class="form-control" accept="image/jpeg,image/png,image/webp" onchange="onLogoFileChange(this)">
+                                <div class="form-text">JPG, PNG o WebP. Máximo 2MB. Recomendado: 280 × 80 px.</div>
                             </div>
-                            <div class="form-check mb-2">
-                                <input class="form-check-input" type="checkbox" name="ticket_logo_remove" id="ticket_logo_remove" value="1">
-                                <label class="form-check-label" for="ticket_logo_remove">Eliminar logo actual</label>
+
+                            <div class="mb-4 pb-3 border-bottom">
+                                <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-font me-1"></i>Textos del ticket</h6>
+                                <div class="mb-3">
+                                    <label class="form-label">Slogan / tagline</label>
+                                    <input type="text" name="ticket_slogan" class="form-control" value="<?php echo htmlspecialchars($currentConfig['ticket_slogan']); ?>" oninput="updateTicketPreview()">
+                                </div>
+                                <div>
+                                    <label class="form-label">Mensaje final</label>
+                                    <input type="text" name="mensaje_final" class="form-control" value="<?php echo htmlspecialchars($currentConfig['mensaje_final']); ?>" oninput="updateTicketPreview()">
+                                </div>
                             </div>
-                        <?php endif; ?>
-                        <input type="file" name="ticket_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
-                        <div class="form-text">JPG, PNG o WebP. Máximo 2MB.</div>
+
+                            <div>
+                                <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-sliders-h me-1"></i>Elementos a mostrar</h6>
+                                <div class="row g-2">
+                                    <?php foreach ($ticketToggles as [$name, $id, $icon, $label, $checked]): ?>
+                                        <div class="col-sm-6">
+                                            <div class="form-check form-switch p-2 rounded border bg-light">
+                                                <input class="form-check-input" type="checkbox" role="switch" name="<?php echo $name; ?>" id="<?php echo $id; ?>" <?php echo $checked ? 'checked' : ''; ?> onchange="updateTicketPreview()">
+                                                <label class="form-check-label small fw-semibold" for="<?php echo $id; ?>">
+                                                    <i class="<?php echo $icon; ?> me-1 text-secondary"></i><?php echo $label; ?>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="col-xl-5">
+                            <div class="sticky-top" style="top:20px;">
+                                <h6 class="fw-bold text-secondary mb-2"><i class="fas fa-eye me-1"></i>Vista Previa del Ticket</h6>
+                                <div style="background:#d1d5db; padding:16px; border-radius:10px;">
+                                    <div id="ticketPreview" style="font-family:'Courier New',monospace; font-size:11px; background:#fff; border:1px solid #999; padding:12px; width:220px; margin:0 auto; box-shadow:2px 2px 0 #bbb;"></div>
+                                </div>
+                                <div class="form-text mt-2 text-center">
+                                    Vista aproximada ·
+                                    <a href="ticket_view.php?id=216" target="_blank" class="text-decoration-none">
+                                        Ver ticket real <i class="fas fa-external-link-alt"></i>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Slogan ticket</label>
-                        <input type="text" name="ticket_slogan" class="form-control" value="<?php echo htmlspecialchars($currentConfig['ticket_slogan']); ?>">
-                    </div>
-                </div>
-            </div>
-            <div class="card">
-                <div class="card-header fw-bold text-secondary">🪪 Elementos visibles del ticket</div>
-                <div class="card-body row g-3">
-                    <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" id="ticket2_mostrar_uuid" name="ticket_mostrar_uuid" <?php echo !empty($currentConfig['ticket_mostrar_uuid']) ? 'checked' : ''; ?>><label class="form-check-label" for="ticket2_mostrar_uuid">Mostrar UUID</label></div>
-                    <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" id="ticket2_mostrar_canal" name="ticket_mostrar_canal" <?php echo !empty($currentConfig['ticket_mostrar_canal']) ? 'checked' : ''; ?>><label class="form-check-label" for="ticket2_mostrar_canal">Mostrar canal</label></div>
-                    <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" id="ticket2_mostrar_cajero" name="ticket_mostrar_cajero" <?php echo !empty($currentConfig['ticket_mostrar_cajero']) ? 'checked' : ''; ?>><label class="form-check-label" for="ticket2_mostrar_cajero">Mostrar cajero</label></div>
-                    <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" id="ticket2_mostrar_qr" name="ticket_mostrar_qr" <?php echo !empty($currentConfig['ticket_mostrar_qr']) ? 'checked' : ''; ?>><label class="form-check-label" for="ticket2_mostrar_qr">Mostrar QR</label></div>
-                    <div class="col-md-3 form-check ms-2"><input class="form-check-input" type="checkbox" id="ticket2_mostrar_items_count" name="ticket_mostrar_items_count" <?php echo !empty($currentConfig['ticket_mostrar_items_count']) ? 'checked' : ''; ?>><label class="form-check-label" for="ticket2_mostrar_items_count">Mostrar total items</label></div>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar ticket</button>
@@ -2013,6 +2063,116 @@ function bindMetodoPagoItem(item) {
     });
 }
 
+const _ticketPreviewCfg = {
+    nombre: <?= json_encode($currentConfig['tienda_nombre']) ?>,
+    dir: <?= json_encode($currentConfig['direccion']) ?>,
+    tel: <?= json_encode($currentConfig['telefono']) ?>,
+    slogan: <?= json_encode($currentConfig['ticket_slogan'] ?? '') ?>,
+    msgFinal: <?= json_encode($currentConfig['mensaje_final']) ?>,
+    logoSrc: <?= json_encode($ticketLogoExists ? $ticketLogoPath . '?v=' . filemtime(__DIR__ . '/' . $ticketLogoPath) : '') ?>,
+};
+
+function escTicket(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function ticketSep() {
+    return '<div style="border-top:1px dashed #999;margin:5px 0;"></div>';
+}
+
+function updateTicketPreview() {
+    const target = document.getElementById('ticketPreview');
+    if (!target) return;
+
+    const nombre = document.querySelector('[name="tienda_nombre"]')?.value || _ticketPreviewCfg.nombre;
+    const dir = document.querySelector('[name="direccion"]')?.value || _ticketPreviewCfg.dir;
+    const tel = document.querySelector('[name="telefono"]')?.value || _ticketPreviewCfg.tel;
+    const slogan = document.querySelector('[name="ticket_slogan"]')?.value ?? _ticketPreviewCfg.slogan;
+    const msgFinal = document.querySelector('[name="mensaje_final"]')?.value ?? _ticketPreviewCfg.msgFinal;
+    const showCajero = document.getElementById('chkMostrarCajero')?.checked;
+    const showCanal = document.getElementById('chkMostrarCanal')?.checked;
+    const showUuid = document.getElementById('chkMostrarUuid')?.checked;
+    const showItems = document.getElementById('chkMostrarItemsCount')?.checked;
+    const showQr = document.getElementById('chkMostrarQr')?.checked;
+    const removeLogo = document.getElementById('ticket_logo_remove')?.checked;
+    const logoSrc = removeLogo ? '' : (window._ticketLogoSrc ?? _ticketPreviewCfg.logoSrc);
+
+    let h = '';
+    h += '<div style="text-align:center;margin-bottom:6px;">';
+    if (logoSrc) {
+        h += `<img src="${logoSrc}" style="display:block;max-width:160px;max-height:52px;margin:0 auto 4px;" alt="">`;
+    }
+    h += `<strong style="font-size:13px;">${escTicket(nombre)}</strong>`;
+    if (slogan) h += `<div style="font-size:9px;margin-top:1px;">${escTicket(slogan)}</div>`;
+    h += `<div style="font-size:9px;color:#666;">${escTicket(dir)}</div>`;
+    if (tel) h += `<div style="font-size:9px;color:#666;">Tel: ${escTicket(tel)}</div>`;
+    h += '</div>';
+
+    h += ticketSep();
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><td>Ticket:</td><td style="text-align:right"><b>#000216</b></td></tr>';
+    if (showUuid) h += '<tr><td>UUID:</td><td style="text-align:right;font-size:8px;color:#666;">WEB-1234567890</td></tr>';
+    h += '<tr><td>Fecha:</td><td style="text-align:right">23/02/2026 09:02</td></tr>';
+    if (showCajero) h += '<tr><td>Cajero:</td><td style="text-align:right"><b>Admin</b></td></tr>';
+    if (showCanal) h += '<tr><td>Origen:</td><td style="text-align:right"><span style="background:#0ea5e9;color:#fff;padding:1px 5px;border-radius:10px;font-size:8px;">🌐 Web</span></td></tr>';
+    h += '<tr><td>Método Pago:</td><td style="text-align:right"><b>Efectivo</b></td></tr>';
+    h += '</table>';
+
+    h += ticketSep();
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><th style="text-align:left;border-bottom:1px solid #000;padding:2px 0;">Cant</th><th style="text-align:left;border-bottom:1px solid #000;padding:2px 0;">Descripción</th><th style="text-align:right;border-bottom:1px solid #000;padding:2px 0;">Total</th></tr>';
+    h += '<tr><td>1.00</td><td>Café en sobre</td><td style="text-align:right">$40.00</td></tr>';
+    h += '</table>';
+    if (showItems) {
+        h += '<div style="text-align:right;font-size:9px;font-weight:bold;border-top:1px solid #000;margin-top:3px;padding-top:2px;">Total Ítems: 1</div>';
+    }
+
+    h += '<div style="border:2px solid #000;padding:5px;margin-top:5px;">';
+    h += '<table style="width:100%;font-size:9px;border-collapse:collapse;">';
+    h += '<tr><td>Subtotal productos:</td><td style="text-align:right">$40.00</td></tr>';
+    h += '<tr><td><b>Costo mensajería:</b></td><td style="text-align:right"><b>$250.00</b></td></tr>';
+    h += '<tr style="border-top:1px dashed #000;"><td colspan="2"></td></tr>';
+    h += '<tr><td><b style="font-size:11px;">TOTAL A PAGAR:</b></td><td style="text-align:right"><b style="font-size:14px;">$290.00</b></td></tr>';
+    h += '<tr><td colspan="2" style="text-align:center;font-size:8px;border-top:1px dashed #000;padding-top:3px;">💳 Pagado con: <b>Efectivo</b></td></tr>';
+    h += '</table></div>';
+
+    h += ticketSep();
+    if (msgFinal) {
+        h += `<div style="text-align:center;font-weight:bold;font-size:10px;">${escTicket(msgFinal)}</div>`;
+    }
+    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema PALWEB POS v3.0</div>';
+
+    if (showQr) {
+        h += ticketSep();
+        h += '<div style="text-align:center;">';
+        h += '<div style="font-size:8px;margin-bottom:3px;">Escanea para ver este ticket</div>';
+        h += '<svg width="52" height="52" viewBox="0 0 52 52" style="display:inline-block;">';
+        h += '<rect x="0" y="0" width="52" height="52" fill="white"/>';
+        h += '<rect x="2" y="2" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="6" y="6" width="12" height="12" fill="#000"/>';
+        h += '<rect x="30" y="2" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="34" y="6" width="12" height="12" fill="#000"/>';
+        h += '<rect x="2" y="30" width="20" height="20" fill="none" stroke="#000" stroke-width="2"/>';
+        h += '<rect x="6" y="34" width="12" height="12" fill="#000"/>';
+        h += '<rect x="30" y="30" width="6" height="6" fill="#000"/><rect x="38" y="30" width="6" height="6" fill="#000"/>';
+        h += '<rect x="30" y="38" width="6" height="6" fill="#000"/><rect x="46" y="46" width="6" height="6" fill="#000"/>';
+        h += '</svg></div>';
+    }
+
+    target.innerHTML = h;
+}
+
+function onLogoFileChange(input) {
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => {
+            window._ticketLogoSrc = e.target.result;
+            updateTicketPreview();
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('#metodosPagoList .metodo-item').forEach(bindMetodoPagoItem);
     reindexMetodosPago();
@@ -2027,7 +2187,13 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cashierStatusFilter')?.addEventListener('change', filterCashierRows);
     filterUserRows();
     filterCashierRows();
+    updateTicketPreview();
+    ['tienda_nombre','direccion','telefono','ticket_slogan','mensaje_final'].forEach(name => {
+        document.querySelector(`[name="${name}"]`)?.addEventListener('input', updateTicketPreview);
+    });
 });
 </script>
+<script src="assets/js/bootstrap.bundle.min.js"></script>
+<?php include_once 'menu_master.php'; ?>
 </body>
 </html>
