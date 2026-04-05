@@ -214,6 +214,44 @@ window.RAC = window.RAC || {};
         return ns.badge('pending');
     };
 
+    ns.renderOwnerOfflineQueueCard = function (root) {
+        if (!root || state.ownerTab !== 'wallet') return;
+        var queueItems = (state.queue || []).slice(0, 8);
+        root.insertAdjacentHTML('beforeend', '<div class="card" style="margin-top:18px"><div class="item-title">Cola offline</div><div class="list" style="margin-top:12px">' + (queueItems.length ? queueItems.map(function (item) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(item.type) + '</div><div class="sub">' + ns.esc(item.status || 'pending') + (item.lastError ? ' · ' + ns.esc(item.lastError) : '') + '</div></div><div class="sub">' + ns.esc(item.createdAt || '') + '</div></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin cambios pendientes en este dispositivo.</div></div>') + '</div></div>');
+    };
+
+    ns.renderAdminAnalyticsBlocks = function (root) {
+        if (!root || state.adminTab !== 'dashboard') return;
+        var funnel = (state.analytics || {}).funnel || {};
+        var trend = ((state.analytics || {}).dailyTrend || []).slice(-7);
+        var ownerCohorts = ((state.analytics || {}).ownerCohorts || []).slice(0, 6);
+        var gestorCohorts = ((state.analytics || {}).gestorCohorts || []).slice(0, 6);
+        var sponsoredRoi = ((state.analytics || {}).sponsoredRoi || []).slice(0, 6);
+        root.insertAdjacentHTML('beforeend',
+            '<div class="grid two" style="margin-top:18px">'
+            + '<div class="card"><div class="item-title">Embudo RAC</div><div class="list" style="margin-top:12px">'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Clics</div><div class="sub">Trazas abiertas</div></div><div class="money">' + ns.esc(funnel.clicks || 0) + '</div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Leads</div><div class="sub">' + ns.esc(funnel.leadRate || 0) + '% base</div></div><div class="money">' + ns.esc(funnel.leads || 0) + '</div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Contactados</div><div class="sub">' + ns.esc(funnel.contactRate || 0) + '%</div></div><div class="money">' + ns.esc(funnel.contacts || 0) + '</div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Negociando</div><div class="sub">' + ns.esc(funnel.negotiatingRate || 0) + '%</div></div><div class="money">' + ns.esc(funnel.negotiating || 0) + '</div></div></div>'
+            + '<div class="item"><div class="item-head"><div><div class="item-title">Vendidos</div><div class="sub">' + ns.esc(funnel.soldRate || 0) + '%</div></div><div class="money">' + ns.esc(funnel.sold || 0) + '</div></div></div>'
+            + '</div></div>'
+            + '<div class="card"><div class="item-title">Tendencia diaria (7 días)</div><div class="list" style="margin-top:12px">'
+            + (trend.length ? trend.map(function (row) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(row.day) + '</div><div class="sub">Leads ' + ns.esc(row.leads) + ' · Contactos ' + ns.esc(row.contacts) + ' · Vendidos ' + ns.esc(row.sold) + '</div></div><div class="money">' + ns.formatCUP(row.revenue || 0) + '</div></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin datos diarios todavía.</div></div>')
+            + '</div></div></div>'
+            + '<div class="grid two" style="margin-top:18px">'
+            + '<div class="card"><div class="item-title">Cohortes · Dueños</div><div class="list" style="margin-top:12px">'
+            + (ownerCohorts.length ? ownerCohorts.map(function (row) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(row.ownerCode + ' · ' + row.ownerName) + '</div><div class="sub">Leads ' + ns.esc(row.leads) + ' · Contacto ' + ns.esc(row.contactRate) + '% · Cierre ' + ns.esc(row.conversionRate) + '%</div></div><div class="money">' + ns.formatCUP(row.revenue || 0) + '</div></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin cohortes de dueños.</div></div>')
+            + '</div></div>'
+            + '<div class="card"><div class="item-title">Cohortes · Gestores</div><div class="list" style="margin-top:12px">'
+            + (gestorCohorts.length ? gestorCohorts.map(function (row) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(row.id + ' · ' + row.name) + '</div><div class="sub">Leads ' + ns.esc(row.leads) + ' · Contacto ' + ns.esc(row.contactRate) + '% · Cierre ' + ns.esc(row.conversionRate) + '%</div></div><div class="money">' + ns.formatCUP(row.earned || 0) + '</div></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin cohortes de gestores.</div></div>')
+            + '</div></div></div>'
+            + '<div class="card" style="margin-top:18px"><div class="item-title">ROI patrocinado</div><div class="list" style="margin-top:12px">'
+            + (sponsoredRoi.length ? sponsoredRoi.map(function (row) { return '<div class="item"><div class="item-head"><div><div class="item-title">' + ns.esc(row.name) + '</div><div class="sub">' + ns.esc(row.ownerCode) + ' · presupuesto ' + ns.formatCUP(row.advertisingBudget || 0) + '</div></div><div style="text-align:right"><div class="money">' + ns.esc(row.roiPct || 0) + '%</div><div class="sub">rev ' + ns.formatCUP(row.platformRevenue || 0) + '</div></div></div></div>'; }).join('') : '<div class="item"><div class="sub">Sin productos patrocinados suficientes para ROI.</div></div>')
+            + '</div></div>'
+        );
+    };
+
     ns.openProductModal = function () {
         var p = state.ownerNewProduct;
         var isEdit = !!p.id;
@@ -295,6 +333,7 @@ window.RAC = window.RAC || {};
                 }).join('') + '</div>';
         }
         root.innerHTML = ns.panelHeader('🏪 Panel del Dueño · ' + state.owner.name + ' · ' + state.owner.code, ns.formatCUP(state.owner.wallet.available), 'Saldo disponible') + ns.tabRow('owner', tabs, state.ownerTab) + body;
+        ns.renderOwnerOfflineQueueCard(root);
     };
 
     ns.renderGestor = function () {
@@ -447,6 +486,7 @@ window.RAC = window.RAC || {};
             }).join('') + '</div></div>';
         }
         root.innerHTML = ns.panelHeader('🛡️ Panel de Control · RAC', ns.formatCUP(state.summary.revenue), 'Revenue plataforma') + ns.tabRow('admin', tabs, state.adminTab) + body;
+        ns.renderAdminAnalyticsBlocks(root);
     };
 
     ns.render = function () {

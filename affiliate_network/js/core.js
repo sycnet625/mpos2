@@ -30,6 +30,7 @@ window.RAC = window.RAC || {};
         linkRankings: [],
         pricingSuggestions: [],
         marketInsights: { zones: [], categories: [], plans: [] },
+        analytics: { dailyTrend: [], ownerCohorts: [], gestorCohorts: [], sponsoredRoi: [], funnel: { clicks: 0, leads: 0, contacts: 0, negotiating: 0, sold: 0, noSale: 0, leadRate: 0, contactRate: 0, negotiatingRate: 0, soldRate: 0 } },
         walletTopups: [],
         billingCharges: [],
         paymentReconciliations: [],
@@ -58,12 +59,14 @@ window.RAC = window.RAC || {};
         userFilter: { q: '', role: 'all', status: 'all' },
         summary: { volumeTotal: 0, revenue: 0, ownersActive: 0, gestoresActive: 0, leadsToday: 0, salesToday: 0 },
         queue: [],
-        cacheKey: 'rac_affiliate_cache_v4',
-        queueKey: 'rac_affiliate_queue_v4',
+        cacheKey: 'rac_affiliate_cache_v5',
+        queueKey: 'rac_affiliate_queue_v5',
         installPrompt: null,
         syncInFlight: false,
         lastSyncAt: '',
         syncError: '',
+        syncRetryAt: '',
+        swUpdateAvailable: false,
         csrf: (document.querySelector('meta[name="rac-csrf"]') || {}).content || ''
     };
 

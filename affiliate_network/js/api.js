@@ -73,6 +73,7 @@ window.RAC = window.RAC || {};
             linkRankings: state.linkRankings,
             pricingSuggestions: state.pricingSuggestions,
             marketInsights: state.marketInsights,
+            analytics: state.analytics,
             walletTopups: state.walletTopups,
             billingCharges: state.billingCharges,
             paymentReconciliations: state.paymentReconciliations,
@@ -120,7 +121,32 @@ window.RAC = window.RAC || {};
     };
 
     ns.enqueueMutation = function (item) {
-        state.queue.push(item);
+        var now = Date.now();
+        var entityId = ((item.payload || {}).id || (item.payload || {}).product_id || (item.payload || {}).reference_code || '');
+        var entityKey = item.type + '::' + entityId;
+        var wrapped = {
+            id: 'Q' + now + Math.random().toString(36).slice(2, 8),
+            type: item.type,
+            payload: item.payload || {},
+            entityKey: entityKey,
+            createdAt: new Date().toISOString(),
+            retries: 0,
+            nextAttemptAt: 0,
+            lastError: '',
+            status: 'pending'
+        };
+        var replaced = false;
+        state.queue = state.queue.map(function (queued) {
+            if (queued.entityKey && queued.entityKey === entityKey) {
+                replaced = true;
+                wrapped.retries = Number(queued.retries || 0);
+                return wrapped;
+            }
+            return queued;
+        });
+        if (!replaced) {
+            state.queue.push(wrapped);
+        }
         ns.saveQueue();
         ns.updateSyncBadge();
     };
@@ -164,11 +190,13 @@ window.RAC = window.RAC || {};
             if (state.syncInFlight) {
                 el.textContent = 'Sincronizando cambios pendientes...';
             } else if (state.queue.length) {
-                el.textContent = state.queue.length + ' cambio(s) pendiente(s) de sincronizar';
+                var failed = state.queue.filter(function (item) { return item.status === 'failed'; }).length;
+                var pending = state.queue.filter(function (item) { return item.status !== 'synced'; }).length;
+                el.textContent = pending + ' cambio(s) pendiente(s)' + (failed ? ' · ' + failed + ' con reintento' : '') + (state.syncRetryAt ? ' · próximo ' + state.syncRetryAt : '');
             } else if (state.lastSyncAt) {
-                el.textContent = 'Última sync: ' + state.lastSyncAt;
+                el.textContent = 'Última sync: ' + state.lastSyncAt + (state.swUpdateAvailable ? ' · actualización disponible' : '');
             } else {
-                el.textContent = 'Sin cambios pendientes';
+                el.textContent = state.swUpdateAvailable ? 'Actualización disponible' : 'Sin cambios pendientes';
             }
         }
     };
@@ -180,28 +208,40 @@ window.RAC = window.RAC || {};
         }
         state.syncInFlight = true;
         state.syncError = '';
+        state.syncRetryAt = '';
         ns.updateSyncBadge();
-        var seen = {};
+        var now = Date.now();
         var pending = [];
+        var deferred = [];
+        var nextRetryTs = 0;
         state.queue.forEach(function (item) {
-            var key = item.type + '::' + JSON.stringify(item.payload || {});
-            if (seen[key]) return;
-            seen[key] = true;
+            if ((item.nextAttemptAt || 0) > now) {
+                deferred.push(item);
+                if (!nextRetryTs || item.nextAttemptAt < nextRetryTs) nextRetryTs = item.nextAttemptAt;
+                return;
+            }
             pending.push(item);
         });
-        state.queue = [];
+        state.queue = deferred;
         ns.saveQueue();
         for (var i = 0; i < pending.length; i += 1) {
+            var item = pending[i];
             try {
-                await ns.api(pending[i].type, 'POST', pending[i].payload);
+                await ns.api(item.type, 'POST', item.payload);
             } catch (e) {
-                state.queue.push(pending[i]);
-                state.syncError = e && e.message ? e.message : 'sync_failed';
+                item.retries = Number(item.retries || 0) + 1;
+                item.status = 'failed';
+                item.lastError = e && e.message ? e.message : 'sync_failed';
+                item.nextAttemptAt = now + Math.min(600000, Math.pow(2, Math.min(item.retries, 6)) * 15000);
+                state.queue.push(item);
+                state.syncError = item.lastError;
+                if (!nextRetryTs || item.nextAttemptAt < nextRetryTs) nextRetryTs = item.nextAttemptAt;
             }
         }
         ns.saveQueue();
         state.syncInFlight = false;
         state.lastSyncAt = new Date().toLocaleString('es-CU');
+        state.syncRetryAt = nextRetryTs ? new Date(nextRetryTs).toLocaleString('es-CU') : '';
         ns.updateSyncBadge();
         await ns.loadBootstrap();
         if (state.syncError) {
@@ -502,6 +542,34 @@ window.RAC = window.RAC || {};
             await ns.loadBootstrap();
         } catch (e) {
             ns.toast(e.message || 'No fue posible generar el enlace.', 'error');
+        }
+    };
+
+    ns.showSwUpdateNotice = function () {
+        var box = document.getElementById('racSwUpdateNotice');
+        if (!state.swUpdateAvailable) {
+            if (box) box.remove();
+            return;
+        }
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'racSwUpdateNotice';
+            box.style.position = 'fixed';
+            box.style.left = '16px';
+            box.style.right = '16px';
+            box.style.bottom = '16px';
+            box.style.zIndex = '9999';
+            box.style.background = '#111';
+            box.style.color = '#fff';
+            box.style.border = '1px solid rgba(255,215,0,.35)';
+            box.style.borderRadius = '14px';
+            box.style.padding = '14px 16px';
+            box.style.boxShadow = '0 10px 28px rgba(0,0,0,.35)';
+            box.innerHTML = '<div style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap"><div><strong>Actualización RAC disponible</strong><div style="font-size:12px;opacity:.8;margin-top:4px">Recarga para usar la última versión offline.</div></div><button id="racReloadForUpdate" style="background:#ffd700;border:none;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer">Actualizar</button></div>';
+            document.body.appendChild(box);
+            box.querySelector('#racReloadForUpdate').addEventListener('click', function () {
+                window.location.reload();
+            });
         }
     };
 })(window.RAC);

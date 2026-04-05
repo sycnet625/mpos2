@@ -2334,6 +2334,159 @@ function aff_create_trace_link(PDO $pdo, string $productId, string $gestorId): a
     ];
 }
 
+function aff_daily_trends(PDO $pdo, int $days = 14): array {
+    $days = max(1, min($days, 31));
+    $st = $pdo->prepare("SELECT DATE(lead_date) AS day,
+                                COUNT(*) AS leads_count,
+                                SUM(CASE WHEN status IN ('contacted','negotiating','sold','no_sale') THEN 1 ELSE 0 END) AS contact_count,
+                                SUM(CASE WHEN status='negotiating' THEN 1 ELSE 0 END) AS negotiating_count,
+                                SUM(CASE WHEN status='sold' THEN 1 ELSE 0 END) AS sold_count,
+                                SUM(CASE WHEN status='sold' THEN platform_share ELSE 0 END) AS revenue_amount
+                           FROM affiliate_leads
+                          WHERE lead_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                          GROUP BY DATE(lead_date)
+                          ORDER BY DATE(lead_date) ASC");
+    $st->execute([$days - 1]);
+    return array_map(function ($row) {
+        return [
+            'day' => (string)$row['day'],
+            'leads' => (int)$row['leads_count'],
+            'contacts' => (int)$row['contact_count'],
+            'negotiating' => (int)$row['negotiating_count'],
+            'sold' => (int)$row['sold_count'],
+            'revenue' => round((float)$row['revenue_amount'], 2),
+        ];
+    }, $st->fetchAll());
+}
+
+function aff_owner_cohorts(PDO $pdo): array {
+    $rows = $pdo->query("SELECT o.owner_code AS ownerCode,
+                                o.owner_name AS ownerName,
+                                COUNT(l.id) AS leads_count,
+                                SUM(CASE WHEN l.status IN ('contacted','negotiating','sold','no_sale') THEN 1 ELSE 0 END) AS contacts_count,
+                                SUM(CASE WHEN l.status='sold' THEN 1 ELSE 0 END) AS sold_count,
+                                SUM(CASE WHEN l.status='sold' THEN l.platform_share ELSE 0 END) AS revenue_amount
+                           FROM affiliate_owners o
+                      LEFT JOIN affiliate_leads l ON l.owner_id = o.id
+                          GROUP BY o.id, o.owner_code, o.owner_name
+                          ORDER BY sold_count DESC, leads_count DESC, o.owner_code ASC
+                          LIMIT 10")->fetchAll();
+    return array_map(function ($row) {
+        $leads = (int)$row['leads_count'];
+        $contacts = (int)$row['contacts_count'];
+        $sold = (int)$row['sold_count'];
+        return [
+            'ownerCode' => (string)$row['ownerCode'],
+            'ownerName' => (string)$row['ownerName'],
+            'leads' => $leads,
+            'contacts' => $contacts,
+            'sold' => $sold,
+            'contactRate' => $leads > 0 ? round(($contacts / $leads) * 100, 2) : 0.0,
+            'conversionRate' => $leads > 0 ? round(($sold / $leads) * 100, 2) : 0.0,
+            'revenue' => round((float)$row['revenue_amount'], 2),
+        ];
+    }, $rows);
+}
+
+function aff_gestor_cohorts(PDO $pdo): array {
+    $rows = $pdo->query("SELECT g.id,
+                                g.name,
+                                COUNT(l.id) AS leads_count,
+                                SUM(CASE WHEN l.status IN ('contacted','negotiating','sold','no_sale') THEN 1 ELSE 0 END) AS contacts_count,
+                                SUM(CASE WHEN l.status='sold' THEN 1 ELSE 0 END) AS sold_count,
+                                SUM(CASE WHEN l.status='sold' THEN l.gestor_share ELSE 0 END) AS earned_amount
+                           FROM affiliate_gestores g
+                      LEFT JOIN affiliate_leads l ON l.gestor_id = g.id
+                          GROUP BY g.id, g.name
+                          ORDER BY sold_count DESC, leads_count DESC, g.id ASC
+                          LIMIT 10")->fetchAll();
+    return array_map(function ($row) {
+        $leads = (int)$row['leads_count'];
+        $contacts = (int)$row['contacts_count'];
+        $sold = (int)$row['sold_count'];
+        return [
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'leads' => $leads,
+            'contacts' => $contacts,
+            'sold' => $sold,
+            'contactRate' => $leads > 0 ? round(($contacts / $leads) * 100, 2) : 0.0,
+            'conversionRate' => $leads > 0 ? round(($sold / $leads) * 100, 2) : 0.0,
+            'earned' => round((float)$row['earned_amount'], 2),
+        ];
+    }, $rows);
+}
+
+function aff_sponsored_roi(PDO $pdo): array {
+    $rows = $pdo->query("SELECT p.id,
+                                p.name,
+                                o.owner_code AS ownerCode,
+                                o.owner_name AS ownerName,
+                                p.sponsor_rank AS sponsorRank,
+                                o.advertising_budget AS advertisingBudget,
+                                p.clicks,
+                                p.leads,
+                                p.sales,
+                                (SELECT COALESCE(SUM(l.platform_share),0) FROM affiliate_leads l WHERE l.product_id = p.id AND l.status='sold') AS platformRevenue
+                           FROM affiliate_products p
+                           JOIN affiliate_owners o ON o.id = p.owner_id
+                          WHERE p.is_featured = 1
+                          ORDER BY p.sponsor_rank DESC, p.clicks DESC, p.id ASC
+                          LIMIT 12")->fetchAll();
+    return array_map(function ($row) {
+        $budget = round((float)$row['advertisingBudget'], 2);
+        $revenue = round((float)$row['platformRevenue'], 2);
+        return [
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'ownerCode' => (string)$row['ownerCode'],
+            'ownerName' => (string)$row['ownerName'],
+            'sponsorRank' => (int)$row['sponsorRank'],
+            'advertisingBudget' => $budget,
+            'clicks' => (int)$row['clicks'],
+            'leads' => (int)$row['leads'],
+            'sales' => (int)$row['sales'],
+            'platformRevenue' => $revenue,
+            'roiPct' => $budget > 0 ? round((($revenue - $budget) / $budget) * 100, 2) : 0.0,
+        ];
+    }, $rows);
+}
+
+function aff_funnel_metrics(PDO $pdo): array {
+    $row = $pdo->query("SELECT COUNT(*) AS leads_count,
+                               SUM(CASE WHEN status IN ('contacted','negotiating','sold','no_sale') THEN 1 ELSE 0 END) AS contacts_count,
+                               SUM(CASE WHEN status='negotiating' THEN 1 ELSE 0 END) AS negotiating_count,
+                               SUM(CASE WHEN status='sold' THEN 1 ELSE 0 END) AS sold_count,
+                               SUM(CASE WHEN status='no_sale' THEN 1 ELSE 0 END) AS no_sale_count
+                          FROM affiliate_leads")->fetch();
+    $leads = (int)($row['leads_count'] ?? 0);
+    $contacts = (int)($row['contacts_count'] ?? 0);
+    $negotiating = (int)($row['negotiating_count'] ?? 0);
+    $sold = (int)($row['sold_count'] ?? 0);
+    return [
+        'clicks' => (int)$pdo->query("SELECT COALESCE(SUM(clicks),0) FROM affiliate_trace_links")->fetchColumn(),
+        'leads' => $leads,
+        'contacts' => $contacts,
+        'negotiating' => $negotiating,
+        'sold' => $sold,
+        'noSale' => (int)($row['no_sale_count'] ?? 0),
+        'leadRate' => $leads > 0 ? 100.0 : 0.0,
+        'contactRate' => $leads > 0 ? round(($contacts / $leads) * 100, 2) : 0.0,
+        'negotiatingRate' => $leads > 0 ? round(($negotiating / $leads) * 100, 2) : 0.0,
+        'soldRate' => $leads > 0 ? round(($sold / $leads) * 100, 2) : 0.0,
+    ];
+}
+
+function aff_bi_analytics(PDO $pdo): array {
+    return [
+        'dailyTrend' => aff_daily_trends($pdo, 14),
+        'ownerCohorts' => aff_owner_cohorts($pdo),
+        'gestorCohorts' => aff_gestor_cohorts($pdo),
+        'sponsoredRoi' => aff_sponsored_roi($pdo),
+        'funnel' => aff_funnel_metrics($pdo),
+    ];
+}
+
 function aff_bootstrap(PDO $pdo): array {
     $expiredHolds = aff_expire_stale_holds($pdo);
     aff_refresh_audit_alerts($pdo);
@@ -2365,6 +2518,7 @@ function aff_bootstrap(PDO $pdo): array {
     $linkRankings = aff_admin_link_rankings($pdo);
     $pricing = aff_price_suggestions($pdo, (int)$owner['id']);
     $insights = aff_market_insights($pdo);
+    $analytics = aff_bi_analytics($pdo);
 
     $volume = (float)$pdo->query("SELECT COALESCE(SUM(price * GREATEST(sales,1)),0) FROM affiliate_products WHERE active=1")->fetchColumn();
     $revenue = (float)$pdo->query("SELECT COALESCE(SUM(CASE WHEN status='sold' THEN platform_share ELSE 0 END),0) FROM affiliate_leads")->fetchColumn();
@@ -2415,6 +2569,7 @@ function aff_bootstrap(PDO $pdo): array {
         'linkRankings' => $role === 'admin' ? $linkRankings : [],
         'pricingSuggestions' => $pricing,
         'marketInsights' => $insights,
+        'analytics' => $role === 'admin' ? $analytics : ['dailyTrend' => [], 'ownerCohorts' => [], 'gestorCohorts' => [], 'sponsoredRoi' => [], 'funnel' => ['clicks' => 0, 'leads' => 0, 'contacts' => 0, 'negotiating' => 0, 'sold' => 0, 'noSale' => 0, 'leadRate' => 0, 'contactRate' => 0, 'negotiatingRate' => 0, 'soldRate' => 0]],
         'walletTopups' => $role === 'admin' ? aff_wallet_topups($pdo) : aff_owner_wallet_topups($pdo, (int)$owner['id']),
         'billingCharges' => $role === 'admin' ? aff_billing_charges($pdo) : aff_owner_billing_charges($pdo, (int)$owner['id']),
         'paymentReconciliations' => $role === 'admin' ? aff_payment_reconciliations($pdo) : [],

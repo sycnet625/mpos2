@@ -389,7 +389,24 @@
 
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {
-            navigator.serviceWorker.register('/affiliate_network_sw.js').catch(function () {});
+            navigator.serviceWorker.register('/affiliate_network_sw.js').then(function (registration) {
+                if (registration.waiting) {
+                    state.swUpdateAvailable = true;
+                    ns.updateSyncBadge();
+                    if (ns.showSwUpdateNotice) ns.showSwUpdateNotice();
+                }
+                registration.addEventListener('updatefound', function () {
+                    var worker = registration.installing;
+                    if (!worker) return;
+                    worker.addEventListener('statechange', function () {
+                        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+                            state.swUpdateAvailable = true;
+                            ns.updateSyncBadge();
+                            if (ns.showSwUpdateNotice) ns.showSwUpdateNotice();
+                        }
+                    });
+                });
+            }).catch(function () {});
             ns.updateInstallNotice();
         });
     }
