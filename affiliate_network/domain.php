@@ -803,8 +803,9 @@ function aff_notify_admin_alerts(PDO $pdo): void {
     if ($chatId === '') {
         return;
     }
+    $settings = aff_alert_settings($pdo);
     $fraud = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_audit_alerts WHERE active=1 AND alert_type='fraud'")->fetchColumn();
-    $lowBalance = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE status='active' AND available_balance < 1000")->fetchColumn();
+    $lowBalance = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_owners WHERE status='active' AND available_balance < " . (float)$settings['lowBalanceThreshold'])->fetchColumn();
     $pendingTopups = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_wallet_topups WHERE status='pending'")->fetchColumn();
     $pendingCharges = (int)$pdo->query("SELECT COUNT(*) FROM affiliate_billing_charges WHERE status='pending'")->fetchColumn();
     $lines = [];
@@ -830,16 +831,52 @@ function aff_notify_owner_low_balance(PDO $pdo, int $ownerId): void {
     if ($chatId === '') {
         return;
     }
+    $settings = aff_alert_settings($pdo);
     $st = $pdo->prepare("SELECT owner_code, owner_name, available_balance FROM affiliate_owners WHERE id=? LIMIT 1");
     $st->execute([$ownerId]);
     $owner = $st->fetch();
-    if (!$owner || (float)$owner['available_balance'] >= 1000) {
+    if (!$owner || (float)$owner['available_balance'] >= (float)$settings['lowBalanceThreshold']) {
         return;
     }
     aff_notify_telegram_chat($pdo, $chatId, "💸 Saldo bajo RAC\nDueño: " . (string)$owner['owner_code'] . " · " . (string)$owner['owner_name'] . "\nDisponible: " . number_format((float)$owner['available_balance'], 2, '.', '') . " CUP", [
         'owner_id' => $ownerId,
         'context' => ['owner_code' => (string)$owner['owner_code']],
     ]);
+}
+
+function aff_alert_settings(PDO $pdo): array {
+    return [
+        'lowBalanceThreshold' => (float)aff_get_setting($pdo, 'alert_low_balance_threshold', '1000'),
+        'fraudMinLeads' => (int)aff_get_setting($pdo, 'alert_fraud_min_leads', '6'),
+        'fraudLowConversion' => (float)aff_get_setting($pdo, 'alert_fraud_low_conversion_pct', '12'),
+    ];
+}
+
+function aff_notifications_poll(PDO $pdo, string $since = ''): array {
+    $auth = aff_auth_context();
+    $role = (string)($auth['role'] ?? '');
+    $ownerId = isset($auth['owner_id']) ? (int)$auth['owner_id'] : null;
+    $gestorId = isset($auth['gestor_id']) ? (string)$auth['gestor_id'] : null;
+    $sinceSql = $since !== '' ? $since : date('Y-m-d H:i:s', time() - 3600);
+    if ($role === 'admin') {
+        $st = $pdo->prepare("SELECT id, event_type AS eventType, message AS body, created_at AS createdAt FROM affiliate_audit_events WHERE created_at > ? AND (event_type IN ('telegram_notified','telegram_notify_failed','wallet_topup_requested','wallet_topup_reviewed','billing_charge_created','billing_charge_paid','lead_triggered')) ORDER BY id ASC LIMIT 20");
+        $st->execute([$sinceSql]);
+    } elseif ($role === 'gestor') {
+        $st = $pdo->prepare("SELECT id, event_type AS eventType, message AS body, created_at AS createdAt FROM affiliate_audit_events WHERE created_at > ? AND gestor_id=? AND (event_type IN ('telegram_notified','lead_triggered')) ORDER BY id ASC LIMIT 20");
+        $st->execute([$sinceSql, $gestorId]);
+    } else {
+        $st = $pdo->prepare("SELECT id, event_type AS eventType, message AS body, created_at AS createdAt FROM affiliate_audit_events WHERE created_at > ? AND owner_id=? AND (event_type IN ('wallet_topup_reviewed','billing_charge_paid','lead_triggered')) ORDER BY id ASC LIMIT 20");
+        $st->execute([$sinceSql, $ownerId]);
+    }
+    return array_map(function ($row) {
+        return [
+            'id' => (int)$row['id'],
+            'title' => 'RAC · ' . (string)$row['eventType'],
+            'body' => (string)$row['body'],
+            'url' => '/affiliate_network.php',
+            'createdAt' => (string)$row['createdAt'],
+        ];
+    }, $st->fetchAll());
 }
 
 function aff_webpush_subscribe(PDO $pdo, array $input): array {
@@ -1127,6 +1164,9 @@ function aff_integration_settings(PDO $pdo): array {
         'defaultGestorChatId' => (string)($gestor['telegram_chat_id'] ?? ''),
         'telegramAdminChatId' => aff_admin_telegram_chat_id($pdo),
         'webpushEnabled' => aff_webpush_enabled($pdo),
+        'alertLowBalanceThreshold' => aff_alert_settings($pdo)['lowBalanceThreshold'],
+        'alertFraudMinLeads' => aff_alert_settings($pdo)['fraudMinLeads'],
+        'alertFraudLowConversionPct' => aff_alert_settings($pdo)['fraudLowConversion'],
     ];
 }
 
@@ -1136,9 +1176,15 @@ function aff_save_integration_settings(PDO $pdo, array $input): array {
     $chatId = trim((string)($input['default_gestor_chat_id'] ?? ''));
     $adminChatId = trim((string)($input['telegram_admin_chat_id'] ?? ''));
     $webpushEnabled = !empty($input['webpush_enabled']) ? '1' : '0';
+    $lowBalanceThreshold = round((float)($input['alert_low_balance_threshold'] ?? 1000), 2);
+    $fraudMinLeads = max(1, (int)($input['alert_fraud_min_leads'] ?? 6));
+    $fraudLowConversion = round((float)($input['alert_fraud_low_conversion_pct'] ?? 12), 2);
     aff_set_setting($pdo, 'telegram_bot_token', $token);
     aff_set_setting($pdo, 'telegram_admin_chat_id', $adminChatId);
     aff_set_setting($pdo, 'webpush_enabled', $webpushEnabled);
+    aff_set_setting($pdo, 'alert_low_balance_threshold', (string)$lowBalanceThreshold);
+    aff_set_setting($pdo, 'alert_fraud_min_leads', (string)$fraudMinLeads);
+    aff_set_setting($pdo, 'alert_fraud_low_conversion_pct', (string)$fraudLowConversion);
     $st = $pdo->prepare("UPDATE affiliate_gestores SET telegram_chat_id=? WHERE id=?");
     $st->execute([$chatId, $gestorId]);
     aff_record_audit($pdo, [
@@ -2574,6 +2620,7 @@ function aff_expire_stale_holds(PDO $pdo): int {
 }
 
 function aff_refresh_audit_alerts(PDO $pdo): void {
+    $settings = aff_alert_settings($pdo);
     $pdo->exec("UPDATE affiliate_audit_alerts SET active=0");
 
     $inactive = $pdo->query("SELECT id, owner_code, owner_name FROM affiliate_owners WHERE status='suspended' OR available_balance <= 0")->fetchAll();
@@ -2599,7 +2646,7 @@ function aff_refresh_audit_alerts(PDO $pdo): void {
             LEFT JOIN affiliate_leads l ON l.owner_id=o.id
             GROUP BY o.id, o.owner_code, o.owner_name
         ) x
-        WHERE total_leads >= 6 AND sold_leads = 0")->fetchAll();
+        WHERE total_leads >= " . (int)$settings['fraudMinLeads'] . " AND sold_leads = 0")->fetchAll();
     foreach ($fraud as $row) {
         $stAlert->execute([
             (int)$row['owner_id'],
@@ -2621,7 +2668,7 @@ function aff_refresh_audit_alerts(PDO $pdo): void {
             LEFT JOIN affiliate_leads l ON l.owner_id=o.id
             GROUP BY o.id, o.owner_code, o.owner_name
         ) x
-        WHERE total_leads >= 6 AND sold_leads > 0 AND ROUND((sold_leads / NULLIF(total_leads, 0)) * 100, 2) < 12")->fetchAll();
+        WHERE total_leads >= " . (int)$settings['fraudMinLeads'] . " AND sold_leads > 0 AND ROUND((sold_leads / NULLIF(total_leads, 0)) * 100, 2) < " . (float)$settings['fraudLowConversion'])->fetchAll();
     foreach ($medium as $row) {
         $stAlert->execute([
             (int)$row['owner_id'],
@@ -2855,14 +2902,23 @@ function aff_sponsored_roi(PDO $pdo): array {
 }
 
 function aff_public_campaign_products(PDO $pdo, string $campaign): array {
+    if ($campaign === 'genio-g001') {
+        $landing = aff_public_gestor_landing($pdo, 'G001');
+        return [
+            'meta' => ['campaignName' => 'Selección del Genio G001', 'heroText' => 'Ofertas públicas recomendadas por Carlos Méndez.'],
+            'products' => $landing['products'],
+        ];
+    }
     if ($campaign === 'featured') {
         $st = $pdo->query("SELECT p.*, o.owner_name, o.geo_zone, o.reputation_score FROM affiliate_products p JOIN affiliate_owners o ON o.id=p.owner_id WHERE p.active=1 AND p.is_featured=1 ORDER BY p.sponsor_rank DESC, p.clicks DESC, p.name ASC LIMIT 18");
+        $meta = ['campaignName' => 'Destacados RAC', 'heroText' => 'Productos con mayor prioridad y beneficios visibles.'];
     } elseif ($campaign === 'managed') {
         $st = $pdo->query("SELECT p.*, o.owner_name, o.geo_zone, o.reputation_score FROM affiliate_products p JOIN affiliate_owners o ON o.id=p.owner_id WHERE p.active=1 AND o.managed_service=1 ORDER BY p.clicks DESC, p.sales DESC, p.name ASC LIMIT 18");
+        $meta = ['campaignName' => 'Gestión asistida RAC', 'heroText' => 'Inventario con apoyo operativo y seguimiento.'];
     } else {
         throw new RuntimeException('campaign_not_found');
     }
-    return array_map(function ($row) {
+    return ['meta' => $meta, 'products' => array_map(function ($row) {
         return array_merge([
             'id' => (string)$row['id'],
             'name' => (string)$row['name'],
@@ -2877,7 +2933,7 @@ function aff_public_campaign_products(PDO $pdo, string $campaign): array {
             'zone' => (string)$row['geo_zone'],
             'reputationScore' => (float)$row['reputation_score'],
         ], aff_product_media($row));
-    }, $st->fetchAll());
+    }, $st->fetchAll())];
 }
 
 function aff_public_gestor_landing(PDO $pdo, string $gestorId): array {

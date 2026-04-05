@@ -83,7 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
     </div>
   <?php elseif ($publicMode === 'campaign'): ?>
     <div class="card hero">
-      <div class="promo-band">📣 Campaña RAC <?= htmlspecialchars($campaign === 'featured' ? 'Destacados' : 'Gestión asistida', ENT_QUOTES, 'UTF-8') ?></div>
+      <div class="promo-band">📣 <?= htmlspecialchars(($data['meta']['campaignName'] ?? 'Campaña RAC'), ENT_QUOTES, 'UTF-8') ?></div>
+      <?php if (!empty($data['meta']['heroText'])): ?><div class="sub"><?= htmlspecialchars($data['meta']['heroText'], ENT_QUOTES, 'UTF-8') ?></div><?php endif; ?>
       <div class="catalog-grid">
         <?php foreach (($data['products'] ?? []) as $product): ?>
           <div class="catalog-card">

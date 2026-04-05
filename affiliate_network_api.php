@@ -51,6 +51,7 @@ function aff_action_permissions(): array {
         'trace_link_create' => ['admin', 'gestor'],
         'integration_settings_update' => ['admin'],
         'webpush_subscribe' => ['admin', 'owner', 'gestor'],
+        'notifications_poll' => ['admin', 'owner', 'gestor'],
         'owner_upsert' => ['admin'],
         'gestor_upsert' => ['admin'],
         'wallet_topup_request' => ['admin', 'owner'],
@@ -224,6 +225,11 @@ try {
         aff_require_csrf();
         aff_require_action_permission($action);
         echo json_encode(['status' => 'success', 'row' => aff_webpush_subscribe($pdo, $input)], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'notifications_poll') {
+        aff_require_action_permission($action);
+        echo json_encode(['status' => 'success', 'rows' => aff_notifications_poll($pdo, (string)($_GET['since'] ?? ''))], JSON_UNESCAPED_UNICODE);
         exit;
     }
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'owner_upsert') {

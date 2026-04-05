@@ -84,7 +84,10 @@
                 default_gestor_id: state.integrationSettings.defaultGestorId || 'G001',
                 default_gestor_chat_id: state.integrationSettings.defaultGestorChatId || '',
                 telegram_admin_chat_id: state.integrationSettings.telegramAdminChatId || '',
-                webpush_enabled: String(state.integrationSettings.webpushEnabled || '0') === '1' ? 1 : 0
+                webpush_enabled: String(state.integrationSettings.webpushEnabled || '0') === '1' ? 1 : 0,
+                alert_low_balance_threshold: state.integrationSettings.alertLowBalanceThreshold || 1000,
+                alert_fraud_min_leads: state.integrationSettings.alertFraudMinLeads || 6,
+                alert_fraud_low_conversion_pct: state.integrationSettings.alertFraudLowConversionPct || 12
             });
         }
         var enableWebpushBtn = event.target.closest('[data-enable-webpush]');
@@ -384,6 +387,7 @@
     window.addEventListener('online', function () {
         ns.updateNetBadge();
         ns.flushQueue();
+        ns.pollNotifications();
     });
 
     window.addEventListener('offline', ns.updateNetBadge);
@@ -434,4 +438,7 @@
         }
     }, 1800);
     ns.loadBootstrap().then(ns.flushQueue);
+    window.setInterval(function () {
+        if (navigator.onLine) ns.pollNotifications();
+    }, 60000);
 })(window.RAC);

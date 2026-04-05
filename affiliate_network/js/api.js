@@ -412,6 +412,27 @@ window.RAC = window.RAC || {};
             auth: auth
         });
     };
+    ns.pollNotifications = async function () {
+        try {
+            var since = state.lastNotificationAt || '';
+            var url = ns.apiUrl('notifications_poll') + (since ? '&since=' + encodeURIComponent(since) : '');
+            var json = await fetch(url, { credentials: 'same-origin' }).then(function (res) { return res.json(); });
+            var rows = json.rows || [];
+            if (!rows.length || !navigator.serviceWorker) return;
+            state.lastNotificationAt = rows[rows.length - 1].createdAt || state.lastNotificationAt;
+            var registration = await navigator.serviceWorker.ready;
+            rows.forEach(function (row) {
+                if (registration.active) {
+                    registration.active.postMessage({
+                        type: 'rac-show-notification',
+                        title: row.title || 'RAC',
+                        body: row.body || '',
+                        url: row.url || '/affiliate_network.php'
+                    });
+                }
+            });
+        } catch (e) {}
+    };
     ns.saveOwner = async function (payload) {
         try {
             await ns.api('owner_upsert', 'POST', payload);
