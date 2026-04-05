@@ -708,8 +708,12 @@ unset($treeCompany);
         .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
         .small-muted { font-size:.82rem; color:var(--cfg-muted); }
         .metodo-item.dragging { opacity:.55; }
-        .metodo-item { background:#fff; border-radius:16px; box-shadow:inset 0 0 0 1px #e6edf6; }
+        .metodo-item { background:#f8fafc; border-radius:14px; box-shadow:inset 0 0 0 1px #dde6f0; padding:12px; }
         .metodo-warn { font-size:.82rem; color:#b45309; display:none; }
+        .metodo-legacy-alert { background:#fff7ed; border:0; color:#9a3412; border-radius:14px; padding:12px 14px; }
+        .metodo-item .form-label.small { margin-bottom:.2rem; color:#64748b; font-weight:600; }
+        .metodo-item .form-check-inline { margin-right:.75rem; }
+        .metodo-item .especial-text-row { margin-top:.6rem; }
         #cfgTabs { border:none; flex-wrap:wrap; gap:.55rem; margin-bottom:1.25rem; }
         #cfgTabs .nav-link { color:#334155; font-weight:700; border:1px solid #dbe3ee; padding:.75rem 1rem; border-radius:999px; background:#ffffff; box-shadow:0 4px 12px rgba(15,23,42,.04); }
         #cfgTabs .nav-link:hover { color:var(--cfg-primary); border-color:#bfd3ff; background:#f8fbff; }
@@ -938,40 +942,79 @@ unset($treeCompany);
                 <div class="card-header fw-bold text-primary">💸 Métodos de pago</div>
                 <div class="card-body row g-3">
                     <div class="col-12">
-                        <div class="d-flex justify-content-between align-items-center mb-2">
-                            <label class="form-label fw-bold mb-0">Métodos de pago</label>
-                            <button type="button" class="btn btn-sm btn-outline-primary" onclick="addMetodoPagoRow()">+ Método</button>
+                        <div class="metodo-legacy-alert small mb-3">
+                            <i class="fas fa-exclamation-triangle me-1"></i>
+                            El campo <strong>ID</strong> se guarda en base de datos. No lo cambies en métodos existentes. Solo un método debería marcarse como <strong>Transferencia</strong>.
                         </div>
                         <div id="metodosPagoList">
                             <?php foreach (($currentConfig['metodos_pago'] ?? []) as $idx => $metodo): ?>
-                                <div class="border rounded p-3 mb-2 metodo-item" draggable="true">
+                                <div class="metodo-item border rounded mb-2" draggable="true">
                                     <div class="row g-2">
-                                        <div class="col-md-12 d-flex justify-content-between align-items-center">
-                                            <div class="fw-semibold small text-secondary"><i class="fas fa-grip-vertical me-1"></i> Método #<?php echo $idx + 1; ?></div>
-                                            <div class="d-flex gap-2">
-                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, -1)">↑</button>
-                                                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, 1)">↓</button>
-                                            </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small">ID (inmutable)</label>
+                                            <input type="text" class="form-control form-control-sm mono fw-bold" name="metodo_id[]" value="<?php echo htmlspecialchars($metodo['id'] ?? ''); ?>">
                                         </div>
-                                        <div class="col-md-2"><label class="form-label small">ID</label><input type="text" class="form-control" name="metodo_id[]" value="<?php echo htmlspecialchars($metodo['id'] ?? ''); ?>"></div>
-                                        <div class="col-md-2"><label class="form-label small">Nombre</label><input type="text" class="form-control" name="metodo_nombre[]" value="<?php echo htmlspecialchars($metodo['nombre'] ?? ''); ?>"></div>
-                                        <div class="col-md-2"><label class="form-label small">Icono</label><input type="text" class="form-control mono" name="metodo_icono[]" value="<?php echo htmlspecialchars($metodo['icono'] ?? ''); ?>"></div>
-                                        <div class="col-md-2"><label class="form-label small">Color</label><input type="text" class="form-control" name="metodo_color[]" value="<?php echo htmlspecialchars($metodo['color_bootstrap'] ?? ''); ?>"></div>
-                                        <div class="col-md-4"><label class="form-label small">Texto especial</label><input type="text" class="form-control" name="metodo_texto_especial[]" value="<?php echo htmlspecialchars($metodo['texto_especial'] ?? ''); ?>"></div>
-                                        <div class="col-md-12 d-flex flex-wrap gap-3 mt-2">
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_activo[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['activo']) ? 'checked' : ''; ?>><label class="form-check-label">Activo</label></div>
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_requiere_codigo[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['requiere_codigo']) ? 'checked' : ''; ?>><label class="form-check-label">Requiere código</label></div>
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_aplica_pos[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['aplica_pos']) ? 'checked' : ''; ?>><label class="form-check-label">Aplica POS</label></div>
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_aplica_shop[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['aplica_shop']) ? 'checked' : ''; ?>><label class="form-check-label">Aplica shop</label></div>
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_es_transferencia[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['es_transferencia']) ? 'checked' : ''; ?>><label class="form-check-label">Es transferencia</label></div>
-                                            <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_es_especial[]" value="<?php echo $idx; ?>" <?php echo !empty($metodo['es_especial']) ? 'checked' : ''; ?>><label class="form-check-label">Es especial</label></div>
-                                            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" onclick="this.closest('.metodo-item').remove()">Eliminar</button>
+                                        <div class="col-md-2">
+                                            <label class="form-label small">Nombre visible</label>
+                                            <input type="text" class="form-control form-control-sm" name="metodo_nombre[]" value="<?php echo htmlspecialchars($metodo['nombre'] ?? ''); ?>">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small">Icono FontAwesome</label>
+                                            <input type="text" class="form-control form-control-sm" name="metodo_icono[]" value="<?php echo htmlspecialchars($metodo['icono'] ?? ''); ?>">
+                                        </div>
+                                        <div class="col-md-2">
+                                            <label class="form-label small">Color</label>
+                                            <select class="form-select form-select-sm" name="metodo_color[]">
+                                                <?php foreach (['success'=>'Verde','primary'=>'Azul','secondary'=>'Gris','warning'=>'Amarillo','danger'=>'Rojo','info'=>'Celeste','dark'=>'Negro'] as $cv => $cl): ?>
+                                                    <option value="<?php echo $cv; ?>" <?php echo ($metodo['color_bootstrap'] ?? '') === $cv ? 'selected' : ''; ?>><?php echo $cl; ?></option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small">Opciones</label>
+                                            <div class="d-flex flex-wrap gap-2 align-items-center">
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_activo[]" value="<?php echo $idx; ?>" id="metodo_activo_<?php echo $idx; ?>" <?php echo !empty($metodo['activo']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small" for="metodo_activo_<?php echo $idx; ?>">Activo</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_aplica_pos[]" value="<?php echo $idx; ?>" id="metodo_pos_<?php echo $idx; ?>" <?php echo !empty($metodo['aplica_pos']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small" for="metodo_pos_<?php echo $idx; ?>">POS</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_aplica_shop[]" value="<?php echo $idx; ?>" id="metodo_shop_<?php echo $idx; ?>" <?php echo !empty($metodo['aplica_shop']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small" for="metodo_shop_<?php echo $idx; ?>">Shop</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_es_transferencia[]" value="<?php echo $idx; ?>" id="metodo_trans_<?php echo $idx; ?>" <?php echo !empty($metodo['es_transferencia']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small" for="metodo_trans_<?php echo $idx; ?>">Transf.</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_es_especial[]" value="<?php echo $idx; ?>" id="metodo_esp_<?php echo $idx; ?>" <?php echo !empty($metodo['es_especial']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small text-info fw-semibold" for="metodo_esp_<?php echo $idx; ?>">Especial</label>
+                                                </div>
+                                                <div class="form-check form-check-inline mb-0">
+                                                    <input class="form-check-input" type="checkbox" name="metodo_requiere_codigo[]" value="<?php echo $idx; ?>" id="metodo_cod_<?php echo $idx; ?>" <?php echo !empty($metodo['requiere_codigo']) ? 'checked' : ''; ?>>
+                                                    <label class="form-check-label small" for="metodo_cod_<?php echo $idx; ?>">Código</label>
+                                                </div>
+                                                <div class="d-flex gap-2 ms-auto">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, -1)">↑</button>
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, 1)">↓</button>
+                                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.metodo-item').remove()"><i class="fas fa-trash"></i></button>
+                                                </div>
+                                            </div>
+                                            <div class="especial-text-row">
+                                                <input type="text" class="form-control form-control-sm" name="metodo_texto_especial[]" placeholder="Texto a mostrar al seleccionar este método" value="<?php echo htmlspecialchars($metodo['texto_especial'] ?? ''); ?>">
+                                            </div>
                                         </div>
                                         <div class="col-md-12 metodo-warn"></div>
                                     </div>
                                 </div>
                             <?php endforeach; ?>
                         </div>
+                        <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addMetodoPagoRow()">
+                            <i class="fas fa-plus-circle me-1"></i>Agregar Método de Pago
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1872,30 +1915,40 @@ function addMetodoPagoRow() {
     const wrap = document.getElementById('metodosPagoList');
     if (!wrap) return;
     const div = document.createElement('div');
-    div.className = 'border rounded p-3 mb-2 metodo-item';
+    div.className = 'metodo-item border rounded mb-2';
     div.setAttribute('draggable', 'true');
     div.innerHTML = `
         <div class="row g-2">
-            <div class="col-md-12 d-flex justify-content-between align-items-center">
-                <div class="fw-semibold small text-secondary"><i class="fas fa-grip-vertical me-1"></i> Método #0</div>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, -1)">↑</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, 1)">↓</button>
+            <div class="col-md-2"><label class="form-label small">ID (inmutable)</label><input type="text" class="form-control form-control-sm mono fw-bold" name="metodo_id[]" value=""></div>
+            <div class="col-md-2"><label class="form-label small">Nombre visible</label><input type="text" class="form-control form-control-sm" name="metodo_nombre[]" value=""></div>
+            <div class="col-md-2"><label class="form-label small">Icono FontAwesome</label><input type="text" class="form-control form-control-sm" name="metodo_icono[]" value="fa-money-bill-wave"></div>
+            <div class="col-md-2"><label class="form-label small">Color</label><select class="form-select form-select-sm" name="metodo_color[]">
+                <option value="success">Verde</option>
+                <option value="primary">Azul</option>
+                <option value="secondary" selected>Gris</option>
+                <option value="warning">Amarillo</option>
+                <option value="danger">Rojo</option>
+                <option value="info">Celeste</option>
+                <option value="dark">Negro</option>
+            </select></div>
+            <div class="col-md-4">
+                <label class="form-label small">Opciones</label>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_activo[]" value="0" checked><label class="form-check-label small">Activo</label></div>
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_aplica_pos[]" value="0" checked><label class="form-check-label small">POS</label></div>
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_aplica_shop[]" value="0"><label class="form-check-label small">Shop</label></div>
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_es_transferencia[]" value="0"><label class="form-check-label small">Transf.</label></div>
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_es_especial[]" value="0"><label class="form-check-label small text-info fw-semibold">Especial</label></div>
+                    <div class="form-check form-check-inline mb-0"><input class="form-check-input" type="checkbox" name="metodo_requiere_codigo[]" value="0"><label class="form-check-label small">Código</label></div>
+                    <div class="d-flex gap-2 ms-auto">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, -1)">↑</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="moveMetodoPago(this, 1)">↓</button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.metodo-item').remove(); reindexMetodosPago();"><i class="fas fa-trash"></i></button>
+                    </div>
                 </div>
-            </div>
-            <div class="col-md-2"><label class="form-label small">ID</label><input type="text" class="form-control" name="metodo_id[]" value=""></div>
-            <div class="col-md-2"><label class="form-label small">Nombre</label><input type="text" class="form-control" name="metodo_nombre[]" value=""></div>
-            <div class="col-md-2"><label class="form-label small">Icono</label><input type="text" class="form-control mono" name="metodo_icono[]" value="fa-money-bill-wave"></div>
-            <div class="col-md-2"><label class="form-label small">Color</label><input type="text" class="form-control" name="metodo_color[]" value="secondary"></div>
-            <div class="col-md-4"><label class="form-label small">Texto especial</label><input type="text" class="form-control" name="metodo_texto_especial[]" value=""></div>
-            <div class="col-md-12 d-flex flex-wrap gap-3 mt-2">
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_activo[]" value="0" checked><label class="form-check-label">Activo</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_requiere_codigo[]" value="0"><label class="form-check-label">Requiere código</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_aplica_pos[]" value="0" checked><label class="form-check-label">Aplica POS</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_aplica_shop[]" value="0"><label class="form-check-label">Aplica shop</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_es_transferencia[]" value="0"><label class="form-check-label">Es transferencia</label></div>
-                <div class="form-check"><input class="form-check-input" type="checkbox" name="metodo_es_especial[]" value="0"><label class="form-check-label">Es especial</label></div>
-                <button type="button" class="btn btn-sm btn-outline-danger ms-auto" onclick="this.closest('.metodo-item').remove(); reindexMetodosPago();">Eliminar</button>
+                <div class="especial-text-row">
+                    <input type="text" class="form-control form-control-sm" name="metodo_texto_especial[]" value="" placeholder="Texto a mostrar al seleccionar este método">
+                </div>
             </div>
             <div class="col-md-12 metodo-warn"></div>
         </div>
