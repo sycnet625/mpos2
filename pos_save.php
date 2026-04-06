@@ -7,7 +7,12 @@ ini_set('log_errors', 1);
 error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
 require_once 'db.php';
+require_once 'config_loader.php';
 require_once 'push_notify.php';
 require_once 'pos_audit.php';
 
@@ -32,13 +37,12 @@ try {
     
     if (!$input) throw new Exception("Datos vacíos o JSON inválido.");
 
-    // 2. Configuración
-    $configFile = __DIR__ . '/pos.cfg';
-    $config = ["id_almacen" => 1, "id_sucursal" => 1, "id_empresa" => 1];
-    if (file_exists($configFile)) {
-        $loaded = json_decode(file_get_contents($configFile), true);
-        if ($loaded) $config = array_merge($config, $loaded);
-    }
+    // 2. Configuración (dinámica por sesión/cajero; fallback a pos.cfg en config_loader)
+    $config = array_merge([
+        "id_almacen" => 1,
+        "id_sucursal" => 1,
+        "id_empresa" => 1
+    ], $config ?? []);
 
     $idAlmacen = intval($config['id_almacen']);
     $idSucursal = intval($config['id_sucursal']);
