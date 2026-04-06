@@ -28,6 +28,20 @@ $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 
+function dashboard_product_scope_sql(string $alias, int $sucursalId, int $almacenId): string {
+    $sucursalId = (int)$sucursalId;
+    $almacenId = (int)$almacenId;
+    return "(
+        COALESCE({$alias}.id_sucursal_origen, 0) = {$sucursalId}
+        OR EXISTS (
+            SELECT 1
+            FROM stock_almacen ds_scope
+            WHERE ds_scope.id_producto = {$alias}.codigo
+              AND ds_scope.id_almacen = {$almacenId}
+        )
+    )";
+}
+
 // --- DETERMINAR ALCANCE (SCOPE) ---
 // global = Toda la empresa | local = Sucursal/Almacén actual
 $scope = isset($_GET['scope']) ? $_GET['scope'] : 'local'; 
@@ -74,20 +88,23 @@ $fechaFin    = isset($_GET['end']) && !empty($_GET['end']) ? $_GET['end'] : $fec
 // --- CONSTRUCCIÓN DE FILTROS SQL SEGÚN SCOPE ---
 // Filtros Base
 $sqlEmpresa = " AND p.id_empresa = $EMP_ID ";
+$sqlProductScope = ($scope === 'local') ? " AND " . dashboard_product_scope_sql('p', $SUC_ID, $ALM_ID) . " " : "";
 
 // Filtros Inventario
 $sqlAlmacen = ($scope === 'local') ? " AND s.id_almacen = $ALM_ID " : ""; 
 
 // Filtros Ventas
 $sqlSucursal = ($scope === 'local') ? " AND v.id_sucursal = $SUC_ID " : "";
+$sqlPedidosSucursal = ($scope === 'local') ? " AND id_sucursal = $SUC_ID " : "";
+$sqlPedidosAliasSucursal = ($scope === 'local') ? " AND pc.id_sucursal = $SUC_ID " : "";
 $sqlDateRange = " AND DATE(v.fecha) BETWEEN ? AND ? ";
 
 // A. Inventario (COLLATE fix: stock_almacen.id_producto usa uca1400, productos.codigo usa unicode_ci)
-$sqlInvBase = "SELECT SUM(s.cantidad * %FIELD%) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE 1=1 $sqlEmpresa $sqlAlmacen";
+$sqlInvBase = "SELECT SUM(s.cantidad * %FIELD%) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE 1=1 $sqlEmpresa $sqlProductScope $sqlAlmacen";
 $valorInventarioCosto = getScalar($pdo, str_replace('%FIELD%', 'p.costo', $sqlInvBase));
 $valorInventarioVenta = getScalar($pdo, str_replace('%FIELD%', 'p.precio', $sqlInvBase));
 
-$sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.cantidad <= p.stock_minimo $sqlEmpresa $sqlAlmacen";
+$sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.cantidad <= p.stock_minimo $sqlEmpresa $sqlProductScope $sqlAlmacen";
 $stockCritico = getScalar($pdo, $sqlStockCritico);
 $margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
 
@@ -118,6 +135,7 @@ $topPaises = getRows($pdo, "SELECT pais, COUNT(*) as visitas FROM metricas_web G
 $topVistos = getRows($pdo, "SELECT p.nombre, COUNT(v.id) as vistas 
                             FROM vistas_productos v 
                             JOIN productos p ON v.codigo_producto = p.codigo 
+                            WHERE p.id_empresa = $EMP_ID $sqlProductScope
                             GROUP BY v.codigo_producto ORDER BY vistas DESC LIMIT 5");
 
 $visitantesRecientes = getRows($pdo, "SELECT ip, url_visitada, fecha FROM metricas_web ORDER BY fecha DESC LIMIT 5");
@@ -125,7 +143,7 @@ $carritosAbandonadosCount = getScalar($pdo, "SELECT COUNT(*) FROM carritos_aband
 $carritosTotalValor = getScalar($pdo, "SELECT SUM(total) FROM carritos_abandonados WHERE recuperado = 0");
 
 // Tasa de Conversión (Ventas Web / Visitas Únicas)
-$ventasWebCount = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE id_empresa = $EMP_ID");
+$ventasWebCount = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE id_empresa = $EMP_ID $sqlPedidosSucursal");
 $tasaConversion = ($ipsUnicas > 0) ? ($ventasWebCount / $ipsUnicas) * 100 : 0;
 
 // URL más visitada (Solo el path relativo)
@@ -154,11 +172,13 @@ try {
     $reservasSinStock = (int)$pdo->query(
         "SELECT COUNT(*) FROM ventas_cabecera
          WHERE tipo_servicio='reserva' AND sin_existencia=1
+           AND id_empresa = $EMP_ID" . (($scope === 'local') ? " AND id_sucursal = $SUC_ID" : "") . "
            AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
     )->fetchColumn();
     $pagosVerificando = (int)$pdo->query(
         "SELECT COUNT(*) FROM ventas_cabecera
          WHERE estado_pago='verificando'
+           AND id_empresa = $EMP_ID" . (($scope === 'local') ? " AND id_sucursal = $SUC_ID" : "") . "
            AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
     )->fetchColumn();
 } catch (Throwable $e) { /* columnas pueden no existir aún */ }
@@ -199,7 +219,7 @@ $totalTransacciones = getScalar($pdo, $sqlTrans, $paramsDate);
 $ticketPromedio = ($totalTransacciones > 0) ? $ventasPeriodo / $totalTransacciones : 0;
 
 // C. Pendientes (Pedidos Web - Globalmente o por sucursal si se implementara asignación)
-$countPendientes = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE estado = 'pendiente'", []);
+$countPendientes = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE id_empresa = $EMP_ID $sqlPedidosSucursal AND estado = 'pendiente'", []);
 
 // D. Datos para Gráficas
 $sqlPagos = "SELECT COALESCE(metodo_pago, 'Efectivo') as metodo, SUM(total) as total 
@@ -235,7 +255,7 @@ $sqlLowMargin = "SELECT p.nombre, p.precio, p.costo,
                  ((p.precio - p.costo) / NULLIF(p.precio,0)) * 100 as margen_porc
                  FROM stock_almacen s
                  JOIN productos p ON s.id_producto = p.codigo
-                 WHERE p.id_empresa = $EMP_ID $sqlAlmacen AND s.cantidad > 0 AND p.precio > 0
+                 WHERE p.id_empresa = $EMP_ID $sqlProductScope $sqlAlmacen AND s.cantidad > 0 AND p.precio > 0
                  ORDER BY margen_porc ASC LIMIT 5";
 $lowMarginProds = getRows($pdo, $sqlLowMargin);
 
@@ -245,7 +265,7 @@ $sevenDaysAgo = date('Y-m-d', strtotime('-7 days'));
 $sqlSlow = "SELECT p.nombre, s.cantidad
             FROM stock_almacen s
             JOIN productos p ON s.id_producto = p.codigo
-            WHERE p.id_empresa = $EMP_ID $sqlAlmacen AND s.cantidad > 0
+            WHERE p.id_empresa = $EMP_ID $sqlProductScope $sqlAlmacen AND s.cantidad > 0
             AND p.codigo NOT IN (
                 SELECT d.id_producto
                 FROM ventas_detalle d
@@ -283,7 +303,7 @@ $catProfitData = getRows($pdo, $sqlCatProfit, $paramsDate);
 $sqlInvByCategory = "SELECT p.categoria, SUM(s.cantidad) as total_cantidad, SUM(s.cantidad * p.costo) as total_costo_valor
                      FROM stock_almacen s
                      JOIN productos p ON s.id_producto = p.codigo
-                     WHERE 1=1 $sqlEmpresa $sqlAlmacen
+                     WHERE 1=1 $sqlEmpresa $sqlProductScope $sqlAlmacen
                      GROUP BY p.categoria
                      ORDER BY total_costo_valor DESC"; // Order by total cost value
 $invByCategoryData = getRows($pdo, $sqlInvByCategory);
@@ -303,7 +323,8 @@ $sqlOrders = "
         notas,
         'WEB' as origen,
         'Web' as canal_origen
-    FROM pedidos_cabecera)
+    FROM pedidos_cabecera
+    WHERE id_empresa = $EMP_ID $sqlPedidosSucursal)
     UNION ALL
     (SELECT
         id,
@@ -325,7 +346,8 @@ $sqlOrders = "
         'POS' as origen,
         COALESCE(canal_origen, 'POS') as canal_origen
     FROM ventas_cabecera
-    WHERE tipo_servicio = 'reserva')
+    WHERE tipo_servicio = 'reserva'
+      AND id_empresa = $EMP_ID" . (($scope === 'local') ? " AND id_sucursal = $SUC_ID" : "") . ")
     ORDER BY CASE WHEN estado = 'pendiente' THEN 1 ELSE 2 END, fecha DESC 
     LIMIT 100";
 $pedidos = getRows($pdo, $sqlOrders, []);
