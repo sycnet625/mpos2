@@ -662,6 +662,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
         $rows = $draft['rows'];
         $resolutions = $_POST['resolution'] ?? [];
         $newSkus = $_POST['new_sku'] ?? [];
+        $reservedGeneratedSkus = [];
 
         foreach ($rows as &$row) {
             if ($row['resolution_mode'] !== 'name_match_required') {
