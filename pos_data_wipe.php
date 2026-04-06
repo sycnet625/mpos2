@@ -239,6 +239,12 @@ $sections = [
         'description' => 'Vacía recetas y su detalle.',
         'tables' => ['recetas_detalle', 'recetas_cabecera'],
     ],
+    'kardex' => [
+        'label' => 'Kardex',
+        'icon' => 'fa-clipboard-list',
+        'description' => 'Vacía los movimientos del kardex.',
+        'tables' => ['kardex'],
+    ],
     'compras' => [
         'label' => 'Compras',
         'icon' => 'fa-truck-loading',
@@ -281,6 +287,12 @@ $sections = [
         'icon' => 'fa-robot',
         'description' => 'Vacía sesiones, mensajes y órdenes del bot.',
         'tables' => ['pos_bot_messages', 'pos_bot_orders', 'pos_bot_sessions'],
+    ],
+    'auditoria' => [
+        'label' => 'Auditoría',
+        'icon' => 'fa-user-shield',
+        'description' => 'Vacía tablas de auditoría del sistema y RAC.',
+        'tables' => ['affiliate_audit_alerts', 'affiliate_audit_events', 'auditoria_pos'],
     ],
     'carrito_web' => [
         'label' => 'Carritos / wishlist web',
