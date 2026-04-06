@@ -262,8 +262,8 @@ $sections = [
     'kardex' => [
         'label' => 'Kardex',
         'icon' => 'fa-clipboard-list',
-        'description' => 'Vacía los movimientos del kardex.',
-        'tables' => ['kardex'],
+        'description' => 'Vacía los movimientos del kardex y el stock por almacén.',
+        'tables' => ['kardex', 'stock_almacen'],
     ],
     'compras' => [
         'label' => 'Compras',
