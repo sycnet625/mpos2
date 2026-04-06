@@ -15,6 +15,20 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $localPath = __DIR__ . '/assets/product_images/';
 
+function ptable_scope_sql(string $alias, int $sucursalId, int $almacenId): string {
+    $sucursalId = (int)$sucursalId;
+    $almacenId = (int)$almacenId;
+    return "(
+        COALESCE({$alias}.id_sucursal_origen, 0) = {$sucursalId}
+        OR EXISTS (
+            SELECT 1
+            FROM stock_almacen sa_scope
+            WHERE sa_scope.id_producto = {$alias}.codigo
+              AND sa_scope.id_almacen = {$almacenId}
+        )
+    )";
+}
+
 function ptable_dir_is_really_writable(string $path): bool {
     if (!is_dir($path)) {
         if (!@mkdir($path, 0775, true) && !is_dir($path)) {
@@ -1006,7 +1020,7 @@ if (isset($_GET['action'])) {
             $filterStockRange = trim((string)($_GET['stock_range'] ?? ''));
             $onlyProd = isset($_GET['only_prod']);
 
-            $whereClauses = ["p.id_empresa = $EMP_ID"];
+            $whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $ALM_ID)];
             $params = [];
 
             if ($filterStatus === 'active') $whereClauses[] = "p.activo = 1";
@@ -1092,7 +1106,7 @@ if (isset($_GET['action'])) {
             $sql = "SELECT p.codigo, p.nombre, p.categoria, 
                     (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = :alm) as stock_total
                     FROM productos p 
-                    WHERE p.id_empresa = :emp AND p.activo = 1 
+                    WHERE p.id_empresa = :emp AND " . ptable_scope_sql('p', $SUC_ID, $ALM_ID) . " AND p.activo = 1 
                     ORDER BY p.categoria ASC, p.nombre ASC";
             $stmt = $pdo->prepare($sql);
             $stmt->execute([':emp' => $EMP_ID, ':alm' => $ALM_ID]);
@@ -1130,7 +1144,7 @@ $dir = strtoupper($_GET['dir'] ?? 'ASC');
 if ($dir !== 'ASC' && $dir !== 'DESC') $dir = 'ASC';
 
 // WHERE
-$whereClauses = ["p.id_empresa = $EMP_ID"];
+$whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $ALM_ID)];
 $params = [];
 
 if ($filterStatus === 'active') $whereClauses[] = "p.activo = 1";
@@ -1187,6 +1201,7 @@ try {
             SUM(CASE WHEN activo = 0 THEN 1 ELSE 0 END) AS inactivos
         FROM productos
         WHERE id_empresa = ?
+          AND " . str_replace('p.', '', ptable_scope_sql('productos', $SUC_ID, $ALM_ID)) . "
     ");
     $stmtKpi->execute([$EMP_ID]);
     $k = $stmtKpi->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1200,6 +1215,7 @@ try {
         SELECT COUNT(*)
         FROM productos p
         WHERE p.id_empresa = ?
+          AND " . ptable_scope_sql('p', $SUC_ID, $ALM_ID) . "
           AND (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = ?) <= 0
     ");
     $stmtSinStock->execute([$EMP_ID, $ALM_ID]);
@@ -1424,6 +1440,16 @@ if ($isAjax) {
 <input type="file" id="fileInput"       accept="image/jpeg, image/webp, image/png" style="display:none" onchange="uploadPhoto()">
 <input type="file" id="editorFileInput" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
 <input type="file" id="importFileInput" accept=".csv,text/csv" style="display:none" onchange="runImportCsv()">
+<div id="uploadProgressBox" style="display:none;position:fixed;right:18px;bottom:18px;z-index:2055;width:min(340px,calc(100vw - 36px));background:#fff;border:1px solid #dbeafe;border-radius:14px;box-shadow:0 18px 40px rgba(15,23,42,.18);padding:14px 14px 12px">
+    <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-semibold text-dark"><i class="fas fa-cloud-upload-alt text-primary me-2"></i>Subiendo imagen</div>
+        <div id="uploadProgressPct" class="small text-muted">0%</div>
+    </div>
+    <div class="progress" style="height:12px;background:#e5e7eb">
+        <div id="uploadProgressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%"></div>
+    </div>
+    <div id="uploadProgressText" class="small text-muted mt-2">Preparando archivo...</div>
+</div>
 
 <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -1910,6 +1936,56 @@ async function cloneProduct(sku) {
 
 // --- IMÁGENES DEL EDITOR ---
 let _editorSlot = '', _editorSku = '';
+function setUploadProgress(visible, percent = 0, text = 'Subiendo imagen...') {
+    const box = document.getElementById('uploadProgressBox');
+    const bar = document.getElementById('uploadProgressBar');
+    const pct = document.getElementById('uploadProgressPct');
+    const label = document.getElementById('uploadProgressText');
+    if (!box || !bar || !pct || !label) return;
+    box.style.display = visible ? 'block' : 'none';
+    if (!visible) return;
+    const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+    bar.style.width = safePercent + '%';
+    bar.setAttribute('aria-valuenow', String(safePercent));
+    pct.textContent = safePercent + '%';
+    label.textContent = text || 'Subiendo imagen...';
+}
+
+function ptableUploadRequest(formData, onProgressText = 'Subiendo imagen...') {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'products_table.php', true);
+        xhr.responseType = 'text';
+        xhr.upload.onprogress = (event) => {
+            if (!event.lengthComputable) {
+                setUploadProgress(true, 15, onProgressText);
+                return;
+            }
+            const percent = event.total > 0 ? (event.loaded / event.total) * 100 : 0;
+            setUploadProgress(true, percent, onProgressText);
+        };
+        xhr.onload = () => {
+            const raw = xhr.responseText || '';
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch (parseError) {
+                reject(new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.'));
+                return;
+            }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                setUploadProgress(true, 100, 'Imagen subida. Procesando respuesta...');
+                resolve(data);
+                return;
+            }
+            reject(new Error((data && data.msg) || `Error HTTP ${xhr.status}`));
+        };
+        xhr.onerror = () => reject(new Error('No se pudo conectar con el servidor.'));
+        xhr.onabort = () => reject(new Error('Subida cancelada.'));
+        setUploadProgress(true, 0, onProgressText);
+        xhr.send(formData);
+    });
+}
 
 function triggerEditorImg(sku, slot) {
     _editorSku  = sku;
@@ -1971,6 +2047,7 @@ async function ptablePrepareUploadFile(file) {
 async function handleEditorUpload() {
     const input = document.getElementById('editorFileInput');
     const selectedFile  = input.files[0];
+    setUploadProgress(true, 0, 'Optimizando imagen...');
     const file = selectedFile ? await ptablePrepareUploadFile(selectedFile) : null;
     if (!file) return;
     input.value = '';
@@ -1984,14 +2061,7 @@ async function handleEditorUpload() {
     if (imgEl) imgEl.style.opacity = '0.4';
 
     try {
-        const res  = await fetch('products_table.php', { method: 'POST', body: formData });
-        const raw  = await res.text();
-        let data;
-        try {
-            data = JSON.parse(raw);
-        } catch (parseError) {
-            throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
-        }
+        const data = await ptableUploadRequest(formData, 'Subiendo imagen del editor...');
         if (data.status === 'success') {
             if (imgEl) {
                 imgEl.src = `image.php?code=${encodeURIComponent(prodCode)}&t=${Date.now()}`;
@@ -2017,12 +2087,15 @@ async function handleEditorUpload() {
                 const tableImg = document.querySelector(`.prod-img-table[data-code="${_editorSku}"]`);
                 if (tableImg) tableImg.src = `image.php?code=${encodeURIComponent(_editorSku)}&t=${Date.now()}`;
             }
+            setTimeout(() => setUploadProgress(false), 500);
         } else {
             if (imgEl) imgEl.style.opacity = '1';
+            setUploadProgress(false);
             showToast('❌ Error al guardar imagen: ' + (data.msg || 'desconocido'));
         }
     } catch (e) {
         if (imgEl) imgEl.style.opacity = '1';
+        setUploadProgress(false);
         showToast('❌ Error al subir imagen: ' + (e.message || 'desconocido'));
     }
 }
@@ -2103,31 +2176,32 @@ function triggerUpload(code) { currentCode = code; document.getElementById('file
 function uploadPhoto() {
     (async () => {
         const selectedFile = document.getElementById('fileInput').files[0];
+        setUploadProgress(true, 0, 'Optimizando imagen...');
         const file = selectedFile ? await ptablePrepareUploadFile(selectedFile) : null;
         if(!file) return;
         const formData = new FormData();
         formData.append('new_photo', file);
         formData.append('prod_code', currentCode);
         document.getElementById('fileInput').value = '';
-        fetch('products_table.php', { method: 'POST', body: formData })
-            .then(r => r.text())
-            .then(raw => {
-                try {
-                    return JSON.parse(raw);
-                } catch (e) {
-                    throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
-                }
-            })
+        ptableUploadRequest(formData, 'Subiendo imagen del producto...')
             .then(res => {
                 if(res.status === 'success') {
                     const img = document.querySelector(`.prod-img-table[data-code="${currentCode}"]`);
                     if(img) img.src = `image.php?code=${encodeURIComponent(currentCode)}&t=${Date.now()}`;
+                    setTimeout(() => setUploadProgress(false), 500);
                 } else {
+                    setUploadProgress(false);
                     showToast('❌ Error al guardar imagen: ' + res.msg);
                 }
             })
-            .catch(e => showToast('❌ Error de conexión: ' + e.message));
-    })().catch(e => showToast('❌ Error preparando imagen: ' + (e.message || 'desconocido')));
+            .catch(e => {
+                setUploadProgress(false);
+                showToast('❌ Error de conexión: ' + e.message);
+            });
+    })().catch(e => {
+        setUploadProgress(false);
+        showToast('❌ Error preparando imagen: ' + (e.message || 'desconocido'));
+    });
 }
 async function toggleWeb(sku, checkbox) {
     const val = checkbox.checked ? 1 : 0;
