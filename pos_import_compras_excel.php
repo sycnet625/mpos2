@@ -869,7 +869,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
                 (int)$row['almacen_id'],
                 (int)$row['sucursal_id'],
                 'SALIDA',
-                (float)$row['quantity'],
+                -abs((float)$row['quantity']),
                 'REVERSA IMPORT RUN #' . $runId,
                 (float)$row['cost_price'],
                 $usuario,
