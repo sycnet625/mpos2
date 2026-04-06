@@ -301,7 +301,5 @@ $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
     </div>
 </div>
 
-<?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
