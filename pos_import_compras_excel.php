@@ -262,6 +262,52 @@ function purchase_import_default_wholesale(float $cost): float
     return round($cost * 1.10, 2);
 }
 
+function purchase_import_generate_next_sku(PDO $pdo, int $empresaId, array &$reserved = []): string
+{
+    static $lastNumericSkuByCompany = [];
+
+    if (!isset($lastNumericSkuByCompany[$empresaId])) {
+        $stmt = $pdo->prepare("
+            SELECT codigo
+            FROM productos
+            WHERE id_empresa = ?
+            ORDER BY CHAR_LENGTH(codigo) DESC, codigo DESC
+        ");
+        $stmt->execute([$empresaId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+        $max = 0;
+        foreach ($rows as $codigo) {
+            $codigo = trim((string)$codigo);
+            if ($codigo === '') {
+                continue;
+            }
+            if (preg_match('/(\d+)$/', $codigo, $m)) {
+                $num = (int)$m[1];
+                if ($num > $max) {
+                    $max = $num;
+                }
+            }
+        }
+        $lastNumericSkuByCompany[$empresaId] = $max;
+    }
+
+    $reserved[$empresaId] = $reserved[$empresaId] ?? [];
+
+    do {
+        $lastNumericSkuByCompany[$empresaId]++;
+        $candidate = (string)$lastNumericSkuByCompany[$empresaId];
+
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM productos WHERE id_empresa = ? AND codigo = ?");
+        $stmt->execute([$empresaId, $candidate]);
+        $exists = ((int)$stmt->fetchColumn() > 0);
+        $alreadyReserved = isset($reserved[$empresaId][$candidate]);
+    } while ($exists || $alreadyReserved);
+
+    $reserved[$empresaId][$candidate] = true;
+    return $candidate;
+}
+
 function purchase_import_build_product_diff(?array $existing, array $incoming): array
 {
     if (!$existing) {
@@ -325,6 +371,7 @@ function purchase_import_parse_uploaded_file(string $tmpFile, PDO $pdo): array
     $errors = [];
     $needsResolution = 0;
     $seenSkuByCompany = [];
+    $reservedGeneratedSkus = [];
 
     foreach (array_slice($rows, 1) as $index => $row) {
         $line = $index + 2;
@@ -628,7 +675,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
             if ($selected === '__new__') {
                 $newSku = trim((string)($newSkus[$lineKey] ?? ''));
                 if ($newSku === '') {
-                    throw new RuntimeException('Debes escribir un SKU nuevo para la fila ' . $row['line'] . '.');
+                    $newSku = purchase_import_generate_next_sku($pdo, (int)$row['empresa_id'], $reservedGeneratedSkus);
                 }
                 $row['resolved_sku'] = $newSku;
                 $row['resolution_mode'] = 'name_create';
@@ -1146,7 +1193,8 @@ if ($preview && !empty($preview['rows'])) {
                                             </div>
                                             <div class="col-lg-3">
                                                 <label class="form-label small fw-bold">SKU nuevo si crea</label>
-                                                <input type="text" class="form-control mono" name="new_sku[<?= (int)$row['line'] ?>]" placeholder="SKU nuevo">
+                                                <input type="text" class="form-control mono" name="new_sku[<?= (int)$row['line'] ?>]" placeholder="Automático si lo dejas vacío">
+                                                <div class="small text-muted mt-1">Si no escribes SKU, el sistema genera uno único incrementando el último SKU de la empresa.</div>
                                             </div>
                                         </div>
                                     </div>
