@@ -147,12 +147,30 @@ function poscfg_validate_location(PDO $pdo, int $empresaId, int $sucursalId, int
 $msg = '';
 $msgType = 'success';
 $editUserId = (int)($_GET['edit_user'] ?? 0);
+$activeTab = 'shop';
+
+if ($editUserId > 0) {
+    $activeTab = 'usuarios';
+} elseif ((int)($_GET['edit_empresa'] ?? 0) > 0 || (int)($_GET['edit_sucursal'] ?? 0) > 0 || (int)($_GET['edit_almacen'] ?? 0) > 0) {
+    $activeTab = 'estructura';
+} elseif (!empty($_GET['tab'])) {
+    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones'];
+    $requestedTab = (string)$_GET['tab'];
+    if (in_array($requestedTab, $allowedTabs, true)) {
+        $activeTab = $requestedTab;
+    }
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $formAction = $_POST['form_action'] ?? '';
+        $postedTab = (string)($_POST['active_tab'] ?? '');
+        if (in_array($postedTab, ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones'], true)) {
+            $activeTab = $postedTab;
+        }
 
         if ($formAction === 'save_empresa') {
+            $activeTab = 'estructura';
             $empresaId = (int)($_POST['empresa_id'] ?? 0);
             $nombre = trim((string)($_POST['empresa_nombre'] ?? ''));
             $activo = isset($_POST['empresa_activo']) ? 1 : 0;
@@ -181,6 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'delete_empresa') {
+            $activeTab = 'estructura';
             $empresaId = (int)($_POST['empresa_id'] ?? 0);
             $stmt = $pdo->prepare("DELETE FROM empresas WHERE id = ?");
             $stmt->execute([$empresaId]);
@@ -188,6 +207,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_sucursal') {
+            $activeTab = 'estructura';
             $sucursalId = (int)($_POST['sucursal_id'] ?? 0);
             $empresaId = (int)($_POST['sucursal_id_empresa'] ?? 0);
             $nombre = trim((string)($_POST['sucursal_nombre'] ?? ''));
@@ -217,6 +237,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'delete_sucursal') {
+            $activeTab = 'estructura';
             $sucursalId = (int)($_POST['sucursal_id'] ?? 0);
             $stmt = $pdo->prepare("DELETE FROM sucursales WHERE id = ?");
             $stmt->execute([$sucursalId]);
@@ -224,6 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_almacen') {
+            $activeTab = 'estructura';
             $almacenId = (int)($_POST['almacen_id'] ?? 0);
             $sucursalId = (int)($_POST['almacen_id_sucursal'] ?? 0);
             $nombre = trim((string)($_POST['almacen_nombre'] ?? ''));
@@ -253,6 +275,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'delete_almacen') {
+            $activeTab = 'estructura';
             $almacenId = (int)($_POST['almacen_id'] ?? 0);
             $stmt = $pdo->prepare("DELETE FROM almacenes WHERE id = ?");
             $stmt->execute([$almacenId]);
@@ -260,6 +283,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_shop_config') {
+            if ($activeTab === 'shop') {
+                $activeTab = 'shop';
+            }
             $newConfig = $currentConfig;
             $newConfig['tienda_nombre'] = trim((string)($_POST['tienda_nombre'] ?? ''));
             $newConfig['direccion'] = trim((string)($_POST['direccion'] ?? ''));
@@ -386,6 +412,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_user') {
+            $activeTab = 'usuarios';
             $userId = (int)($_POST['user_id'] ?? 0);
             $nombre = trim((string)($_POST['user_nombre'] ?? ''));
             $email = trim((string)($_POST['user_email'] ?? ''));
@@ -445,6 +472,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_user_context') {
+            $activeTab = 'usuarios';
             $userId = (int)($_POST['user_id'] ?? 0);
             $empresaId = (int)($_POST['user_id_empresa'] ?? 0);
             $sucursalId = (int)($_POST['user_id_sucursal'] ?? 0);
@@ -468,12 +496,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'delete_user_context') {
+            $activeTab = 'usuarios';
             $userId = (int)($_POST['user_id'] ?? 0);
             $pdo->prepare("DELETE FROM pos_user_contexts WHERE user_id = ?")->execute([$userId]);
             $msg = 'Asignación de usuario eliminada.';
         }
 
         if ($formAction === 'delete_user') {
+            $activeTab = 'usuarios';
             $userId = (int)($_POST['user_id'] ?? 0);
             if ($userId === (int)($_SESSION['user_id'] ?? 0)) {
                 throw new RuntimeException('No puedes eliminar tu propio usuario.');
@@ -485,6 +515,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'save_cashier') {
+            $activeTab = 'cajeros';
             $cashierId = (int)($_POST['cashier_id'] ?? 0);
             $nombre = trim((string)($_POST['cashier_nombre'] ?? ''));
             $pin = trim((string)($_POST['cashier_pin'] ?? ''));
@@ -515,6 +546,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($formAction === 'delete_cashier') {
+            $activeTab = 'cajeros';
             $cashierId = (int)($_POST['cashier_id'] ?? 0);
             $pdo->prepare("DELETE FROM pos_cashiers WHERE id = ?")->execute([$cashierId]);
             $msg = 'Cajero eliminado.';
@@ -774,14 +806,14 @@ unset($treeCompany);
     <?php endif; ?>
 
     <ul class="nav nav-tabs mb-3" id="cfgTabs">
-        <li class="nav-item"><button type="button" class="nav-link active" onclick="showCfgTab('shop', this)">🏪 Negocio</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('ticket', this)">🧾 Ticket</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('pantalla', this)">🖥️ Pantalla</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('finanzas', this)">💳 Pagos y Redes</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('estructura', this)">🏢 Estructura</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('usuarios', this)">👤 Usuarios ERP</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('cajeros', this)">🧑‍💼 Cajeros POS</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" onclick="showCfgTab('notificaciones', this)">🔔 Notificaciones</button></li>
+        <li class="nav-item"><button type="button" class="nav-link active" data-tab="shop" onclick="showCfgTab('shop', this)">🏪 Negocio</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="ticket" onclick="showCfgTab('ticket', this)">🧾 Ticket</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="pantalla" onclick="showCfgTab('pantalla', this)">🖥️ Pantalla</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="finanzas" onclick="showCfgTab('finanzas', this)">💳 Pagos y Redes</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="estructura" onclick="showCfgTab('estructura', this)">🏢 Estructura</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="usuarios" onclick="showCfgTab('usuarios', this)">👤 Usuarios ERP</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="cajeros" onclick="showCfgTab('cajeros', this)">🧑‍💼 Cajeros POS</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="notificaciones" onclick="showCfgTab('notificaciones', this)">🔔 Notificaciones</button></li>
     </ul>
 
     <div class="cfg-tab" data-tab-panel="shop">
@@ -1856,11 +1888,28 @@ unset($treeCompany);
     </div>
 </div>
 <script>
+const POSCFG_ACTIVE_TAB = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+function ensureActiveTabInputs(name) {
+    document.querySelectorAll('form').forEach(form => {
+        let input = form.querySelector('input[name="active_tab"]');
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'active_tab';
+            form.appendChild(input);
+        }
+        input.value = name;
+    });
+}
+
 function showCfgTab(name, btn) {
     document.querySelectorAll('.cfg-tab').forEach(el => el.classList.add('d-none'));
     document.querySelector('[data-tab-panel="' + name + '"]')?.classList.remove('d-none');
     document.querySelectorAll('#cfgTabs .nav-link').forEach(el => el.classList.remove('active'));
-    btn.classList.add('active');
+    btn?.classList.add('active');
+    ensureActiveTabInputs(name);
+    try { localStorage.setItem('pos_config2_active_tab', name); } catch (e) {}
 }
 
 function normalizeText(value) {
@@ -2174,6 +2223,12 @@ function onLogoFileChange(input) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const rememberedTab = (() => {
+        try { return localStorage.getItem('pos_config2_active_tab') || ''; } catch (e) { return ''; }
+    })();
+    const initialTab = POSCFG_ACTIVE_TAB || rememberedTab || 'shop';
+    const initialBtn = document.querySelector(`#cfgTabs .nav-link[data-tab="${initialTab}"]`) || document.querySelector('#cfgTabs .nav-link[data-tab="shop"]');
+    showCfgTab(initialTab, initialBtn);
     document.querySelectorAll('#metodosPagoList .metodo-item').forEach(bindMetodoPagoItem);
     reindexMetodosPago();
     bindDependentSelects('shopEmpresaSelect', 'shopSucursalSelect', 'shopAlmacenSelect');
