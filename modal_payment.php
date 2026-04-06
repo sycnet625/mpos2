@@ -292,9 +292,31 @@ window.fillRemainingMixed = function(targetMethodId) {
 
 function autoCompleteMixedDynamic(sourceId) {
     const inputs = Array.from(document.querySelectorAll('.split-payment-input'));
-    if (inputs.length === 2) {
+    const normalizeMethodId = (value) =>
+        (value || '')
+            .toString()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+
+    const sourceNorm = normalizeMethodId(sourceId);
+    const isTransferSource = sourceNorm.includes('transfer');
+
+    if (isTransferSource) {
+        const efectivoInput = inputs.find(i => normalizeMethodId(i.dataset.methodId).includes('efectiv'));
+        if (efectivoInput) {
+            let otherTotal = 0;
+            inputs.forEach(inp => {
+                if (inp !== efectivoInput) {
+                    otherTotal += parseFloat(inp.value) || 0;
+                }
+            });
+            const rem = currentSaleTotal - otherTotal;
+            efectivoInput.value = rem > 0 ? rem.toFixed(2) : '0.00';
+        }
+    } else if (inputs.length === 2) {
         const safeSourceId = sourceId.replace(/\W/g, '_');
-        const src   = document.getElementById('payMixed_' + safeSourceId);
+        const src = document.getElementById('payMixed_' + safeSourceId);
         const other = inputs.find(i => i.dataset.methodId !== sourceId);
         if (src && other) {
             const rem = currentSaleTotal - (parseFloat(src.value) || 0);
