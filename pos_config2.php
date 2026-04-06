@@ -699,7 +699,7 @@ unset($treeCompany);
         }
         body { background:linear-gradient(180deg,#edf3f9 0%,#f7f9fc 100%); font-family:'Segoe UI',sans-serif; color:var(--cfg-text); }
         .page-shell { background:rgba(255,255,255,.72); border:1px solid rgba(255,255,255,.85); box-shadow:var(--cfg-shadow); border-radius:28px; padding:24px; backdrop-filter:blur(8px); }
-        .hero-panel { background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 52%,#0f766e 100%); color:#fff; border-radius:24px; padding:24px 26px; box-shadow:0 22px 50px rgba(15,23,42,.22); margin-bottom:22px; position:relative; overflow:hidden; }
+        .hero-panel { background:linear-gradient(135deg,#020617 0%,#0f172a 38%,#172554 70%,#134e4a 100%); color:#fff; border-radius:24px; padding:24px 26px; box-shadow:0 22px 50px rgba(2,6,23,.28); margin-bottom:22px; position:relative; overflow:hidden; }
         .hero-panel:before { content:""; position:absolute; inset:auto -80px -80px auto; width:220px; height:220px; background:radial-gradient(circle,rgba(255,255,255,.16),transparent 70%); }
         .hero-kpi { background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.14); border-radius:16px; padding:14px 16px; min-width:150px; }
         .card { border:1px solid var(--cfg-border); box-shadow:var(--cfg-shadow-soft); margin-bottom:20px; border-radius:20px; overflow:hidden; background:var(--cfg-surface); }
