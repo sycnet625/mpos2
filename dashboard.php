@@ -600,6 +600,7 @@ function auditResumen(string $accion, array $d): string {
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item"><a class="nav-link" href="pos_config2.php"><i class="fas fa-cogs"></i> Configuración</a></li>
+                <li class="nav-item"><a class="nav-link" href="pos_import_compras_excel.php"><i class="fas fa-file-excel"></i> Importar compras</a></li>
                 <li class="nav-item"><a class="nav-link" href="pos_data_wipe.php"><i class="fas fa-radiation-alt"></i> Vaciar módulos</a></li>
                 <li class="nav-item ms-lg-3"> <a class="btn btn-danger btn-sm fw-bold" href="logout.php"><i class="fas fa-sign-out-alt me-1"></i> Salir </a></li>            
             </ul>

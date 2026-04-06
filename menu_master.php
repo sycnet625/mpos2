@@ -30,6 +30,7 @@ $menuCategories = [
     ],
     "✨ Compras" => [
         ["icon" => "fa-truck-loading", "name" => "Entrada / Compra", "url" => "pos_purchases.php"],
+        ["icon" => "fa-file-excel", "name" => "Importar Compras Excel", "url" => "pos_import_compras_excel.php"],
         ["icon" => "fa-exchange-alt", "name" => "Transferencias", "url" => "branch_transfers.php"],
         ["icon" => "fa-trash-alt", "name" => "Mermas", "url" => "pos_shrinkage.php"],
 
