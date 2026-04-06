@@ -58,6 +58,22 @@ function wipe_direct_scope_sql(PDO $pdo, string $table, string $scopeMode, ?int 
         return ["DELETE FROM `$table`", []];
     }
 
+    if ($table === 'transferencias_cabecera') {
+        if ($scopeMode === 'empresa') {
+            return ["DELETE FROM `$table` WHERE id_empresa = ?", [$empresaId]];
+        }
+        return [
+            "DELETE FROM `$table`
+             WHERE id_empresa = ?
+               AND (
+                    id_almacen_origen IN (SELECT id FROM almacenes WHERE id_sucursal = ?)
+                    OR
+                    id_almacen_destino IN (SELECT id FROM almacenes WHERE id_sucursal = ?)
+               )",
+            [$empresaId, $sucursalId, $sucursalId]
+        ];
+    }
+
     if (wipe_table_has_column($pdo, $table, 'id_empresa')) {
         if ($scopeMode === 'empresa') {
             return ["DELETE FROM `$table` WHERE id_empresa = ?", [$empresaId]];
@@ -95,29 +111,29 @@ function wipe_direct_scope_sql(PDO $pdo, string $table, string $scopeMode, ?int 
         return ["DELETE FROM `$table` WHERE id_almacen IN (SELECT id FROM almacenes WHERE id_sucursal = ?)", [$sucursalId]];
     }
 
-    if ($table === 'transferencias_cabecera') {
+    if ($table === 'transferencias_detalle') {
+        $fk = wipe_first_existing_column($pdo, 'transferencias_detalle', ['id_transferencia', 'id_transf_cabecera']);
+        if ($fk === null) {
+            return null;
+        }
         if ($scopeMode === 'empresa') {
             return [
-                "DELETE FROM `$table` WHERE
-                    (id_sucursal_origen IN (SELECT id FROM sucursales WHERE id_empresa = ?))
-                    OR
-                    (id_sucursal_destino IN (SELECT id FROM sucursales WHERE id_empresa = ?))",
-                [$empresaId, $empresaId]
+                "DELETE td FROM `$table` td
+                 INNER JOIN transferencias_cabecera tc ON tc.id = td.`$fk`
+                 WHERE tc.id_empresa = ?",
+                [$empresaId]
             ];
         }
         return [
-            "DELETE FROM `$table` WHERE id_sucursal_origen = ? OR id_sucursal_destino = ?",
-            [$sucursalId, $sucursalId]
-        ];
-    }
-
-    if ($table === 'transferencias_detalle') {
-        $parentScope = wipe_parent_scope_clause('tc', $scopeMode, $empresaId, $sucursalId);
-        return [
             "DELETE td FROM `$table` td
-             INNER JOIN transferencias_cabecera tc ON tc.id = td.id_transferencia
-             WHERE {$parentScope[0]}",
-            $parentScope[1]
+             INNER JOIN transferencias_cabecera tc ON tc.id = td.`$fk`
+             WHERE tc.id_empresa = ?
+               AND (
+                    tc.id_almacen_origen IN (SELECT id FROM almacenes WHERE id_sucursal = ?)
+                    OR
+                    tc.id_almacen_destino IN (SELECT id FROM almacenes WHERE id_sucursal = ?)
+               )",
+            [$empresaId, $sucursalId, $sucursalId]
         ];
     }
 
@@ -126,6 +142,10 @@ function wipe_direct_scope_sql(PDO $pdo, string $table, string $scopeMode, ?int 
 
 function wipe_table_sql(PDO $pdo, string $table, string $scopeMode, ?int $empresaId, ?int $sucursalId, bool $reservationOnly = false): ?array
 {
+    if (!$reservationOnly && $scopeMode === 'global') {
+        return ["DELETE FROM `$table`", []];
+    }
+
     if ($reservationOnly) {
         if ($table === 'ventas_cabecera') {
             $parentScope = wipe_parent_scope_clause('vc', $scopeMode, $empresaId, $sucursalId);
@@ -181,14 +201,14 @@ function wipe_table_sql(PDO $pdo, string $table, string $scopeMode, ?int $empres
         'comandas' => ['parent' => 'ventas_cabecera', 'fk' => ['id_venta']],
         'recetas_detalle' => ['parent' => 'recetas_cabecera', 'fk' => ['id_receta']],
         'compras_detalle' => ['parent' => 'compras_cabecera', 'fk' => ['id_compra']],
-        'transferencias_detalle' => ['parent' => 'transferencias_cabecera', 'fk' => ['id_transferencia']],
+        'transferencias_detalle' => ['parent' => 'transferencias_cabecera', 'fk' => ['id_transferencia', 'id_transf_cabecera']],
         'pedidos_detalle' => ['parent' => 'pedidos_cabecera', 'fk' => ['id_pedido']],
         'mermas_detalle' => ['parent' => 'mermas_cabecera', 'fk' => ['id_merma']],
         'producto_variantes' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id']],
-        'restock_avisos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto']],
-        'resenas_productos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto']],
-        'vistas_productos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto']],
-        'wishlist' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto']],
+        'restock_avisos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto', 'producto_codigo']],
+        'resenas_productos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto', 'producto_codigo']],
+        'vistas_productos' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto', 'producto_codigo']],
+        'wishlist' => ['parent' => 'productos', 'fk' => ['id_producto', 'producto_id', 'codigo_producto', 'producto_codigo']],
     ];
 
     if (isset($detailMap[$table])) {
@@ -198,11 +218,11 @@ function wipe_table_sql(PDO $pdo, string $table, string $scopeMode, ?int $empres
             return null;
         }
 
-        if ($parent === 'productos' && $fk === 'codigo_producto') {
+        if ($parent === 'productos' && in_array($fk, ['codigo_producto', 'producto_codigo'], true)) {
             $parentScope = wipe_parent_scope_clause('p', $scopeMode, $empresaId, $sucursalId);
             return [
                 "DELETE t FROM `$table` t
-                 INNER JOIN productos p ON p.codigo = t.codigo_producto
+                 INNER JOIN productos p ON p.codigo = t.`$fk`
                  WHERE {$parentScope[0]}",
                 $parentScope[1]
             ];
