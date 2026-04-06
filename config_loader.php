@@ -3,6 +3,76 @@
 // Carga centralizada de la configuración desde pos.cfg
 // Uso: require_once 'config_loader.php'; (provee $config global)
 
+if (!function_exists('config_loader_apply_session_context')) {
+    function config_loader_apply_session_context(array &$config): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        $sessionSuc = (int)($_SESSION['id_sucursal'] ?? 0);
+        $sessionAlm = (int)($_SESSION['id_almacen'] ?? 0);
+        $sessionEmp = (int)($_SESSION['id_empresa'] ?? 0);
+
+        if ($sessionSuc > 0) {
+            $config['id_sucursal'] = $sessionSuc;
+        }
+        if ($sessionAlm > 0) {
+            $config['id_almacen'] = $sessionAlm;
+        }
+        if ($sessionEmp > 0) {
+            $config['id_empresa'] = $sessionEmp;
+        }
+    }
+}
+
+if (!function_exists('config_loader_apply_user_context')) {
+    function config_loader_apply_user_context(array &$config): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+        if (!isset($GLOBALS['pdo']) || !($GLOBALS['pdo'] instanceof PDO)) {
+            return;
+        }
+
+        $userId = (int)($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return;
+        }
+
+        try {
+            $stmt = $GLOBALS['pdo']->prepare("
+                SELECT id_empresa, id_sucursal, id_almacen
+                FROM pos_user_contexts
+                WHERE user_id = ? AND COALESCE(activo, 1) = 1
+                LIMIT 1
+            ");
+            $stmt->execute([$userId]);
+            $ctx = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$ctx) {
+                return;
+            }
+
+            $emp = (int)($ctx['id_empresa'] ?? 0);
+            $suc = (int)($ctx['id_sucursal'] ?? 0);
+            $alm = (int)($ctx['id_almacen'] ?? 0);
+
+            if ($emp > 0) {
+                $config['id_empresa'] = $emp;
+            }
+            if ($suc > 0) {
+                $config['id_sucursal'] = $suc;
+            }
+            if ($alm > 0) {
+                $config['id_almacen'] = $alm;
+            }
+        } catch (Throwable $e) {
+            // Mantener fallback a pos.cfg si la tabla no existe o falla el query.
+        }
+    }
+}
+
 if (!isset($config)) {
     $configFile = __DIR__ . '/pos.cfg';
     $config = [
@@ -47,6 +117,14 @@ if (!isset($config)) {
 
     if (file_exists($configFile)) {
         $loaded = json_decode(file_get_contents($configFile), true);
-        if ($loaded) $config = array_merge($config, $loaded);
+        if ($loaded) {
+            $config = array_merge($config, $loaded);
+        }
     }
+
+    // Prioridad:
+    // 1) Contexto guardado en sesión (PIN/cajero u otros flujos)
+    // 2) Contexto dinámico por usuario ERP logueado
+    config_loader_apply_session_context($config);
+    config_loader_apply_user_context($config);
 }
