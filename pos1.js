@@ -553,6 +553,7 @@ async function verifyPin() {
 
     let loginSuccess = false;
     let cajeroRol    = 'cajero';
+    let loginContext = null;
 
     if (navigator.onLine) {
         try {
@@ -567,6 +568,7 @@ async function verifyPin() {
                 loginSuccess = true;
                 currentCashier = data.cajero;
                 cajeroRol = data.rol ?? 'cajero';
+                loginContext = data;
 
                 if (typeof CAJEROS_CONFIG !== 'undefined' &&
                     typeof window.posCache !== 'undefined' &&
@@ -587,6 +589,7 @@ async function verifyPin() {
                 loginSuccess = true;
                 currentCashier = cajero.nombre;
                 cajeroRol = cajero.rol ?? 'cajero';
+                loginContext = cajero;
             }
         }
 
@@ -597,6 +600,7 @@ async function verifyPin() {
                     loginSuccess = true;
                     currentCashier = cajero.nombre;
                     cajeroRol = cajero.rol ?? 'cajero';
+                    loginContext = cajero;
                 }
             } catch(e) {}
         }
@@ -606,6 +610,19 @@ async function verifyPin() {
         currentRole = cajeroRol;
         pinAttempts = 0;
         showPinAttemptDots(); // limpiar dots
+
+        if (loginContext) {
+            const sucBadge = document.getElementById('ctxSucursalBadge');
+            const almBadge = document.getElementById('ctxAlmacenBadge');
+            if (sucBadge && loginContext.id_sucursal) sucBadge.innerText = String(loginContext.id_sucursal);
+            if (almBadge && loginContext.id_almacen) almBadge.innerText = String(loginContext.id_almacen);
+        }
+
+        // Releer productos con el contexto (sucursal/almacén) recién autenticado.
+        if (navigator.onLine) {
+            try { await refreshProducts(); } catch (e) {}
+        }
+
         Synth.tada();
         applyRoleRestrictions();
         startInactivityTimer();

@@ -1,5 +1,8 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_cash.php
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 header('Content-Type: application/json');
 ini_set('display_errors', 0);
 require_once 'db.php';
@@ -14,13 +17,70 @@ $sucursalID = intval($config['id_sucursal']);
 try {
     if ($action === 'login') {
         $pin = $input['pin'] ?? '';
-        $cajeros = $config['cajeros'] ?? [];
         $foundCajero = null;
-        foreach ($cajeros as $c) {
-            if ((string)$c['pin'] === (string)$pin) { $foundCajero = $c; break; }
+
+        try {
+            $stmtCashier = $pdo->prepare("
+                SELECT id, nombre, pin, rol, id_empresa, id_sucursal, id_almacen
+                FROM pos_cashiers
+                WHERE pin = ? AND COALESCE(activo, 1) = 1
+                LIMIT 1
+            ");
+            $stmtCashier->execute([(string)$pin]);
+            $row = $stmtCashier->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                $foundCajero = [
+                    'id' => (int)$row['id'],
+                    'nombre' => (string)$row['nombre'],
+                    'pin' => (string)$row['pin'],
+                    'rol' => (string)($row['rol'] ?? 'cajero'),
+                    'id_empresa' => (int)($row['id_empresa'] ?? 1),
+                    'id_sucursal' => (int)($row['id_sucursal'] ?? 1),
+                    'id_almacen' => (int)($row['id_almacen'] ?? 1),
+                ];
+            }
+        } catch (Throwable $e) {
+            // Fallback a configuración legacy en pos.cfg.
         }
-        if ($foundCajero) echo json_encode(['status' => 'success', 'cajero' => $foundCajero['nombre'], 'rol' => $foundCajero['rol'] ?? 'cajero']);
-        else echo json_encode(['status' => 'error', 'msg' => 'PIN incorrecto']);
+
+        if (!$foundCajero) {
+            $cajeros = $config['cajeros'] ?? [];
+            foreach ($cajeros as $c) {
+                if ((string)($c['pin'] ?? '') === (string)$pin) {
+                    $foundCajero = [
+                        'id' => 0,
+                        'nombre' => (string)($c['nombre'] ?? 'Cajero'),
+                        'pin' => (string)$pin,
+                        'rol' => (string)($c['rol'] ?? 'cajero'),
+                        'id_empresa' => (int)($config['id_empresa'] ?? 1),
+                        'id_sucursal' => (int)($config['id_sucursal'] ?? 1),
+                        'id_almacen' => (int)($config['id_almacen'] ?? 1),
+                    ];
+                    break;
+                }
+            }
+        }
+
+        if ($foundCajero) {
+            session_regenerate_id(true);
+            $_SESSION['cajero'] = $foundCajero['nombre'];
+            $_SESSION['cajero_id'] = (int)$foundCajero['id'];
+            $_SESSION['id_empresa'] = (int)$foundCajero['id_empresa'];
+            $_SESSION['id_sucursal'] = (int)$foundCajero['id_sucursal'];
+            $_SESSION['id_almacen'] = (int)$foundCajero['id_almacen'];
+            $_SESSION['pos_rol'] = (string)$foundCajero['rol'];
+
+            echo json_encode([
+                'status' => 'success',
+                'cajero' => $foundCajero['nombre'],
+                'rol' => $foundCajero['rol'],
+                'id_empresa' => (int)$foundCajero['id_empresa'],
+                'id_sucursal' => (int)$foundCajero['id_sucursal'],
+                'id_almacen' => (int)$foundCajero['id_almacen'],
+            ]);
+        } else {
+            echo json_encode(['status' => 'error', 'msg' => 'PIN incorrecto']);
+        }
     }
 
     elseif ($action === 'status') {
@@ -124,4 +184,3 @@ try {
 } catch (Exception $e) {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
-

@@ -13,7 +13,11 @@ header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
 
 ini_set('display_errors', 1);
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 require_once 'db.php';
+require_once 'config_loader.php';
 
 function pos_image_meta(string $code): array {
     $safe = trim($code);
@@ -31,6 +35,45 @@ function pos_image_meta(string $code): array {
         }
     }
     return [false, 0];
+}
+
+function pos_get_dynamic_cashiers(PDO $pdo, array $config): array
+{
+    try {
+        $rows = $pdo->query("
+            SELECT nombre, pin, rol, id_empresa, id_sucursal, id_almacen
+            FROM pos_cashiers
+            WHERE COALESCE(activo, 1) = 1
+            ORDER BY nombre ASC
+        ")->fetchAll(PDO::FETCH_ASSOC);
+        if (!empty($rows)) {
+            return array_map(static function (array $row): array {
+                return [
+                    'nombre' => (string)$row['nombre'],
+                    'pin' => (string)$row['pin'],
+                    'rol' => (string)($row['rol'] ?? 'cajero'),
+                    'id_empresa' => (int)($row['id_empresa'] ?? 1),
+                    'id_sucursal' => (int)($row['id_sucursal'] ?? 1),
+                    'id_almacen' => (int)($row['id_almacen'] ?? 1),
+                ];
+            }, $rows);
+        }
+    } catch (Throwable $e) {
+        // Fallback a configuración legacy.
+    }
+
+    $fallback = [];
+    foreach (($config['cajeros'] ?? []) as $c) {
+        $fallback[] = [
+            'nombre' => (string)($c['nombre'] ?? 'Cajero'),
+            'pin' => (string)($c['pin'] ?? ''),
+            'rol' => (string)($c['rol'] ?? 'cajero'),
+            'id_empresa' => (int)($config['id_empresa'] ?? 1),
+            'id_sucursal' => (int)($config['id_sucursal'] ?? 1),
+            'id_almacen' => (int)($config['id_almacen'] ?? 1),
+        ];
+    }
+    return $fallback;
 }
 
 // ---------------------------------------------------------
@@ -72,34 +115,26 @@ if (isset($_GET['api_client']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 // ENDPOINT: Carga de productos para caché
 if (isset($_GET['load_products'])) {
     header('Content-Type: application/json');
-    
-    // Leer configuración
-    $configFile = 'pos.cfg';
-    $config = [ 
-        "id_almacen" => 1, 
-        "id_sucursal" => 1, 
-        "mostrar_materias_primas" => false, 
-        "mostrar_servicios" => true, 
-        "categorias_ocultas" => [] 
-    ];
-    
-    if (file_exists($configFile)) {
-        $loaded = json_decode(file_get_contents($configFile), true);
-        if ($loaded) $config = array_merge($config, $loaded);
-    }
+    $ctxConfig = array_merge([
+        "id_almacen" => 1,
+        "id_sucursal" => 1,
+        "mostrar_materias_primas" => false,
+        "mostrar_servicios" => true,
+        "categorias_ocultas" => []
+    ], $config ?? []);
     
     try {
         $cond = ["p.activo = 1"];
-        if (!$config['mostrar_materias_primas']) $cond[] = "p.es_materia_prima = 0";
-        if (!$config['mostrar_servicios']) $cond[] = "p.es_servicio = 0";
-        if (!empty($config['categorias_ocultas'])) {
-            $placeholders = implode(',', array_fill(0, count($config['categorias_ocultas']), '?'));
+        if (empty($ctxConfig['mostrar_materias_primas'])) $cond[] = "p.es_materia_prima = 0";
+        if (empty($ctxConfig['mostrar_servicios'])) $cond[] = "p.es_servicio = 0";
+        if (!empty($ctxConfig['categorias_ocultas'])) {
+            $placeholders = implode(',', array_fill(0, count($ctxConfig['categorias_ocultas']), '?'));
             $cond[] = "p.categoria NOT IN ($placeholders)";
         }
         
         $where = implode(" AND ", $cond);
-        $almacenID = intval($config['id_almacen']);
-        $params = $config['categorias_ocultas'];
+        $almacenID = (int)$ctxConfig['id_almacen'];
+        $params = $ctxConfig['categorias_ocultas'] ?? [];
         
         $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
                     COALESCE(p.favorito,0) as favorito,
@@ -166,12 +201,14 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $fechaRaw = trim($input['fecha'] ?? '');
     $fecha   = ($fechaRaw && strlen($fechaRaw) >= 10) ? (substr($fechaRaw,0,10).' '.date('H:i:s')) : date('Y-m-d H:i:s');
 
-    $cfgFile = 'pos.cfg';
-    $cfg = ["id_almacen"=>1,"id_sucursal"=>1,"id_empresa"=>1];
-    if (file_exists($cfgFile)) { $tmp = json_decode(file_get_contents($cfgFile),true); if($tmp) $cfg = array_merge($cfg,$tmp); }
-    $ALM = intval($cfg['id_almacen']);
-    $SUC = intval($cfg['id_sucursal']);
-    $EMP = intval($cfg['id_empresa']);
+    $ctxConfig = array_merge([
+        "id_almacen" => 1,
+        "id_sucursal" => 1,
+        "id_empresa" => 1
+    ], $config ?? []);
+    $ALM = (int)$ctxConfig['id_almacen'];
+    $SUC = (int)$ctxConfig['id_sucursal'];
+    $EMP = (int)$ctxConfig['id_empresa'];
 
     require_once 'db.php';
     require_once 'kardex_engine.php';
@@ -281,12 +318,17 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // Config
-$configFile = 'pos.cfg';
-$config = [ "tienda_nombre" => "MI TIENDA", "cajeros" => [["nombre"=>"Admin", "pin"=>"0000"]], "id_almacen" => 1, "id_sucursal" => 1, "mostrar_materias_primas" => false, "mostrar_servicios" => true, "categorias_ocultas" => [] ];
-if (file_exists($configFile)) {
-    $loaded = json_decode(file_get_contents($configFile), true);
-    if ($loaded) $config = array_merge($config, $loaded);
-}
+$config = array_merge([
+    "tienda_nombre" => "MI TIENDA",
+    "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]],
+    "id_empresa" => 1,
+    "id_almacen" => 1,
+    "id_sucursal" => 1,
+    "mostrar_materias_primas" => false,
+    "mostrar_servicios" => true,
+    "categorias_ocultas" => []
+], $config ?? []);
+$dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
 
 // Asegurar columna favorito en productos
 try { $pdo->exec("ALTER TABLE productos ADD COLUMN favorito TINYINT(1) NOT NULL DEFAULT 0"); } catch (Exception $e) {}
@@ -792,10 +834,10 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <div class="d-flex justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-1">
                     <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Sucursal">
-                        <i class="fas fa-building"></i> <?php echo intval($config['id_sucursal'] ?? 1); ?>
+                        <i class="fas fa-building"></i> <span id="ctxSucursalBadge"><?php echo intval($config['id_sucursal'] ?? 1); ?></span>
                     </span>
                     <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Almacén">
-                        <i class="fas fa-warehouse"></i> <?php echo intval($config['id_almacen']); ?>
+                        <i class="fas fa-warehouse"></i> <span id="ctxAlmacenBadge"><?php echo intval($config['id_almacen']); ?></span>
                     </span>
                 </div>
                 <div class="d-flex align-items-center gap-1">
@@ -1081,7 +1123,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     let currentSaleTotal = 0;
     let currentPaymentMode = 'cash';
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
-    const CAJEROS_CONFIG = <?php echo json_encode($config['cajeros'] ?? []); ?>;
+    const CAJEROS_CONFIG = <?php echo json_encode($dynamicCashiers ?? []); ?>;
     const MOST_SOLD_CODES = <?php echo json_encode($mostSoldCodes); ?>;
     let CLIENTS_DATA = <?php echo json_encode($clientsData); ?>; // Lista inicial
 
