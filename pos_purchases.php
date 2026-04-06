@@ -55,6 +55,28 @@ $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 
+// Priorizar contexto dinámico por usuario (POS Config 2) sobre pos.cfg global.
+try {
+    $userId = (int)($_SESSION['user_id'] ?? 0);
+    if ($userId > 0) {
+        $stmtCtx = $pdo->prepare("
+            SELECT id_empresa, id_sucursal, id_almacen
+            FROM pos_user_contexts
+            WHERE user_id = ? AND COALESCE(activo, 1) = 1
+            LIMIT 1
+        ");
+        $stmtCtx->execute([$userId]);
+        $ctx = $stmtCtx->fetch(PDO::FETCH_ASSOC);
+        if ($ctx) {
+            $EMP_ID = (int)$ctx['id_empresa'];
+            $SUC_ID = (int)$ctx['id_sucursal'];
+            $ALM_ID = (int)$ctx['id_almacen'];
+        }
+    }
+} catch (Throwable $e) {
+    // Fallback silencioso a pos.cfg si no existe la tabla/contexto.
+}
+
 // --- API BACKEND (AJAX) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['action'] === 'get_next_sku')) {
     ob_clean(); 
@@ -704,4 +726,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
