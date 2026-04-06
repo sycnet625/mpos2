@@ -1211,6 +1211,7 @@ function askQty() {
         Synth.increment(); 
         renderCart();
         saveCartState();
+        updateStockBadges(); // Refrescar stock visible del card tras cantidad manual
     } 
 }
 
@@ -1607,13 +1608,23 @@ window.toggleDetail = function(id) {
     }
 };
 
+function askSystemAuth(actionLabel) {
+    const user = prompt(`Usuario del sistema para ${actionLabel}:`, '');
+    if (!user) return null;
+    const pass = prompt(`Contraseña del sistema para ${actionLabel}:`, '');
+    if (!pass) return null;
+    return { auth_user: user.trim(), auth_pass: pass };
+}
+
 window.refundTicketComplete = async function(ticketId) {
     if(!confirm(`¿DEVOLVER TICKET #${ticketId} COMPLETO?`)) return;
+    const auth = askSystemAuth(`devolver ticket #${ticketId}`);
+    if (!auth) return;
     try {
         const r = await fetch('pos_refund.php', { 
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ ticket_id: ticketId }) 
+            body: JSON.stringify({ ticket_id: ticketId, ...auth }) 
         });
         const d = await r.json();
         if(d.status === 'success') { 
@@ -1630,11 +1641,13 @@ window.refundTicketComplete = async function(ticketId) {
 
 window.refundItemFromHistorial = async function(detailId, prodName) {
     if(!confirm(`¿Devolver lote de: ${prodName}?`)) return;
+    const auth = askSystemAuth(`devolver producto ${prodName}`);
+    if (!auth) return;
     try {
         const r = await fetch('pos_refund.php', { 
             method: 'POST', 
             headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ id: detailId }) 
+            body: JSON.stringify({ id: detailId, ...auth }) 
         });
         const d = await r.json();
         if(d.status === 'success') { 
@@ -1653,14 +1666,16 @@ window.refundItemFromHistorial = async function(detailId, prodName) {
 
 window.voidTicket = function(ticketId) {
     const motEl = document.getElementById('voidMotivo');
-    const pinEl = document.getElementById('voidPin');
+    const userEl = document.getElementById('voidAuthUser');
+    const passEl = document.getElementById('voidAuthPass');
     const idEl  = document.getElementById('voidTicketId');
-    if (!motEl || !pinEl || !idEl) {
+    if (!motEl || !userEl || !passEl || !idEl) {
         return alert('Modal de anulación no disponible en esta página');
     }
     idEl.textContent = ticketId;
     motEl.value = '';
-    pinEl.value = '';
+    userEl.value = '';
+    passEl.value = '';
     window._voidTicketId = ticketId;
     const voidModalEl = document.getElementById('voidModal');
     if (voidModalEl) new bootstrap.Modal(voidModalEl).show();
@@ -1668,10 +1683,11 @@ window.voidTicket = function(ticketId) {
 
 window.confirmVoid = async function() {
     const motivo = (document.getElementById('voidMotivo')?.value || '').trim();
-    const pin    = (document.getElementById('voidPin')?.value    || '').trim();
+    const authUser = (document.getElementById('voidAuthUser')?.value || '').trim();
+    const authPass = (document.getElementById('voidAuthPass')?.value || '').trim();
 
     if (motivo.length < 5) return alert('El motivo debe tener al menos 5 caracteres');
-    if (!pin)              return alert('Ingrese su PIN de cajero para autorizar');
+    if (!authUser || !authPass) return alert('Ingrese usuario y contraseña del sistema');
 
     const btn = document.querySelector('#voidModal .btn-void-confirm');
     const orig = btn ? btn.innerHTML : '';
@@ -1681,7 +1697,7 @@ window.confirmVoid = async function() {
         const r = await fetch('pos_void.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id_venta: window._voidTicketId, motivo, pin }),
+            body: JSON.stringify({ id_venta: window._voidTicketId, motivo, auth_user: authUser, auth_pass: authPass }),
         });
         const d = await r.json();
         if (d.status === 'success') {
