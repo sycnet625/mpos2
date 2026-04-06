@@ -65,7 +65,8 @@ $menuCategories = [
         ["icon" => "fa-chart-bar", "name" => "Análisis Diario", "url" => "profit.php"],
     ],
     "⚙️ Administración" => [
-        ["icon" => "fa-cogs", "name" => "Configuración", "url" => "pos_config.php"],
+        ["icon" => "fa-cogs", "name" => "Configuración", "url" => "pos_config2.php"],
+        ["icon" => "fa-radiation-alt", "name" => "Vaciar Módulos", "url" => "pos_data_wipe.php"],
         ["icon" => "fa-tools", "name" => "Mantenimiento BD", "url" => "pos_admin.php"],
         ["icon" => "fa-server", "name" => "Migración Espejo", "url" => "admin_migracion.php"],
         ["icon" => "fa-heartbeat", "name" => "Estado Salud", "url" => "pos_health.php"],
