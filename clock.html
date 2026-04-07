@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Clock LCD con alarmas, temporizadores y modo presentacion">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Clock LCD</title>
+  <link rel="stylesheet" href="clock.css">
+  <link rel="manifest" href="clock-manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+  <div id="pwaBanner">
+    <span>Instalar como app para usar offline</span>
+    <button id="pwaInstallBtn">Instalar</button>
+    <button id="pwaClose">X</button>
+  </div>
+
+  <button id="toolsBtn" type="button">Herramientas</button>
+  <button id="customizeBtn" type="button">Personalizacion</button>
+
+  <aside id="panel" aria-label="Panel de personalizacion">
+    <h2 class="title">Personalizacion</h2>
+    <div class="hint">Ajusta colores, tipografia, tamanos, modo nocturno y alarmas. Se guarda en este navegador.</div>
+    <div class="panel-actions">
+      <button id="panelFullscreenBtn" type="button">Pantalla completa</button>
+      <button id="panelCloseBtn" type="button">Cerrar opciones</button>
+    </div>
+
+    <div class="section">
+      <h3>Apariencia</h3>
+      <div class="row"><label for="bgColor">Fondo general</label><input id="bgColor" type="color" value="#000000"></div>
+      <div class="row"><label for="clockBg">Fondo reloj</label><input id="clockBg" type="color" value="#0a100a"></div>
+      <div class="row"><label for="clockBorder">Borde reloj</label><input id="clockBorder" type="color" value="#143314"></div>
+      <div class="row"><label for="clockText">Color hora</label><input id="clockText" type="color" value="#00e676"></div>
+      <div class="row"><label for="dateColor">Color fecha</label><input id="dateColor" type="color" value="#87d4a5"></div>
+      <div class="row"><label for="weatherColor">Color clima</label><input id="weatherColor" type="color" value="#b7f3ce"></div>
+      <div class="row"><label for="fontFamily">Tipografia</label>
+        <select id="fontFamily">
+          <option value="Courier New, Lucida Console, monospace">LCD Clasico</option>
+          <option value="Consolas, Monaco, monospace">Consolas</option>
+          <option value="DSEGDisplay, 'DSEG7 Classic', 'DSEG14 Classic', monospace">DSEG 7/14 segmentos</option>
+          <option value="DSEGModern, 'DSEG7 Modern', monospace">DSEG Modern</option>
+          <option value="DSEGMini, 'DSEG14 Classic Mini', monospace">DSEG Mini</option>
+          <option value="DSEGModernMini, 'DSEG7 Modern Mini', monospace">DSEG Modern Mini</option>
+          <option value="'Roboto', Arial, sans-serif">Roboto</option>
+          <option value="'Orbitron', 'Roboto', sans-serif">Orbitron</option>
+          <option value="'Audiowide', 'Roboto', sans-serif">Audiowide</option>
+          <option value="monospace">Monospace</option>
+        </select>
+      </div>
+      <div class="row"><label for="displayStyle">Visualizacion hora</label>
+        <select id="displayStyle">
+          <option value="classic">LCD clasico</option>
+          <option value="flip">Flip cards</option>
+        </select>
+      </div>
+      <div class="switch-row"><label for="colorMode">Modo a color</label>
+        <label class="switch"><input id="colorMode" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="colorStyle">Estilo color</label>
+        <select id="colorStyle">
+          <option value="rainbow">Arcoiris</option>
+          <option value="fluid">Fluido</option>
+          <option value="mono">Degradado 1 color</option>
+          <option value="aurora">Aurora</option>
+          <option value="plasma">Plasma neon</option>
+          <option value="random">Aleatorio</option>
+        </select>
+      </div>
+      <div class="switch-row"><label for="shadowMode">Sombra en hora</label>
+        <label class="switch"><input id="shadowMode" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="shadowColor">Color sombra</label><input id="shadowColor" type="color" value="#00e676"></div>
+      <div class="row"><label for="shadowStrength">Grosor sombra</label><input id="shadowStrength" type="range" min="0" max="24" step="1" value="8"></div>
+      <div class="switch-row"><label for="glowMode">Glow alrededor de la hora</label>
+        <label class="switch"><input id="glowMode" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="glowColor">Color glow</label><input id="glowColor" type="color" value="#00e676"></div>
+      <div class="row"><label for="glowStrength">Grosor glow</label><input id="glowStrength" type="range" min="0" max="40" step="1" value="12"></div>
+      <div class="switch-row"><label for="ampmToggle">Formato AM/PM</label>
+        <label class="switch"><input id="ampmToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="soundToggle">Sonido horario</label>
+        <label class="switch"><input id="soundToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="nightMode">Modo nocturno (22:00-06:00)</label>
+        <label class="switch"><input id="nightMode" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="row"><label for="timeSize">Tamano hora</label><input id="timeSize" type="range" min="3" max="18" step="0.1" value="13"></div>
+      <div class="row"><label for="metaSize">Tamano fecha/clima</label><input id="metaSize" type="range" min="0.8" max="3.2" step="0.05" value="1.7"></div>
+      <div class="row"><label for="spacing">Espaciado letras</label><input id="spacing" type="range" min="0.02" max="0.30" step="0.01" value="0.14"></div>
+    </div>
+
+    <div class="section">
+      <h3>Alarmas de Turno</h3>
+      <div class="hint">Cada alarma suena 1 minuto y se apaga sola. Se puede silenciar tocando cualquier parte de la pantalla.</div>
+      <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:4px;">
+        <div class="row"><label for="alarm1Enabled">Alarma 1</label>
+          <label class="switch"><input id="alarm1Enabled" type="checkbox" checked><span class="switch-slider"></span></label>
+        </div>
+        <div class="row"><label for="alarm1Time">Hora</label><input id="alarm1Time" type="time" value="07:00"></div>
+        <div class="days" id="alarm1DaysWrap">
+          <label><input type="checkbox" data-alarm="1" value="1">L</label>
+          <label><input type="checkbox" data-alarm="1" value="2">M</label>
+          <label><input type="checkbox" data-alarm="1" value="3">X</label>
+          <label><input type="checkbox" data-alarm="1" value="4">J</label>
+          <label><input type="checkbox" data-alarm="1" value="5">V</label>
+          <label><input type="checkbox" data-alarm="1" value="6">S</label>
+          <label><input type="checkbox" data-alarm="1" value="0">D</label>
+        </div>
+      </div>
+      <div style="border-top:1px dashed #2a612a; padding-top:8px; margin-top:8px;">
+        <div class="row"><label for="alarm2Enabled">Alarma 2</label>
+          <label class="switch"><input id="alarm2Enabled" type="checkbox" checked><span class="switch-slider"></span></label>
+        </div>
+        <div class="row"><label for="alarm2Time">Hora</label><input id="alarm2Time" type="time" value="20:00"></div>
+        <div class="days" id="alarm2DaysWrap">
+          <label><input type="checkbox" data-alarm="2" value="1">L</label>
+          <label><input type="checkbox" data-alarm="2" value="2">M</label>
+          <label><input type="checkbox" data-alarm="2" value="3">X</label>
+          <label><input type="checkbox" data-alarm="2" value="4">J</label>
+          <label><input type="checkbox" data-alarm="2" value="5">V</label>
+          <label><input type="checkbox" data-alarm="2" value="6">S</label>
+          <label><input type="checkbox" data-alarm="2" value="0">D</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="split">
+      <button id="soundTest" type="button">Probar Sonido</button>
+      <button id="resetBtn" type="button">Restablecer</button>
+    </div>
+
+    <div class="section">
+      <h3>Extras</h3>
+      <div class="switch-row"><label for="breatheToggle">Efecto Respiracion</label>
+        <label class="switch"><input id="breatheToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="hour24Toggle">Formato 24 horas</label>
+        <label class="switch"><input id="hour24Toggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="secondsToggle">Mostrar Segundos</label>
+        <label class="switch"><input id="secondsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="moonToggle">Fase Lunar</label>
+        <label class="switch"><input id="moonToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="salesToggle">Ventas Diarias</label>
+        <label class="switch"><input id="salesToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="clientsToggle">Clientes Diarios</label>
+        <label class="switch"><input id="clientsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="mirrorToggle">Modo Espejo</label>
+        <label class="switch"><input id="mirrorToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="presentToggle">Modo Presentacion</label>
+        <label class="switch"><input id="presentToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="split" style="margin-top:10px;">
+        <button id="exportBtn" type="button">Exportar</button>
+        <button id="importBtn" type="button">Importar</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="wrap">
+    <section class="clock-card">
+      <div id="clockLine"><span class="h">12</span><span class="sep">:</span><span class="m">00</span><span class="ampm">AM</span></div>
+      <div id="dateLine">--</div>
+      <div id="weatherLine">Clima La Habana: cargando...</div>
+      <div id="alarmLine"></div>
+      <div id="secondsLine"></div>
+      <div id="moonPhaseLine"></div>
+      <div id="salesLine"></div>
+      <div id="clientsLine"></div>
+    </section>
+  </main>
+
+  <div id="presentationSlides" class="presentation-slides">
+    <div class="slide" data-slide="clock">
+      <div class="slide-clock-time" id="slideClockTime">--:--</div>
+      <div class="slide-clock-date" id="slideClockDate"></div>
+    </div>
+    <div class="slide" data-slide="weather">
+      <div class="slide-emoji" id="slideWeatherEmoji"></div>
+      <div class="slide-weather-text" id="slideWeatherText">--</div>
+      <div class="slide-weather-detail" id="slideWeatherDetail"></div>
+    </div>
+    <div class="slide" data-slide="stats">
+      <div class="slide-stats-sales" id="slideSalesTotal">$0.00</div>
+      <div class="slide-stats-detail" id="slideSalesDetail">0 transacciones</div>
+      <div class="slide-stats-clients" id="slideClientsTotal">0 clientes</div>
+    </div>
+  </div>
+
+  <div id="timerPanel" class="timer-panel" style="display:none;">
+    <div class="timer-tabs">
+      <button class="timer-tab active" data-tab="pomodoro">Pomodoro</button>
+      <button class="timer-tab" data-tab="stopwatch">Cronometro</button>
+      <button class="timer-tab" data-tab="countdown">Countdown</button>
+    </div>
+    <div id="pomodoroTab" class="timer-content active">
+      <div id="pomodoroDisplay" class="timer-display">25:00</div>
+      <div class="timer-controls">
+        <button id="pomodoroStart" type="button">Iniciar</button>
+        <button id="pomodoroReset" type="button">Reset</button>
+      </div>
+      <div class="timer-sets">
+        <button class="pomo-set" data-min="25">25m</button>
+        <button class="pomo-set" data-min="5">5m</button>
+        <button class="pomo-set" data-min="15">15m</button>
+      </div>
+    </div>
+    <div id="stopwatchTab" class="timer-content">
+      <div id="stopwatchDisplay" class="timer-display">00:00:00</div>
+      <div class="timer-controls">
+        <button id="stopwatchStart" type="button">Iniciar</button>
+        <button id="stopwatchLap" type="button">Vuelta</button>
+        <button id="stopwatchReset" type="button">Reset</button>
+      </div>
+      <div id="lapTimes" class="lap-times"></div>
+    </div>
+    <div id="countdownTab" class="timer-content">
+      <div id="countdownDisplay" class="timer-display">00:00:00</div>
+      <div class="timer-inputs">
+        <input type="number" id="countdownMin" min="0" max="999" placeholder="Min" value="5">
+        <input type="number" id="countdownSec" min="0" max="59" placeholder="Seg" value="0">
+      </div>
+      <div class="timer-controls">
+        <button id="countdownStart" type="button">Iniciar</button>
+        <button id="countdownReset" type="button">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="eventPanel" class="event-panel" style="display:none;">
+    <h3>Recordatorio de Evento</h3>
+    <div class="row"><label for="eventTitle">Titulo</label><input id="eventTitle" type="text" placeholder="Nombre del evento"></div>
+    <div class="row"><label for="eventDate">Fecha</label><input id="eventDate" type="datetime-local"></div>
+    <div class="row"><label for="eventNotify">Notificar</label>
+      <label class="switch"><input id="eventNotify" type="checkbox" checked><span class="switch-slider"></span></label>
+    </div>
+    <div class="timer-controls">
+      <button id="eventSave" type="button">Guardar</button>
+      <button id="eventClear" type="button">Borrar</button>
+    </div>
+    <div id="eventsList" class="events-list"></div>
+  </div>
+
+  <div id="alarmHistory" class="alarm-history"></div>
+
+  <script src="clock.js"></script>
+  <script>
+  (function() {
+    let deferredPrompt = null;
+    let pwaInstalled = false;
+    const banner = document.getElementById('pwaBanner');
+    const installBtn = document.getElementById('pwaInstallBtn');
+    const closeBtn = document.getElementById('pwaClose');
+
+    function showBanner() {
+      if (!pwaInstalled && banner) banner.classList.remove('hidden');
+    }
+
+    async function tryInstall() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const result = await deferredPrompt.userChoice;
+        if (result.outcome === 'accepted') {
+          pwaInstalled = true;
+          localStorage.setItem('pwaInstalled', 'true');
+        }
+        deferredPrompt = null;
+        return;
+      }
+      if (navigator.maybeQuitForPossiblePMSTake) {
+        return;
+      }
+      if (chrome && chrome.webstore && chrome.webstore.install) {
+        const ref = document.referrer;
+        chrome.webstore.install(ref, function() {
+          localStorage.setItem('pwaInstalled', 'true');
+          banner.classList.add('hidden');
+        }, function(err) {
+          console.log('[PWA] Install error:', err);
+        });
+        return;
+      }
+      alert('Para instalar: Busca "Instalar app" en el menu del navegador o usa Chrome Android.');
+    }
+
+    if (localStorage.getItem('pwaInstalled') === 'true') {
+      pwaInstalled = true;
+      banner.classList.add('hidden');
+    } else {
+      showBanner();
+    }
+
+    if (installBtn) installBtn.addEventListener('click', tryInstall);
+    if (closeBtn) closeBtn.addEventListener('click', function() {
+      banner.classList.add('hidden');
+    });
+
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      showBanner();
+    });
+
+    window.addEventListener('appinstalled', function() {
+      pwaInstalled = true;
+      banner.classList.add('hidden');
+      localStorage.setItem('pwaInstalled', 'true');
+    });
+  })();
+  </script>
+</body>
+</html>
