@@ -55,6 +55,14 @@ $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 
+// Obtener almacenes de esta sucursal
+$almacenes = [];
+try {
+    $stmtAlm = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id_sucursal = ? ORDER BY nombre");
+    $stmtAlm->execute([$SUC_ID]);
+    $almacenes = $stmtAlm->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {}
+
 // Priorizar contexto dinámico por usuario (POS Config 2) sobre pos.cfg global.
 try {
     $userId = (int)($_SESSION['user_id'] ?? 0);
@@ -75,6 +83,11 @@ try {
     }
 } catch (Throwable $e) {
     // Fallback silencioso a pos.cfg si no existe la tabla/contexto.
+}
+
+// Si el almacen del usuario no existe en la lista de almacenes de la sucursal, usar el primero de la sucursal
+if (!empty($almacenes) && !in_array($ALM_ID, array_column($almacenes, 'id'))) {
+    $ALM_ID = $almacenes[0]['id'];
 }
 
 // --- API BACKEND (AJAX) ---
@@ -107,6 +120,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['a
     }
 
     $input = json_decode(file_get_contents('php://input'), true);
+    
+    // Usar almacén del request si se proporciona (sobreescribe el default)
+    if (!empty($input['almacen'])) {
+        $ALM_ID = intval($input['almacen']);
+    }
     
     // API: CANCELAR COMPRA
     if (isset($input['action']) && $input['action'] === 'cancel') {
@@ -408,7 +426,25 @@ try {
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
             <h3 class="fw-bold text-primary mb-0"><i class="fas fa-truck-loading me-2"></i> Entrada / Compra</h3>
+            <?php if (!empty($almacenes)): ?>
+            <div class="d-flex align-items-center gap-3 mt-2">
+                <div class="text-muted small">
+                    <i class="fas fa-building"></i> Sucursal: <strong><?php echo $SUC_ID; ?></strong>
+                </div>
+                <div class="text-muted small">
+                    <i class="fas fa-warehouse"></i> Almacén: 
+                    <select id="almacenSelect" class="form-select form-select-sm d-inline-block w-auto ms-1" onchange="changeAlmacen(this.value)">
+                        <?php foreach ($almacenes as $alm): ?>
+                        <option value="<?php echo $alm['id']; ?>" <?php echo ($alm['id'] == $ALM_ID) ? 'selected' : ''; ?>>
+                            <?php echo htmlspecialchars($alm['nombre']); ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+            <?php else: ?>
             <div class="text-muted small mt-1"><i class="fas fa-building"></i> Sucursal: <strong><?php echo $SUC_ID; ?></strong> | <i class="fas fa-warehouse"></i> Almacén: <strong><?php echo $ALM_ID; ?></strong></div>
+            <?php endif; ?>
         </div>
         <div>
             <button type="button" class="btn btn-outline-primary me-2" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
@@ -577,12 +613,7 @@ try {
     const recentPurchases = <?php echo !empty($recentPurchases) ? json_encode($recentPurchases, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) : '[]'; ?>;
     const historyErr = "<?php echo addslashes($historyError); ?>";
     const today = new Date().toISOString().split('T')[0];
-
-    // Debug en consola si hay error de SQL
-    if(historyErr) {
-        console.error("SQL History Error:", historyErr);
-        console.log("Tip: Verifica la tabla compras_cabecera.");
-    }
+    const initialAlmacen = <?php echo $ALM_ID; ?>;
 
     const app = new Vue({
         el: '#app',
@@ -592,17 +623,37 @@ try {
             header: { proveedor:'', notas:'', fecha: today, factura: '' }, 
             cart: [],
             recentList: recentPurchases, 
-            categories: allCats
+            categories: allCats,
+            almacenActual: initialAlmacen
         },
         computed: { totalCart() { return this.cart.reduce((a, i) => a + (i.cantidad * i.costo), 0); } },
-        methods: {
-            async reloadCats() {
-                try {
-                    const res = await fetch('categories_api.php');
-                    const data = await res.json();
-                    this.categories = data.map(c => c.nombre);
-                } catch(e) { console.error(e); }
-            },
+methods: {
+             async reloadCats() {
+                 try {
+                     const res = await fetch('categories_api.php');
+                     const data = await res.json();
+                     this.categories = data.map(c => c.nombre);
+                 } catch(e) { console.error(e); }
+             },
+             filterProds() {
+                 if(this.search.length < 2) { this.filteredProds = []; return; }
+                 const q = this.search.toLowerCase();
+                 this.filteredProds = allProds.filter(p => p.codigo.toLowerCase().includes(q) || p.nombre.toLowerCase().includes(q)).slice(0, 8);
+             },
+             selectProd(p) {
+                 this.form.sku = p.codigo; this.form.nombre = p.nombre; this.form.costo = parseFloat(p.costo);
+                 this.form.precio_venta = parseFloat(p.precio); this.form.categoria = p.categoria;
+                 this.form.tipo_costo = p.tipo_costo;
+                 this.isExisting = true;
+                 this.search = '';
+                 this.filteredProds = [];
+             },
+             changeAlmacen(almId) {
+                 this.almacenActual = parseInt(almId);
+                 const key = 'pos_purchases_almacen_' + this.almacenActual;
+                 localStorage.setItem(key, this.almacenActual);
+             }
+         },
             filterProds() {
                 if(this.search.length < 2) { this.filteredProds = []; return; }
                 const q = this.search.toLowerCase();
@@ -672,7 +723,7 @@ try {
                 try {
                     const res = await fetch('pos_purchases.php', { 
                         method: 'POST', 
-                        body: JSON.stringify({ ...this.header, total: this.totalCart, items: this.cart, estado: estado }) 
+                        body: JSON.stringify({ ...this.header, total: this.totalCart, items: this.cart, estado: estado, almacen: this.almacenActual }) 
                     });
                     const data = await res.json();
                     if(data.status === 'success') { alert('✅ Éxito'); location.reload(); } else { alert('❌ ' + data.msg); }
@@ -683,7 +734,7 @@ try {
                 try {
                     const res = await fetch('pos_purchases.php', { 
                         method: 'POST', 
-                        body: JSON.stringify({ action: 'process_pending', id: id }) 
+                        body: JSON.stringify({ action: 'process_pending', id: id, almacen: this.almacenActual }) 
                     });
                     const data = await res.json();
                     if(data.status === 'success') { alert('✅ Compra procesada correctamente'); location.reload(); } else { alert('❌ ' + data.msg); }
@@ -692,7 +743,7 @@ try {
             async cancelPurchase(id) {
                 if(!confirm('⚠️ ¿Estás SEGURO de REVERTIR esta entrada?\n\nEsto RESTARÁ las existencias del inventario.')) return;
                 try {
-                    const res = await fetch('pos_purchases.php', { method: 'POST', body: JSON.stringify({ action: 'cancel', id: id }) });
+                    const res = await fetch('pos_purchases.php', { method: 'POST', body: JSON.stringify({ action: 'cancel', id: id, almacen: this.almacenActual }) });
                     const data = await res.json();
                     if(data.status === 'success') { alert('✅ Revertida correctamente'); location.reload(); } else { alert('❌ ' + data.msg); }
                 } catch (e) { alert('Error de conexión'); }
@@ -700,7 +751,7 @@ try {
             async revertItem(compraId, detalleId, sku, nombre, cantidad) {
                 if(!confirm('⚠️ ¿Revertir solo este producto?\n\nProducto: ' + (nombre || sku) + '\nCantidad: ' + cantidad + '\n\nEsto RESTARÁ ' + cantidad + ' unidades del inventario.')) return;
                 try {
-                    const res = await fetch('pos_purchases.php', { method: 'POST', body: JSON.stringify({ action: 'revert_item', id_compra: compraId, id_detalle: detalleId }) });
+                    const res = await fetch('pos_purchases.php', { method: 'POST', body: JSON.stringify({ action: 'revert_item', id_compra: compraId, id_detalle: detalleId, almacen: this.almacenActual }) });
                     const data = await res.json();
                     if(data.status === 'success') { alert('✅ Producto revertido correctamente'); location.reload(); } else { alert('❌ ' + data.msg); }
                 } catch (e) { alert('Error de conexión'); }
