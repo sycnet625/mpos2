@@ -972,9 +972,53 @@
       font-size: 0.92rem;
     }
     #toolsBtn:hover { background: #152a15; }
+
+    #pwaBanner {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(0deg, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 100%);
+      border-top: 1px solid #2f7b2f;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      z-index: 100;
+    }
+    #pwaBanner.hidden { display: none; }
+    #pwaBanner span {
+      color: #9bf3b8;
+      font-size: 0.85rem;
+    }
+    #pwaBanner button {
+      background: #1f5f1f;
+      border: 1px solid #4ea84e;
+      color: #fff;
+      border-radius: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+    #pwaClose {
+      background: transparent;
+      border: none;
+      color: #7ab87a;
+      font-size: 1.2rem;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
   </style>
 </head>
 <body>
+  <div id="pwaBanner">
+    <span>Instalar como app para usar offline</span>
+    <button id="pwaInstallBtn">Instalar</button>
+    <button id="pwaClose">X</button>
+  </div>
+
   <button id="toolsBtn" type="button">Herramientas</button>
   <button id="customizeBtn" type="button">Personalizacion</button>
 
@@ -1107,6 +1151,15 @@
       </div>
       <div class="switch-row"><label for="secondsToggle">Mostrar Segundos</label>
         <label class="switch"><input id="secondsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="moonToggle">Fase Lunar</label>
+        <label class="switch"><input id="moonToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="salesToggle">Ventas Diarias</label>
+        <label class="switch"><input id="salesToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="clientsToggle">Clientes Diarios</label>
+        <label class="switch"><input id="clientsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
       </div>
       <div class="switch-row"><label for="mirrorToggle">Modo Espejo</label>
         <label class="switch"><input id="mirrorToggle" type="checkbox"><span class="switch-slider"></span></label>
@@ -1338,29 +1391,6 @@ let events = [];
       const phase = jd / 29.5305882;
       const phaseNum = Math.floor((phase - Math.floor(phase)) * 8) % 8;
       return moonPhases[phaseNum];
-    }
-
-    function updateMoonPhase() {
-      const moon = getMoonPhase();
-      const el = $("#moonPhaseLine");
-      if (el) el.textContent = moon.emoji + " " + moon.name;
-    }
-
-    async function loadSalesMetrics() {
-      try {
-        const r = await fetch("api_sales.php", { cache: "no-store" });
-        if (!r.ok) throw new Error("http " + r.status);
-        const d = await r.json();
-        const salesLine = $("#salesLine");
-        const clientsLine = $("#clientsLine");
-        if (salesLine) salesLine.textContent = "Ventas hoy: $" + d.total + " (" + d.count + " transacciones)";
-        if (clientsLine) clientsLine.textContent = "Clientes hoy: " + d.clients;
-      } catch (e) {
-        const salesLine = $("#salesLine");
-        const clientsLine = $("#clientsLine");
-        if (salesLine) salesLine.textContent = "";
-        if (clientsLine) clientsLine.textContent = "";
-      }
     }
 
     function PresentationModeController() {
@@ -2319,7 +2349,90 @@ const sec = String(now.getSeconds()).padStart(2, "0");
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(function() {});
+
+    let deferredPrompt = null;
+    let pwaInstalled = false;
+
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferredPrompt = e;
+      if (!pwaInstalled) document.getElementById('pwaBanner').classList.remove('hidden');
+    });
+
+    window.addEventListener('appinstalled', function() {
+      pwaInstalled = true;
+      document.getElementById('pwaBanner').classList.add('hidden');
+      localStorage.setItem('pwaInstalled', 'true');
+    });
+
+    if (localStorage.getItem('pwaInstalled') === 'true') {
+      pwaInstalled = true;
+      document.getElementById('pwaBanner').classList.add('hidden');
     }
+
+    document.getElementById('pwaInstallBtn').addEventListener('click', function() {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(function(result) {
+          if (result.outcome === 'accepted') {
+            pwaInstalled = true;
+            document.getElementById('pwaBanner').classList.add('hidden');
+            localStorage.setItem('pwaInstalled', 'true');
+          }
+          deferredPrompt = null;
+        });
+      }
+    });
+
+    document.getElementById('pwaClose').addEventListener('click', function() {
+      document.getElementById('pwaBanner').classList.add('hidden');
+    });
+
+    let showMoon = true;
+    let showSales = true;
+    let showClients = true;
+
+    function updateMoonPhase() {
+      const moon = getMoonPhase();
+      const el = document.getElementById('moonPhaseLine');
+      if (el && showMoon) el.textContent = moon.emoji + ' ' + moon.name;
+      else if (el) el.textContent = '';
+    }
+
+    async function loadSalesMetrics() {
+      try {
+        const r = await fetch('api_sales.php', { cache: 'no-store' });
+        if (!r.ok) throw new Error('http ' + r.status);
+        const d = await r.json();
+        const salesEl = document.getElementById('salesLine');
+        const clientsEl = document.getElementById('clientsLine');
+        if (salesEl) salesEl.textContent = showSales ? 'Ventas hoy: $' + d.total + ' (' + d.count + ' ventas)' : '';
+        if (clientsEl) clientsEl.textContent = showClients ? 'Clientes hoy: ' + d.clients : '';
+      } catch (e) {
+        const salesEl = document.getElementById('salesLine');
+        const clientsEl = document.getElementById('clientsLine');
+        if (salesEl) salesEl.textContent = '';
+        if (clientsEl) clientsEl.textContent = '';
+      }
+    }
+
+    document.getElementById('moonToggle').addEventListener('change', function() {
+      showMoon = this.checked;
+      updateMoonPhase();
+      saveSettings();
+    });
+
+    document.getElementById('salesToggle').addEventListener('change', function() {
+      showSales = this.checked;
+      loadSalesMetrics();
+      saveSettings();
+    });
+
+    document.getElementById('clientsToggle').addEventListener('change', function() {
+      showClients = this.checked;
+      loadSalesMetrics();
+      saveSettings();
+    });
 
     $("#toolsBtn").addEventListener("click", () => {
       timerPanel.style.display = timerPanel.style.display === "none" ? "block" : "none";
