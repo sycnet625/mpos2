@@ -2339,6 +2339,11 @@ const sec = String(now.getSeconds()).padStart(2, "0");
 
     loadSettings();
     bindAlarmDismiss();
+
+    let showMoon = true;
+    let showSales = true;
+    let showClients = true;
+
     startClock();
     loadHavanaWeather();
     setInterval(loadHavanaWeather, 30 * 60 * 1000);
@@ -2388,10 +2393,6 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     document.getElementById('pwaClose').addEventListener('click', function() {
       document.getElementById('pwaBanner').classList.add('hidden');
     });
-
-    let showMoon = true;
-    let showSales = true;
-    let showClients = true;
 
     function updateMoonPhase() {
       const moon = getMoonPhase();
