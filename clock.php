@@ -48,6 +48,14 @@
       font-display: swap;
     }
 
+    /* Mejora global de renderizado de fuentes */
+    @media screen and (-webkit-min-device-pixel-ratio: 0) {
+      .time-text, .h, .m, .ampm, .flip-glyph {
+        -webkit-font-smoothing: antialiased;
+        text-rendering: geometricPrecision;
+      }
+    }
+
     :root {
       --bg: #000000;
       --clock-bg: #0a100a;
@@ -84,6 +92,8 @@
       --seg-v-top: 6%;
       --seg-v-bottom: 6%;
       --seg-radius: 999px;
+      /* Color de transicion suave */
+      --color-transition-duration: 1.8s;
     }
 
     * { box-sizing: border-box; }
@@ -94,6 +104,9 @@
       font-family: var(--font-main);
       overflow: hidden;
       transition: filter 0.25s ease;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
     }
     body.night-dim { filter: brightness(0.38) saturate(0.85); }
 
@@ -136,6 +149,10 @@
       transform: translate(var(--clock-offset-x), var(--clock-offset-y));
       transition: transform 1.2s ease, filter 0.6s ease;
       filter: var(--line-filter);
+      /* Mejora de renderizado de texto */
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
     }
     #clockLine.blink-colon .sep { opacity: 0.2; }
     #clockLine.colorful {
@@ -150,6 +167,9 @@
       background-clip: text;
       text-shadow: var(--time-shadow);
       animation: var(--color-flow-animation);
+      /* Transicion de color mas fluida */
+      transition: background-image var(--color-transition-duration) ease,
+                  text-shadow var(--color-transition-duration) ease;
     }
     #clockLine.colorful .ampm {
       background-image: var(--color-fill);
@@ -160,6 +180,8 @@
       background-attachment: var(--color-fill-attachment);
       text-shadow: var(--time-shadow);
       animation: var(--color-flow-animation);
+      transition: background-image var(--color-transition-duration) ease,
+                  text-shadow var(--color-transition-duration) ease;
     }
 
     @keyframes rainbow-flow-rtl {
@@ -203,6 +225,12 @@
       100% { background-position: 0% 50%; }
     }
 
+    /* Transicion suave entre cambios de gradiente */
+    @keyframes color-fade-in {
+      0% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+
     .time-segment {
       display: inline-flex;
       align-items: center;
@@ -215,20 +243,26 @@
       height: 1em;
       display: inline-block;
       filter: var(--segment-shadow);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
     }
 
     .digit-7 .seg {
       position: absolute;
       background: color-mix(in srgb, var(--clock-text) 10%, transparent);
       border-radius: var(--seg-radius);
-      transition: background 0.35s ease, opacity 0.35s ease, box-shadow 0.35s ease;
+      transition: background 0.4s ease, opacity 0.4s ease, box-shadow 0.4s ease;
       opacity: 0.12;
     }
 
     .digit-7 .seg.on {
       background: var(--clock-text);
       opacity: 1;
-      box-shadow: 0 0 10px var(--clock-text), 0 0 24px var(--clock-glow);
+      box-shadow:
+        0 0 8px var(--clock-text),
+        0 0 18px var(--clock-glow),
+        0 0 32px color-mix(in srgb, var(--clock-text) 40%, transparent);
     }
 
     #clockLine.colorful .digit-7 .seg.on,
@@ -328,13 +362,20 @@
       height: 0.09em;
       border-radius: 50%;
       background: var(--clock-text);
-      box-shadow: 0 0 6px var(--clock-text), 0 0 14px var(--clock-glow);
+      box-shadow:
+        0 0 6px var(--clock-text),
+        0 0 14px var(--clock-glow),
+        0 0 24px color-mix(in srgb, var(--clock-text) 30%, transparent);
+      transition: opacity 0.3s ease, box-shadow 0.3s ease;
     }
     .ampm {
       font-size: 0.30em;
       letter-spacing: 0.02em;
       margin-left: 0.18em;
       opacity: 0.9;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
     }
 
     #clockLine.flip-mode {
@@ -420,6 +461,9 @@
       transform: translateY(-0.02em);
       text-shadow: var(--time-shadow);
       color: var(--clock-text);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: geometricPrecision;
     }
 
     .flip-digit .flip-glyph {
@@ -634,9 +678,262 @@
       .row input[type="range"] { width: 100%; }
       .days label { font-size: 0.7rem; }
     }
+
+    @keyframes breathe-glow {
+      0%, 100% { opacity: 1; filter: brightness(1); }
+      50% { opacity: 0.75; filter: brightness(0.82); }
+    }
+    .time-text.breathe { animation: breathe-glow 3s ease-in-out infinite; }
+
+    @keyframes fade-in-up {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .clock-card { animation: fade-in-up 0.8s ease-out; }
+
+    #secondsLine {
+      margin-top: clamp(3px, 0.8vw, 8px);
+      font-size: calc(var(--meta-size) * 0.68);
+      color: var(--clock-text);
+      opacity: 0.7;
+      letter-spacing: 0.12em;
+      text-shadow: var(--time-shadow);
+    }
+    #secondsLine.breathe { animation: breathe-glow 1s ease-in-out infinite; }
+
+    #moonPhaseLine {
+      margin-top: clamp(4px, 0.9vw, 10px);
+      font-size: calc(var(--meta-size) * 0.6);
+      color: var(--date-text);
+      opacity: 0.8;
+      text-shadow: var(--time-shadow);
+    }
+
+    #salesLine, #clientsLine {
+      margin-top: clamp(2px, 0.5vw, 6px);
+      font-size: calc(var(--meta-size) * 0.55);
+      color: var(--weather-text);
+      opacity: 0.75;
+      text-shadow: var(--time-shadow);
+    }
+
+    body.mirror-mode {
+      transform: scaleX(-1);
+    }
+
+    body.presentation-mode {
+      cursor: none;
+      user-select: none;
+    }
+    body.presentation-mode .clock-card { animation: none; }
+    .presentation-slides {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--bg);
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 100;
+    }
+    .presentation-slides.active { display: flex; }
+    .slide {
+      display: none;
+      text-align: center;
+    }
+    .slide.active { display: block; }
+    .slide h1 {
+      font-size: clamp(3rem, 12vw, 8rem);
+      color: var(--clock-text);
+      margin: 0 0 1rem 0;
+      text-shadow: var(--time-shadow);
+    }
+    .slide p {
+      font-size: clamp(1.5rem, 6vw, 4rem);
+      color: var(--date-text);
+      margin: 0;
+      text-shadow: var(--time-shadow);
+    }
+
+    .mode-indicator {
+      font-size: calc(var(--meta-size) * 0.58);
+      color: var(--date-text);
+      opacity: 0.65;
+      margin-left: 0.15em;
+      letter-spacing: 0.04em;
+    }
+
+    .timer-panel, .event-panel {
+      position: fixed;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: min(420px, 92vw);
+      max-height: 85dvh;
+      overflow: auto;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 14px;
+      padding: 16px;
+      z-index: 50;
+      color: #d5ffd5;
+    }
+    .timer-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+    }
+    .timer-tab {
+      flex: 1;
+      padding: 8px 6px;
+      background: #0f2a0f;
+      border: 1px solid #2f7b2f;
+      border-radius: 8px;
+      color: #9bf3b8;
+      font-size: 0.82rem;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .timer-tab.active {
+      background: #1f4f1f;
+      border-color: #4ea84e;
+    }
+    .timer-content { display: none; }
+    .timer-content.active { display: block; }
+    .timer-display {
+      font-size: clamp(2.8rem, 14vw, 4rem);
+      text-align: center;
+      font-family: var(--font-main);
+      color: var(--clock-text);
+      text-shadow: var(--time-shadow);
+      margin: 12px 0;
+      letter-spacing: 0.08em;
+    }
+    .timer-controls {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .timer-controls button {
+      padding: 8px 16px;
+      background: #0f2a0f;
+      border: 1px solid #2f7b2f;
+      border-radius: 8px;
+      color: #d5ffd5;
+      font-family: inherit;
+      cursor: pointer;
+      font-size: 0.88rem;
+    }
+    .timer-controls button:hover { background: #1a3a1a; }
+    .timer-sets {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+    }
+    .pomo-set {
+      padding: 6px 12px;
+      background: #0d210d;
+      border: 1px solid #2a5a2a;
+      border-radius: 6px;
+      color: #a8e8b8;
+      font-family: inherit;
+      cursor: pointer;
+      font-size: 0.8rem;
+    }
+    .timer-inputs {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .timer-inputs input {
+      width: 70px;
+      padding: 8px;
+      background: #0f2a0f;
+      border: 1px solid #2f7b2f;
+      border-radius: 8px;
+      color: #d5ffd5;
+      font-family: inherit;
+      text-align: center;
+      font-size: 1.1rem;
+    }
+    .lap-times {
+      max-height: 120px;
+      overflow: auto;
+      font-size: 0.78rem;
+      color: #a8e8b8;
+      text-align: center;
+    }
+    .lap-times div { padding: 3px 0; border-bottom: 1px dashed #245024; }
+
+    .event-panel h3 {
+      margin: 0 0 12px 0;
+      font-size: 1rem;
+      color: #aaf7c4;
+    }
+    .events-list {
+      margin-top: 12px;
+      max-height: 150px;
+      overflow: auto;
+    }
+    .event-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      background: #0d210d;
+      border: 1px solid #245024;
+      border-radius: 8px;
+      margin-bottom: 6px;
+      font-size: 0.82rem;
+    }
+    .event-item button {
+      padding: 4px 8px;
+      background: #1a2a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 5px;
+      color: #c8c8c8;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .alarm-history {
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      font-size: 0.74rem;
+      color: #7ab87a;
+      opacity: 0.8;
+      max-width: 200px;
+    }
+    .alarm-history div {
+      padding: 3px 0;
+    }
+
+    #toolsBtn {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      z-index: 30;
+      border: 1px solid #2f7b2f;
+      background: #0f2a0f;
+      color: #9bf3b8;
+      border-radius: 9px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 0.92rem;
+    }
+    #toolsBtn:hover { background: #152a15; }
   </style>
 </head>
 <body>
+  <button id="toolsBtn" type="button">Herramientas</button>
   <button id="customizeBtn" type="button">Personalizacion</button>
 
   <aside id="panel" aria-label="Panel de personalizacion">
@@ -757,6 +1054,23 @@
       <button id="soundTest" type="button">Probar Sonido</button>
       <button id="resetBtn" type="button">Restablecer</button>
     </div>
+
+    <div class="section">
+      <h3>Extras</h3>
+      <div class="switch-row"><label for="breatheToggle">Efecto Respiracion</label>
+        <label class="switch"><input id="breatheToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="hour24Toggle">Formato 24 horas</label>
+        <label class="switch"><input id="hour24Toggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="secondsToggle">Mostrar Segundos</label>
+        <label class="switch"><input id="secondsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
+      </div>
+      <div class="split" style="margin-top:10px;">
+        <button id="exportBtn" type="button">Exportar</button>
+        <button id="importBtn" type="button">Importar</button>
+      </div>
+    </div>
   </aside>
 
   <main class="wrap">
@@ -767,8 +1081,65 @@
       <div id="dateLine">--</div>
       <div id="weatherLine">Clima La Habana: cargando...</div>
       <div id="alarmLine"></div>
+      <div id="secondsLine"></div>
     </section>
   </main>
+
+  <div id="timerPanel" class="timer-panel" style="display:none;">
+    <div class="timer-tabs">
+      <button class="timer-tab active" data-tab="pomodoro">Pomodoro</button>
+      <button class="timer-tab" data-tab="stopwatch">Cronometro</button>
+      <button class="timer-tab" data-tab="countdown">Countdown</button>
+    </div>
+    <div id="pomodoroTab" class="timer-content active">
+      <div id="pomodoroDisplay" class="timer-display">25:00</div>
+      <div class="timer-controls">
+        <button id="pomodoroStart" type="button">Iniciar</button>
+        <button id="pomodoroReset" type="button">Reset</button>
+      </div>
+      <div class="timer-sets">
+        <button class="pomo-set" data-min="25">25m</button>
+        <button class="pomo-set" data-min="5">5m</button>
+        <button class="pomo-set" data-min="15">15m</button>
+      </div>
+    </div>
+    <div id="stopwatchTab" class="timer-content">
+      <div id="stopwatchDisplay" class="timer-display">00:00:00</div>
+      <div class="timer-controls">
+        <button id="stopwatchStart" type="button">Iniciar</button>
+        <button id="stopwatchLap" type="button">Vuelta</button>
+        <button id="stopwatchReset" type="button">Reset</button>
+      </div>
+      <div id="lapTimes" class="lap-times"></div>
+    </div>
+    <div id="countdownTab" class="timer-content">
+      <div id="countdownDisplay" class="timer-display">00:00:00</div>
+      <div class="timer-inputs">
+        <input type="number" id="countdownMin" min="0" max="999" placeholder="Min" value="5">
+        <input type="number" id="countdownSec" min="0" max="59" placeholder="Seg" value="0">
+      </div>
+      <div class="timer-controls">
+        <button id="countdownStart" type="button">Iniciar</button>
+        <button id="countdownReset" type="button">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="eventPanel" class="event-panel" style="display:none;">
+    <h3>Recordatorio de Evento</h3>
+    <div class="row"><label for="eventTitle">Titulo</label><input id="eventTitle" type="text" placeholder="Nombre del evento"></div>
+    <div class="row"><label for="eventDate">Fecha</label><input id="eventDate" type="datetime-local"></div>
+    <div class="row"><label for="eventNotify">Notificar</label>
+      <label class="switch"><input id="eventNotify" type="checkbox" checked><span class="switch-slider"></span></label>
+    </div>
+    <div class="timer-controls">
+      <button id="eventSave" type="button">Guardar</button>
+      <button id="eventClear" type="button">Borrar</button>
+    </div>
+    <div id="eventsList" class="events-list"></div>
+  </div>
+
+  <div id="alarmHistory" class="alarm-history"></div>
 
   <script>
     const STORAGE_KEY = "clock_lcd_settings_v6";
@@ -801,13 +1172,21 @@
       alarm1Days: DEFAULT_DAYS,
       alarm2Enabled: true,
       alarm2Time: "20:00",
-      alarm2Days: DEFAULT_DAYS
+      alarm2Days: DEFAULT_DAYS,
+      breathe: false,
+      hour24: false,
+      seconds: true
     };
 
     const $ = (s) => document.querySelector(s);
+    const $$ = (s) => document.querySelectorAll(s);
     const panel = $("#panel");
     const customizeBtn = $("#customizeBtn");
     const alarmLine = $("#alarmLine");
+    const secondsLine = $("#secondsLine");
+    const timerPanel = $("#timerPanel");
+    const eventPanel = $("#eventPanel");
+    const alarmHistory = $("#alarmHistory");
 
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     let alarmInterval = null;
@@ -820,6 +1199,25 @@
     let lastRandomHourKey = "";
     let lastRenderedClockKey = "";
     let lastAppliedColorSignature = "";
+    let breatheEnabled = false;
+    let use24Hour = false;
+    let lastAlarmHistory = [];
+
+    let pomodoroTime = 25 * 60;
+    let pomodoroInterval = null;
+    let pomodoroRunning = false;
+    let pomodoroSet = 25;
+
+    let stopwatchTime = 0;
+    let stopwatchInterval = null;
+    let stopwatchRunning = false;
+    let lapTimes = [];
+
+    let countdownTime = 5 * 60;
+    let countdownInterval = null;
+    let countdownRunning = false;
+
+    let events = [];
 
     const rainbowPatterns = [
       "linear-gradient(90deg, #ff004c, #ff7a00, #ffe600, #00d26a, #00b7ff, #6c5cff, #ff00c8)",
@@ -872,6 +1270,216 @@
         Synth.playTone(1319, "sine", 0.20, 0.22);
         setTimeout(() => Synth.playTone(988, "square", 0.20, 0.20), 240);
         setTimeout(() => Synth.playTone(1319, "sine", 0.22, 0.22), 500);
+      },
+      onTimer: () => {
+        Synth.playTone(880, "sine", 0.15, 0.18);
+      },
+      onTimerEnd: () => {
+        Synth.playTone(1047, "sine", 0.3, 0.22);
+        setTimeout(() => Synth.playTone(1319, "sine", 0.4, 0.24), 300);
+        setTimeout(() => Synth.playTone(1568, "sine", 0.5, 0.2), 600);
+      }
+    };
+
+    const Pomodoro = {
+      formatTime: (secs) => {
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      },
+      start: () => {
+        if (pomodoroRunning) return;
+        pomodoroRunning = true;
+        $("#pomodoroStart").textContent = "Pausar";
+        pomodoroInterval = setInterval(() => {
+          pomodoroTime--;
+          $("#pomodoroDisplay").textContent = Pomodoro.formatTime(pomodoroTime);
+          if (pomodoroTime <= 0) {
+            Pomodoro.stop();
+            Synth.onTimerEnd();
+            alarmLine.textContent = "Pomodoro completado!";
+            setTimeout(() => alarmLine.textContent = "", 3000);
+          }
+        }, 1000);
+      },
+      stop: () => {
+        pomodoroRunning = false;
+        if (pomodoroInterval) clearInterval(pomodoroInterval);
+        pomodoroInterval = null;
+        $("#pomodoroStart").textContent = "Iniciar";
+      },
+      reset: () => {
+        Pomodoro.stop();
+        pomodoroTime = pomodoroSet * 60;
+        $("#pomodoroDisplay").textContent = Pomodoro.formatTime(pomodoroTime);
+      },
+      setTime: (mins) => {
+        Pomodoro.stop();
+        pomodoroSet = mins;
+        pomodoroTime = mins * 60;
+        $("#pomodoroDisplay").textContent = Pomodoro.formatTime(pomodoroTime);
+      }
+    };
+
+    const Stopwatch = {
+      formatTime: (secs) => {
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = secs % 60;
+        return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      },
+      start: () => {
+        if (stopwatchRunning) return;
+        stopwatchRunning = true;
+        $("#stopwatchStart").textContent = "Pausar";
+        stopwatchInterval = setInterval(() => {
+          stopwatchTime++;
+          $("#stopwatchDisplay").textContent = Stopwatch.formatTime(stopwatchTime);
+        }, 1000);
+      },
+      stop: () => {
+        stopwatchRunning = false;
+        if (stopwatchInterval) clearInterval(stopwatchInterval);
+        stopwatchInterval = null;
+        $("#stopwatchStart").textContent = "Iniciar";
+      },
+      lap: () => {
+        lapTimes.push({ time: stopwatchTime, label: lapTimes.length + 1 });
+        const html = lapTimes.map(l => `<div>#${l.label}: ${Stopwatch.formatTime(l.time)}</div>`).join("");
+        $("#lapTimes").innerHTML = html;
+      },
+      reset: () => {
+        Stopwatch.stop();
+        stopwatchTime = 0;
+        lapTimes = [];
+        $("#stopwatchDisplay").textContent = Stopwatch.formatTime(0);
+        $("#lapTimes").innerHTML = "";
+      }
+    };
+
+    const CountdownTimer = {
+      formatTime: (secs) => {
+        const m = Math.floor(secs / 60);
+        const s = secs % 60;
+        return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      },
+      start: () => {
+        if (countdownRunning || countdownTime <= 0) return;
+        countdownRunning = true;
+        $("#countdownStart").textContent = "Pausar";
+        if (!$("#countdownMin").value && !$("#countdownSec").value) {
+          countdownTime = 5 * 60;
+        }
+        countdownInterval = setInterval(() => {
+          countdownTime--;
+          $("#countdownDisplay").textContent = CountdownTimer.formatTime(countdownTime);
+          if (countdownTime <= 0) {
+            CountdownTimer.stop();
+            Synth.onTimerEnd();
+            alarmLine.textContent = "Countdown terminado!";
+            setTimeout(() => alarmLine.textContent = "", 3000);
+          }
+        }, 1000);
+      },
+      stop: () => {
+        countdownRunning = false;
+        if (countdownInterval) clearInterval(countdownInterval);
+        countdownInterval = null;
+        $("#countdownStart").textContent = "Iniciar";
+      },
+      reset: () => {
+        CountdownTimer.stop();
+        const m = parseInt($("#countdownMin").value) || 5;
+        const s = parseInt($("#countdownSec").value) || 0;
+        countdownTime = m * 60 + s;
+        $("#countdownDisplay").textContent = CountdownTimer.formatTime(countdownTime);
+      }
+    };
+
+    const EventManager = {
+      load: () => {
+        try {
+          const data = JSON.parse(localStorage.getItem("clock_events_v1") || "[]");
+          events = data;
+          EventManager.render();
+        } catch (e) {}
+      },
+      save: () => {
+        localStorage.setItem("clock_events_v1", JSON.stringify(events));
+      },
+      add: () => {
+        const title = $("#eventTitle").value.trim();
+        const date = $("#eventDate").value;
+        if (!title || !date) return;
+        events.push({ title, date: new Date(date).toISOString(), notify: $("#eventNotify").checked });
+        EventManager.save();
+        EventManager.render();
+        $("#eventTitle").value = "";
+        $("#eventDate").value = "";
+      },
+      remove: (idx) => {
+        events.splice(idx, 1);
+        EventManager.save();
+        EventManager.render();
+      },
+      render: () => {
+        const now = new Date();
+        const html = events.map((e, i) => {
+          const d = new Date(e.date);
+          const diff = d - now;
+          const future = diff > 0;
+          const days = Math.floor(Math.abs(diff) / (1000 * 60 * 60 * 24));
+          return `<div class="event-item">
+            <span>${e.title} (${future ? "+" : "-"}${days}d)</span>
+            <button onclick="EventManager.remove(${i})">X</button>
+          </div>`;
+        }).join("");
+        $("#eventsList").innerHTML = html || "<div style='opacity:0.6;font-size:0.8rem;'>Sin eventos</div>";
+      },
+      check: (now) => {
+        events.forEach((e, i) => {
+          const eventTime = new Date(e.date).getTime();
+          const nowMs = now.getTime();
+          if (e.notify && Math.abs(eventTime - nowMs) < 2000) {
+            Synth.onTimerEnd();
+            alarmLine.textContent = `Evento: ${e.title}`;
+          }
+        });
+      }
+    };
+
+    const SettingsIO = {
+      export: () => {
+        const data = localStorage.getItem(STORAGE_KEY);
+        const blob = new Blob([data || "{}"], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "clock_settings.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      import: () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json";
+        input.onchange = (e) => {
+          const file = e.target.files[0];
+          const reader = new FileReader();
+          reader.onload = (ev) => {
+            try {
+              localStorage.setItem(STORAGE_KEY, ev.target.result);
+              loadSettings();
+              alarmLine.textContent = "Settings importados!";
+              setTimeout(() => alarmLine.textContent = "", 2000);
+            } catch (err) {
+              alarmLine.textContent = "Error importando";
+              setTimeout(() => alarmLine.textContent = "", 2000);
+            }
+          };
+          reader.readAsText(file);
+        };
+        input.click();
       }
     };
 
@@ -919,7 +1527,10 @@
         alarm1Days: getCheckedDays("1") || DEFAULT_DAYS,
         alarm2Enabled: $("#alarm2Enabled").checked,
         alarm2Time: $("#alarm2Time").value,
-        alarm2Days: getCheckedDays("2") || DEFAULT_DAYS
+        alarm2Days: getCheckedDays("2") || DEFAULT_DAYS,
+        breathe: !!$("#breatheToggle").checked,
+        hour24: !!$("#hour24Toggle").checked,
+        seconds: !!$("#secondsToggle").checked
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
       applySettings(s);
@@ -957,6 +1568,9 @@
       $("#alarm2Time").value = s.alarm2Time;
       setCheckedDays("1", s.alarm1Days || DEFAULT_DAYS);
       setCheckedDays("2", s.alarm2Days || DEFAULT_DAYS);
+      $("#breatheToggle").checked = !!s.breathe;
+      $("#hour24Toggle").checked = !!s.hour24;
+      $("#secondsToggle").checked = s.seconds !== false;
       applySettings(s);
     }
 
@@ -1044,6 +1658,18 @@
         animation = "plasma-wave 8s ease-in-out infinite";
       }
 
+      // Transicion suave: fade in del nuevo gradiente
+      const timeTextEls = document.querySelectorAll("#clockLine .time-text");
+      timeTextEls.forEach(el => {
+        el.style.opacity = "0.3";
+        el.style.transition = "opacity 0.6s ease";
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            el.style.opacity = "1";
+          });
+        });
+      });
+
       root.style.setProperty("--color-fill", fill.replace(/\s{2,}/g, " ").trim());
       root.style.setProperty("--color-fill-size", size);
       root.style.setProperty("--color-flow-animation", animation);
@@ -1090,12 +1716,35 @@
       }
       root.style.setProperty("--shadow-color", shadowColor);
       root.style.setProperty("--shadow-blur", shadowBlur);
-      root.style.setProperty("--time-shadow", s.shadowMode && shadowStrengthValue > 0 ? `${shadowOffsetX} ${shadowOffsetY} ${shadowTextBlur} ${shadowColor}` : "none");
-      root.style.setProperty("--segment-shadow", s.shadowMode && shadowStrengthValue > 0 ? `drop-shadow(${shadowOffsetX} ${shadowOffsetY} ${Math.max(1, shadowStrengthValue * 0.82).toFixed(2)}px ${shadowColor})` : "none");
       root.style.setProperty("--glow-color", glowColor);
-      root.style.setProperty("--line-filter", lineFilters.length ? lineFilters.join(" ") : "none");
       root.style.setProperty("--clock-offset-x", "0px");
       root.style.setProperty("--clock-offset-y", "0px");
+
+      // Sombra 3D multicapa mas rica
+      if (s.shadowMode && shadowStrengthValue > 0) {
+        const sc = s.shadowColor || s.clockText;
+        const sc2 = mixHex(sc, 0.35, 0);
+        const sc3 = mixHex(sc, 0.55, 0);
+        const ox = shadowStrengthValue * 0.12;
+        const oy = shadowStrengthValue * 0.34;
+        const blur1 = shadowStrengthValue * 0.72;
+        const blur2 = shadowStrengthValue * 1.1;
+        const blur3 = shadowStrengthValue * 1.8;
+        const layers = [
+          `${ox.toFixed(1)}px ${oy.toFixed(1)}px ${blur1.toFixed(1)}px ${hexToRgba(sc3, 0.55)}`,
+          `${(ox * 2).toFixed(1)}px ${(oy * 2.2).toFixed(1)}px ${blur2.toFixed(1)}px ${hexToRgba(sc2, 0.35)}`,
+          `${(ox * 3).toFixed(1)}px ${(oy * 3.5).toFixed(1)}px ${blur3.toFixed(1)}px ${hexToRgba(sc, 0.18)}`
+        ];
+        // Efecto de relieve interior (bevel)
+        layers.unshift(`-1px -1px 0px ${hexToRgba(sc, 0.12)}`);
+        root.style.setProperty("--time-shadow", layers.join(", "));
+        root.style.setProperty("--segment-shadow", `drop-shadow(${ox.toFixed(1)}px ${oy.toFixed(1)}px ${Math.max(1, shadowStrengthValue * 0.82).toFixed(2)}px ${hexToRgba(sc3, 0.5)})`);
+      } else {
+        root.style.setProperty("--time-shadow", "none");
+        root.style.setProperty("--segment-shadow", "none");
+      }
+
+      root.style.setProperty("--line-filter", lineFilters.length ? lineFilters.join(" ") : "none");
       applyColorStyle(s.colorStyle || DEFAULTS.colorStyle, s.clockText);
       lastAppliedColorSignature = "";
       syncColorStyleIfNeeded(new Date(), true);
@@ -1104,6 +1753,10 @@
       line.classList.toggle("colorful", !!s.colorMode);
       line.classList.toggle("flip-mode", (s.displayStyle || DEFAULTS.displayStyle) === "flip");
       lastRenderedClockKey = "";
+
+      breatheEnabled = !!s.breathe;
+      use24Hour = !!s.hour24;
+      secondsLine.style.display = s.seconds !== false ? "" : "none";
     }
 
     function buildFlipCardMarkup(char) {
@@ -1243,23 +1896,40 @@
 
     async function loadHavanaWeather() {
       const el = $("#weatherLine");
-      const url = "https://api.open-meteo.com/v1/forecast?latitude=23.1136&longitude=-82.3666&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FHavana&forecast_days=1";
-      try {
-        const r = await fetch(url, { cache: "no-store" });
-        if (!r.ok) throw new Error("http " + r.status);
-        const d = await r.json();
-        const cur = d.current || {};
-        const dayMax = d.daily?.temperature_2m_max?.[0];
-        const dayMin = d.daily?.temperature_2m_min?.[0];
-        const tNow = Number(cur.temperature_2m);
-        const text = weatherCodeText(cur.weather_code);
-        const nowTxt = Number.isFinite(tNow) ? `${Math.round(tNow)}°C` : "--";
-        const maxTxt = Number.isFinite(dayMax) ? `${Math.round(dayMax)}°C` : "--";
-        const minTxt = Number.isFinite(dayMin) ? `${Math.round(dayMin)}°C` : "--";
-        el.textContent = `La Habana, Cuba hoy: ${text} | Ahora ${nowTxt} | Max ${maxTxt} / Min ${minTxt}`;
-      } catch (e) {
-        el.textContent = "La Habana, Cuba hoy: clima no disponible";
+      const urls = [
+        "https://api.open-meteo.com/v1/forecast?latitude=23.1136&longitude=-82.3666&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FHavana&forecast_days=1",
+        "https://wttr.in/Havana?format=j1"
+      ];
+      let success = false;
+      for (let i = 0; i < urls.length; i++) {
+        try {
+          const r = await fetch(urls[i], { cache: "no-store" });
+          if (!r.ok) continue;
+          const d = await r.json();
+          if (i === 0) {
+            const cur = d.current || {};
+            const dayMax = d.daily?.temperature_2m_max?.[0];
+            const dayMin = d.daily?.temperature_2m_min?.[0];
+            const tNow = Number(cur.temperature_2m);
+            const text = weatherCodeText(cur.weather_code);
+            const nowTxt = Number.isFinite(tNow) ? `${Math.round(tNow)}°C` : "--";
+            const maxTxt = Number.isFinite(dayMax) ? `${Math.round(dayMax)}°C` : "--";
+            const minTxt = Number.isFinite(dayMin) ? `${Math.round(dayMin)}°C` : "--";
+            el.textContent = `La Habana, Cuba hoy: ${text} | Ahora ${nowTxt} | Max ${maxTxt} / Min ${minTxt}`;
+            success = true;
+          } else {
+            const w = d.weather?.[0]?.hourly?.[0] || d.current_condition?.[0];
+            const temp = w?.temp_C || w?.temp_C?.[0] || "--";
+            const code = w?.weatherCode || w?.weatherCode?.[0] || "3";
+            const maxC = w?.tempMaxC || w?.tempMaxC?.[0] || "--";
+            const minC = w?.tempMinC || w?.tempMinC?.[0] || "--";
+            el.textContent = `La Habana, Cuba: ${weatherCodeText(code)} | Ahora ${temp}°C | Max ${maxC} / Min ${minC}`;
+            success = true;
+          }
+          break;
+        } catch (e) {}
       }
+      if (!success) el.textContent = "La Habana, Cuba hoy: clima no disponible";
     }
 
     function isNightModeActive(now) {
@@ -1338,7 +2008,7 @@
         applyNightVisual(now);
 
         const hours24 = now.getHours();
-        const useAmpm = $("#ampmToggle").checked;
+        const useAmpm = use24Hour ? false : $("#ampmToggle").checked;
         const h = useAmpm ? (hours24 % 12 || 12) : hours24;
         const m = String(now.getMinutes()).padStart(2, "0");
         const ampm = hours24 < 12 ? "AM" : "PM";
@@ -1363,6 +2033,14 @@
             }
           }
         }
+
+const sec = String(now.getSeconds()).padStart(2, "0");
+        if (secondsLine.textContent !== sec) {
+          secondsLine.textContent = sec;
+          secondsLine.classList.toggle("breathe", breatheEnabled);
+        }
+
+        EventManager.check(now);
       }
 
       tick();
@@ -1431,6 +2109,91 @@
     startClock();
     loadHavanaWeather();
     setInterval(loadHavanaWeather, 30 * 60 * 1000);
+    EventManager.load();
+
+    $("#toolsBtn").addEventListener("click", () => {
+      timerPanel.style.display = timerPanel.style.display === "none" ? "block" : "none";
+      if (timerPanel.style.display === "block") eventPanel.style.display = "none";
+    });
+
+    $$(".timer-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        $$(".timer-tab").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        $$(".timer-content").forEach(c => c.classList.remove("active"));
+        $(`#${btn.dataset.tab}Tab`).classList.add("active");
+      });
+    });
+
+    $("#pomodoroStart").addEventListener("click", () => {
+      if (pomodoroRunning) Pomodoro.stop();
+      else Pomodoro.start();
+    });
+    $("#pomodoroReset").addEventListener("click", Pomodoro.reset);
+    $$(".pomo-set").forEach(btn => {
+      btn.addEventListener("click", () => Pomodoro.setTime(parseInt(btn.dataset.min)));
+    });
+
+    $("#stopwatchStart").addEventListener("click", () => {
+      if (stopwatchRunning) Stopwatch.stop();
+      else Stopwatch.start();
+    });
+    $("#stopwatchLap").addEventListener("click", Stopwatch.lap);
+    $("#stopwatchReset").addEventListener("click", Stopwatch.reset);
+
+    $("#countdownStart").addEventListener("click", () => {
+      if (countdownRunning) CountdownTimer.stop();
+      else CountdownTimer.start();
+    });
+    $("#countdownReset").addEventListener("click", CountdownTimer.reset);
+
+    $("#eventSave").addEventListener("click", EventManager.add);
+    $("#eventClear").addEventListener("click", () => {
+      events = [];
+      EventManager.save();
+      EventManager.render();
+    });
+
+    $("#exportBtn").addEventListener("click", SettingsIO.export);
+    $("#importBtn").addEventListener("click", SettingsIO.import);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        panel.classList.remove("open");
+        timerPanel.style.display = "none";
+        eventPanel.style.display = "none";
+      }
+      if (e.key.toLowerCase() === "f") {
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
+        else document.exitFullscreen().catch(() => {});
+      }
+      if (e.key.toLowerCase() === "m") {
+        $("#soundToggle").checked = !$("#soundToggle").checked;
+        saveSettings();
+      }
+      if (e.key.toLowerCase() === "n") {
+        $("#nightMode").checked = !$("#nightMode").checked;
+        saveSettings();
+      }
+      if (e.key.toLowerCase() === "c") {
+        $("#colorMode").checked = !$("#colorMode").checked;
+        saveSettings();
+      }
+      if (e.key === "1") {
+        startAlarm("1");
+      }
+      if (e.key === "2") {
+        startAlarm("2");
+      }
+      if (e.key.toLowerCase() === "t") {
+        timerPanel.style.display = timerPanel.style.display === "none" ? "block" : "none";
+        if (timerPanel.style.display === "block") eventPanel.style.display = "none";
+      }
+      if (e.key.toLowerCase() === "e") {
+        eventPanel.style.display = eventPanel.style.display === "none" ? "block" : "none";
+        if (eventPanel.style.display === "block") timerPanel.style.display = "none";
+      }
+    });
   </script>
 </body>
 </html>
