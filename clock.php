@@ -2349,6 +2349,7 @@ const sec = String(now.getSeconds()).padStart(2, "0");
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js").catch(function() {});
+    }
 
     let deferredPrompt = null;
     let pwaInstalled = false;
