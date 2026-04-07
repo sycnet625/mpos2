@@ -1,5 +1,3 @@
-<?php
-?>
 <!doctype html>
 <html lang="es">
 <head>
@@ -783,21 +781,65 @@
     }
     .presentation-slides.active { display: flex; }
     .slide {
-      display: none;
+      position: absolute;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
       text-align: center;
+      opacity: 0;
+      transition: opacity 1s ease-in-out, transform 0.8s ease;
+      transform: scale(0.92);
+      pointer-events: none;
     }
-    .slide.active { display: block; }
-    .slide h1 {
+    .slide.active { 
+      opacity: 1; 
+      transform: scale(1);
+      pointer-events: auto;
+    }
+    .slide.prev {
+      opacity: 0;
+      transform: scale(1.08);
+    }
+    .slide-clock-time {
+      font-size: clamp(4rem, 16vw, 10rem);
+      font-family: var(--font-main);
+      color: var(--clock-text);
+      text-shadow: var(--time-shadow);
+      letter-spacing: 0.1em;
+    }
+    .slide-clock-date {
+      font-size: clamp(1.5rem, 5vw, 3rem);
+      color: var(--date-text);
+      text-shadow: var(--time-shadow);
+      margin-top: 0.5em;
+    }
+    .slide-emoji {
+      font-size: clamp(6rem, 20vw, 12rem);
+      line-height: 1;
+    }
+    .slide-weather-text {
+      font-size: clamp(2.5rem, 8vw, 6rem);
+      color: var(--weather-text);
+      text-shadow: var(--time-shadow);
+      margin-top: 0.3em;
+    }
+    .slide-weather-detail {
+      font-size: clamp(1.2rem, 4vw, 2.5rem);
+      color: var(--date-text);
+      text-shadow: var(--time-shadow);
+      margin-top: 0.2em;
+    }
+    .slide-stats-sales {
       font-size: clamp(3rem, 12vw, 8rem);
       color: var(--clock-text);
-      margin: 0 0 1rem 0;
       text-shadow: var(--time-shadow);
     }
-    .slide p {
-      font-size: clamp(1.5rem, 6vw, 4rem);
+    .slide-stats-detail, .slide-stats-clients {
+      font-size: clamp(1.2rem, 4vw, 2.2rem);
       color: var(--date-text);
-      margin: 0;
       text-shadow: var(--time-shadow);
+      margin-top: 0.2em;
     }
 
     .mode-indicator {
@@ -1190,40 +1232,19 @@
   </main>
 
   <div id="presentationSlides" class="presentation-slides">
-    <div class="slide active" id="slideClock">
-      <h1 id="slideClockTime">--:--</h1>
-      <p id="slideClockDate"></p>
+    <div class="slide" data-slide="clock">
+      <div class="slide-clock-time" id="slideClockTime">--:--</div>
+      <div class="slide-clock-date" id="slideClockDate"></div>
     </div>
-    <div class="slide" id="slideWeather">
-      <h1 id="slideWeatherText">--</h1>
-      <p id="slideWeatherDetail"></p>
+    <div class="slide" data-slide="weather">
+      <div class="slide-emoji" id="slideWeatherEmoji"></div>
+      <div class="slide-weather-text" id="slideWeatherText">--</div>
+      <div class="slide-weather-detail" id="slideWeatherDetail"></div>
     </div>
-    <div class="slide" id="slideEvents">
-      <h1>Proximos Eventos</h1>
-      <p id="slideEventsList">Sin eventos</p>
-    </div>
-    <div class="slide" id="slideSales">
-      <h1 id="slideSalesTotal">$0.00</h1>
-      <p id="slideSalesDetail">0 transacciones | 0 clientes</p>
-    </div>
-  </div>
-
-  <div id="presentationSlides" class="presentation-slides">
-    <div class="slide active" id="slideClock">
-      <h1 id="slideClockTime">--:--</h1>
-      <p id="slideClockDate"></p>
-    </div>
-    <div class="slide" id="slideWeather">
-      <h1 id="slideWeatherText">--</h1>
-      <p id="slideWeatherDetail"></p>
-    </div>
-    <div class="slide" id="slideEvents">
-      <h1>Proximos Eventos</h1>
-      <p id="slideEventsList">Sin eventos</p>
-    </div>
-    <div class="slide" id="slideSales">
-      <h1 id="slideSalesTotal">$0.00</h1>
-      <p id="slideSalesDetail">0 transacciones | 0 clientes</p>
+    <div class="slide" data-slide="stats">
+      <div class="slide-stats-sales" id="slideSalesTotal">$0.00</div>
+      <div class="slide-stats-detail" id="slideSalesDetail">0 transacciones</div>
+      <div class="slide-stats-clients" id="slideClientsTotal">0 clientes</div>
     </div>
   </div>
 
@@ -1394,6 +1415,8 @@ let events = [];
     }
 
     function PresentationModeController() {
+      this.slideDuration = 8000;
+      this.slides = ["clock", "weather", "stats"];
       this.start = function() {
         presentationMode = true;
         document.body.classList.add("presentation-mode");
@@ -1401,9 +1424,8 @@ let events = [];
         currentSlide = 0;
         this.showSlide(0);
         presentationInterval = setInterval(function() {
-          currentSlide = (currentSlide + 1) % 4;
-          this.showSlide(currentSlide);
-        }.bind(this), 10000);
+          presentation.showNext();
+        }.bind(this), this.slideDuration);
       };
       this.stop = function() {
         presentationMode = false;
@@ -1412,32 +1434,49 @@ let events = [];
         if (presentationInterval) clearInterval(presentationInterval);
         presentationInterval = null;
       };
+      this.showNext = function() {
+        var prev = currentSlide;
+        currentSlide = (currentSlide + 1) % this.slides.length;
+        this.animateTransition(prev, currentSlide);
+      };
+      this.animateTransition = function(fromIdx, toIdx) {
+        var slideEls = document.querySelectorAll(".slide");
+        slideEls[fromIdx].classList.remove("active");
+        slideEls[fromIdx].classList.add("prev");
+        slideEls[toIdx].classList.add("active");
+        setTimeout(function() {
+          slideEls[fromIdx].classList.remove("prev");
+        }, 800);
+        this.updateSlideContent(toIdx);
+      };
       this.showSlide = function(idx) {
-        var slides = document.querySelectorAll(".slide");
-        for (var i = 0; i < slides.length; i++) {
-          slides[i].classList.toggle("active", i === idx);
+        var slideEls = document.querySelectorAll(".slide");
+        for (var i = 0; i < slideEls.length; i++) {
+          slideEls[i].classList.remove("active", "prev");
         }
+        slideEls[idx].classList.add("active");
+        this.updateSlideContent(idx);
+      };
+      this.updateSlideContent = function(idx) {
         if (idx === 0) {
           var now = new Date();
           var h = String(now.getHours()).padStart(2, "0");
           var m = String(now.getMinutes()).padStart(2, "0");
-          $("#slideClockTime").textContent = h + ":" + m;
+          var s = String(now.getSeconds()).padStart(2, "0");
+          $("#slideClockTime").textContent = h + ":" + m + ":" + s;
           $("#slideClockDate").textContent = formatDateEs(now);
         } else if (idx === 1) {
           var wt = $("#weatherLine").textContent;
           $("#slideWeatherText").textContent = wt;
           var moon = getMoonPhase();
-          $("#slideWeatherDetail").textContent = moon.emoji + " " + moon.name;
+          $("#slideWeatherEmoji").textContent = moon.emoji;
+          $("#slideWeatherDetail").textContent = moon.name;
         } else if (idx === 2) {
-          var evtText = events.length > 0
-            ? events.slice(0, 5).map(function(e) { return e.title + " (" + new Date(e.date).toLocaleDateString() + ")"; }).join(" | ")
-            : "Sin eventos proximos";
-          $("#slideEventsList").textContent = evtText;
-        } else if (idx === 3) {
-          var st = $("#salesLine").textContent || "Ventas: $0.00";
-          var ct = $("#clientsLine").textContent || "Clientes: 0";
-          $("#slideSalesTotal").textContent = st;
-          $("#slideSalesDetail").textContent = ct;
+          var st = $("#salesLine").textContent || "$0.00";
+          var ct = $("#clientsLine").textContent || "0";
+          $("#slideSalesTotal").textContent = st.replace("Ventas: ", "");
+          var parts = ct.match(/\d+/);
+          $("#slideClientsTotal").textContent = (parts ? parts[0] : "0") + " clientes";
         }
       };
     }
@@ -2118,51 +2157,40 @@ let events = [];
     }
 
     function weatherCodeText(code) {
+      const c = Number(code);
       const map = {
         0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
         45: "Niebla", 48: "Niebla escarchada", 51: "Llovizna ligera", 53: "Llovizna moderada", 55: "Llovizna intensa",
         61: "Lluvia ligera", 63: "Lluvia moderada", 65: "Lluvia fuerte", 71: "Nieve ligera", 73: "Nieve moderada", 75: "Nieve fuerte",
-        80: "Chubascos ligeros", 81: "Chubascos moderados", 82: "Chubascos fuertes", 95: "Tormenta"
+        80: "Chubascos ligeros", 81: "Chubascos moderados", 82: "Chubascos fuertes", 95: "Tormenta",
+        113: "Despejado", 116: "Parcialmente nublado", 119: "Nublado", 122: "Muy nublado",
+        143: "Niebla ligera", 176: "Lluvia dispersa", 179: "Nieve dispersa", 182: "Aguanieve disperso",
+        200: "Tormenta cercana", 227: "Nieve con viento", 230: "Tormenta de nieve",
+        248: "Niebla", 260: "Niebla helada", 263: "Llovizna ligera", 266: "Llovizna",
+        281: "Llovizna helada", 293: "Lluvia ligera", 296: "Lluvia ligera", 299: "Lluvia moderada",
+        302: "Lluvia moderada", 305: "Lluvia fuerte", 308: "Lluvia muy fuerte",
+        311: "Lluvia helada ligera", 314: "Lluvia helada fuerte", 317: "Aguanieve ligero",
+        320: "Aguanieve fuerte", 323: "Nieve ligera", 326: "Nieve ligera", 329: "Nieve moderada",
+        332: "Nieve moderada", 335: "Nieve fuerte", 338: "Nieve muy fuerte",
+        350: "Granizo", 353: "Chubasco ligero", 356: "Chubasco fuerte", 359: "Chubasco torrencial",
+        362: "Aguanieve ligero", 365: "Aguanieve fuerte", 368: "Nieve ligera", 371: "Nieve fuerte",
+        386: "Lluvia con truenos", 389: "Tormenta con lluvia", 392: "Nieve con truenos", 395: "Tormenta con nieve"
       };
-      return map[Number(code)] || "Condicion variable";
+      return map[c] || "Condicion variable";
     }
 
     async function loadHavanaWeather() {
       const el = $("#weatherLine");
-      const urls = [
-        "https://api.open-meteo.com/v1/forecast?latitude=23.1136&longitude=-82.3666&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FHavana&forecast_days=1",
-        "https://wttr.in/Havana?format=j1"
-      ];
-      let success = false;
-      for (let i = 0; i < urls.length; i++) {
-        try {
-          const r = await fetch(urls[i], { cache: "no-store" });
-          if (!r.ok) continue;
-          const d = await r.json();
-          if (i === 0) {
-            const cur = d.current || {};
-            const dayMax = d.daily?.temperature_2m_max?.[0];
-            const dayMin = d.daily?.temperature_2m_min?.[0];
-            const tNow = Number(cur.temperature_2m);
-            const text = weatherCodeText(cur.weather_code);
-            const nowTxt = Number.isFinite(tNow) ? `${Math.round(tNow)}°C` : "--";
-            const maxTxt = Number.isFinite(dayMax) ? `${Math.round(dayMax)}°C` : "--";
-            const minTxt = Number.isFinite(dayMin) ? `${Math.round(dayMin)}°C` : "--";
-            el.textContent = `La Habana, Cuba hoy: ${text} | Ahora ${nowTxt} | Max ${maxTxt} / Min ${minTxt}`;
-            success = true;
-          } else {
-            const w = d.weather?.[0]?.hourly?.[0] || d.current_condition?.[0];
-            const temp = w?.temp_C || w?.temp_C?.[0] || "--";
-            const code = w?.weatherCode || w?.weatherCode?.[0] || "3";
-            const maxC = w?.tempMaxC || w?.tempMaxC?.[0] || "--";
-            const minC = w?.tempMinC || w?.tempMinC?.[0] || "--";
-            el.textContent = `La Habana, Cuba: ${weatherCodeText(code)} | Ahora ${temp}°C | Max ${maxC} / Min ${minC}`;
-            success = true;
-          }
-          break;
-        } catch (e) {}
+      try {
+        const r = await fetch("simple_weather.php", { cache: "no-store" });
+        if (!r.ok) throw new Error("No response");
+        const d = await r.json();
+        if (d.error) throw new Error(d.error);
+        const code = String(d.code || "0");
+        el.textContent = `${d.city}: ${weatherCodeText(code)} | Ahora ${d.current}°C | Max ${d.max} / Min ${d.min}`;
+      } catch (e) {
+        el.textContent = "La Habana, Cuba hoy: clima no disponible";
       }
-      if (!success) el.textContent = "La Habana, Cuba hoy: clima no disponible";
     }
 
     function isNightModeActive(now) {
@@ -2329,14 +2357,6 @@ const sec = String(now.getSeconds()).padStart(2, "0");
       loadSettings();
     });
 
-    window.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") panel.classList.remove("open");
-      if (e.key.toLowerCase() === "f") {
-        if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
-        else document.exitFullscreen().catch(() => {});
-      }
-    });
-
     loadSettings();
     bindAlarmDismiss();
 
@@ -2353,11 +2373,24 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     EventManager.load();
 
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("./sw.js").then(function() {
-        console.log("Service Worker registered");
-      }).catch(function(err) {
-        console.log("Service Worker error:", err.message);
-      });
+      (async () => {
+        const swCandidates = ["./service-worker.js", "./sw.js"];
+        let lastError = null;
+
+        for (const swPath of swCandidates) {
+          try {
+            const probe = await fetch(swPath, { method: "HEAD", cache: "no-store" });
+            if (!probe.ok && probe.status !== 405) continue;
+            await navigator.serviceWorker.register(swPath, { scope: "./" });
+            console.log("Service Worker registered:", swPath);
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+
+        console.log("Service Worker error:", lastError ? lastError.message : "No Service Worker script available");
+      })();
     }
 
     let deferredPrompt = null;
@@ -2493,6 +2526,7 @@ const sec = String(now.getSeconds()).padStart(2, "0");
         eventPanel.style.display = "none";
       }
       if (e.key.toLowerCase() === "f") {
+        if (!e.isTrusted) return;
         if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(() => {});
         else document.exitFullscreen().catch(() => {});
       }
