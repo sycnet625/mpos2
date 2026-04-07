@@ -2,6 +2,7 @@
 /**
  * ARCHIVO: simple_weather.php
  * Provee datos de clima para La Habana, Cuba con múltiples fuentes y caché local.
+ * Versión compatible sin dependencia de CURL.
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -22,31 +23,28 @@ if (file_exists($cacheFile) && (time() - filemtime($cacheFile) < $cacheTime)) {
 
 // 2. Fuentes de datos
 $urls = [
-    'https://wttr.in/Havana?format=j1',
-    'https://api.open-meteo.com/v1/forecast?latitude=23.1136&longitude=-82.3666&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FHavana&forecast_days=1'
+    'wttr' => 'https://wttr.in/Havana?format=j1',
+    'meteo' => 'https://api.open-meteo.com/v1/forecast?latitude=23.1136&longitude=-82.3666&current_weather=true&daily=temperature_2m_max,temperature_2m_min&timezone=America%2FHavana&forecast_days=1'
 ];
 
 $finalResult = null;
 
-foreach ($urls as $url) {
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $url,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 8,
-        CURLOPT_USERAGENT => 'PalWeb-POS/1.0 (compatible; Mozilla/5.0)',
-        CURLOPT_HTTPHEADER => ['Accept: application/json']
-    ]);
-    $resp = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+foreach ($urls as $source => $url) {
+    $opts = [
+        'http' => [
+            'method' => "GET",
+            'header' => "User-Agent: PalWeb-POS/1.0 (compatible; Mozilla/5.0)\r\nAccept: application/json\r\n",
+            'timeout' => 8
+        ]
+    ];
+    $context = stream_context_create($opts);
+    $resp = @file_get_contents($url, false, $context);
 
-    if ($httpCode === 200 && $resp) {
+    if ($resp) {
         $data = json_decode($resp, true);
         if (!$data) continue;
 
-        // Formato wttr.in
-        if (isset($data['current_condition'])) {
+        if ($source === 'wttr' && isset($data['current_condition'])) {
             $cur = $data['current_condition'][0] ?? null;
             $weather = $data['weather'][0] ?? null;
             $finalResult = [
@@ -61,8 +59,7 @@ foreach ($urls as $url) {
             break;
         }
 
-        // Formato open-meteo
-        if (isset($data['current_weather']) || isset($data['current'])) {
+        if ($source === 'meteo' && (isset($data['current_weather']) || isset($data['current']))) {
             $current = $data['current_weather'] ?? $data['current'];
             $finalResult = [
                 'source' => 'open-meteo',
@@ -84,7 +81,6 @@ if ($finalResult) {
     @file_put_contents($cacheFile, $jsonResult);
     echo $jsonResult;
 } else {
-    // Si fallan todas las APIs, intentar usar caché expirada como fallback
     if (file_exists($cacheFile)) {
         echo @file_get_contents($cacheFile);
     } else {
