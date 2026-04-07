@@ -1467,14 +1467,17 @@ let events = [];
           $("#slideClockDate").textContent = formatDateEs(now);
         } else if (idx === 1) {
           var wt = $("#weatherLine").textContent;
+          var code = $("#weatherLine").dataset.code || localStorage.getItem("last_weather_code") || "0";
+          var txt = weatherCodeText(code);
+          var emoji = txt.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\uD83C[\uDDE6-\uDDFF]|[\u2000-\u3300]/g);
+          
           $("#slideWeatherText").textContent = wt;
-          var moon = getMoonPhase();
-          $("#slideWeatherEmoji").textContent = moon.emoji;
-          $("#slideWeatherDetail").textContent = moon.name;
+          $("#slideWeatherEmoji").textContent = emoji ? emoji[0] : "☀️";
+          $("#slideWeatherDetail").textContent = txt.replace(emoji ? emoji[0] : "", "").trim();
         } else if (idx === 2) {
           var st = $("#salesLine").textContent || "$0.00";
           var ct = $("#clientsLine").textContent || "0";
-          $("#slideSalesTotal").textContent = st.replace("Ventas: ", "");
+          $("#slideSalesTotal").textContent = st.replace("Ventas hoy: ", "");
           var parts = ct.match(/\d+/);
           $("#slideClientsTotal").textContent = (parts ? parts[0] : "0") + " clientes";
         }
@@ -2159,37 +2162,79 @@ let events = [];
     function weatherCodeText(code) {
       const c = Number(code);
       const map = {
-        0: "Despejado", 1: "Mayormente despejado", 2: "Parcialmente nublado", 3: "Nublado",
-        45: "Niebla", 48: "Niebla escarchada", 51: "Llovizna ligera", 53: "Llovizna moderada", 55: "Llovizna intensa",
-        61: "Lluvia ligera", 63: "Lluvia moderada", 65: "Lluvia fuerte", 71: "Nieve ligera", 73: "Nieve moderada", 75: "Nieve fuerte",
-        80: "Chubascos ligeros", 81: "Chubascos moderados", 82: "Chubascos fuertes", 95: "Tormenta",
-        113: "Despejado", 116: "Parcialmente nublado", 119: "Nublado", 122: "Muy nublado",
-        143: "Niebla ligera", 176: "Lluvia dispersa", 179: "Nieve dispersa", 182: "Aguanieve disperso",
-        200: "Tormenta cercana", 227: "Nieve con viento", 230: "Tormenta de nieve",
-        248: "Niebla", 260: "Niebla helada", 263: "Llovizna ligera", 266: "Llovizna",
-        281: "Llovizna helada", 293: "Lluvia ligera", 296: "Lluvia ligera", 299: "Lluvia moderada",
-        302: "Lluvia moderada", 305: "Lluvia fuerte", 308: "Lluvia muy fuerte",
-        311: "Lluvia helada ligera", 314: "Lluvia helada fuerte", 317: "Aguanieve ligero",
-        320: "Aguanieve fuerte", 323: "Nieve ligera", 326: "Nieve ligera", 329: "Nieve moderada",
-        332: "Nieve moderada", 335: "Nieve fuerte", 338: "Nieve muy fuerte",
-        350: "Granizo", 353: "Chubasco ligero", 356: "Chubasco fuerte", 359: "Chubasco torrencial",
-        362: "Aguanieve ligero", 365: "Aguanieve fuerte", 368: "Nieve ligera", 371: "Nieve fuerte",
-        386: "Lluvia con truenos", 389: "Tormenta con lluvia", 392: "Nieve con truenos", 395: "Tormenta con nieve"
+        0: "Despejado ☀️", 1: "Mayormente despejado 🌤️", 2: "Parcialmente nublado ⛅", 3: "Nublado ☁️",
+        45: "Niebla 🌫️", 48: "Niebla escarchada 🌫️", 51: "Llovizna ligera 🌦️", 53: "Llovizna moderada 🌦️", 55: "Llovizna intensa 🌦️",
+        61: "Lluvia ligera 🌧️", 63: "Lluvia moderada 🌧️", 65: "Lluvia fuerte 🌧️", 71: "Nieve ligera 🌨️", 73: "Nieve moderada 🌨️", 75: "Nieve fuerte 🌨️",
+        77: "Granizo fino 🌨️", 80: "Chubascos ligeros 🌦️", 81: "Chubascos moderados 🌧️", 82: "Chubascos fuertes 🌧️", 
+        85: "Chubascos de nieve 🌨️", 86: "Chubascos de nieve fuertes 🌨️", 95: "Tormenta ⛈️",
+        96: "Tormenta con granizo ligero ⛈️", 99: "Tormenta con granizo fuerte ⛈️",
+        113: "Despejado ☀️", 116: "Parcialmente nublado ⛅", 119: "Nublado ☁️", 122: "Muy nublado ☁️",
+        143: "Niebla ligera 🌫️", 176: "Lluvia dispersa 🌦️", 179: "Nieve dispersa 🌨️", 182: "Aguanieve disperso 🌧️",
+        200: "Tormenta cercana ⛈️", 227: "Nieve con viento 🌨️", 230: "Tormenta de nieve ❄️",
+        248: "Niebla 🌫️", 260: "Niebla helada ❄️", 263: "Llovizna ligera 🌦️", 266: "Llovizna 🌦️",
+        281: "Llovizna helada ❄️", 293: "Lluvia ligera 🌧️", 296: "Lluvia ligera 🌧️", 299: "Lluvia moderada 🌧️",
+        302: "Lluvia moderada 🌧️", 305: "Lluvia fuerte 🌧️", 308: "Lluvia muy fuerte 🌧️",
+        311: "Lluvia helada ligera ❄️", 314: "Lluvia helada fuerte ❄️", 317: "Aguanieve ligero 🌧️",
+        320: "Aguanieve fuerte 🌧️", 323: "Nieve ligera 🌨️", 326: "Nieve ligera 🌨️", 329: "Nieve moderada 🌨️",
+        332: "Nieve moderada 🌨️", 335: "Nieve fuerte 🌨️", 338: "Nieve muy fuerte 🌨️",
+        350: "Granizo 🌨️", 353: "Chubasco ligero 🌦️", 356: "Chubasco fuerte 🌧️", 359: "Chubasco torrencial 🌧️",
+        362: "Aguanieve ligero 🌧️", 365: "Aguanieve fuerte 🌧️", 368: "Nieve ligera 🌨️", 371: "Nieve fuerte 🌨️",
+        386: "Lluvia con truenos ⛈️", 389: "Tormenta con lluvia ⛈️", 392: "Nieve con truenos ⛈️", 395: "Tormenta con nieve ⛈️"
       };
-      return map[c] || "Condicion variable";
+      return map[c] || "Condicion variable 🌀";
     }
 
     async function loadHavanaWeather() {
       const el = $("#weatherLine");
+      const CACHE_KEY = "last_weather_cache";
+      const CACHE_TIME_KEY = "last_weather_time";
+      const CACHE_CODE_KEY = "last_weather_code";
+      const CACHE_MAX_AGE = 15 * 60 * 1000; // 15 minutos
+
+      // Intentar cargar desde cache local para mostrar algo inmediato
       try {
-        const r = await fetch("simple_weather.php", { cache: "no-store" });
+        const cached = localStorage.getItem(CACHE_KEY);
+        const lastTime = localStorage.getItem(CACHE_TIME_KEY);
+        if (cached && lastTime) {
+          const age = Date.now() - parseInt(lastTime);
+          if (age < CACHE_MAX_AGE) {
+            el.textContent = cached;
+            if (age < 5 * 60 * 1000) return;
+          } else {
+            el.textContent = cached + " (actualizando...)";
+          }
+        }
+      } catch (e) {}
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); 
+
+      try {
+        const r = await fetch("simple_weather.php", { 
+          cache: "no-store",
+          signal: controller.signal 
+        });
+        clearTimeout(timeoutId);
+        
         if (!r.ok) throw new Error("No response");
         const d = await r.json();
         if (d.error) throw new Error(d.error);
+        
         const code = String(d.code || "0");
-        el.textContent = `${d.city}: ${weatherCodeText(code)} | Ahora ${d.current}°C | Max ${d.max} / Min ${d.min}`;
+        const weatherText = `${d.city}: ${weatherCodeText(code)} | Ahora ${d.current}°C | Max ${d.max} / Min ${d.min}`;
+        
+        el.textContent = weatherText;
+        el.dataset.code = code; // Guardar codigo para presentacion
+        
+        localStorage.setItem(CACHE_KEY, weatherText);
+        localStorage.setItem(CACHE_TIME_KEY, Date.now().toString());
+        localStorage.setItem(CACHE_CODE_KEY, code);
+        
       } catch (e) {
-        el.textContent = "La Habana, Cuba hoy: clima no disponible";
+        clearTimeout(timeoutId);
+        if (!el.textContent.includes(":")) {
+          el.textContent = "La Habana, Cuba hoy: clima no disponible";
+        }
       }
     }
 
@@ -2439,8 +2484,16 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     }
 
     async function loadSalesMetrics() {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+
       try {
-        const r = await fetch('api_sales.php', { cache: 'no-store' });
+        const r = await fetch('api_sales.php', { 
+          cache: 'no-store',
+          signal: controller.signal 
+        });
+        clearTimeout(timeoutId);
+        
         if (!r.ok) throw new Error('http ' + r.status);
         const d = await r.json();
         const salesEl = document.getElementById('salesLine');
@@ -2448,10 +2501,8 @@ const sec = String(now.getSeconds()).padStart(2, "0");
         if (salesEl) salesEl.textContent = showSales ? 'Ventas hoy: $' + d.total + ' (' + d.count + ' ventas)' : '';
         if (clientsEl) clientsEl.textContent = showClients ? 'Clientes hoy: ' + d.clients : '';
       } catch (e) {
-        const salesEl = document.getElementById('salesLine');
-        const clientsEl = document.getElementById('clientsLine');
-        if (salesEl) salesEl.textContent = '';
-        if (clientsEl) clientsEl.textContent = '';
+        clearTimeout(timeoutId);
+        // Silenciar error en consola, no afectar UI si ya hay contenido
       }
     }
 
