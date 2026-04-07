@@ -672,11 +672,53 @@
     .days input { width: 13px; height: 13px; }
 
     @media (max-width: 700px) {
-      #clockLine { letter-spacing: 0.08em; }
-      #customizeBtn { font-size: 0.84rem; padding: 7px 10px; }
-      .row { grid-template-columns: 1fr; }
+      :root {
+        --time-size: clamp(2.5rem, 18vw, 6rem);
+        --meta-size: clamp(0.75rem, 2.5vw, 1.1rem);
+        --letter-spacing: 0.08em;
+      }
+      #clockLine { letter-spacing: 0.06em; gap: 0.02em; }
+      #clockLine > span { font-size: 0.95em; }
+      #customizeBtn, #toolsBtn { font-size: 0.78rem; padding: 6px 10px; top: 8px; }
+      #toolsBtn { left: 8px; }
+      #customizeBtn { right: 8px; }
+      .clock-card { padding: clamp(10px, 3vw, 20px); border-radius: clamp(8px, 2vw, 14px); }
+      .row { grid-template-columns: 1fr; gap: 6px; }
+      .row label { font-size: 0.85rem; }
       .row input[type="range"] { width: 100%; }
-      .days label { font-size: 0.7rem; }
+      .row input[type="color"] { width: 40px; height: 30px; }
+      .days label { font-size: 0.65rem; padding: 3px 1px; }
+      .panel { width: 92vw; max-height: 90dvh; padding: 10px; }
+      .timer-panel, .event-panel { width: 90vw; max-height: 88dvh; padding: 12px; }
+      .timer-display { font-size: clamp(2rem, 12vw, 3rem); }
+      .section { padding: 8px; margin: 8px 0; }
+      .section h3 { font-size: 0.8rem; }
+      .alarm-history { font-size: 0.68rem; max-width: 160px; bottom: 8px; left: 8px; }
+      #secondsLine { font-size: calc(var(--meta-size) * 0.55); }
+      #moonPhaseLine, #salesLine, #clientsLine { font-size: calc(var(--meta-size) * 0.5); }
+    }
+
+    @media (max-width: 480px) {
+      :root {
+        --time-size: clamp(2rem, 22vw, 4.5rem);
+        --meta-size: clamp(0.65rem, 3vw, 0.9rem);
+      }
+      #clockLine { flex-wrap: wrap; justify-content: center; }
+      .clock-card { padding: 8px; }
+      #customizeBtn, #toolsBtn { font-size: 0.7rem; padding: 5px 8px; }
+      .panel-actions { grid-template-columns: 1fr; }
+      .split { grid-template-columns: 1fr; }
+      .timer-sets { flex-wrap: wrap; }
+      .switch { width: 48px; height: 26px; }
+      .switch-slider::before { width: 20px; height: 20px; }
+      .switch input:checked + .switch-slider::before { transform: translateX(22px); }
+    }
+
+    @media (max-height: 500px) and (orientation: landscape) {
+      .clock-card { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px; }
+      #dateLine, #weatherLine, #alarmLine, #secondsLine, #moonPhaseLine, #salesLine, #clientsLine { margin: 2px 0; }
+      :root { --time-size: clamp(1.8rem, 12vw, 3rem); }
+      .panel { max-height: 95dvh; }
     }
 
     @keyframes breathe-glow {
@@ -1066,6 +1108,12 @@
       <div class="switch-row"><label for="secondsToggle">Mostrar Segundos</label>
         <label class="switch"><input id="secondsToggle" type="checkbox" checked><span class="switch-slider"></span></label>
       </div>
+      <div class="switch-row"><label for="mirrorToggle">Modo Espejo</label>
+        <label class="switch"><input id="mirrorToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
+      <div class="switch-row"><label for="presentToggle">Modo Presentacion</label>
+        <label class="switch"><input id="presentToggle" type="checkbox"><span class="switch-slider"></span></label>
+      </div>
       <div class="split" style="margin-top:10px;">
         <button id="exportBtn" type="button">Exportar</button>
         <button id="importBtn" type="button">Importar</button>
@@ -1082,8 +1130,49 @@
       <div id="weatherLine">Clima La Habana: cargando...</div>
       <div id="alarmLine"></div>
       <div id="secondsLine"></div>
+      <div id="moonPhaseLine"></div>
+      <div id="salesLine"></div>
+      <div id="clientsLine"></div>
     </section>
   </main>
+
+  <div id="presentationSlides" class="presentation-slides">
+    <div class="slide active" id="slideClock">
+      <h1 id="slideClockTime">--:--</h1>
+      <p id="slideClockDate"></p>
+    </div>
+    <div class="slide" id="slideWeather">
+      <h1 id="slideWeatherText">--</h1>
+      <p id="slideWeatherDetail"></p>
+    </div>
+    <div class="slide" id="slideEvents">
+      <h1>Proximos Eventos</h1>
+      <p id="slideEventsList">Sin eventos</p>
+    </div>
+    <div class="slide" id="slideSales">
+      <h1 id="slideSalesTotal">$0.00</h1>
+      <p id="slideSalesDetail">0 transacciones | 0 clientes</p>
+    </div>
+  </div>
+
+  <div id="presentationSlides" class="presentation-slides">
+    <div class="slide active" id="slideClock">
+      <h1 id="slideClockTime">--:--</h1>
+      <p id="slideClockDate"></p>
+    </div>
+    <div class="slide" id="slideWeather">
+      <h1 id="slideWeatherText">--</h1>
+      <p id="slideWeatherDetail"></p>
+    </div>
+    <div class="slide" id="slideEvents">
+      <h1>Proximos Eventos</h1>
+      <p id="slideEventsList">Sin eventos</p>
+    </div>
+    <div class="slide" id="slideSales">
+      <h1 id="slideSalesTotal">$0.00</h1>
+      <p id="slideSalesDetail">0 transacciones | 0 clientes</p>
+    </div>
+  </div>
 
   <div id="timerPanel" class="timer-panel" style="display:none;">
     <div class="timer-tabs">
@@ -1217,7 +1306,112 @@
     let countdownInterval = null;
     let countdownRunning = false;
 
-    let events = [];
+let events = [];
+
+    let presentationMode = false;
+    let presentationInterval = null;
+    let currentSlide = 0;
+    let mirrorMode = false;
+
+    const moonPhases = [
+      { name: "Luna Nueva", emoji: "🌑" },
+      { name: "Luna Creciente", emoji: "🌒" },
+      { name: "Cuarto Creciente", emoji: "🌓" },
+      { name: "Gibosa Creciente", emoji: "🌔" },
+      { name: "Luna Llena", emoji: "🌕" },
+      { name: "Gibosa Menguante", emoji: "🌖" },
+      { name: "Cuarto Menguante", emoji: "🌗" },
+      { name: "Luna Menguante", emoji: "🌘" }
+    ];
+
+    function getMoonPhase(date = new Date()) {
+      const year = date.getFullYear();
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
+      let c = 0;
+      if (month < 3) {
+        c = 365.25 * (year - 1) + 30.6001 * (month + 13) + day;
+      } else {
+        c = 365.25 * year + 30.6001 * (month + 1) + day;
+      }
+      const jd = c - 694039.09;
+      const phase = jd / 29.5305882;
+      const phaseNum = Math.floor((phase - Math.floor(phase)) * 8) % 8;
+      return moonPhases[phaseNum];
+    }
+
+    function updateMoonPhase() {
+      const moon = getMoonPhase();
+      const el = $("#moonPhaseLine");
+      if (el) el.textContent = moon.emoji + " " + moon.name;
+    }
+
+    async function loadSalesMetrics() {
+      try {
+        const r = await fetch("api_sales.php", { cache: "no-store" });
+        if (!r.ok) throw new Error("http " + r.status);
+        const d = await r.json();
+        const salesLine = $("#salesLine");
+        const clientsLine = $("#clientsLine");
+        if (salesLine) salesLine.textContent = "Ventas hoy: $" + d.total + " (" + d.count + " transacciones)";
+        if (clientsLine) clientsLine.textContent = "Clientes hoy: " + d.clients;
+      } catch (e) {
+        const salesLine = $("#salesLine");
+        const clientsLine = $("#clientsLine");
+        if (salesLine) salesLine.textContent = "";
+        if (clientsLine) clientsLine.textContent = "";
+      }
+    }
+
+    function PresentationModeController() {
+      this.start = function() {
+        presentationMode = true;
+        document.body.classList.add("presentation-mode");
+        $("#presentationSlides").classList.add("active");
+        currentSlide = 0;
+        this.showSlide(0);
+        presentationInterval = setInterval(function() {
+          currentSlide = (currentSlide + 1) % 4;
+          this.showSlide(currentSlide);
+        }.bind(this), 10000);
+      };
+      this.stop = function() {
+        presentationMode = false;
+        document.body.classList.remove("presentation-mode");
+        $("#presentationSlides").classList.remove("active");
+        if (presentationInterval) clearInterval(presentationInterval);
+        presentationInterval = null;
+      };
+      this.showSlide = function(idx) {
+        var slides = document.querySelectorAll(".slide");
+        for (var i = 0; i < slides.length; i++) {
+          slides[i].classList.toggle("active", i === idx);
+        }
+        if (idx === 0) {
+          var now = new Date();
+          var h = String(now.getHours()).padStart(2, "0");
+          var m = String(now.getMinutes()).padStart(2, "0");
+          $("#slideClockTime").textContent = h + ":" + m;
+          $("#slideClockDate").textContent = formatDateEs(now);
+        } else if (idx === 1) {
+          var wt = $("#weatherLine").textContent;
+          $("#slideWeatherText").textContent = wt;
+          var moon = getMoonPhase();
+          $("#slideWeatherDetail").textContent = moon.emoji + " " + moon.name;
+        } else if (idx === 2) {
+          var evtText = events.length > 0
+            ? events.slice(0, 5).map(function(e) { return e.title + " (" + new Date(e.date).toLocaleDateString() + ")"; }).join(" | ")
+            : "Sin eventos proximos";
+          $("#slideEventsList").textContent = evtText;
+        } else if (idx === 3) {
+          var st = $("#salesLine").textContent || "Ventas: $0.00";
+          var ct = $("#clientsLine").textContent || "Clientes: 0";
+          $("#slideSalesTotal").textContent = st;
+          $("#slideSalesDetail").textContent = ct;
+        }
+      };
+    }
+    var presentation = new PresentationModeController();
 
     const rainbowPatterns = [
       "linear-gradient(90deg, #ff004c, #ff7a00, #ffe600, #00d26a, #00b7ff, #6c5cff, #ff00c8)",
@@ -1530,7 +1724,9 @@
         alarm2Days: getCheckedDays("2") || DEFAULT_DAYS,
         breathe: !!$("#breatheToggle").checked,
         hour24: !!$("#hour24Toggle").checked,
-        seconds: !!$("#secondsToggle").checked
+        seconds: !!$("#secondsToggle").checked,
+        mirror: !!$("#mirrorToggle").checked,
+        present: !!$("#presentToggle").checked
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
       applySettings(s);
@@ -1571,6 +1767,8 @@
       $("#breatheToggle").checked = !!s.breathe;
       $("#hour24Toggle").checked = !!s.hour24;
       $("#secondsToggle").checked = s.seconds !== false;
+      $("#mirrorToggle").checked = !!s.mirror;
+      $("#presentToggle").checked = !!s.present;
       applySettings(s);
     }
 
@@ -1757,6 +1955,11 @@
       breatheEnabled = !!s.breathe;
       use24Hour = !!s.hour24;
       secondsLine.style.display = s.seconds !== false ? "" : "none";
+      mirrorMode = !!s.mirror;
+      document.body.classList.toggle("mirror-mode", mirrorMode);
+      if (!!s.present) {
+        presentation.start();
+      }
     }
 
     function buildFlipCardMarkup(char) {
@@ -2109,7 +2312,14 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     startClock();
     loadHavanaWeather();
     setInterval(loadHavanaWeather, 30 * 60 * 1000);
+    updateMoonPhase();
+    loadSalesMetrics();
+    setInterval(loadSalesMetrics, 30 * 1000);
     EventManager.load();
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("sw.js").catch(function() {});
+    }
 
     $("#toolsBtn").addEventListener("click", () => {
       timerPanel.style.display = timerPanel.style.display === "none" ? "block" : "none";
@@ -2192,6 +2402,14 @@ const sec = String(now.getSeconds()).padStart(2, "0");
       if (e.key.toLowerCase() === "e") {
         eventPanel.style.display = eventPanel.style.display === "none" ? "block" : "none";
         if (eventPanel.style.display === "block") timerPanel.style.display = "none";
+      }
+      if (e.key.toLowerCase() === "p") {
+        if (presentationMode) presentation.stop();
+        else presentation.start();
+      }
+      if (e.key.toLowerCase() === "i") {
+        mirrorMode = !mirrorMode;
+        document.body.classList.toggle("mirror-mode", mirrorMode);
       }
     });
   </script>
