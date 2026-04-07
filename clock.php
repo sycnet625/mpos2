@@ -2352,14 +2352,12 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     setInterval(loadSalesMetrics, 30 * 1000);
     EventManager.load();
 
-    if ("serviceWorker" in navigator && window.location.protocol === "https:") {
-      navigator.serviceWorker.register("sw.js").then(function() {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").then(function() {
         console.log("Service Worker registered");
       }).catch(function(err) {
         console.log("Service Worker error:", err.message);
       });
-    } else if ("serviceWorker" in navigator) {
-      console.log("Service Worker skipped: not HTTPS");
     }
 
     let deferredPrompt = null;
