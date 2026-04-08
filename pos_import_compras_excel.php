@@ -16,6 +16,7 @@ require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
 require_once __DIR__ . '/kardex_engine.php';
+require_once __DIR__ . '/inventory_suite_layout.php';
 
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -991,22 +992,23 @@ if ($preview && !empty($preview['rows'])) {
     </style>
 </head>
 <body class="p-4 inventory-suite">
-<div class="container-fluid shell inventory-shell">
-        <div class="glass-card inventory-hero hero mb-4">
-            <div class="d-flex flex-column flex-lg-row justify-content-between gap-4">
-                <div>
-                    <div class="section-title text-white-50 mb-2">Compras / Utilidad</div>
-                    <h2 class="mb-2"><i class="fas fa-file-excel me-2"></i>Importar compras desde Excel</h2>
-                    <div class="text-white-50">Plantilla descargable, validación fuerte, matching por nombre, diff previo, modo de actualización y bitácora reversible.</div>
-                </div>
-                <div class="d-flex flex-wrap gap-3 align-self-start">
-                    <div class="hero-kpi"><div class="small text-white-50">Columnas requeridas</div><div class="fs-5 fw-bold">10</div></div>
-                    <div class="hero-kpi"><div class="small text-white-50">Defaults</div><div class="fs-6 fw-bold mono">venta +30% · mayorista +10%</div></div>
-                    <a href="?action=download_template" class="btn btn-light"><i class="fas fa-download me-2"></i>Descargar plantilla</a>
-                    <a href="pos_purchases.php" class="btn btn-outline-light"><i class="fas fa-dolly-flatbed me-2"></i>Ir a compras</a>
-                </div>
-            </div>
-        </div>
+<?php inventory_suite_shell_open('shell'); ?>
+<?php
+inventory_suite_render_hero([
+    'hero_classes' => 'hero',
+    'eyebrow' => 'Compras / Utilidad',
+    'title' => '<i class="fas fa-file-excel me-2"></i>Importar compras desde Excel',
+    'description' => 'Plantilla descargable, validación fuerte, matching por nombre, diff previo, modo de actualización y bitácora reversible.',
+    'chips' => [
+        '<span class="small text-white-50">Columnas requeridas</span><strong class="ms-2">10</strong>',
+        '<span class="small text-white-50">Defaults</span><strong class="ms-2 mono">venta +30% · mayorista +10%</strong>',
+    ],
+    'actions' => [
+        '<a href="?action=download_template" class="btn btn-light inventory-btn"><i class="fas fa-download me-2"></i>Descargar plantilla</a>',
+        '<a href="pos_purchases.php" class="btn btn-outline-light inventory-btn"><i class="fas fa-dolly-flatbed me-2"></i>Ir a compras</a>',
+    ],
+]);
+?>
 
     <?php if ($notice !== ''): ?>
         <div class="alert alert-<?= htmlspecialchars($noticeType) ?> shadow-sm"><?= htmlspecialchars($notice) ?></div>
@@ -1311,7 +1313,7 @@ if ($preview && !empty($preview['rows'])) {
             </div>
         </div>
     </div>
-</div>
+<?php inventory_suite_shell_close(); ?>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>

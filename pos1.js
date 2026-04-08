@@ -661,11 +661,11 @@ function activatePinLockout() {
             clearInterval(pinLockInterval);
             pinLockInterval = null;
             pinLockedUntil = 0;
-            if (lockMsg) { lockMsg.textContent = ''; lockMsg.classList.add('d-none'); }
+            if (lockMsg) { lockMsg.textContent = ''; lockMsg.style.visibility = 'hidden'; lockMsg.style.height = '0'; lockMsg.style.overflow = 'hidden'; lockMsg.style.padding = '0'; lockMsg.style.margin = '0'; lockMsg.style.border = 'none'; }
             if (grid) grid.querySelectorAll('button').forEach(b => b.disabled = false);
         } else {
             if (lockMsg) {
-                lockMsg.classList.remove('d-none');
+                lockMsg.style.visibility = 'visible'; lockMsg.style.height = ''; lockMsg.style.overflow = ''; lockMsg.style.padding = ''; lockMsg.style.margin = ''; lockMsg.style.border = '';
                 lockMsg.textContent = `🔒 Bloqueado por ${remaining} segundo${remaining !== 1 ? 's' : ''}`;
             }
         }

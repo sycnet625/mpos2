@@ -23,6 +23,7 @@ try {
 }
 
 require_once 'config_loader.php';
+require_once 'inventory_suite_layout.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
@@ -511,10 +512,40 @@ function auditResumen(string $accion, array $d): string {
     <title>Dashboard Admin | PalWeb POS</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
     <style id="kpi-custom-styles">
-        body { background-color: #f0f2f5 !important; font-family: 'Segoe UI', sans-serif; padding-bottom: 60px; }
+        body.inventory-suite { font-family: 'Segoe UI', sans-serif; padding-bottom: 60px; }
+        .dashboard-shell { max-width: 1520px; }
+        .dashboard-main-nav {
+            background: rgba(15, 23, 42, 0.92) !important;
+            backdrop-filter: blur(8px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .dashboard-shell .card {
+            background: var(--pw-card);
+            border: 1px solid var(--pw-line) !important;
+            border-radius: 20px !important;
+            box-shadow: 0 14px 36px rgba(15, 23, 42, 0.08);
+        }
+        .dashboard-shell .card-header {
+            background: rgba(255, 255, 255, 0.74) !important;
+            border-bottom: 1px solid var(--pw-line) !important;
+            border-top-left-radius: 20px !important;
+            border-top-right-radius: 20px !important;
+        }
+        .dashboard-shell .card-footer {
+            background: rgba(248, 250, 252, 0.92) !important;
+            border-top: 1px solid var(--pw-line) !important;
+            border-bottom-left-radius: 20px !important;
+            border-bottom-right-radius: 20px !important;
+        }
+        .dashboard-shell .table > :not(caption) > * > * { background: transparent; }
+        .dashboard-shell .modal-content {
+            border: 1px solid var(--pw-line);
+            border-radius: 18px;
+        }
         
         /* Selectores de máxima prioridad */
         body .card.card-stat { border: none !important; border-radius: 12px !important; transition: transform 0.2s !important; position: relative !important; overflow: hidden !important; }
@@ -609,11 +640,37 @@ function auditResumen(string $accion, array $d): string {
         .kpi-audit-descuentos{ background: #fffbeb !important; border-left: 5px solid #f59e0b !important; }
         .kpi-audit-devol     { background: #f5f0ff !important; border-left: 5px solid #6f42c1 !important; }
         .kpi-audit-integ     { background: #f0fdf4 !important; border-left: 5px solid #198754 !important; }
+
+        @media (max-width: 991px) {
+            .dashboard-shell { padding-top: 1rem !important; padding-bottom: 1.5rem !important; }
+            .dashboard-shell .inventory-hero { border-radius: 20px; }
+            .dashboard-shell .inventory-hero h1 { font-size: 1.55rem; }
+            .dashboard-shell .inventory-toolbar { padding: .85rem .9rem; }
+            .dashboard-shell .inventory-toolbar__filter-form { width: 100%; }
+            .dashboard-shell .inventory-toolbar .btn,
+            .dashboard-shell .inventory-toolbar .form-control,
+            .dashboard-shell .inventory-toolbar .form-select { min-height: 40px; }
+            .dashboard-shell .tab-content { min-height: 420px; }
+        }
+
+        @media (max-width: 767px) {
+            .dashboard-main-nav .navbar-brand { font-size: .95rem; }
+            .dashboard-shell .inventory-hero { padding: 1.05rem !important; }
+            .dashboard-shell .kpi-chip { font-size: .78rem; padding: .3rem .6rem; }
+            .dashboard-shell .card { border-radius: 16px !important; }
+            .dashboard-shell .card-header,
+            .dashboard-shell .card-footer { border-radius: 16px !important; }
+            .dashboard-shell .table-responsive { border-radius: 14px; }
+            .dashboard-shell .table th,
+            .dashboard-shell .table td { font-size: .82rem; }
+            .dashboard-shell .nav-pills .nav-link { padding: 7px 12px; margin-right: 2px; font-size: .84rem; }
+            .dashboard-shell .tab-content { min-height: 300px; }
+        }
     </style>
 </head>
-<body>
+<body class="pb-5 inventory-suite">
 
-<nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow-sm">
+<nav class="navbar navbar-expand-lg navbar-dark sticky-top shadow-sm dashboard-main-nav">
     <div class="container-fluid">
         <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i>PalWeb Admin</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
@@ -630,57 +687,79 @@ function auditResumen(string $accion, array $d): string {
     </div>
 </nav>
 
-<div class="container-fluid p-4">
-
-    <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
-        <!-- Navegación por Tabs -->
-        <ul class="nav nav-pills bg-light p-1 rounded shadow-sm" id="dashboardTabs" role="tablist">
-            <li class="nav-item">
-                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tab-negocios" type="button"><i class="fas fa-chart-line me-1"></i> Negocios</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-realtime" type="button" id="btnTabRealtime">
-                    <i class="fas fa-satellite-dish me-1 text-danger blink-dot"></i> Tiempo Real
-                </button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-reservas" type="button"><i class="fas fa-calendar-check me-1"></i> Reservas</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-web" type="button"><i class="fas fa-shopping-cart me-1"></i> Web & Ecommerce</button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-promo" type="button"><i class="fas fa-bullhorn me-1"></i> Promociones <?php if($pushClientesCount > 0): ?><span class="badge bg-primary ms-1"><?php echo $pushClientesCount; ?></span><?php endif; ?></button>
-            </li>
-            <li class="nav-item">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-auditoria" type="button">
-                    <i class="fas fa-shield-alt me-1"></i> Auditoría
-                    <?php if($auditTabBadge > 0): ?>
-                        <span class="badge bg-danger ms-1"><?php echo $auditTabBadge; ?></span>
-                    <?php endif; ?>
-                </button>
-            </li>
-        </ul>
-
-        <div class="d-flex gap-2">
-            <div class="btn-group shadow-sm">
-                <a href="?scope=local&start=<?php echo $fechaInicio; ?>&end=<?php echo $fechaFin; ?>" class="btn btn-sm <?php echo $scope === 'local' ? 'btn-primary fw-bold' : 'btn-outline-secondary bg-white'; ?>">
-                    <i class="fas fa-store me-1"></i> Sucursal Actual (#<?php echo $SUC_ID; ?>)
-                </a>
-                <a href="?scope=global&start=<?php echo $fechaInicio; ?>&end=<?php echo $fechaFin; ?>" class="btn btn-sm <?php echo $scope === 'global' ? 'btn-primary fw-bold' : 'btn-outline-secondary bg-white'; ?>">
-                    <i class="fas fa-globe me-1"></i> Global / Todos
-                </a>
+<div class="container-fluid shell inventory-shell dashboard-shell py-4 py-lg-5">
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Analitica / Operaciones</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-line me-2"></i>Dashboard Admin</h1>
+                <p class="mb-3 text-white-50">Vista integral de ventas, inventario, reservas, ecommerce y auditoria operativa.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i><?= $scope === 'global' ? 'Alcance global' : 'Sucursal actual' ?></span>
+                    <span class="kpi-chip"><i class="fas fa-calendar-alt me-1"></i><?= htmlspecialchars($fechaInicio) ?> a <?= htmlspecialchars($fechaFin) ?></span>
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i>Suc <?= (int)$SUC_ID ?></span>
+                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Alm <?= (int)$ALM_ID ?></span>
+                </div>
             </div>
-            
-            <form method="GET" class="d-flex align-items-center gap-2 bg-white p-1 px-2 rounded shadow-sm border">
-                <input type="hidden" name="scope" value="<?php echo $scope; ?>">
-                <input type="date" name="start" class="form-control form-control-sm w-auto border-0" value="<?php echo $fechaInicio; ?>">
-                <span class="text-muted">-</span>
-                <input type="date" name="end" class="form-control form-control-sm w-auto border-0" value="<?php echo $fechaFin; ?>">
-                <button type="submit" class="btn btn-primary btn-sm rounded-circle"><i class="fas fa-filter"></i></button>
-            </form>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="pos_purchases.php" class="btn btn-success"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>
+                <a href="products_table.php" class="btn btn-outline-light"><i class="fas fa-boxes me-1"></i>Inventario</a>
+            </div>
         </div>
-    </div>
+    </section>
+
+    <?php
+    $scopeEsc = htmlspecialchars((string)$scope, ENT_QUOTES, 'UTF-8');
+    $fechaInicioEsc = htmlspecialchars((string)$fechaInicio, ENT_QUOTES, 'UTF-8');
+    $fechaFinEsc = htmlspecialchars((string)$fechaFin, ENT_QUOTES, 'UTF-8');
+    $localBtnClass = $scope === 'local' ? 'btn-primary fw-bold' : 'btn-outline-secondary bg-white';
+    $globalBtnClass = $scope === 'global' ? 'btn-primary fw-bold' : 'btn-outline-secondary bg-white';
+    $scopeLocalUrl = '?scope=local&start=' . rawurlencode((string)$fechaInicio) . '&end=' . rawurlencode((string)$fechaFin);
+    $scopeGlobalUrl = '?scope=global&start=' . rawurlencode((string)$fechaInicio) . '&end=' . rawurlencode((string)$fechaFin);
+    $promoBadge = $pushClientesCount > 0 ? '<span class="badge bg-primary ms-1">' . (int)$pushClientesCount . '</span>' : '';
+    $auditBadge = $auditTabBadge > 0 ? '<span class="badge bg-danger ms-1">' . (int)$auditTabBadge . '</span>' : '';
+
+    $toolbarTabs = <<<HTML
+<ul class="nav nav-pills inventory-tablist" id="dashboardTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tab-negocios" type="button"><i class="fas fa-chart-line me-1"></i> Negocios</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-realtime" type="button" id="btnTabRealtime"><i class="fas fa-satellite-dish me-1 text-danger blink-dot"></i> Tiempo Real</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-reservas" type="button"><i class="fas fa-calendar-check me-1"></i> Reservas</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-web" type="button"><i class="fas fa-shopping-cart me-1"></i> Web & Ecommerce</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-promo" type="button"><i class="fas fa-bullhorn me-1"></i> Promociones {$promoBadge}</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-auditoria" type="button"><i class="fas fa-shield-alt me-1"></i> Auditoría {$auditBadge}</button></li>
+</ul>
+HTML;
+
+    $toolbarScopeButtons = <<<HTML
+<div class="btn-group shadow-sm">
+    <a href="{$scopeLocalUrl}" class="btn btn-sm {$localBtnClass}"><i class="fas fa-store me-1"></i> Sucursal Actual (#{$SUC_ID})</a>
+    <a href="{$scopeGlobalUrl}" class="btn btn-sm {$globalBtnClass}"><i class="fas fa-globe me-1"></i> Global / Todos</a>
+</div>
+HTML;
+
+    $toolbarDateForm = <<<HTML
+<form method="GET" class="inventory-toolbar__filter-form">
+    <input type="hidden" name="scope" value="{$scopeEsc}">
+    <input type="date" name="start" class="form-control form-control-sm" value="{$fechaInicioEsc}">
+    <span class="text-muted small">a</span>
+    <input type="date" name="end" class="form-control form-control-sm" value="{$fechaFinEsc}">
+    <button type="submit" class="btn btn-primary btn-sm inventory-btn"><i class="fas fa-filter me-1"></i>Aplicar</button>
+</form>
+HTML;
+
+    inventory_suite_render_toolbar([
+        'title' => 'Vista y filtros',
+        'subtitle' => 'Tabs operativos, alcance y rango de fechas del dashboard.',
+        'class' => 'mb-4 dashboard-toolbar inventory-fade-in',
+        'left' => [
+            $toolbarTabs,
+        ],
+        'right' => [
+            $toolbarScopeButtons,
+            $toolbarDateForm,
+        ],
+    ]);
+    ?>
 
     <div class="tab-content">
         <!-- TAB: TIEMPO REAL -->

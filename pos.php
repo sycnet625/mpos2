@@ -645,7 +645,10 @@ try {
         .stock-badge { position: absolute !important; top: 5px; right: 5px; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.75rem; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
         .stock-ok { background: #ffc107; color: black; } .stock-zero { background: #dc3545; color: white; }
         #pinOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
-        .pin-box { background: white; padding: 30px; border-radius: 15px; text-align: center; width: 320px; }
+        .pin-box { background: white; padding: 30px; border-radius: 15px; text-align: center; width: 320px; box-sizing: border-box; }
+        #pinDisplay { min-width: 8ch; display: inline-block; letter-spacing: 0.5ch; height: 1.2em; line-height: 1.2em; }
+        #pinAttemptsDots { height: 1.2em; }
+        #pinLockMsg { min-height: 0; }
         .cash-status { font-size: 0.7rem; margin-left: 5px; padding: 1px 6px; border-radius: 4px; display: inline-block; vertical-align: middle; }
         .cash-open { background: #d1e7dd; color: #0f5132; } .cash-closed { background: #f8d7da; color: #842029; }
         .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
@@ -800,8 +803,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     <div class="pin-box">
         <h3 class="mb-2">Acceso POS</h3>
         <div class="fs-1 mb-2" id="pinDisplay">••••</div>
-        <div id="pinAttemptsDots" class="mb-2 text-muted small" style="min-height:1.2em;"></div>
-        <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 d-none small"></div>
+        <div id="pinAttemptsDots" class="mb-2 text-muted small"></div>
+        <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 small" style="visibility:hidden; height:0; overflow:hidden; padding:0; margin:0; border:none;"></div>
         <div class="pin-grid" id="pinGrid">
             <button class="pin-btn" onclick="typePin(1)">1</button><button class="pin-btn" onclick="typePin(2)">2</button><button class="pin-btn" onclick="typePin(3)">3</button>
             <button class="pin-btn" onclick="typePin(4)">4</button><button class="pin-btn" onclick="typePin(5)">5</button><button class="pin-btn" onclick="typePin(6)">6</button>
@@ -972,6 +975,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 <button id="btnHotkeyHelp" class="btn btn-light border-0" onclick="toggleHotkeyPanel()" title="Atajos de teclado">⌨</button>
             </div>
             <div id="posClock"><span class="clock-h">12</span><span class="clock-sep">:</span><span class="clock-m">00</span><span class="clock-ampm" style="font-size:0.7rem; letter-spacing:0; margin-left:3px; opacity:0.85;">AM</span></div>
+            <button id="btnLockScreen" class="btn btn-outline-secondary btn-sm ms-2" onclick="lockPos()" title="Bloquear terminal"><i class="fas fa-lock"></i></button>
         </div>
         <div id="hotkeyPanel">
             <div class="fw-bold mb-2 text-secondary" style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em;">Atajos de Teclado</div>

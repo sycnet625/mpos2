@@ -8,6 +8,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'runtime_context.php';
+require_once 'inventory_suite_layout.php';
 
 function poscfg_table_has_column(PDO $pdo, string $table, string $column): bool
 {

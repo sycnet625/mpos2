@@ -9,6 +9,7 @@ require_once 'pos_audit.php';
 // 1. CARGAR CONFIGURACIÓN
 // ---------------------------------------------------------
 require_once 'config_loader.php';
+require_once 'inventory_suite_layout.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
@@ -1249,17 +1250,18 @@ if ($isAjax) {
     <title>Inventario & Web</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background-color: #f1f5f9; font-family: 'Segoe UI', sans-serif; color: #1e293b; padding-bottom: 80px; }
-        .navbar-custom { background: #0f172a; color: white; padding: 0.8rem 1.5rem; border-bottom: 3px solid #3b82f6; }
+        body.inventory-suite { font-family: 'Segoe UI', sans-serif; color: #1e293b; padding-bottom: 80px; }
+        .inventory-products-shell { max-width: 1520px; }
         .filter-section { background: #ffffff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #e2e8f0; }
-        .card-table { border: none; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-        .table thead th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px; background: #f8fafc; }
+        .card-table { border: 1px solid var(--pw-line); border-radius: 24px; overflow: hidden; background: var(--pw-card); box-shadow: 0 18px 45px rgba(15, 23, 42, .08); }
+        .table thead th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px; background: rgba(248, 250, 252, .88); }
         .prod-img-table { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; cursor: pointer; transition: transform 0.2s; }
         .prod-img-table:hover { transform: scale(1.5); border-color: #3b82f6; }
         .badge-stock { padding: 5px 10px; border-radius: 15px; font-weight: 700; font-size: 0.8rem; }
         .kpi-row { margin-bottom: 1rem; }
-        .kpi-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 0.75rem; }
+        .kpi-card { border: 1px solid var(--pw-line); border-radius: 18px; padding: 0.85rem 1rem; background: rgba(255,255,255,.72); box-shadow: 0 8px 18px rgba(15,23,42,.06); }
         .context-badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1); }
         .row-inactive { background-color: #fff5f5 !important; opacity: 0.8; }
         .editable-cell { position: relative; cursor: cell; transition: background 0.2s; }
@@ -1267,37 +1269,57 @@ if ($isAjax) {
         .editable-cell:hover::after { content: '✎'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #3b82f6; font-size: 0.8rem; opacity: 0.5; }
         .history-btn { font-size: 0.7rem; color: #64748b; cursor: pointer; margin-left: 5px; }
         .history-btn:hover { color: #3b82f6; }
+        #printableArea .table > :not(caption) > * > * { background: transparent; }
+        @media (max-width: 991px) {
+            .inventory-products-shell { padding-top: 1rem !important; padding-bottom: 1.5rem !important; }
+            .inventory-products-shell .inventory-hero { border-radius: 20px; }
+            .inventory-products-shell .inventory-hero h1 { font-size: 1.5rem; }
+            .inventory-products-shell .inventory-toolbar { padding: .85rem .9rem; }
+            .inventory-products-shell .inventory-toolbar .btn,
+            .inventory-products-shell .inventory-toolbar .form-control,
+            .inventory-products-shell .inventory-toolbar .form-select { min-height: 40px; }
+            .card-table { border-radius: 18px; }
+        }
+        @media (max-width: 767px) {
+            .inventory-products-shell .inventory-hero { padding: 1rem !important; }
+            .inventory-products-shell .kpi-chip { font-size: .78rem; padding: .3rem .6rem; }
+            .kpi-card { border-radius: 14px; padding: .7rem .8rem; }
+            .card-table { border-radius: 14px; }
+            #productsTable th, #productsTable td { font-size: .81rem; }
+            .prod-img-table { width: 40px; height: 40px; }
+            .inventory-toolbar__bulk-row { gap: .5rem; }
+            .inventory-toolbar__bulk-row .form-select,
+            .inventory-toolbar__bulk-row .form-control,
+            .inventory-toolbar__bulk-row .btn { width: 100%; max-width: none !important; }
+        }
         @media print { .no-print { display: none !important; } }
     </style>
 </head>
-<body class="pb-5">
+<body class="pb-5 inventory-suite">
 
-<nav class="navbar-custom mb-4 d-flex justify-content-between align-items-center no-print">
-    <div class="d-flex align-items-center">
-        <h4 class="m-0 fw-bold"><i class="fas fa-boxes me-2"></i> INVENTARIO</h4>
-        <div class="d-none d-md-block ms-4 context-badge text-white">
-            <i class="fas fa-building me-1 text-info"></i> Suc: <strong><?php echo $SUC_ID; ?></strong> | 
-            <i class="fas fa-warehouse me-1 text-warning"></i> Alm: <strong><?php echo $ALM_ID; ?></strong>
+<div class="container-fluid shell inventory-shell inventory-products-shell py-4 py-lg-5">
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in no-print">
+    <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+        <div>
+            <div class="section-title text-white-50 mb-2">Catalogo / Inventario</div>
+            <h1 class="h2 fw-bold mb-2"><i class="fas fa-boxes me-2"></i>Inventario</h1>
+            <p class="mb-3 text-white-50">Gestion de productos, stock, precios, importaciones y operaciones masivas.</p>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="kpi-chip"><i class="fas fa-building me-1"></i>Suc <?= (int)$SUC_ID ?></span>
+                <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Alm <?= (int)$ALM_ID ?></span>
+                <span class="kpi-chip"><i class="fas fa-dollar-sign me-1"></i>Valor <strong id="totalValueDisplay" class="ms-1">$<?= number_format($valorInventario, 2) ?></strong></span>
+            </div>
         </div>
-        <div class="ms-3 context-badge" style="background: rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.4);">
-            <i class="fas fa-dollar-sign me-1 text-success"></i>
-            <span class="text-white">Valor: </span>
-            <strong class="text-success" id="totalValueDisplay">$<?php echo number_format($valorInventario, 2); ?></strong>
+        <div class="d-flex flex-wrap gap-2 mt-1 mt-lg-0">
+            <a href="inventory_report.php" class="btn btn-light"><i class="fas fa-chart-pie me-1"></i>Informe</a>
+            <button onclick="forceImageCacheReset()" class="btn btn-outline-light" title="Limpia caché de imágenes y recarga miniaturas"><i class="fas fa-broom me-1"></i>Limpiar cache</button>
+            <button onclick="printInventoryCount()" class="btn btn-warning text-dark"><i class="fas fa-clipboard-list me-1"></i>Conteo</button>
+            <button onclick="printTable()" class="btn btn-outline-light"><i class="fas fa-print me-1"></i>Lista</button>
+            <a href="dashboard.php" class="btn btn-primary"><i class="fas fa-home"></i></a>
         </div>
     </div>
-    <div>
-        <a href="inventory_report.php" class="btn btn-info btn-sm px-3 fw-bold me-2 text-white"><i class="fas fa-chart-pie me-1"></i> Informe</a>
-        <button onclick="forceImageCacheReset()" class="btn btn-outline-light btn-sm px-3 fw-bold me-2" title="Limpia caché de imágenes y recarga miniaturas">
-            <i class="fas fa-broom me-1"></i> Limpiar caché imágenes
-        </button>
-        <button onclick="printInventoryCount()" class="btn btn-warning btn-sm px-3 fw-bold me-2 text-dark"><i class="fas fa-clipboard-list me-1"></i> Conteo</button>
-        <button onclick="printTable()" class="btn btn-light btn-sm px-3 fw-bold me-2"><i class="fas fa-print me-1"></i> Lista</button>
-        <a href="dashboard.php" class="btn btn-primary btn-sm px-3 fw-bold"><i class="fas fa-home"></i></a>
-    </div>
-</nav>
-
-<div class="container-fluid px-4">
-    <div class="row g-2 kpi-row">
+</section>
+    <div class="row g-2 kpi-row inventory-fade-in">
         <div class="col-6 col-md-3">
             <div class="kpi-card">
                 <div class="small text-muted">Total productos</div>
@@ -1324,73 +1346,45 @@ if ($isAjax) {
         </div>
     </div>
 
-    <div class="filter-section shadow-sm no-print">
-        <form id="filterForm" class="row g-3 align-items-end" onsubmit="event.preventDefault(); loadData(1);">
-            <div class="col-md-2"><label class="small fw-bold text-muted mb-1">SKU</label><input type="text" id="f_code" class="form-control form-control-sm" value="<?php echo htmlspecialchars($filterCode); ?>"></div>
-            <div class="col-md-2"><label class="small fw-bold text-muted mb-1">Nombre</label><input type="text" id="f_name" class="form-control form-control-sm" value="<?php echo htmlspecialchars($filterName); ?>"></div>
-            <div class="col-md-2">
-                <label class="small fw-bold text-muted mb-1">Estado</label>
-                <select id="f_status" class="form-select form-select-sm">
-                    <option value="active">✅ Activos</option>
-                    <option value="inactive">❌ Inactivos</option>
-                    <option value="all">♾️ Todos</option>
-                </select>
-            </div>
-            <div class="col-md-2">
-                <label class="small fw-bold text-muted mb-1">Rango Stock</label>
-                <input type="text" id="f_stock" class="form-control form-control-sm" placeholder="Ej: <5, >10, 0, 10-20">
-            </div>
-            <div class="col-md-2">
-                <label class="small fw-bold text-muted mb-1">Mostrar</label>
-                <select id="f_limit" class="form-select form-select-sm" onchange="loadData(1)">
-                    <option value="10">10 por pág</option>
-                    <option value="20">20 por pág</option>
-                    <option value="50">50 por pág</option>
-                    <option value="100">100 por pág</option>
-                </select>
-            </div>
-            <div class="col-md-2 text-end">
-                <button type="submit" class="btn btn-dark btn-sm fw-bold w-100"><i class="fas fa-filter"></i> Filtrar</button>
-                <button type="button" class="btn btn-success btn-sm w-100 mt-1" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
-                <button type="button" class="btn btn-outline-primary btn-sm w-100 mt-1" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
-                <button type="button" class="btn btn-outline-secondary btn-sm w-100 mt-1" onclick="exportCsv()"><i class="fas fa-file-export"></i> Exportar CSV</button>
-                <button type="button" class="btn btn-outline-info btn-sm w-100 mt-1" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import"></i> Importar CSV</button>
-                <select id="importMode" class="form-select form-select-sm w-100 mt-1">
-                    <option value="update_create">Actualizar o crear</option>
-                    <option value="update_only">Solo actualizar</option>
-                </select>
-            </div>
-        </form>
-        
-        <hr class="my-3">
-        
-        <div class="d-flex align-items-center bg-light p-2 rounded border gap-2">
-            <div class="form-check ms-2"><input class="form-check-input" type="checkbox" id="selectAll"><label class="form-check-label small fw-bold" for="selectAll">Todos</label></div>
-            <div class="vr mx-2"></div>
-            <select class="form-select form-select-sm" style="max-width: 200px;" id="bulkActionSelect">
-                <option value="">-- Acción Masiva --</option>
-                <option value="print_labels">🏷️ Imprimir Etiquetas</option>
-                <option value="web_on">🌐 Activar en WEB</option>
-                <option value="web_off">🚫 Ocultar de WEB</option>
-                <option value="reservable_on">📅 Activar Reservable</option>
-                <option value="reservable_off">📅 Desactivar Reservable</option>
-                <option value="pos_on">🧾 Mostrar en POS</option>
-                <option value="pos_off">🧾 Ocultar en POS</option>
-                <option value="active_on">✅ Activar Producto</option>
-                <option value="active_off">❌ Desactivar Producto</option>
-                <option value="set_stock_min">📌 Cambiar Stock Mínimo</option>
-                <option value="change_cat">📂 Cambiar Categoría</option>
-                <option value="clone_selected">📑 Clonar Seleccionados</option>
-            </select>
-            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría" style="max-width: 150px;">
-            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="Stock mínimo" style="max-width: 150px;">
-            <datalist id="bulk_cat_list"></datalist>
-            <button class="btn btn-secondary btn-sm" onclick="applyBulkAction()">Aplicar</button>
-            <div class="ms-auto text-muted small">
-                <strong id="selectedCount">0 sel</strong> | Total: <strong id="totalCountDisplay"><?php echo $totalProducts; ?></strong> | Pág <span id="currentPageDisplay"><?php echo $page; ?></span>
-            </div>
-        </div>
-    </div>
+    <?php
+    $filterCodeEsc = htmlspecialchars((string)$filterCode, ENT_QUOTES, 'UTF-8');
+    $filterNameEsc = htmlspecialchars((string)$filterName, ENT_QUOTES, 'UTF-8');
+    $totalProductsInt = (int)$totalProducts;
+    $pageInt = (int)$page;
+    $toolbarFilterForm = <<<HTML
+<form id="filterForm" class="inventory-toolbar__filter-grid" onsubmit="event.preventDefault(); loadData(1);">
+    <div><label class="small fw-bold text-muted mb-1">SKU</label><input type="text" id="f_code" class="form-control form-control-sm" value="{$filterCodeEsc}"></div>
+    <div><label class="small fw-bold text-muted mb-1">Nombre</label><input type="text" id="f_name" class="form-control form-control-sm" value="{$filterNameEsc}"></div>
+    <div><label class="small fw-bold text-muted mb-1">Estado</label><select id="f_status" class="form-select form-select-sm"><option value="active">✅ Activos</option><option value="inactive">❌ Inactivos</option><option value="all">♾️ Todos</option></select></div>
+    <div><label class="small fw-bold text-muted mb-1">Rango Stock</label><input type="text" id="f_stock" class="form-control form-control-sm" placeholder="Ej: <5, >10, 0, 10-20"></div>
+    <div><label class="small fw-bold text-muted mb-1">Mostrar</label><select id="f_limit" class="form-select form-select-sm" onchange="loadData(1)"><option value="10">10 por pág</option><option value="20">20 por pág</option><option value="50">50 por pág</option><option value="100">100 por pág</option></select></div>
+    <div class="inventory-toolbar__stack"><button type="submit" class="btn btn-dark btn-sm inventory-btn w-100"><i class="fas fa-filter me-1"></i>Filtrar</button><button type="button" class="btn btn-success btn-sm inventory-btn w-100 mt-2" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus me-1"></i>Nuevo</button></div>
+    <div class="inventory-toolbar__stack"><button type="button" class="btn btn-outline-primary btn-sm inventory-btn w-100" onclick="openCategoriesModal()"><i class="fas fa-tags me-1"></i>Categorías</button><button type="button" class="btn btn-outline-secondary btn-sm inventory-btn w-100 mt-2" onclick="exportCsv()"><i class="fas fa-file-export me-1"></i>Exportar CSV</button></div>
+    <div class="inventory-toolbar__stack"><button type="button" class="btn btn-outline-info btn-sm inventory-btn w-100" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import me-1"></i>Importar CSV</button><select id="importMode" class="form-select form-select-sm mt-2"><option value="update_create">Actualizar o crear</option><option value="update_only">Solo actualizar</option></select></div>
+</form>
+HTML;
+    $toolbarBulk = <<<HTML
+<div class="inventory-toolbar__bulk-row">
+    <div class="form-check"><input class="form-check-input" type="checkbox" id="selectAll"><label class="form-check-label small fw-bold" for="selectAll">Todos</label></div>
+    <div class="vr"></div>
+    <select class="form-select form-select-sm" style="max-width: 220px;" id="bulkActionSelect"><option value="">-- Acción Masiva --</option><option value="print_labels">🏷️ Imprimir Etiquetas</option><option value="web_on">🌐 Activar en WEB</option><option value="web_off">🚫 Ocultar de WEB</option><option value="reservable_on">📅 Activar Reservable</option><option value="reservable_off">📅 Desactivar Reservable</option><option value="pos_on">🧾 Mostrar en POS</option><option value="pos_off">🧾 Ocultar en POS</option><option value="active_on">✅ Activar Producto</option><option value="active_off">❌ Desactivar Producto</option><option value="set_stock_min">📌 Cambiar Stock Mínimo</option><option value="change_cat">📂 Cambiar Categoría</option><option value="clone_selected">📑 Clonar Seleccionados</option></select>
+    <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría" style="max-width: 150px;">
+    <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="Stock mínimo" style="max-width: 150px;">
+    <datalist id="bulk_cat_list"></datalist>
+    <button class="btn btn-secondary btn-sm inventory-btn" onclick="applyBulkAction()">Aplicar</button>
+    <div class="ms-auto text-muted small"><strong id="selectedCount">0 sel</strong> | Total: <strong id="totalCountDisplay">{$totalProductsInt}</strong> | Pág <span id="currentPageDisplay">{$pageInt}</span></div>
+</div>
+HTML;
+    inventory_suite_render_toolbar([
+        'title' => 'Filtros y acciones',
+        'subtitle' => 'Búsqueda operativa, importación y acciones masivas sobre el catálogo.',
+        'class' => 'mb-4 products-toolbar no-print inventory-fade-in',
+        'left' => [
+            $toolbarFilterForm,
+            $toolbarBulk,
+        ],
+    ]);
+    ?>
 
     <div class="card card-table shadow-sm" id="printableArea">
         <div class="table-responsive">
