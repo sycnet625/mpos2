@@ -212,7 +212,7 @@ function purchase_bootstrap_tables(PDO $pdo): void
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $stmtEmpresaBySucursal = $pdo->prepare('SELECT id_empresa FROM sucursales WHERE id = ? LIMIT 1');
-    $stmtFixHeader = $pdo->prepare('UPDATE compras_cabecera SET id_empresa = ?, id_sucursal = ?, id_almacen = ?, total_original = COALESCE(total_original, total), created_by = COALESCE(NULLIF(created_by, \"\"), usuario) WHERE id = ?');
+    $stmtFixHeader = $pdo->prepare("UPDATE compras_cabecera SET id_empresa = ?, id_sucursal = ?, id_almacen = ?, total_original = COALESCE(total_original, total), created_by = COALESCE(NULLIF(created_by, ''), usuario) WHERE id = ?");
     foreach ($legacyCabeceras as $row) {
         $loc = purchase_extract_location_from_notes((string)($row['notas'] ?? ''));
         $sucursalId = (int)$loc['id_sucursal'];
@@ -656,7 +656,13 @@ function purchase_process_pending(PDO $pdo, int $purchaseId, array $context): ar
         $stockAntes = purchase_fetch_stock($pdo, $sku, $almacenId);
         $stockDespues = $stockAntes + $cantidad;
 
-        $stmtUpdateProduct->execute([$costoNuevo, $sku, $empresaId]);
+        $costoResultante = $costoNuevo;
+        if ($stockAntes > 0) {
+            $baseCost = $existing ? (float)$existing['costo'] : $costoNuevo;
+            $costoResultante = round((($stockAntes * $baseCost) + ($cantidad * $costoNuevo)) / ($stockAntes + $cantidad), 4);
+        }
+
+        $stmtUpdateProduct->execute([$costoResultante, $sku, $empresaId]);
         $kardex->registrarMovimiento(
             $sku,
             $almacenId,
@@ -668,7 +674,7 @@ function purchase_process_pending(PDO $pdo, int $purchaseId, array $context): ar
             $actor,
             $header['fecha'] ?: date('Y-m-d H:i:s')
         );
-        $stmtUpdateDetail->execute([$costoAnterior, $costoNuevo, $stockAntes, $stockDespues, 'ACTIVO', (int)$item['id']]);
+        $stmtUpdateDetail->execute([$costoAnterior, $costoResultante, $stockAntes, $stockDespues, 'ACTIVO', (int)$item['id']]);
     }
 
     $pdo->prepare("UPDATE compras_cabecera SET estado = 'PROCESADA', updated_at = NOW() WHERE id = ?")->execute([$purchaseId]);
@@ -762,7 +768,7 @@ function purchase_cancel(PDO $pdo, int $purchaseId, array $context): array
         }
     }
 
-    $pdo->prepare("UPDATE compras_detalle SET estado_item = 'REVERTIDO', revertido_at = NOW(), revertido_by = ? WHERE id_compra = ? AND COALESCE(estado_item, 'ACTIVO') = 'ACTIVO'")
+    $pdo->prepare("UPDATE compras_detalle SET estado_item = 'REVERTIDO', revertido_at = NOW(), revertido_by = ? WHERE id_compra = ? AND COALESCE(estado_item, 'ACTIVO') IN ('ACTIVO', 'PENDIENTE', 'BORRADOR')")
         ->execute([$actor, $purchaseId]);
     $pdo->prepare("UPDATE compras_cabecera SET estado = 'CANCELADA', total = 0, updated_at = NOW() WHERE id = ?")->execute([$purchaseId]);
     $pdo->commit();
