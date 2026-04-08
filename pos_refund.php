@@ -96,12 +96,12 @@ try {
             $kardex->registrarMovimiento(
                 $pdo,
                 $item['id_producto'],
-                $item['id_almacen'],
+                $item['id_almacen'] ?: $config['id_almacen'],
                 floatval($item['cantidad']), // Cantidad POSITIVA = Entrada al almacén
                 'DEVOLUCION',
                 "Devolución Venta #{$item['id_ticket']}",
                 null,
-                $item['id_sucursal'],
+                $item['id_sucursal'] ?: $config['id_sucursal'],
                 date('Y-m-d H:i:s')
             );
         }
@@ -144,12 +144,12 @@ try {
                     $kardex->registrarMovimiento(
                         $pdo,
                         $item['id_producto'],
-                        $venta['id_almacen'],
+                        $venta['id_almacen'] ?: $config['id_almacen'],
                         floatval($item['cantidad']),
                         'DEVOLUCION',
                         "Anulación Venta #$idTicket",
                         null,
-                        $venta['id_sucursal'],
+                        $venta['id_sucursal'] ?: $config['id_sucursal'],
                         date('Y-m-d H:i:s')
                     );
                 }

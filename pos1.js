@@ -1207,8 +1207,15 @@ function askQty() {
     if(selectedIndex < 0) return showToast("Seleccione producto", "warning"); 
     let q = prompt("Cantidad:", cart[selectedIndex].qty); 
     if(q && !isNaN(q) && q > 0) { 
-        cart[selectedIndex].qty = Number(q); 
-        Synth.increment(); 
+        const newQty = Number(q);
+        const item = cart[selectedIndex];
+        const prod = window.productsDB ? window.productsDB.find(x => x.codigo == item.id) : null;
+        if (!invModeActive && prod && prod.es_servicio == 0 && newQty > parseFloat(prod.stock)) {
+            if(typeof Synth !== 'undefined') Synth.error();
+            return showToast("Sin más stock", "error");
+        }
+        cart[selectedIndex].qty = newQty; 
+        if(typeof Synth !== 'undefined') Synth.increment(); 
         renderCart();
         saveCartState();
         updateStockBadges(); // Refrescar stock visible del card tras cantidad manual

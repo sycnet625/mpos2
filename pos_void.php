@@ -111,6 +111,13 @@ try {
 
     $kardex = $kardexAvailable ? new KardexEngine($pdo) : null;
 
+    $configFile = __DIR__ . '/pos.cfg';
+    $config = ["id_almacen" => 1, "id_sucursal" => 1];
+    if (file_exists($configFile)) {
+        $loaded = json_decode(file_get_contents($configFile), true);
+        if ($loaded) $config = array_merge($config, $loaded);
+    }
+
     foreach ($detalles as $item) {
         if (floatval($item['cantidad']) > 0) {
             // Devolver stock al almacén (solo productos físicos)
@@ -118,12 +125,12 @@ try {
                 $kardex->registrarMovimiento(
                     $pdo,
                     $item['id_producto'],
-                    $venta['id_almacen'],
+                    $venta['id_almacen'] ?: $config['id_almacen'],
                     floatval($item['cantidad']),  // positivo = entrada
                     'DEVOLUCION',
                     "Anulación POS #{$idVenta} — {$cajero}",
                     null,
-                    $venta['id_sucursal'],
+                    $venta['id_sucursal'] ?: $config['id_sucursal'],
                     date('Y-m-d H:i:s')
                 );
             }
