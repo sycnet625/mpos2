@@ -95,12 +95,20 @@ if (isset($_GET['render_mode'])) {
 
         // Calcular Totales Generales
         $totalVenta = 0; $totalDev = 0;
+        
+        // Ventas netas (solo tickets positivos, ya que los anulados/devueltos enteros están en negativo)
         foreach ($tickets as $t) {
             $monto = floatval($t['total']);
-            if ($monto < 0) $totalDev += abs($monto);
-            else $totalVenta += $monto;
+            if ($monto > 0) $totalVenta += $monto;
         }
-        $totalNeto = $totalVenta - $totalDev;
+        
+        // Devoluciones (sumando los ítems devueltos en los detalles, para abarcar devoluciones parciales y totales)
+        foreach ($allDetalles as $d) {
+            $qty = floatval($d['cantidad']);
+            if ($qty < 0) $totalDev += abs($qty * floatval($d['precio']));
+        }
+        
+        $totalNeto = $totalVenta; // El total neto ya es la suma de los tickets positivos (los devueltos parciales ya tienen su total descontado)
 
         // RENDERIZADO HTML
         ?>

@@ -55,13 +55,19 @@ try {
     $valorDevoluciones = 0;
     
     foreach ($tickets as $t) {
-        $totalVentaNeta += floatval($t['total']);
-        
-        if (floatval($t['total']) < 0 || $t['cliente_nombre'] === 'DEVOLUCIÓN') {
-            $cantDevoluciones++;
-            $valorDevoluciones += abs(floatval($t['total']));
-        } else {
+        $monto = floatval($t['total']);
+        if ($monto > 0 && $t['cliente_nombre'] !== 'DEVOLUCIÓN') {
+            $totalVentaNeta += $monto;
             $conteoTickets++;
+        } else {
+            $cantDevoluciones++;
+        }
+    }
+    
+    foreach ($detalles as $d) {
+        $qty = floatval($d['cantidad']);
+        if ($qty < 0) {
+            $valorDevoluciones += abs($qty * floatval($d['precio']));
         }
     }
     
