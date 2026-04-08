@@ -9,6 +9,10 @@ const CACHE_NAME = 'palweb-pos-v82';
 const OFFLINE_ASSETS = [
     './pos.php',
     './clock.php',
+    './clock.html',
+    './clock.css',
+    './clock.js',
+    './simple_weather.php',
     './pos1.js',                               // CORREGIDO: era pos.js (no existe)
     './pos-offline-system.js',
     './manifest-pos.php',
@@ -88,6 +92,18 @@ self.addEventListener('fetch', (event) => {
         return;
     }
     
+    const swUrl = new URL(event.request.url);
+    
+    // simple_weather.php: siempre a la red, nunca cachear
+    if (swUrl.pathname.includes('simple_weather.php')) {
+        event.respondWith(
+            fetch(event.request, { credentials: 'same-origin' })
+                .then(r => r)
+                .catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+        );
+        return;
+    }
+    
     // ESTRATEGIA: ONLINE FIRST para TODO
     // 1. Intentar servidor primero
     // 2. Si falla (offline), usar caché
@@ -136,7 +152,7 @@ async function onlineFirst(request) {
                 request.url.endsWith('.woff2') ||
                 request.url.includes('bootstrap') ||
                 request.url.includes('fontawesome') ||
-                (request.url.includes('.php') && !url.search); // PHP sin parámetros
+                (request.url.includes('.php') && !url.search && !request.url.includes('simple_weather')); // PHP sin parámetros
             
             if (shouldCache) {
                 cache.put(request, networkResponse.clone());

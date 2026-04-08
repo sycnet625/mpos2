@@ -589,6 +589,13 @@ function purchase_import_restore_product(PDO $pdo, array $rowLog): void
     }
 }
 
+function purchase_import_fetch_stock(PDO $pdo, string $sku, int $almacenId): float
+{
+    $stmt = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? LIMIT 1");
+    $stmt->execute([$sku, $almacenId]);
+    return (float)($stmt->fetchColumn() ?: 0);
+}
+
 $notice = '';
 $noticeType = 'info';
 $preview = null;
@@ -724,8 +731,20 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
         foreach ($groups as $group) {
             $provider = 'IMPORTACION EXCEL';
             $notes = sprintf('Importado desde Excel %s [Run:%d Emp:%d Suc:%d Alm:%d]', $draft['file_name'], $runId, $group['empresa_id'], $group['sucursal_id'], $group['almacen_id']);
-            $stmtHead = $pdo->prepare("INSERT INTO compras_cabecera (proveedor, total, usuario, notas, fecha, numero_factura, estado) VALUES (?, ?, ?, ?, ?, ?, 'PROCESADA')");
-            $stmtHead->execute([$provider, $group['total'], $usuario, $notes, $fechaImport, 'IMP-' . $runId . '-' . date('His')]);
+            $stmtHead = $pdo->prepare("INSERT INTO compras_cabecera (proveedor, total, total_original, usuario, created_by, notas, fecha, numero_factura, estado, id_empresa, id_sucursal, id_almacen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PROCESADA', ?, ?, ?)");
+            $stmtHead->execute([
+                $provider,
+                $group['total'],
+                $group['total'],
+                $usuario,
+                $usuario,
+                $notes,
+                $fechaImport,
+                'IMP-' . $runId . '-' . date('His'),
+                $group['empresa_id'],
+                $group['sucursal_id'],
+                $group['almacen_id'],
+            ]);
             $purchaseId = (int)$pdo->lastInsertId();
             $createdPurchases[] = [
                 'id' => $purchaseId,
@@ -748,6 +767,9 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
                 $existing = $stmtProduct->fetch(PDO::FETCH_ASSOC) ?: null;
                 $productAction = $existing ? 'updated' : 'created';
                 $previousJson = $existing ? json_encode($existing, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null;
+                $costoAnterior = $existing ? (float)($existing['costo'] ?? 0) : null;
+                $stockAntes = purchase_import_fetch_stock($pdo, $targetSku, (int)$row['almacen_id']);
+                $stockDespues = $stockAntes + (float)$row['cantidad'];
 
                 if ($existing) {
                     if ($existingMode === 'full') {
@@ -767,8 +789,18 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
                     $createdProducts++;
                 }
 
-                $stmtDetail = $pdo->prepare("INSERT INTO compras_detalle (id_compra, id_producto, cantidad, costo_unitario, subtotal) VALUES (?, ?, ?, ?, ?)");
-                $stmtDetail->execute([$purchaseId, $targetSku, $row['cantidad'], $row['precio_compra'], $row['cantidad'] * $row['precio_compra']]);
+                $stmtDetail = $pdo->prepare("INSERT INTO compras_detalle (id_compra, id_producto, cantidad, costo_unitario, subtotal, costo_anterior, costo_resultante, stock_antes, stock_despues, estado_item) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVO')");
+                $stmtDetail->execute([
+                    $purchaseId,
+                    $targetSku,
+                    $row['cantidad'],
+                    $row['precio_compra'],
+                    $row['cantidad'] * $row['precio_compra'],
+                    $costoAnterior,
+                    $row['precio_compra'],
+                    $stockAntes,
+                    $stockDespues,
+                ]);
 
                 $kardex->registrarMovimiento(
                     $targetSku,
@@ -880,7 +912,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
         }
 
         foreach (array_keys($purchaseIds) as $purchaseId) {
-            $pdo->prepare("DELETE FROM compras_detalle WHERE id_compra = ?")->execute([$purchaseId]);
+            $pdo->prepare("UPDATE compras_detalle SET estado_item = 'REVERTIDO', revertido_at = ?, revertido_by = ? WHERE id_compra = ? AND COALESCE(estado_item, 'ACTIVO') = 'ACTIVO'")->execute([$fechaUndo, $usuario, $purchaseId]);
             $pdo->prepare("UPDATE compras_cabecera SET estado = 'CANCELADA', total = 0, notas = CONCAT(COALESCE(notas,''), ' [REVERTIDA RUN #{$runId}]') WHERE id = ?")->execute([$purchaseId]);
         }
 
@@ -934,43 +966,47 @@ if ($preview && !empty($preview['rows'])) {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%); }
         .shell { max-width: 1500px; }
-        .hero { border-radius: 24px; padding: 24px 28px; background: linear-gradient(135deg, #0f172a, #1d4ed8 60%, #0ea5e9); color: #fff; box-shadow: 0 22px 50px rgba(30,41,59,.24); }
-        .hero-kpi { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 12px 14px; min-width: 150px; }
-        .card { border: 1px solid #e2e8f0; border-radius: 20px; box-shadow: 0 10px 28px rgba(15,23,42,.06); }
-        .section-title { font-size: .78rem; letter-spacing: .08em; text-transform: uppercase; font-weight: 800; color: #64748b; }
+        .hero { border-radius: 24px; padding: 24px 28px; box-shadow: 0 22px 50px rgba(15,23,42,.16); }
+        .hero-kpi { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); border-radius: 16px; padding: 12px 14px; min-width: 150px; }
+        .card { border-radius: 24px; }
         .chip { display:inline-block; padding:4px 10px; border-radius:999px; border:1px solid #dbeafe; background:#eff6ff; color:#1d4ed8; font-size:.78rem; margin:0 6px 6px 0; }
         .chip-warning { background:#fff7ed; border-color:#fed7aa; color:#c2410c; }
         .chip-success { background:#ecfdf5; border-color:#bbf7d0; color:#15803d; }
         .chip-dark { background:#e2e8f0; border-color:#cbd5e1; color:#0f172a; }
         .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
         .table thead th { white-space: nowrap; }
-        .resolution-card { border:1px dashed #cbd5e1; border-radius:16px; padding:14px; background:#f8fafc; }
+        .table { --bs-table-bg: transparent; }
+        .resolution-card { border:1px dashed #cbd5e1; border-radius:18px; padding:16px; background:#f8fafc; }
         .hierarchy-badge { display:inline-block; padding:6px 10px; border-radius:10px; font-size:.8rem; font-weight:700; margin:0 6px 6px 0; }
         .hierarchy-empresa { background:#dbeafe; color:#1d4ed8; }
         .hierarchy-sucursal { background:#ede9fe; color:#6d28d9; }
         .hierarchy-almacen { background:#dcfce7; color:#15803d; }
         .diff-list { font-size:.83rem; margin:0; padding-left:18px; }
+        .table-responsive {
+            border-radius: 18px;
+        }
     </style>
 </head>
-<body class="p-4">
-<div class="container-fluid shell">
-    <div class="hero mb-4">
-        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4">
-            <div>
-                <div class="section-title text-white-50 mb-2">Compras / Utilidad</div>
-                <h2 class="mb-2"><i class="fas fa-file-excel me-2"></i>Importar compras desde Excel</h2>
-                <div class="text-white-50">Plantilla descargable, validación fuerte, matching por nombre, diff previo, modo de actualización y bitácora reversible.</div>
-            </div>
-            <div class="d-flex flex-wrap gap-3 align-self-start">
-                <div class="hero-kpi"><div class="small text-white-50">Columnas requeridas</div><div class="fs-5 fw-bold">10</div></div>
-                <div class="hero-kpi"><div class="small text-white-50">Defaults</div><div class="fs-6 fw-bold mono">venta +30% · mayorista +10%</div></div>
-                <a href="?action=download_template" class="btn btn-light"><i class="fas fa-download me-2"></i>Descargar plantilla</a>
+<body class="p-4 inventory-suite">
+<div class="container-fluid shell inventory-shell">
+        <div class="glass-card inventory-hero hero mb-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-4">
+                <div>
+                    <div class="section-title text-white-50 mb-2">Compras / Utilidad</div>
+                    <h2 class="mb-2"><i class="fas fa-file-excel me-2"></i>Importar compras desde Excel</h2>
+                    <div class="text-white-50">Plantilla descargable, validación fuerte, matching por nombre, diff previo, modo de actualización y bitácora reversible.</div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 align-self-start">
+                    <div class="hero-kpi"><div class="small text-white-50">Columnas requeridas</div><div class="fs-5 fw-bold">10</div></div>
+                    <div class="hero-kpi"><div class="small text-white-50">Defaults</div><div class="fs-6 fw-bold mono">venta +30% · mayorista +10%</div></div>
+                    <a href="?action=download_template" class="btn btn-light"><i class="fas fa-download me-2"></i>Descargar plantilla</a>
+                    <a href="pos_purchases.php" class="btn btn-outline-light"><i class="fas fa-dolly-flatbed me-2"></i>Ir a compras</a>
+                </div>
             </div>
         </div>
-    </div>
 
     <?php if ($notice !== ''): ?>
         <div class="alert alert-<?= htmlspecialchars($noticeType) ?> shadow-sm"><?= htmlspecialchars($notice) ?></div>
@@ -981,10 +1017,10 @@ if ($preview && !empty($preview['rows'])) {
             <div class="card-body p-4">
                 <div class="section-title mb-3">Resultado</div>
                 <div class="row g-3 mb-3">
-                    <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Run</div><div class="fs-4 fw-bold mono">#<?= (int)$importResult['run_id'] ?></div></div></div>
-                    <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Filas importadas</div><div class="fs-4 fw-bold"><?= (int)$importResult['rows'] ?></div></div></div>
-                    <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Productos creados</div><div class="fs-4 fw-bold text-success"><?= (int)$importResult['created_products'] ?></div></div></div>
-                    <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Productos actualizados</div><div class="fs-4 fw-bold text-primary"><?= (int)$importResult['updated_products'] ?></div></div></div>
+                    <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Run</div><div class="fs-4 fw-bold mono">#<?= (int)$importResult['run_id'] ?></div></div></div>
+                    <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Filas importadas</div><div class="fs-4 fw-bold"><?= (int)$importResult['rows'] ?></div></div></div>
+                    <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Productos creados</div><div class="fs-4 fw-bold text-success"><?= (int)$importResult['created_products'] ?></div></div></div>
+                    <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Productos actualizados</div><div class="fs-4 fw-bold text-primary"><?= (int)$importResult['updated_products'] ?></div></div></div>
                 </div>
                 <?php foreach ($importResult['purchases'] as $purchase): ?>
                     <span class="chip">Compra #<?= (int)$purchase['id'] ?> · <?= htmlspecialchars($purchase['empresa']) ?> · <?= htmlspecialchars($purchase['sucursal']) ?> · <?= htmlspecialchars($purchase['almacen']) ?> · <?= (int)$purchase['rows'] ?> filas</span>
@@ -1008,7 +1044,7 @@ if ($preview && !empty($preview['rows'])) {
                             <label class="form-label fw-bold">Archivo Excel</label>
                             <input type="file" name="excel_file" class="form-control" accept=".xlsx,.xls" required>
                         </div>
-                        <button type="submit" class="btn btn-primary w-100"><i class="fas fa-search me-2"></i>Analizar Excel</button>
+                        <button type="submit" class="btn btn-success w-100"><i class="fas fa-search me-2"></i>Analizar Excel</button>
                     </form>
                 </div>
             </div>
@@ -1031,7 +1067,7 @@ if ($preview && !empty($preview['rows'])) {
                     <div class="section-title mb-3">Bitácora / Undo</div>
                     <?php if ($recentRuns): ?>
                         <?php foreach ($recentRuns as $run): ?>
-                            <div class="border rounded p-3 mb-2">
+                            <div class="stat-box mb-2">
                                 <div class="d-flex justify-content-between gap-2 flex-wrap">
                                     <div>
                                         <div class="fw-bold mono">Run #<?= (int)$run['id'] ?></div>
@@ -1044,10 +1080,10 @@ if ($preview && !empty($preview['rows'])) {
                                             <input type="hidden" name="run_id" value="<?= (int)$run['id'] ?>">
                                             <button type="submit" class="btn btn-outline-danger btn-sm"><i class="fas fa-undo me-1"></i>Deshacer</button>
                                         </form>
-                                        <a href="?run_detail=<?= (int)$run['id'] ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-eye me-1"></i>Ver detalle</a>
+                                        <a href="?run_detail=<?= (int)$run['id'] ?>" class="btn btn-outline-success btn-sm"><i class="fas fa-eye me-1"></i>Ver detalle</a>
                                     <?php else: ?>
                                         <span class="chip chip-dark">Revertida</span>
-                                        <a href="?run_detail=<?= (int)$run['id'] ?>" class="btn btn-outline-primary btn-sm"><i class="fas fa-eye me-1"></i>Ver detalle</a>
+                                        <a href="?run_detail=<?= (int)$run['id'] ?>" class="btn btn-outline-success btn-sm"><i class="fas fa-eye me-1"></i>Ver detalle</a>
                                     <?php endif; ?>
                                 </div>
                             </div>
@@ -1124,10 +1160,10 @@ if ($preview && !empty($preview['rows'])) {
                         <form method="post" id="purchaseImportForm">
                             <input type="hidden" name="action" value="apply_import">
                             <div class="row g-3 mb-3">
-                                <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Filas válidas</div><div class="fs-4 fw-bold"><?= count($preview['rows']) ?></div></div></div>
-                                <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Pendientes de resolución</div><div class="fs-4 fw-bold text-warning"><?= (int)($preview['needs_resolution'] ?? 0) ?></div></div></div>
-                                <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Errores de análisis</div><div class="fs-4 fw-bold text-danger"><?= count($preview['errors'] ?? []) ?></div></div></div>
-                                <div class="col-md-3"><div class="p-3 rounded bg-light border"><div class="small text-muted">Modo productos existentes</div><select name="existing_mode" id="existing_mode" class="form-select mt-2"><option value="full">Sobrescritura completa</option><option value="stock_cost">Stock y costo</option><option value="stock_only">Solo costo</option></select></div></div>
+                                <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Filas válidas</div><div class="fs-4 fw-bold"><?= count($preview['rows']) ?></div></div></div>
+                                <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Pendientes de resolución</div><div class="fs-4 fw-bold text-warning"><?= (int)($preview['needs_resolution'] ?? 0) ?></div></div></div>
+                                <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Errores de análisis</div><div class="fs-4 fw-bold text-danger"><?= count($preview['errors'] ?? []) ?></div></div></div>
+                                <div class="col-md-3"><div class="stat-box"><div class="small text-muted">Modo productos existentes</div><select name="existing_mode" id="existing_mode" class="form-select mt-2"><option value="full">Sobrescritura completa</option><option value="stock_cost">Stock y costo</option><option value="stock_only">Solo costo</option></select></div></div>
                             </div>
 
                             <?php if (!empty($preview['errors'])): ?>
@@ -1146,7 +1182,7 @@ if ($preview && !empty($preview['rows'])) {
                                     <div class="card-body p-3">
                                         <div class="section-title mb-3">Vista previa agrupada por compra</div>
                                         <?php foreach ($previewGroups as $group): ?>
-                                            <div class="border rounded p-3 mb-3 bg-white">
+                                            <div class="stat-box mb-3 bg-white">
                                                 <div class="d-flex justify-content-between gap-3 flex-wrap">
                                                     <div>
                                                         <span class="hierarchy-badge hierarchy-empresa"><?= htmlspecialchars((string)$group['empresa']) ?></span>

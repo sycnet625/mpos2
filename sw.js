@@ -48,7 +48,14 @@ self.addEventListener('fetch', event => {
   
   if (url.hostname === 'api.open-meteo.com' || url.hostname === 'wttr.in') {
     event.respondWith(
-      fetch(event.request).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+      fetch(event.request).then(r => r).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+    );
+    return;
+  }
+
+  if (url.pathname === '/simple_weather.php') {
+    event.respondWith(
+      fetch(event.request).then(r => r).catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
     );
     return;
   }

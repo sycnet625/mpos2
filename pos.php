@@ -1050,8 +1050,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 <div class="modal fade" id="parkModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content"><div class="modal-header bg-warning"><h5 class="modal-title">Espera</h5><button class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body p-0"><div class="list-group list-group-flush" id="parkList"></div></div></div></div></div>
 
 <!-- MODAL ANULAR VENTA ─────────────────────────────────────────────────────
-     Audit trail: registra cajero + motivo + timestamp en auditoria_pos.
-     Solo ventas de la sesión activa. Requiere PIN del cajero. -->
+     Audit trail: registra usuario del sistema + motivo + timestamp.
+     Solo ventas de la sesión activa. Requiere credenciales del sistema. -->
 <div class="modal fade" id="voidModal" tabindex="-1">
     <div class="modal-dialog modal-sm modal-dialog-centered">
         <div class="modal-content border-0 shadow">
@@ -1066,12 +1066,17 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <textarea id="voidMotivo" class="form-control form-control-sm" rows="3"
                         placeholder="Ej: Error en precio, cliente canceló, producto incorrecto..."
                         maxlength="200"></textarea>
-                    <div class="form-text text-muted" style="font-size:0.7rem">Mínimo 5 caracteres. Quedará firmado con su cajero.</div>
+                    <div class="form-text text-muted" style="font-size:0.7rem">Mínimo 5 caracteres. Quedará firmado con su usuario del sistema.</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label small fw-bold">Su PIN de Cajero</label>
-                    <input type="password" id="voidPin" class="form-control form-control-sm text-center fw-bold"
-                        maxlength="8" placeholder="••••" autocomplete="off">
+                    <label class="form-label small fw-bold">Usuario del sistema</label>
+                    <input type="text" id="voidAuthUser" class="form-control form-control-sm"
+                        maxlength="100" placeholder="Ej: admin" autocomplete="off">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Contraseña del sistema</label>
+                    <input type="password" id="voidAuthPass" class="form-control form-control-sm"
+                        maxlength="120" placeholder="••••••" autocomplete="off">
                 </div>
                 <button class="btn btn-danger w-100 fw-bold btn-void-confirm" onclick="confirmVoid()">
                     <i class="fas fa-ban me-1"></i> CONFIRMAR ANULACIÓN

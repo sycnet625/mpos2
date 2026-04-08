@@ -166,29 +166,47 @@ try {
     <meta charset="UTF-8"><title>Mermas</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="assets/js/vue.min.js"></script>
     <style>
+        .shell { max-width: 1480px; }
         .cursor-pointer{cursor:pointer;}
         .list-group-item:hover{background-color:#f8f9fa;}
         .rotate-icon { transition: transform 0.3s; }
         .rotated { transform: rotate(180deg); }
-        .row-cancelled { background-color: #ffeaea !important; color: #b02a37; }
+        .row-cancelled { background-color: rgba(180,35,24,.08) !important; color: #b02a37; }
     </style>
 </head>
-<body class="bg-light p-4">
-    <div id="app" class="container">
-        
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h4 class="text-danger fw-bold m-0"><i class="fas fa-trash-alt me-2"></i> Gestión de Mermas</h4>
-            <a href="dashboard.php" class="btn btn-outline-secondary btn-sm"><i class="fas fa-arrow-left"></i> Volver</a>
-        </div>
+<body class="pb-5 inventory-suite">
+    <div id="app" class="container-fluid shell inventory-shell py-4 py-lg-5">
+        <section class="glass-card inventory-hero inventory-hero-danger p-4 p-lg-5 mb-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+                <div>
+                    <div class="section-title text-white-50 mb-2">Inventario / Control</div>
+                    <h1 class="h2 fw-bold mb-2"><i class="fas fa-trash-alt me-2"></i>Gestión de Mermas</h1>
+                    <p class="mb-3 text-white-50">Registro y reversión de pérdidas de inventario con trazabilidad y contexto por almacén.</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén <?= (int)$ALM_ID ?></span>
+                        <span class="kpi-chip"><i class="fas fa-building me-1"></i>Sucursal <?= (int)$SUC_ID ?></span>
+                        <span class="kpi-chip"><i class="fas fa-clock-rotate-left me-1"></i>{{recentList.length}} registros recientes</span>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="pos_purchases.php" class="btn btn-light"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>
+                    <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
+                </div>
+            </div>
+        </section>
 
-        <div class="alert alert-danger py-2 mb-4 shadow-sm">
-             <i class="fas fa-warehouse"></i> Almacén: <strong><?php echo $ALM_ID; ?></strong> | Sucursal: <strong><?php echo $SUC_ID; ?></strong>
-        </div>
-
-        <div class="card shadow-lg border-0 border-top border-5 border-danger mb-5">
-            <div class="card-body">
+        <div class="glass-card mb-5">
+            <div class="card-body p-4">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                    <div>
+                        <div class="section-title">Registro</div>
+                        <div class="fw-bold fs-5">Nueva merma</div>
+                    </div>
+                    <span class="soft-pill"><i class="fas fa-layer-group"></i>{{cart.length}} líneas</span>
+                </div>
                 
                 <!-- FECHA Y MOTIVO GENERAL -->
                 <div class="row g-3 mb-3 pb-3 border-bottom">
@@ -246,12 +264,12 @@ try {
                         <tfoot v-if="cart.length > 0"><tr class="table-active"><td colspan="4" class="text-end fw-bold">TOTAL:</td><td class="text-end fw-bold text-danger fs-5">${{totalLoss.toFixed(2)}}</td><td></td></tr></tfoot>
                     </table>
                 </div>
-                <div class="d-grid mt-4"><button class="btn btn-dark btn-lg" @click="submit" :disabled="cart.length==0"><i class="fas fa-check-circle me-2"></i> CONFIRMAR BAJA</button></div>
+                <div class="d-grid mt-4"><button class="btn btn-danger btn-lg" @click="submit" :disabled="cart.length==0"><i class="fas fa-check-circle me-2"></i> CONFIRMAR BAJA</button></div>
             </div>
         </div>
 
-        <div class="card shadow-sm border-0">
-            <div class="card-header bg-white py-3"><h5 class="mb-0 fw-bold"><i class="fas fa-history text-secondary me-2"></i> Últimas 15 Mermas</h5></div>
+        <div class="glass-card">
+            <div class="card-header bg-transparent border-0 py-4 px-4"><h5 class="mb-0 fw-bold"><i class="fas fa-history text-secondary me-2"></i> Últimas 15 Mermas</h5></div>
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table mb-0 align-middle">
@@ -355,4 +373,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

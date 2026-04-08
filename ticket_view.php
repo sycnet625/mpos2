@@ -33,6 +33,21 @@ try {
         $stmtCaj->execute([$venta['id_caja']]);
         $cajero = $stmtCaj->fetchColumn() ?: "Cajero";
     }
+
+    $paymentBreakdown = [];
+    try {
+        $stmtPay = $pdo->prepare("
+            SELECT metodo_pago, SUM(monto) AS monto
+            FROM ventas_pagos
+            WHERE id_venta_cabecera = ?
+            GROUP BY metodo_pago
+            ORDER BY SUM(monto) DESC, metodo_pago ASC
+        ");
+        $stmtPay->execute([$idVenta]);
+        $paymentBreakdown = $stmtPay->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        $paymentBreakdown = [];
+    }
 } catch (Exception $e) { die("Error DB."); }
 
 $viaQr = ($_GET['source'] ?? '') === 'qr';
@@ -347,6 +362,18 @@ $canalMap = [
                 <?php if (!empty($venta['metodo_pago'])): ?>
                     <tr><td colspan="2" class="text-center" style="font-size:11px; padding-top: 5px; border-top: 1px dashed #000;">
                         💳 Pagado con: <strong><?php echo htmlspecialchars($venta['metodo_pago']); ?></strong>
+                    </td></tr>
+                <?php endif; ?>
+                <?php if (count($paymentBreakdown) > 1 || strtolower((string)$venta['metodo_pago']) === 'mixto'): ?>
+                    <tr><td colspan="2" style="padding-top:4px;">
+                        <table style="width:100%; font-size:11px;">
+                            <?php foreach ($paymentBreakdown as $payRow): ?>
+                            <tr>
+                                <td style="padding:1px 0 1px 8px;">- <?php echo htmlspecialchars((string)$payRow['metodo_pago']); ?></td>
+                                <td class="text-right fw-bold" style="padding:1px 0;">$<?php echo number_format((float)$payRow['monto'], 2); ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </table>
                     </td></tr>
                 <?php endif; ?>
                 <?php

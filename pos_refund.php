@@ -10,13 +10,6 @@ header('Content-Type: application/json; charset=utf-8');
 
 session_start();
 
-// 2. Validación de Sesión
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    http_response_code(403);
-    echo json_encode(['status' => 'error', 'msg' => 'Sesión no autorizada']);
-    exit;
-}
-
 require_once 'db.php';
 require_once 'pos_audit.php';
 
@@ -35,6 +28,26 @@ try {
     $input = json_decode($rawInput, true);
 
     if (!$input) throw new Exception("Datos de entrada inválidos");
+
+    // 3. Autorización con credenciales del sistema
+    $authUser = trim((string)($input['auth_user'] ?? ''));
+    $authPass = (string)($input['auth_pass'] ?? '');
+    if ($authUser === '' || $authPass === '') {
+        throw new Exception("Debe ingresar usuario y contraseña del sistema");
+    }
+    $stmtAuth = $pdo->prepare("SELECT id, nombre, password, rol, activo FROM users WHERE nombre = ? LIMIT 1");
+    $stmtAuth->execute([$authUser]);
+    $authRow = $stmtAuth->fetch(PDO::FETCH_ASSOC);
+    if (!$authRow || !password_verify($authPass, (string)$authRow['password'])) {
+        throw new Exception("Credenciales del sistema inválidas");
+    }
+    if (isset($authRow['activo']) && (int)$authRow['activo'] !== 1) {
+        throw new Exception("Usuario del sistema inactivo");
+    }
+    $authRole = strtolower(trim((string)($authRow['rol'] ?? '')));
+    if ($authRole === 'cajero') {
+        throw new Exception("Usuario del sistema sin permisos para devoluciones");
+    }
 
     // Determinar si es devolución por Ítem o por Ticket completo
     $idDetalle = isset($input['id']) ? intval($input['id']) : 0;
@@ -55,7 +68,7 @@ try {
     // INICIAR TRANSACCIÓN
     $pdo->beginTransaction();
     $kardex = ($kardexAvailable) ? new KardexEngine($pdo) : null;
-    $usuarioNombre = $_SESSION['admin_user'] ?? 'Sistema';
+    $usuarioNombre = (string)($authRow['nombre'] ?? $authUser);
 
     // =================================================================================
     // CASO A: DEVOLUCIÓN DE UN SOLO ÍTEM (Desde el detalle del modal)
@@ -183,4 +196,3 @@ try {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
 ?>
-

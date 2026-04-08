@@ -1,0 +1,133 @@
+:root {
+    --pw-bg: #f4efe6;
+    --pw-ink: #1f2933;
+    --pw-muted: #6b7280;
+    --pw-card: rgba(255,255,255,.88);
+    --pw-line: rgba(15,23,42,.08);
+    --pw-accent: #0f766e;
+    --pw-accent-2: #ea580c;
+    --pw-warn: #f59e0b;
+    --pw-danger: #b42318;
+}
+
+body.inventory-suite {
+    min-height: 100vh;
+    background:
+        radial-gradient(circle at top left, rgba(234,88,12,.12), transparent 28%),
+        radial-gradient(circle at right 15%, rgba(15,118,110,.18), transparent 25%),
+        linear-gradient(180deg, #fbf7f0 0%, var(--pw-bg) 100%);
+    color: var(--pw-ink);
+}
+
+.inventory-shell {
+    max-width: 1480px;
+}
+
+.glass-card {
+    background: var(--pw-card);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--pw-line);
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .08);
+}
+
+.inventory-hero {
+    background:
+        linear-gradient(135deg, rgba(15,118,110,.92), rgba(21,128,61,.78)),
+        linear-gradient(120deg, rgba(255,255,255,.14), rgba(255,255,255,0));
+    color: #fff;
+    overflow: hidden;
+    position: relative;
+}
+
+.inventory-hero.inventory-hero-danger {
+    background:
+        linear-gradient(135deg, rgba(180,35,24,.92), rgba(225,29,72,.78)),
+        linear-gradient(120deg, rgba(255,255,255,.14), rgba(255,255,255,0));
+}
+
+.inventory-hero::after {
+    content: '';
+    position: absolute;
+    inset: auto -70px -80px auto;
+    width: 220px;
+    height: 220px;
+    background: rgba(255,255,255,.08);
+    border-radius: 45% 55% 42% 58%;
+    transform: rotate(18deg);
+}
+
+.kpi-chip {
+    border-radius: 999px;
+    padding: .4rem .85rem;
+    background: rgba(255,255,255,.14);
+    border: 1px solid rgba(255,255,255,.18);
+    font-size: .85rem;
+}
+
+.section-title {
+    font-size: .8rem;
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    color: var(--pw-muted);
+    font-weight: 700;
+}
+
+.soft-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    border-radius: 999px;
+    padding: .25rem .7rem;
+    border: 1px solid var(--pw-line);
+    background: rgba(255,255,255,.7);
+    font-size: .82rem;
+}
+
+.stat-box {
+    border: 1px solid var(--pw-line);
+    border-radius: 18px;
+    padding: .9rem 1rem;
+    background: rgba(255,255,255,.7);
+}
+
+.inventory-table thead th,
+.table thead th {
+    white-space: nowrap;
+}
+
+.inventory-card {
+    border: 1px solid var(--pw-line);
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, .08);
+    background: var(--pw-card);
+}
+
+.inventory-btn-primary,
+.btn.inventory-btn-primary {
+    background-color: var(--pw-accent);
+    border-color: var(--pw-accent);
+    color: #fff;
+}
+
+.inventory-btn-primary:hover,
+.inventory-btn-primary:focus,
+.btn.inventory-btn-primary:hover,
+.btn.inventory-btn-primary:focus {
+    background-color: #0b5e59;
+    border-color: #0b5e59;
+    color: #fff;
+}
+
+.inventory-fade-in {
+    animation: inventoryFadeIn .35s ease;
+}
+
+@keyframes inventoryFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 991px) {
+    .inventory-summary-total { font-size: 1.5rem; }
+}

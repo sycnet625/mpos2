@@ -13,6 +13,10 @@ ini_set('log_errors', 1);
 error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
 require_once 'db.php';
 require_once 'pos_audit.php';
 
@@ -26,22 +30,27 @@ try {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) throw new Exception("Datos de entrada inválidos");
 
-    // ── 1. Autenticación por PIN ────────────────────────────────────────────────
-    $configFile = __DIR__ . '/pos.cfg';
-    $config = [];
-    if (file_exists($configFile)) {
-        $config = json_decode(file_get_contents($configFile), true) ?? [];
+    // ── 1. Autenticación con usuario/contraseña del sistema ───────────────────
+    $authUser = trim((string)($input['auth_user'] ?? ''));
+    $authPass = (string)($input['auth_pass'] ?? '');
+    if ($authUser === '' || $authPass === '') {
+        throw new Exception("Debe ingresar usuario y contraseña del sistema");
     }
 
-    $pinIngresado = trim($input['pin'] ?? '');
-    $cajero = null;
-    foreach ($config['cajeros'] ?? [] as $c) {
-        if (isset($c['pin']) && $c['pin'] === $pinIngresado) {
-            $cajero = $c['nombre'];
-            break;
-        }
+    $stmtAuth = $pdo->prepare("SELECT id, nombre, password, rol, activo FROM users WHERE nombre = ? LIMIT 1");
+    $stmtAuth->execute([$authUser]);
+    $authRow = $stmtAuth->fetch(PDO::FETCH_ASSOC);
+    if (!$authRow || !password_verify($authPass, (string)$authRow['password'])) {
+        throw new Exception("Credenciales del sistema inválidas");
     }
-    if (!$cajero) throw new Exception("PIN incorrecto o cajero no autorizado");
+    if (isset($authRow['activo']) && (int)$authRow['activo'] !== 1) {
+        throw new Exception("Usuario del sistema inactivo");
+    }
+    $authRole = strtolower(trim((string)($authRow['rol'] ?? '')));
+    if ($authRole === 'cajero') {
+        throw new Exception("Usuario del sistema sin permisos para anular");
+    }
+    $cajero = (string)($authRow['nombre'] ?? $authUser);
 
     // ── 2. Validar motivo ───────────────────────────────────────────────────────
     $motivo = trim($input['motivo'] ?? '');

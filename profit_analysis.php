@@ -21,6 +21,16 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 // ---------------------------------------------------------
 require_once 'config_loader.php';
 
+function profitTableHasColumn(PDO $pdo, string $table, string $column): bool {
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    $stmt->execute([$table, $column]);
+    $cache[$key] = ((int)$stmt->fetchColumn() > 0);
+    return $cache[$key];
+}
+
 // Variables de Entorno
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']); // <--- VARIABLE CLAVE AHORA
@@ -124,8 +134,28 @@ try {
     // =========================================================
     
     // Salidas por Compras de Mercancía
-    $stmtCompras = $pdo->prepare("SELECT SUM(total) FROM compras_cabecera WHERE DATE(fecha) BETWEEN ? AND ?");
-    $stmtCompras->execute([$start, $end]);
+    $sqlCompras = "SELECT SUM(total)
+                   FROM compras_cabecera
+                   WHERE DATE(fecha) BETWEEN ? AND ?
+                     AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
+    $paramsCompras = [$start, $end];
+    if ($isGlobal) {
+        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_empresa')) {
+            $sqlCompras .= " AND id_empresa = ?";
+            $paramsCompras[] = $EMP_ID;
+        }
+    } else {
+        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_sucursal')) {
+            $sqlCompras .= " AND id_sucursal = ?";
+            $paramsCompras[] = $SUC_ID;
+        }
+        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_almacen')) {
+            $sqlCompras .= " AND id_almacen = ?";
+            $paramsCompras[] = $ALM_ID;
+        }
+    }
+    $stmtCompras = $pdo->prepare($sqlCompras);
+    $stmtCompras->execute($paramsCompras);
     $salidaCompras = floatval($stmtCompras->fetchColumn() ?: 0);
     
     // Flujo Neto
@@ -347,4 +377,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

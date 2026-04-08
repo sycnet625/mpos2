@@ -220,38 +220,51 @@ if (isset($_GET['print_id'])) {
     <title>Transferencias entre Sucursales</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background-color: #f8f9fa; font-family: 'Segoe UI', sans-serif; font-size: 0.9rem; }
+        body { font-family: 'Segoe UI', sans-serif; font-size: 0.92rem; }
+        .shell { max-width: 1480px; }
         .search-results { position: absolute; width: 100%; z-index: 1000; max-height: 300px; overflow-y: auto; }
-        .card-transfer { border: none; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .btn-price { font-size: 0.7rem; padding: 1px 4px; }
-        .header-status { background: #2c3e50; color: white; padding: 10px 20px; border-radius: 8px; margin-bottom: 20px; font-size: 0.85rem; }
-        .badge-info-sys { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2); }
+        .card-transfer { border: 1px solid var(--pw-line); border-radius: 24px; box-shadow: 0 18px 45px rgba(15, 23, 42, .08); background: var(--pw-card); }
+        .btn-price { font-size: 0.72rem; padding: 2px 6px; }
+        .table thead th { white-space: nowrap; }
         .preview-modal .modal-lg { max-width: 900px; }
         .invoice-preview { border: 1px solid #ccc; padding: 30px; background: white; font-family: 'Calibri', sans-serif; }
     </style>
 </head>
-<body class="p-4">
-    <div id="app" class="container-fluid">
-        
-        <div class="header-status d-flex justify-content-between align-items-center no-print">
-            <div class="d-flex gap-3">
-                <div class="px-3 py-1 rounded badge-info-sys"><i class="fas fa-warehouse text-warning me-2"></i>Almacén: <strong><?php echo $ALM_ID; ?></strong></div>
-                <div class="px-3 py-1 rounded badge-info-sys"><i class="fas fa-building text-info me-2"></i>Sucursal: <strong><?php echo $SUC_ID; ?> (<?php echo $sucOrigData['nombre'] ?? 'N/A'; ?>)</strong></div>
+<body class="pb-5 inventory-suite">
+    <div id="app" class="container-fluid shell inventory-shell py-4 py-lg-5">
+        <section class="glass-card inventory-hero p-4 p-lg-5 mb-4">
+            <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+                <div>
+                    <div class="section-title text-white-50 mb-2">Inventario / Logística</div>
+                    <h1 class="h2 fw-bold mb-2"><i class="fas fa-exchange-alt me-2"></i>Transferencias e Inter-Facturación</h1>
+                    <p class="mb-3 text-white-50">Movimiento entre sucursales con comprobante interno, vista previa documental y factura inter-sucursal.</p>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="kpi-chip"><i class="fas fa-building me-1"></i>Sucursal <?= (int)$SUC_ID ?> (<?= htmlspecialchars($sucOrigData['nombre'] ?? 'N/A') ?>)</span>
+                        <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén <?= (int)$ALM_ID ?></span>
+                        <span class="kpi-chip"><i class="fas fa-code-branch me-1"></i><?= count($sucursales) ?> destinos disponibles</span>
+                    </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <a href="pos_purchases.php" class="btn btn-light"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>
+                    <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
+                </div>
             </div>
-            <div class="fw-bold text-uppercase opacity-75">Módulo de Inter-Transferencia</div>
-        </div>
-
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3 class="fw-bold m-0"><i class="fas fa-exchange-alt text-primary me-2"></i> Transferencias e Inter-Facturación</h3>
-            <a href="dashboard.php" class="btn btn-outline-secondary btn-sm"><i class="fas fa-home"></i> Volver</a>
-        </div>
+        </section>
 
         <div class="row g-4">
             <!-- CARRITO Y CONFIGURACIÓN -->
             <div class="col-md-8">
                 <div class="card card-transfer mb-4">
-                    <div class="card-header bg-white py-3">
+                    <div class="card-header bg-transparent border-0 py-4 px-4">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                            <div>
+                                <div class="section-title">Operación</div>
+                                <div class="fw-bold fs-5">Armar transferencia</div>
+                            </div>
+                            <span class="soft-pill"><i class="fas fa-truck-ramp-box"></i>{{cart.length}} líneas</span>
+                        </div>
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label class="form-label fw-bold small">1. SUCURSAL DESTINO</label>
@@ -340,21 +353,24 @@ if (isset($_GET['print_id'])) {
             <!-- RESUMEN Y ACCIÓN -->
             <div class="col-md-4">
                 <div class="card card-transfer">
-                    <div class="card-body">
-                        <h5 class="fw-bold mb-4 border-bottom pb-2">Resumen de Operación</h5>
+                    <div class="card-body p-4">
+                        <div class="section-title mb-2">Resumen</div>
+                        <h5 class="fw-bold mb-4">Resumen de operación</h5>
                         
                         <div class="mb-4">
                             <label class="form-label small fw-bold text-muted">Margen Mayorista (%)</label>
                             <input type="number" class="form-control form-control-sm" v-model.number="wholesaleProfit" min="0">
                         </div>
 
-                        <div class="d-flex justify-content-between mb-2">
-                            <span>Total Productos:</span>
-                            <span class="fw-bold">{{cart.length}}</span>
-                        </div>
-                        <div class="d-flex justify-content-between mb-4">
-                            <span class="fs-5">TOTAL FACTURADO:</span>
-                            <span class="fs-4 fw-bold text-success">${{total.toFixed(2)}}</span>
+                        <div class="stat-box mb-3">
+                            <div class="d-flex justify-content-between mb-2">
+                                <span>Total productos</span>
+                                <span class="fw-bold">{{cart.length}}</span>
+                            </div>
+                            <div class="d-flex justify-content-between">
+                                <span class="fs-6">Total facturado</span>
+                                <span class="fs-4 fw-bold text-success">${{total.toFixed(2)}}</span>
+                            </div>
                         </div>
 
                         <div class="d-grid gap-2">
@@ -365,7 +381,7 @@ if (isset($_GET['print_id'])) {
                                 <i class="fas fa-file-invoice-dollar me-2"></i> VISTA PREVIA FACTURA
                             </button>
                             <hr>
-                            <button class="btn btn-primary btn-lg py-3 fw-bold shadow" :disabled="!isReady" @click="submitTransfer">
+                            <button class="btn btn-success btn-lg py-3 fw-bold shadow-sm" :disabled="!isReady" @click="submitTransfer">
                                 <i class="fas fa-check-circle me-2"></i> CONFIRMAR OPERACIÓN
                             </button>
                         </div>

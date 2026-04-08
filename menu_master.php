@@ -19,7 +19,6 @@ $menuCategories = [
     ],
     "🛒 POS & Venta" => [
         ["icon" => "fa-desktop", "name" => "Terminal POS", "url" => "pos.php"],
-        ["icon" => "fa-clock", "name" => "Reloj LCD", "url" => "clock.php"],
         ["icon" => "fa-store", "name" => "Tienda Online", "url" => "shop.php"],
         ["icon" => "fa-calendar-check", "name" => "Reservas", "url" => "reservas.php"],
         ["icon" => "fa-utensils", "name" => "Pantalla Cocina", "url" => "kds.php"],
@@ -76,7 +75,8 @@ $menuCategories = [
     "🧮 Herramientas" => [
         ["icon" => "fa-calculator", "name" => "Convertir Unidades", "url" => "#", "onclick" => "openUnitConverter()"],
         ["icon" => "fa-search-plus", "name" => "Buscador Inteligente", "url" => "image_smart_hunter.php"],
-        ["icon" => "fa-tachometer-alt", "name" => "SNMP VU Monitor", "url" => "snmp_vu_monitor.php"],
+        ["icon" => "fa-clock", "name" => "Reloj LCD", "url" => "clock.php"],
+        ["icon" => "fa-calendar-alt", "name" => "Almanaque", "url" => "almanaque.php"],
     ],
     "🎨 Temas / Skins" => [
         ["icon" => "fa-sun", "name" => "Claro (Original)", "url" => "#", "onclick" => "setTheme('light')"],

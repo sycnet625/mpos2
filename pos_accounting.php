@@ -14,6 +14,15 @@ $EMP_ID = intval($config['id_empresa']);
 // 2. HELPERS
 function getNombreCuenta($pdo, $codigo) { try { $stmt = $pdo->prepare("SELECT nombre FROM contabilidad_cuentas WHERE codigo = ?"); $stmt->execute([$codigo]); return $stmt->fetchColumn() ?: 'Cuenta General'; } catch (Exception $e) { return 'General'; } }
 function getCajaSucursal($pdo, $sucId) { return "101." . str_pad($sucId, 3, "0", STR_PAD_LEFT); }
+function acctTableHasColumn(PDO $pdo, string $table, string $column): bool {
+    static $cache = [];
+    $key = $table . '.' . $column;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    $stmt->execute([$table, $column]);
+    $cache[$key] = ((int)$stmt->fetchColumn() > 0);
+    return $cache[$key];
+}
 function getPeriodStatus($pdo, $mes, $anio) {
     $stmt = $pdo->query("SELECT valor FROM contabilidad_config WHERE clave='fecha_cierre'");
     $fechaCierre = ($stmt) ? $stmt->fetchColumn() : '2000-01-01';
@@ -60,21 +69,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // PREPARAR FILTROS SCOPE
             $sqlVentas = "SELECT * FROM ventas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'";
             $sqlGastos = "SELECT * FROM gastos_historial WHERE fecha BETWEEN '$fi' AND '$ff'";
-            $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND estado != 'CANCELADA'";
+            $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
             $sqlMermas = "SELECT * FROM mermas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'"; // Asumiendo columna fecha
+
+            $comprasHasSucursal = acctTableHasColumn($pdo, 'compras_cabecera', 'id_sucursal');
+            $comprasHasEmpresa = acctTableHasColumn($pdo, 'compras_cabecera', 'id_empresa');
+            $comprasHasAlmacen = acctTableHasColumn($pdo, 'compras_cabecera', 'id_almacen');
+            $mermasHasSucursal = acctTableHasColumn($pdo, 'mermas_cabecera', 'id_sucursal');
+            $mermasHasEmpresa = acctTableHasColumn($pdo, 'mermas_cabecera', 'id_empresa');
 
             if ($scope === 'local') {
                 $sqlVentas .= " AND id_sucursal = $SUC_ID";
                 $sqlGastos .= " AND id_sucursal = $SUC_ID"; 
-                // Intentar filtrar Compras/Mermas por sucursal si existe la columna
-                try { $pdo->query("SELECT id_sucursal FROM compras_cabecera LIMIT 1"); $sqlCompras .= " AND id_sucursal=$SUC_ID"; } catch(Exception $e){}
-                try { $pdo->query("SELECT id_sucursal FROM mermas_cabecera LIMIT 1"); $sqlMermas .= " AND id_sucursal=$SUC_ID"; } catch(Exception $e){}
+                if ($comprasHasSucursal) $sqlCompras .= " AND id_sucursal=$SUC_ID";
+                if ($comprasHasAlmacen) $sqlCompras .= " AND id_almacen=$ALM_ID";
+                if ($mermasHasSucursal) $sqlMermas .= " AND id_sucursal=$SUC_ID";
             } else {
                 $sqlVentas .= " AND id_empresa = $EMP_ID";
-                // Global attempts
                 try { $pdo->query("SELECT id_empresa FROM gastos_historial LIMIT 1"); $sqlGastos .= " AND id_empresa=$EMP_ID"; } catch(Exception $e){}
-                try { $pdo->query("SELECT id_empresa FROM compras_cabecera LIMIT 1"); $sqlCompras .= " AND id_empresa=$EMP_ID"; } catch(Exception $e){}
-                try { $pdo->query("SELECT id_empresa FROM mermas_cabecera LIMIT 1"); $sqlMermas .= " AND id_empresa=$EMP_ID"; } catch(Exception $e){}
+                if ($comprasHasEmpresa) $sqlCompras .= " AND id_empresa=$EMP_ID";
+                if ($mermasHasEmpresa) $sqlMermas .= " AND id_empresa=$EMP_ID";
             }
 
             // A. VENTAS
@@ -289,4 +303,3 @@ new Vue({
 });
 </script><?php include_once 'menu_master.php'; ?>
 </body></html>
-
