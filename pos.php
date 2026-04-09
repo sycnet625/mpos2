@@ -269,18 +269,15 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($accion === 'entrada') {
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'ENTRADA',abs($qty),"ENTRADA POS: $motivo",$costo,$usuario,$fecha);
-                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad+? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
                 $results[] = "+".abs($qty)." ".$prod['nombre'];
 
             } elseif ($accion === 'merma') {
                 $pdo->prepare("INSERT INTO mermas_detalle (id_merma,id_producto,cantidad,costo_al_momento,motivo_especifico) VALUES(?,?,?,?,?)")->execute([$idMerma,$sku,abs($qty),$costo,$motivo]);
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',-abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha);
-                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad-? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
                 $results[] = "-".abs($qty)." ".$prod['nombre'];
 
             } elseif ($accion === 'ajuste') {
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$qty,"AJUSTE POS: $motivo",$costo,$usuario,$fecha);
-                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad+? WHERE id_producto=? AND id_almacen=?")->execute([$qty,$sku,$ALM]);
                 $results[] = ($qty>0?"+":"").$qty." ".$prod['nombre'];
 
             } elseif ($accion === 'conteo') {
@@ -289,12 +286,10 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stockAnt = floatval($sq->fetchColumn()?:0);
                 $delta = $qty - $stockAnt;
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: $stockAnt→$qty",$costo,$usuario,$fecha);
-                $pdo->prepare("UPDATE stock_almacen SET cantidad=? WHERE id_producto=? AND id_almacen=?")->execute([$qty,$sku,$ALM]);
                 $results[] = $prod['nombre'].": ".($delta>=0?"+$delta":"$delta");
 
             } elseif ($accion === 'transferencia') {
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSFER→$destino POS: $motivo",$costo,$usuario,$fecha);
-                $pdo->prepare("UPDATE stock_almacen SET cantidad=cantidad-? WHERE id_producto=? AND id_almacen=?")->execute([abs($qty),$sku,$ALM]);
                 $pdo->prepare("INSERT INTO transfer_pendiente (sku,cantidad,costo,sucursal_origen,destino_nombre,usuario,motivo,fecha) VALUES(?,?,?,?,?,?,?,?)")->execute([$sku,abs($qty),$costo,$SUC,$destino,$usuario,$motivo,$fecha]);
                 $results[] = "-".abs($qty)." ".$prod['nombre']." → $destino";
             }
