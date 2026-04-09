@@ -372,7 +372,6 @@ function getCanalBadgePR($canal, $map) {
         <?php endif; ?>
     </div>
 
-<?php include_once 'menu_master.php'; ?>
 </body>
 </html>
 
