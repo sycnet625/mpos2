@@ -72,6 +72,9 @@ $defaultConfig = [
     "tipo_cambio_usd" => 385,
     "tipo_cambio_mlc" => 310,
     "moneda_default_pos" => "CUP",
+    "hero_color_1" => "#0f766e",
+    "hero_color_2" => "#15803d",
+    "hero_mostrar_usuario" => true,
     "vapid_public_key" => "",
     "vapid_private_key" => "",
     "metodos_pago" => [
@@ -155,7 +158,7 @@ if ($editUserId > 0) {
 } elseif ((int)($_GET['edit_empresa'] ?? 0) > 0 || (int)($_GET['edit_sucursal'] ?? 0) > 0 || (int)($_GET['edit_almacen'] ?? 0) > 0) {
     $activeTab = 'estructura';
 } elseif (!empty($_GET['tab'])) {
-    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones'];
+    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'];
     $requestedTab = (string)$_GET['tab'];
     if (in_array($requestedTab, $allowedTabs, true)) {
         $activeTab = $requestedTab;
@@ -166,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $formAction = $_POST['form_action'] ?? '';
         $postedTab = (string)($_POST['active_tab'] ?? '');
-        if (in_array($postedTab, ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones'], true)) {
+        if (in_array($postedTab, ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'], true)) {
             $activeTab = $postedTab;
         }
 
@@ -329,6 +332,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['tipo_cambio_usd'] = (float)($_POST['tipo_cambio_usd'] ?? 385);
             $newConfig['tipo_cambio_mlc'] = (float)($_POST['tipo_cambio_mlc'] ?? 310);
             $newConfig['moneda_default_pos'] = trim((string)($_POST['moneda_default_pos'] ?? 'CUP')) ?: 'CUP';
+            $newConfig['hero_color_1'] = trim((string)($_POST['hero_color_1'] ?? '#0f766e'));
+            $newConfig['hero_color_2'] = trim((string)($_POST['hero_color_2'] ?? '#15803d'));
+            $newConfig['hero_mostrar_usuario'] = isset($_POST['hero_mostrar_usuario']);
             $newConfig['categorias_ocultas'] = $_POST['categorias_ocultas'] ?? [];
             $newConfig['vapid_public_key'] = trim((string)($_POST['vapid_public_key'] ?? ($currentConfig['vapid_public_key'] ?? '')));
             $replacePrivate = isset($_POST['replace_vapid_private']);
@@ -815,6 +821,7 @@ unset($treeCompany);
         <li class="nav-item"><button type="button" class="nav-link" data-tab="usuarios" onclick="showCfgTab('usuarios', this)">👤 Usuarios ERP</button></li>
         <li class="nav-item"><button type="button" class="nav-link" data-tab="cajeros" onclick="showCfgTab('cajeros', this)">🧑‍💼 Cajeros POS</button></li>
         <li class="nav-item"><button type="button" class="nav-link" data-tab="notificaciones" onclick="showCfgTab('notificaciones', this)">🔔 Notificaciones</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" data-tab="estilo" onclick="showCfgTab('estilo', this)">🎨 Hero & Estilos</button></li>
     </ul>
 
     <div class="cfg-tab" data-tab-panel="shop">
@@ -1886,6 +1893,95 @@ unset($treeCompany);
                 </form>
             </div>
         </div>
+    </div>
+
+    <div class="cfg-tab d-none" data-tab-panel="estilo">
+        <form method="post">
+            <input type="hidden" name="form_action" value="save_shop_config">
+            <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
+            <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
+            <input type="hidden" name="telefono" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>">
+            <input type="hidden" name="email" value="<?php echo htmlspecialchars($currentConfig['email']); ?>">
+            <input type="hidden" name="website" value="<?php echo htmlspecialchars($currentConfig['website']); ?>">
+            <input type="hidden" name="nit" value="<?php echo htmlspecialchars($currentConfig['nit']); ?>">
+            <input type="hidden" name="cuenta_bancaria" value="<?php echo htmlspecialchars($currentConfig['cuenta_bancaria']); ?>">
+            <input type="hidden" name="banco" value="<?php echo htmlspecialchars($currentConfig['banco']); ?>">
+            <input type="hidden" name="mensaje_final" value="<?php echo htmlspecialchars($currentConfig['mensaje_final']); ?>">
+            <input type="hidden" name="id_empresa" value="<?php echo (int)$currentConfig['id_empresa']; ?>">
+            <input type="hidden" name="id_sucursal" value="<?php echo (int)$currentConfig['id_sucursal']; ?>">
+            <input type="hidden" name="id_almacen" value="<?php echo (int)$currentConfig['id_almacen']; ?>">
+            <input type="hidden" name="mensajeria_tarifa_km" value="<?php echo htmlspecialchars((string)$currentConfig['mensajeria_tarifa_km']); ?>">
+            <input type="hidden" name="semana_inicio_dia" value="<?php echo (int)$currentConfig['semana_inicio_dia']; ?>">
+            <input type="hidden" name="reserva_limpieza_pct" value="<?php echo htmlspecialchars((string)$currentConfig['reserva_limpieza_pct']); ?>">
+            <input type="hidden" name="salario_elaborador_pct" value="<?php echo htmlspecialchars((string)$currentConfig['salario_elaborador_pct']); ?>">
+            <input type="hidden" name="reserva_negocio_pct" value="<?php echo htmlspecialchars((string)$currentConfig['reserva_negocio_pct']); ?>">
+            <input type="hidden" name="depreciacion_equipos_pct" value="<?php echo htmlspecialchars((string)$currentConfig['depreciacion_equipos_pct']); ?>">
+            <?php if (!empty($currentConfig['mostrar_materias_primas'])): ?><input type="hidden" name="mostrar_materias_primas" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['mostrar_servicios'])): ?><input type="hidden" name="mostrar_servicios" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['kiosco_solo_stock'])): ?><input type="hidden" name="kiosco_solo_stock" value="1"><?php endif; ?>
+            <input type="hidden" name="customer_display_insect" value="<?php echo htmlspecialchars($currentConfig['customer_display_insect'] ?? 'mosca'); ?>">
+            <input type="hidden" name="customer_display_chime_type" value="<?php echo htmlspecialchars($currentConfig['customer_display_chime_type']); ?>">
+            <input type="hidden" name="numero_tarjeta" value="<?php echo htmlspecialchars($currentConfig['numero_tarjeta']); ?>">
+            <input type="hidden" name="titular_tarjeta" value="<?php echo htmlspecialchars($currentConfig['titular_tarjeta']); ?>">
+            <input type="hidden" name="banco_tarjeta" value="<?php echo htmlspecialchars($currentConfig['banco_tarjeta']); ?>">
+            <input type="hidden" name="facebook_url" value="<?php echo htmlspecialchars($currentConfig['facebook_url']); ?>">
+            <input type="hidden" name="twitter_url" value="<?php echo htmlspecialchars($currentConfig['twitter_url']); ?>">
+            <input type="hidden" name="instagram_url" value="<?php echo htmlspecialchars($currentConfig['instagram_url']); ?>">
+            <input type="hidden" name="youtube_url" value="<?php echo htmlspecialchars($currentConfig['youtube_url']); ?>">
+            <input type="hidden" name="ticket_logo" value="<?php echo htmlspecialchars($currentConfig['ticket_logo']); ?>">
+            <input type="hidden" name="ticket_slogan" value="<?php echo htmlspecialchars($currentConfig['ticket_slogan']); ?>">
+            <?php if (!empty($currentConfig['ticket_mostrar_uuid'])): ?><input type="hidden" name="ticket_mostrar_uuid" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['ticket_mostrar_canal'])): ?><input type="hidden" name="ticket_mostrar_canal" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['ticket_mostrar_cajero'])): ?><input type="hidden" name="ticket_mostrar_cajero" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['ticket_mostrar_qr'])): ?><input type="hidden" name="ticket_mostrar_qr" value="1"><?php endif; ?>
+            <?php if (!empty($currentConfig['ticket_mostrar_items_count'])): ?><input type="hidden" name="ticket_mostrar_items_count" value="1"><?php endif; ?>
+            <input type="hidden" name="tipo_cambio_usd" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_usd']); ?>">
+            <input type="hidden" name="tipo_cambio_mlc" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_mlc']); ?>">
+            <input type="hidden" name="moneda_default_pos" value="<?php echo htmlspecialchars($currentConfig['moneda_default_pos']); ?>">
+            <input type="hidden" name="vapid_public_key" value="<?php echo htmlspecialchars($currentConfig['vapid_public_key'] ?? ''); ?>">
+            <?php foreach (($currentConfig['categorias_ocultas'] ?? []) as $hiddenCategory): ?><input type="hidden" name="categorias_ocultas[]" value="<?php echo htmlspecialchars($hiddenCategory); ?>"><?php endforeach; ?>
+            <?php foreach (($currentConfig['notification_type_settings'] ?? []) as $key => $enabled): ?><input type="hidden" name="notification_type_keys[]" value="<?php echo htmlspecialchars($key); ?>"><?php if ($enabled): ?><input type="hidden" name="notification_type_enabled[]" value="<?php echo htmlspecialchars($key); ?>"><?php endif; ?><?php endforeach; ?>
+            <?php foreach (($currentConfig['metodos_pago'] ?? []) as $idx => $metodo): ?>
+                <input type="hidden" name="metodo_id[]" value="<?php echo htmlspecialchars($metodo['id'] ?? ''); ?>">
+                <input type="hidden" name="metodo_nombre[]" value="<?php echo htmlspecialchars($metodo['nombre'] ?? ''); ?>">
+                <input type="hidden" name="metodo_icono[]" value="<?php echo htmlspecialchars($metodo['icono'] ?? ''); ?>">
+                <input type="hidden" name="metodo_color[]" value="<?php echo htmlspecialchars($metodo['color_bootstrap'] ?? ''); ?>">
+                <input type="hidden" name="metodo_texto_especial[]" value="<?php echo htmlspecialchars($metodo['texto_especial'] ?? ''); ?>">
+                <?php if (!empty($metodo['activo'])): ?><input type="hidden" name="metodo_activo[]" value="<?php echo $idx; ?>"><?php endif; ?>
+                <?php if (!empty($metodo['requiere_codigo'])): ?><input type="hidden" name="metodo_requiere_codigo[]" value="<?php echo $idx; ?>"><?php endif; ?>
+                <?php if (!empty($metodo['aplica_pos'])): ?><input type="hidden" name="metodo_aplica_pos[]" value="<?php echo $idx; ?>"><?php endif; ?>
+                <?php if (!empty($metodo['aplica_shop'])): ?><input type="hidden" name="metodo_aplica_shop[]" value="<?php echo $idx; ?>"><?php endif; ?>
+                <?php if (!empty($metodo['es_transferencia'])): ?><input type="hidden" name="metodo_es_transferencia[]" value="<?php echo $idx; ?>"><?php endif; ?>
+                <?php if (!empty($metodo['es_especial'])): ?><input type="hidden" name="metodo_es_especial[]" value="<?php echo $idx; ?>"><?php endif; ?>
+            <?php endforeach; ?>
+
+            <div class="card">
+                <div class="card-header fw-bold text-primary">🎨 Personalización del Hero Banner</div>
+                <div class="card-body row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Color Primario (Gradiente Izq)</label>
+                        <input type="color" name="hero_color_1" class="form-control form-control-color w-100" value="<?php echo htmlspecialchars($currentConfig['hero_color_1'] ?? '#0f766e'); ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Color Secundario (Gradiente Der)</label>
+                        <input type="color" name="hero_color_2" class="form-control form-control-color w-100" value="<?php echo htmlspecialchars($currentConfig['hero_color_2'] ?? '#15803d'); ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label d-block">Usuario en Banner y Menú</label>
+                        <div class="form-check form-switch mt-2">
+                            <input class="form-check-input" type="checkbox" name="hero_mostrar_usuario" id="hero_mostrar_usuario" <?php echo !empty($currentConfig['hero_mostrar_usuario']) ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="hero_mostrar_usuario">Mostrar nombre de usuario</label>
+                        </div>
+                    </div>
+                    <div class="col-12 mt-3">
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-1"></i> Estos colores afectan el "Hero Banner" de todos los módulos que utilizan el estilo <strong>Inventory Suite</strong> (Producción, Compras, KDS, etc.)
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar estilos hero</button>
+        </form>
     </div>
 </div>
 <script>

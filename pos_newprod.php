@@ -1,7 +1,10 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_newprod.php
 // DESCRIPCIÓN: Modal universal para creación rápida de productos (Backend + UI)
-// VERSIÓN: V2.0 (SKU AUTOMÁTICO POR SUCURSAL 6 DÍGITOS)
+// VERSIÓN: V2.1 (CONDICIONAL FULL PAGE O MODAL)
+
+// Detectar si se está llamando directamente o incluido
+$is_direct_access = (basename($_SERVER['SCRIPT_FILENAME']) === 'pos_newprod.php');
 
 // 1. LÓGICA DE BACKEND (Solo se ejecuta si hay petición AJAX)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array($_GET['action'], ['get_next_sku', 'get_categories']))) {
@@ -178,14 +181,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
         exit;
     }
 }
+
+if ($is_direct_access) {
+    ?>
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>Nuevo Producto - PalWeb POS</title>
+        <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+        <link rel="stylesheet" href="assets/css/all.min.css">
+        <script src="assets/js/bootstrap.bundle.min.js"></script>
+        <style>
+            body { background: #f4f7f6; }
+            .full-page-wrapper { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+            /* Estilos para que cuando sea directo no parezca un modal "flotante" si no se quiere */
+            #modalQuickProd.show { display: block !important; opacity: 1 !important; position: relative; z-index: 1; }
+            #modalQuickProd .modal-backdrop { display: none !important; }
+            #modalQuickProd .modal-dialog { margin: 0; max-width: 800px; width: 100%; }
+        </style>
+    </head>
+    <body>
+        <div class="full-page-wrapper">
+    <?php
+}
 ?>
 
-<div class="modal fade" id="modalQuickProd" tabindex="-1" data-bs-backdrop="static" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
+<div class="modal fade <?php echo $is_direct_access ? 'show' : ''; ?>" id="modalQuickProd" tabindex="-1" <?php echo $is_direct_access ? '' : 'data-bs-backdrop="static" aria-hidden="true"'; ?> style="<?php echo $is_direct_access ? 'display:block; position:relative;' : ''; ?>">
+    <div class="modal-dialog modal-lg <?php echo $is_direct_access ? '' : 'modal-dialog-centered'; ?>">
         <div class="modal-content border-0 shadow-lg" style="border-radius: 15px;">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title fw-bold"><i class="fas fa-box-open me-2"></i> Nuevo Producto</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <?php if (!$is_direct_access): ?>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <?php endif; ?>
             </div>
             <div class="modal-body bg-light">
                 <form id="formQuickProd" enctype="multipart/form-data">
@@ -357,7 +386,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <?php if (!$is_direct_access): ?>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <?php else: ?>
+                    <a href="dashboard.php" class="btn btn-secondary">Volver al Menú</a>
+                <?php endif; ?>
                 <button type="button" class="btn btn-success fw-bold px-4" onclick="submitNewProduct()">
                     <i class="fas fa-save me-2"></i> CREAR PRODUCTO
                 </button>
@@ -365,6 +398,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
         </div>
     </div>
 </div>
+
+<?php if ($is_direct_access): ?>
+    </div> <!-- .full-page-wrapper -->
+    <script>
+        // Si es acceso directo, inicializar todo automáticamente
+        document.addEventListener('DOMContentLoaded', () => {
+            loadNextSku();
+            loadCategoriesQP();
+        });
+    </script>
+<?php endif; ?>
 
 <script>
     // Variable para almacenar el callback (función que se ejecuta al terminar)
@@ -382,9 +426,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
         // Cargar categorías desde la tabla
         loadCategoriesQP();
         
-        // Mostrar Modal
-        const modal = new bootstrap.Modal(document.getElementById('modalQuickProd'));
-        modal.show();
+        // Mostrar Modal (solo si no es directo)
+        const modalEl = document.getElementById('modalQuickProd');
+        if (modalEl.classList.contains('fade')) {
+            const modal = new bootstrap.Modal(modalEl);
+            modal.show();
+        }
     }
 
     async function loadCategoriesQP() {
@@ -407,19 +454,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
 
     async function loadNextSku() {
         try {
-            // IMPORTANTE: Asegúrate de que el nombre del archivo aquí coincida con el real.
-            // Si el archivo se llama 'pos_newprod.php', usaremos esa ruta.
             const res = await fetch('pos_newprod.php?action=get_next_sku'); 
             const data = await res.json();
             
             if(data.status === 'success') {
                 let prefix = data.prefix;
                 let seq = parseInt(data.next_seq);
-                
-                // Formato: SS + 000N (Total 6 chars aprox, asegurando relleno de 4 ceros)
-                // Ej: 44 + 0001 = 440001
                 let sku = prefix + seq.toString().padStart(4, '0');
-                
                 document.getElementById('qp_codigo').value = sku;
             }
         } catch(e) {
@@ -441,7 +482,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
 
         try {
             const formData = new FormData(form);
-            // Asegurarse de enviar a este mismo archivo
             const res = await fetch('pos_newprod.php', {
                 method: 'POST',
                 body: formData
@@ -459,15 +499,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
             if (data.status === 'success') {
                 alert("✅ Producto creado correctamente: " + data.data.codigo);
                 
+                // Si es modal, cerrarlo
                 const modalEl = document.getElementById('modalQuickProd');
-                const modalInstance = bootstrap.Modal.getInstance(modalEl);
-                modalInstance.hide();
+                if (modalEl.classList.contains('fade')) {
+                    const modalInstance = bootstrap.Modal.getInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                }
 
                 if (typeof productCreatedCallback === 'function') {
                     productCreatedCallback(data.data);
                 } else if (typeof window.reloadTable === 'function') {
                     window.reloadTable(); 
                 } else {
+                    // Si es acceso directo, tal vez no queramos recargar la página completa
+                    // o sí, para limpiar el formulario.
                     location.reload(); 
                 }
 
@@ -483,3 +528,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
         }
     }
 </script>
+
+<?php if ($is_direct_access): ?>
+</body>
+</html>
+<?php endif; ?>

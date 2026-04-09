@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-09T13:05:29.011Z",
+  "updated_at": "2026-04-09T13:55:30.603Z",
   "rows": [
     {
       "id": "17905869652079@lid",
@@ -20,86 +20,8 @@
       "is_contact": true
     },
     {
-      "id": "120363360932598727@g.us",
-      "name": "ELECTRODOMÉSTICOS NEKY",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363292278532360@g.us",
-      "name": "Ventas Nana en todo 10 de oct",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417843314195@g.us",
-      "name": "Ventas en Luyano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363290425164967@g.us",
-      "name": "Mercado✨️Larga Vida✨️20 de mayo",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363308533081066@g.us",
-      "name": "VENTAS #1MAGUI💪😎✌️💜",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363208098502354@g.us",
-      "name": "Servicio Ángel S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363371593990080@g.us",
-      "name": "Landy bodega 1362 y 1365",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363146276338458@g.us",
-      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363399656158378@g.us",
-      "name": "Mipyme Carpa Roja 240 2️⃣",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363284221041847@g.us",
-      "name": "KAVY SURL (grupo 2)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363097952048749@g.us",
-      "name": "Sevillano Cambalache",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363154630055070@g.us",
-      "name": "Ventas Sevillano y 10 de Octubre🛍️",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363320342931722@g.us",
       "name": "Proyecto Manantial ✨",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363092735489534@g.us",
-      "name": "CRenta (LaHabana)",
       "is_group": true,
       "is_contact": false
     },
@@ -110,8 +32,14 @@
       "is_contact": false
     },
     {
-      "id": "120363143811700257@g.us",
-      "name": "Ofertas Imperial #4",
+      "id": "120363284472545099@g.us",
+      "name": "En el Cerro si se vende ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363097952048749@g.us",
+      "name": "Sevillano Cambalache",
       "is_group": true,
       "is_contact": false
     },
@@ -122,26 +50,200 @@
       "is_contact": false
     },
     {
-      "id": "120363272765626601@g.us",
-      "name": "La Azulita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363284472545099@g.us",
-      "name": "En el Cerro si se vende ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363018307699587@g.us",
       "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
       "is_group": true,
       "is_contact": false
     },
     {
+      "id": "120363154630055070@g.us",
+      "name": "Ventas Sevillano y 10 de Octubre🛍️",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363371593990080@g.us",
+      "name": "Landy bodega 1362 y 1365",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363423288484798@g.us",
+      "name": "👉 LA FARMACIA",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363421148919027@g.us",
+      "name": "De todo un poco Latino Cerro",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363146276338458@g.us",
+      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363423759484549@g.us",
+      "name": "Cargas Locales  Full y Sencillo 😎",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363360932598727@g.us",
+      "name": "ELECTRODOMÉSTICOS NEKY",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363402026168995@g.us",
+      "name": "Mayorista 10 de Octubre (1)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363319505658337@g.us",
+      "name": "Bodegón de Santa Teresa 🥩🍗🧀🍟🍫",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363369056045854@g.us",
+      "name": "Ventas GIVENT CyC",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
       "id": "120363381582979126@g.us",
       "name": "Las ventas del sevillano ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363277683119708@g.us",
+      "name": "Almacén Parque Córdoba ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363295596458291@g.us",
+      "name": "1 El bodegon",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363163702070098@g.us",
+      "name": "Venta de Cerveza Habana Vieja 🍺🍻",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363284221041847@g.us",
+      "name": "KAVY SURL (grupo 2)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363417843314195@g.us",
+      "name": "Ventas en Luyano",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363165699252346@g.us",
+      "name": "💯👇👋*EL PUENTE D' VÁZQUEZ S.R.L.",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363349471934469@g.us",
+      "name": "Proveedor de Mercancía ll",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363143524235744@g.us",
+      "name": "Mensajería boyeros _ Habana",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363319691633869@g.us",
+      "name": "NuevoVedado#7(LOS VIDALES)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363248879469223@g.us",
+      "name": "Mensajeros Habana Pedidos",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363272765626601@g.us",
+      "name": "La Azulita",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363026868701907@g.us",
+      "name": "Mayorista REMANENTE 🛒 Somos de LAS TOSCAS, STA FE🛍️🛒",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363308533081066@g.us",
+      "name": "VENTAS #1MAGUI💪😎✌️💜",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363417744793559@g.us",
+      "name": "S/B ~ Grupo 7mo1🥰🥰",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363092735489534@g.us",
+      "name": "CRenta (LaHabana)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363294384459536@g.us",
+      "name": "GARAJE-🛍-ANDO                \"Por Un Sueño de ❤️\"",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363292278532360@g.us",
+      "name": "Ventas Nana en todo 10 de oct",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363290425164967@g.us",
+      "name": "Mercado✨️Larga Vida✨️20 de mayo",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363208098502354@g.us",
+      "name": "Servicio Ángel S.U.R.L",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363399656158378@g.us",
+      "name": "Mipyme Carpa Roja 240 2️⃣",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363143811700257@g.us",
+      "name": "Ofertas Imperial #4",
       "is_group": true,
       "is_contact": false
     },
@@ -158,12 +260,6 @@
       "is_contact": false
     },
     {
-      "id": "120363369056045854@g.us",
-      "name": "Ventas GIVENT CyC",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363350818457900@g.us",
       "name": "CAKEREY",
       "is_group": true,
@@ -172,12 +268,6 @@
     {
       "id": "120363275735207600@g.us",
       "name": "De todo un poco...sin límites",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363295596458291@g.us",
-      "name": "1 El bodegon",
       "is_group": true,
       "is_contact": false
     },
@@ -206,12 +296,6 @@
       "is_contact": false
     },
     {
-      "id": "120363277683119708@g.us",
-      "name": "Almacén Parque Córdoba ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363421077901869@g.us",
       "name": "🟢⚪️SUPER MÁS-MAYORISTA⚪️🟢",
       "is_group": true,
@@ -220,6 +304,12 @@
     {
       "id": "120363166730745941@g.us",
       "name": "Ridel Export 1 aquí 👈 Ofertas de Productos a Importar desde España hacia Cuba (Puerto Mariel)🍺🍻🇨🇺🇪🇸🇨🇴🇺🇸",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363406529581714@g.us",
+      "name": "Ventas de todo tipo 🍩🎽🎁",
       "is_group": true,
       "is_contact": false
     },
@@ -236,30 +326,6 @@
       "is_contact": false
     },
     {
-      "id": "120363406529581714@g.us",
-      "name": "Ventas de todo tipo 🍩🎽🎁",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363026868701907@g.us",
-      "name": "Mayorista REMANENTE 🛒 Somos de LAS TOSCAS, STA FE🛍️🛒",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363163702070098@g.us",
-      "name": "Venta de Cerveza Habana Vieja 🍺🍻",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417744793559@g.us",
-      "name": "S/B ~ Grupo 7mo1🥰🥰",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "102649852649672@lid",
       "name": "FMLIA Gladita",
       "is_group": false,
@@ -268,12 +334,6 @@
     {
       "id": "120363192339176602@g.us",
       "name": "G&G Mayorista S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423759484549@g.us",
-      "name": "Cargas Locales  Full y Sencillo 😎",
       "is_group": true,
       "is_contact": false
     },
@@ -296,12 +356,6 @@
       "is_contact": false
     },
     {
-      "id": "120363421148919027@g.us",
-      "name": "De todo un poco Latino Cerro",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "109603287261358@lid",
       "name": "Guerra ( J' Cuad",
       "is_group": false,
@@ -312,18 +366,6 @@
       "name": "$ Espe",
       "is_group": false,
       "is_contact": true
-    },
-    {
-      "id": "120363319505658337@g.us",
-      "name": "Bodegón de Santa Teresa 🥩🍗🧀🍟🍫",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363319691633869@g.us",
-      "name": "NuevoVedado#7(LOS VIDALES)",
-      "is_group": true,
-      "is_contact": false
     },
     {
       "id": "120363346146748512@g.us",
@@ -358,18 +400,6 @@
     {
       "id": "120363399465225554@g.us",
       "name": "la barra de oro",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363349471934469@g.us",
-      "name": "Proveedor de Mercancía ll",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363294384459536@g.us",
-      "name": "GARAJE-🛍-ANDO                \"Por Un Sueño de ❤️\"",
       "is_group": true,
       "is_contact": false
     },
@@ -428,20 +458,8 @@
       "is_contact": false
     },
     {
-      "id": "120363339394872557@g.us",
-      "name": "Burhan",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363302048840134@g.us",
       "name": "VENTAS AYESTARAN 8",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363402026168995@g.us",
-      "name": "Mayorista 10 de Octubre (1)",
       "is_group": true,
       "is_contact": false
     },
@@ -472,18 +490,6 @@
     {
       "id": "120363316989802283@g.us",
       "name": "Venta de Garage Parque Ermita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363248879469223@g.us",
-      "name": "Mensajeros Habana Pedidos",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363143524235744@g.us",
-      "name": "Mensajería boyeros _ Habana",
       "is_group": true,
       "is_contact": false
     },
@@ -524,12 +530,6 @@
       "is_contact": true
     },
     {
-      "id": "120363423288484798@g.us",
-      "name": "👉 LA FARMACIA",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363306394282339@g.us",
       "name": "Mpm anillo del puerto",
       "is_group": true,
@@ -546,12 +546,6 @@
       "name": "$ Ibet",
       "is_group": false,
       "is_contact": true
-    },
-    {
-      "id": "120363165699252346@g.us",
-      "name": "💯👇👋*EL PUENTE D' VÁZQUEZ S.R.L.",
-      "is_group": true,
-      "is_contact": false
     },
     {
       "id": "120363406953694585@g.us",
@@ -1486,6 +1480,12 @@
     {
       "id": "120363305008178132@g.us",
       "name": "PALWEB",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363339394872557@g.us",
+      "name": "Burhan",
       "is_group": true,
       "is_contact": false
     },

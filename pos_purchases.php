@@ -1028,6 +1028,9 @@ $today = date('Y-m-d');
             font-weight: 800;
         }
         .tiny { font-size: .78rem; }
+        .inventory-hero {
+            background: linear-gradient(135deg, <?php echo $config['hero_color_1'] ?? '#0f766e'; ?>ee, <?php echo $config['hero_color_2'] ?? '#15803d'; ?>c6) !important;
+        }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
@@ -1036,6 +1039,11 @@ $today = date('Y-m-d');
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
             <div>
                 <div class="section-title text-white-50 mb-2">Compras / Inventario</div>
+                <?php if (!empty($config['hero_mostrar_usuario']) && !empty($_SESSION['admin_user_name'])): ?>
+                    <div class="badge bg-white bg-opacity-10 text-white mb-2" style="font-size:0.7rem; border:1px solid rgba(255,255,255,0.2);">
+                        <i class="fas fa-user-circle me-1"></i> Sesión: <?php echo htmlspecialchars($_SESSION['admin_user_name']); ?>
+                    </div>
+                <?php endif; ?>
                 <h1 class="h2 fw-bold mb-2"><i class="fas fa-dolly-flatbed me-2"></i>Compras POS V3</h1>
                 <p class="mb-3 text-white-50">Entrada multi-almacen con borrador local, validacion dura, historial filtrable, duplicado y reversión trazable.</p>
                 <div class="d-flex flex-wrap gap-2">

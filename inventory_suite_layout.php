@@ -1,4 +1,19 @@
 <?php
+// ARCHIVO: inventory_suite_layout.php
+// UI COMPONENTS FOR INVENTORY SUITE
+
+// Inyectar CSS dinámico basado en configuración si existe
+if (isset($config) || isset($currentConfig)) {
+    $_c = $config ?? $currentConfig;
+    $c1 = $_c['hero_color_1'] ?? '#0f766e';
+    $c2 = $_c['hero_color_2'] ?? '#15803d';
+    echo "<style>
+        .inventory-hero {
+            background: linear-gradient(135deg, {$c1}ee, {$c2}c6) !important;
+        }
+    </style>";
+}
+
 if (!function_exists('inventory_suite_shell_open')) {
     function inventory_suite_shell_open(string $extraClasses = ''): void {
         $classes = trim('inventory-shell ' . $extraClasses);
@@ -26,6 +41,16 @@ if (!function_exists('inventory_suite_render_hero')) {
         if ($eyebrow !== '') {
             echo '<div class="inventory-hero__eyebrow">' . $eyebrow . '</div>';
         }
+
+        // Mostrar usuario si está configurado
+        global $config, $currentConfig;
+        $_c = $config ?? $currentConfig;
+        if (!empty($_c['hero_mostrar_usuario']) && !empty($_SESSION['admin_user_name'])) {
+            echo '<div class="badge bg-white bg-opacity-10 text-white mb-2" style="font-size:0.7rem; border:1px solid rgba(255,255,255,0.2);">
+                    <i class="fas fa-user-circle me-1"></i> Sesión: ' . htmlspecialchars($_SESSION['admin_user_name']) . '
+                  </div>';
+        }
+
         if ($title !== '') {
             echo '<h1 class="inventory-hero__title">' . $title . '</h1>';
         }

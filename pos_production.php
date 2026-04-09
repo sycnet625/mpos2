@@ -67,6 +67,9 @@ try {
         .input-qty:focus { background: white; border-color: #3b82f6; outline: none; }
         .input-qty:hover { background: rgba(255,255,255,0.5); border-color: #e2e8f0; }
         [v-cloak] { display: none; }
+        .inventory-hero {
+            background: linear-gradient(135deg, <?php echo $config['hero_color_1'] ?? '#0f766e'; ?>ee, <?php echo $config['hero_color_2'] ?? '#15803d'; ?>c6) !important;
+        }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
@@ -76,6 +79,11 @@ try {
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
             <div>
                 <div class="section-title text-white-50 mb-2">Producción / Recetas</div>
+                <?php if (!empty($config['hero_mostrar_usuario']) && !empty($_SESSION['admin_user_name'])): ?>
+                    <div class="badge bg-white bg-opacity-10 text-white mb-2" style="font-size:0.7rem; border:1px solid rgba(255,255,255,0.2);">
+                        <i class="fas fa-user-circle me-1"></i> Sesión: <?php echo htmlspecialchars($_SESSION['admin_user_name']); ?>
+                    </div>
+                <?php endif; ?>
                 <h1 class="h2 fw-bold mb-2"><i class="fas fa-industry me-2"></i>Centro de Producción</h1>
                 <p class="mb-3 text-white-50">Gestión de recetas, fórmulas, producción y análisis de insumos.</p>
                 <div class="d-flex flex-wrap gap-2">

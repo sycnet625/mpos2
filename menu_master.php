@@ -234,9 +234,20 @@ $menuCategories = [
     <div class="pw-menu-content" id="pwMenuContent">
         <div style="text-align:center; padding-bottom:5px; border-bottom:1px solid var(--border-color); margin-bottom:5px;">
             <strong style="color:var(--primary-color);">PalWeb POS</strong> <small class="text-muted">v3.0</small>
+            
+            <?php 
+            global $config, $currentConfig;
+            $_c = $config ?? $currentConfig;
+            if (!empty($_c['hero_mostrar_usuario']) && !empty($_SESSION['admin_user_name'])): ?>
+                <div style="font-size: 0.75rem; margin-top: 5px; color: #475569; background: #f1f5f9; padding: 4px; border-radius: 8px;">
+                    <i class="fas fa-user-circle"></i> <?php echo htmlspecialchars($_SESSION['admin_user_name']); ?>
+                </div>
+            <?php endif; ?>
+
             <br>
             <button class="pw-expand-all-btn" onclick="toggleAllCategories(true)">Abrir todo</button>
             <button class="pw-expand-all-btn" onclick="toggleAllCategories(false)">Cerrar todo</button>
+            <a href="logout.php" class="pw-expand-all-btn text-danger fw-bold" style="text-decoration:none;"><i class="fas fa-sign-out-alt"></i> Salir</a>
         </div>
         
         <?php foreach($menuCategories as $catName => $links): ?>
