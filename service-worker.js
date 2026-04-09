@@ -251,15 +251,23 @@ self.addEventListener('push', event => {
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (!data || !data.titulo) return;
-                return self.registration.showNotification(data.titulo, {
+                
+                const options = {
                     body:    data.cuerpo || '',
                     icon:    BASE + 'icon-192.png',
                     badge:   BASE + 'icon-192.png',
-                    data:    { url: data.url || BASE },
+                    data:    { 
+                        url: data.url || BASE,
+                        chat_id: data.chat_id || null, // Guardar chat_id para acciones
+                        agente: data.agente || 'claude'
+                    },
                     tag:     'palweb-' + (data.id || Date.now()),
                     renotify: true,
                     vibrate: [200, 100, 200],
-                });
+                    actions: data.acciones || [] // Soporte para botones
+                };
+
+                return self.registration.showNotification(data.titulo, options);
             })
             .catch(err => console.error('[SW Push] fetch error:', err))
         )
@@ -267,15 +275,40 @@ self.addEventListener('push', event => {
 });
 
 self.addEventListener('notificationclick', event => {
-    event.notification.close();
-    const target = event.notification.data?.url || BASE;
+    const notification = event.notification;
+    const action = event.action; // 'approve', 'deny' o null (clic normal)
+    const data = notification.data || {};
+
+    notification.close();
+
+    if (action === 'approve' || action === 'deny') {
+        const response = (action === 'approve') ? 'y' : 'n';
+        
+        event.waitUntil(
+            fetch(BASE + 'palweb_ai_api.php?action=approve_action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    chat_id: data.chat_id,
+                    agente: data.agente,
+                    response: response
+                })
+            }).then(r => {
+                console.log('[SW Action] Respuesta enviada:', response);
+            }).catch(err => {
+                console.error('[SW Action] Error enviando respuesta:', err);
+            })
+        );
+        return;
+    }
+
+    // Comportamiento normal: abrir/enfocar app
+    const target = data.url || BASE;
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-            // Si ya hay una pestaña abierta con esa URL, enfocarla
             for (const client of list) {
                 if (client.url === target && 'focus' in client) return client.focus();
             }
-            // Si no, abrir nueva pestaña
             return clients.openWindow(target);
         })
     );

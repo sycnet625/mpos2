@@ -7,9 +7,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 }
 
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // --- 0. AUTO-MIGRACIÓN: CREAR TABLA DE REPORTES SI NO EXISTE ---
-// Esto asegura que el sistema funcione sin que tengas que ir a phpMyAdmin
 try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS reportes_cierre (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -24,13 +24,6 @@ try {
 } catch (Exception $e) { /* Silencio si ya existe */ }
 
 // 1. CARGAR CONFIGURACIÓN
-$configFile = 'pos.cfg';
-$config = ["semana_inicio_dia" => 1, "id_sucursal" => 1, "id_almacen" => 1, "reserva_limpieza_pct" => 10];
-if (file_exists($configFile)) {
-    $loaded = json_decode(file_get_contents($configFile), true);
-    if ($loaded) $config = array_merge($config, $loaded);
-}
-
 $id_sucursal = intval($config['id_sucursal']);
 $id_almacen = intval($config['id_almacen']);
 $week_start_day = intval($config['semana_inicio_dia'] ?? 1);
@@ -118,7 +111,11 @@ try {
                               JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id 
                               JOIN productos p ON vd.id_producto = p.codigo
                               WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia), 0) as total_costo,
-                    COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto
+                    COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto,
+                    COALESCE((SELECT SUM(vp.monto) 
+                              FROM ventas_pagos vp 
+                              JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id 
+                              WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia AND vp.metodo_pago = 'Transferencia'), 0) as total_transferencia
                  FROM (
                     SELECT DISTINCT DATE(fecha) as dia FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
                     UNION
@@ -127,7 +124,7 @@ try {
                  ORDER BY dates.dia ASC";
     $stmt = $pdo->prepare($sqlDaily);
     $stmt->execute([
-        $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal, 
+        $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal,
         $id_sucursal, $fecha_inicio, $fecha_fin, 
         $id_sucursal, $fecha_inicio, $fecha_fin
     ]);
@@ -138,12 +135,14 @@ try {
     $costo_total = 0;
     $gastos_totales = 0;
     $total_transacciones = 0;
+    $total_transferencias = 0;
     
     foreach($dailySummary as $row) {
         $venta_total += floatval($row['total_venta']);
         $costo_total += floatval($row['total_costo']);
         $gastos_totales += floatval($row['total_gasto']);
         $total_transacciones += intval($row['num_transacciones']);
+        $total_transferencias += floatval($row['total_transferencia']);
     }
 
     $ganancia_bruta = $venta_total - $costo_total;
@@ -320,6 +319,7 @@ try {
                                 <tr>
                                     <th>Fecha</th>
                                     <th class="text-end">Ventas ($)</th>
+                                    <th class="text-end">Transf. ($)</th>
                                     <th class="text-end text-muted">Costo Merc. ($)</th>
                                     <th class="text-end">Ganancia Bruta ($)</th>
                                     <th class="text-end text-danger">Gastos ($)</th>
@@ -329,6 +329,7 @@ try {
                             <tbody>
                                 <?php foreach($dailySummary as $row): 
                                     $v = floatval($row['total_venta']);
+                                    $t = floatval($row['total_transferencia']);
                                     $c = floatval($row['total_costo']);
                                     $e = floatval($row['total_gasto']);
                                     $gb = $v - $c;
@@ -337,6 +338,7 @@ try {
                                 <tr>
                                     <td class="small fw-bold"><?php echo $row['dia']; ?></td>
                                     <td class="text-end">$<?php echo number_format($v, 2); ?></td>
+                                    <td class="text-end text-primary">$<?php echo number_format($t, 2); ?></td>
                                     <td class="text-end text-muted">$<?php echo number_format($c, 2); ?></td>
                                     <td class="text-end">$<?php echo number_format($gb, 2); ?></td>
                                     <td class="text-end text-danger">$<?php echo number_format($e, 2); ?></td>
@@ -348,6 +350,7 @@ try {
                                 <tr>
                                     <td>TOTALES</td>
                                     <td class="text-end">$<?php echo number_format($venta_total, 2); ?></td>
+                                    <td class="text-end text-primary">$<?php echo number_format($total_transferencias, 2); ?></td>
                                     <td class="text-end text-muted">$<?php echo number_format($costo_total, 2); ?></td>
                                     <td class="text-end">$<?php echo number_format($ganancia_bruta, 2); ?></td>
                                     <td class="text-end text-danger">$<?php echo number_format($gastos_totales, 2); ?></td>

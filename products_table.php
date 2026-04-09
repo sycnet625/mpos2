@@ -314,9 +314,15 @@ function renderProductRows($rows, $localPath) {
             $<?php echo number_format($p['precio'], 2); ?>
             <i class="fas fa-history history-btn" onclick="showHistory('<?php echo $p['codigo']; ?>')"></i>
         </td>
-        <td class="text-end">$<?php echo number_format($p['precio_mayorista'], 2); ?></td>
+        <td class="text-end col-cost-mayorista">
+            <span class="val-costo">$<?php echo number_format($p['costo'], 2); ?></span>
+            <span class="val-mayorista d-none">$<?php echo number_format($p['precio_mayorista'], 2); ?></span>
+        </td>
         
-        <td class="text-end fw-bold text-success bg-light">$<?php echo number_format($p['ganancia_neta'], 2); ?></td>
+        <td class="text-end fw-bold text-success bg-light col-utilidad">
+            <span class="val-util-pct"><?php echo number_format($p['ganancia_pct'] ?? 0, 1); ?>%</span>
+            <span class="val-util-neta d-none">$<?php echo number_format($p['ganancia_neta'], 2); ?></span>
+        </td>
         <td class="text-center no-print">
         <div class="btn-group">
                 <button class="btn btn-outline-secondary btn-action" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar">
@@ -1165,7 +1171,7 @@ if ($page < 1) $page = 1;
 $offset = ($page - 1) * $limit;
 
 // Validación de ordenamiento para evitar SQL Injection
-$allowedSorts = ['codigo', 'nombre', 'categoria', 'stock_total', 'precio', 'ganancia_neta'];
+$allowedSorts = ['codigo', 'nombre', 'categoria', 'stock_total', 'precio', 'ganancia_neta', 'ganancia_pct', 'costo', 'precio_mayorista'];
 $sort = $_GET['sort'] ?? 'nombre';
 if (!in_array($sort, $allowedSorts)) $sort = 'nombre';
 
@@ -1204,7 +1210,9 @@ if ($filterStockRange !== '') {
 // QUERY DATOS
 $sqlBase = "SELECT p.*, 
             (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $ALM_ID) as stock_total,
-            (p.precio - p.costo) as ganancia_neta, p.precio_mayorista
+            (p.precio - p.costo) as ganancia_neta,
+            (CASE WHEN p.precio > 0 THEN ((p.precio - p.costo) / p.precio) * 100 ELSE 0 END) as ganancia_pct,
+            p.precio_mayorista
             FROM productos p 
             WHERE $whereSQL 
             $havingClause";
@@ -1437,8 +1445,14 @@ HTML;
                         <th onclick="sortBy('categoria')" style="cursor:pointer">Categoría <i id="icon_categoria" class="fas fa-sort text-muted small"></i></th>
                         <th onclick="sortBy('stock_total')" style="cursor:pointer" class="text-center">Stock <i id="icon_stock_total" class="fas fa-sort text-muted small"></i></th>
                         <th onclick="sortBy('precio')" style="cursor:pointer" class="text-end">Venta <i id="icon_precio" class="fas fa-sort text-muted small"></i></th>
-                        <th class="text-end">Mayorista</th>
-                        <th onclick="sortBy('ganancia_neta')" style="cursor:pointer" class="text-end bg-light">Utilidad <i id="icon_ganancia_neta" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="handlePriceSort()" style="cursor:pointer" class="text-end">
+                            <span id="header-price" onclick="event.stopPropagation(); togglePriceColumn()">Costo <i class="fas fa-exchange-alt small opacity-50 ms-1"></i></span>
+                            <i id="icon_price_col" class="fas fa-sort text-muted small"></i>
+                        </th>
+                        <th onclick="handleUtilSort()" style="cursor:pointer" class="text-end bg-light">
+                            <span id="header-util" onclick="event.stopPropagation(); toggleUtilColumn()">% Utilidad <i class="fas fa-exchange-alt small opacity-50 ms-1"></i></span>
+                            <i id="icon_util_col" class="fas fa-sort text-muted small"></i>
+                        </th>
                         
                         <th class="text-center no-print" style="width: 50px;">Acción</th>
                     </tr>
@@ -1657,7 +1671,47 @@ function renderKpi(kpi) {
     if (kNoStock) kNoStock.innerText = Number(kpi.sin_stock || 0).toLocaleString('en-US');
 }
 
-// --- 1. CARGA AJAX CON ORDENAMIENTO ---
+// --- TOGGLES DE COLUMNAS (Costo/Mayorista y % Utilidad/Utilidad) ---
+let showCosto = localStorage.getItem('pt_show_costo') !== 'false'; // default true
+let showUtilPct = localStorage.getItem('pt_show_util_pct') !== 'false'; // default true
+
+function togglePriceColumn() {
+    showCosto = !showCosto;
+    localStorage.setItem('pt_show_costo', showCosto);
+    applyColumnVisibility();
+}
+
+function toggleUtilColumn() {
+    showUtilPct = !showUtilPct;
+    localStorage.setItem('pt_show_util_pct', showUtilPct);
+    applyColumnVisibility();
+}
+
+function applyColumnVisibility() {
+    const hPrice = document.getElementById('header-price');
+    if (hPrice) hPrice.innerText = showCosto ? 'Costo' : 'Mayorista';
+    
+    const hUtil = document.getElementById('header-util');
+    if (hUtil) hUtil.innerHTML = (showUtilPct ? '% Utilidad' : 'Utilidad') + ' <i class="fas fa-exchange-alt small opacity-50 ms-1"></i>';
+
+    document.querySelectorAll('.val-costo').forEach(el => el.classList.toggle('d-none', !showCosto));
+    document.querySelectorAll('.val-mayorista').forEach(el => el.classList.toggle('d-none', showCosto));
+    
+    document.querySelectorAll('.val-util-pct').forEach(el => el.classList.toggle('d-none', !showUtilPct));
+    document.querySelectorAll('.val-util-neta').forEach(el => el.classList.toggle('d-none', showUtilPct));
+}
+
+function handleUtilSort() {
+    const field = showUtilPct ? 'ganancia_pct' : 'ganancia_neta';
+    sortBy(field);
+}
+
+function handlePriceSort() {
+    const field = showCosto ? 'costo' : 'precio_mayorista';
+    sortBy(field);
+}
+
+// Modificar loadData para aplicar visibilidad después de cargar
 async function loadData(page) {
     currentPage = page;
     const limit = document.getElementById('f_limit').value;
@@ -1694,6 +1748,7 @@ async function loadData(page) {
         
         document.getElementById('tableBody').style.opacity = '1';
         initInlineEdit();
+        applyColumnVisibility(); // Aplicar después de renderizar
         updateSortIcons();
         
     } catch(e) { 
@@ -1761,7 +1816,14 @@ function updateSortIcons() {
         }
     });
     // Activar el actual
-    const activeIcon = document.getElementById('icon_' + currentSort);
+    let targetId = 'icon_' + currentSort;
+    if (currentSort === 'ganancia_neta' || currentSort === 'ganancia_pct') {
+        targetId = 'icon_util_col';
+    } else if (currentSort === 'costo' || currentSort === 'precio_mayorista') {
+        targetId = 'icon_price_col';
+    }
+    
+    const activeIcon = document.getElementById(targetId);
     if (activeIcon) {
         activeIcon.className = `fas fa-sort-${currentDir === 'ASC' ? 'up' : 'down'} text-primary small`;
     }
@@ -2409,9 +2471,10 @@ async function forceImageCacheReset() {
 
 // Inicializar
 document.addEventListener('DOMContentLoaded', function() {
+    applyColumnVisibility();
     initInlineEdit();
     updateCount();
-        // Marcar el ícono por defecto (Nombre ASC)
+    // Marcar el ícono por defecto (Nombre ASC)
     updateSortIcons();
     renderKpi(initialKpi);
     // Cargar categorías

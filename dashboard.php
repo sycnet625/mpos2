@@ -672,7 +672,7 @@ function auditResumen(string $accion, array $d): string {
 
 <nav class="navbar navbar-expand-lg navbar-dark sticky-top shadow-sm dashboard-main-nav">
     <div class="container-fluid">
-        <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i>PalWeb Admin</a>
+        <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i>PALWEB POS</a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -692,7 +692,9 @@ function auditResumen(string $accion, array $d): string {
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
             <div>
                 <div class="section-title text-white-50 mb-2">Analitica / Operaciones</div>
-                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-line me-2"></i>Dashboard Admin</h1>
+                <h1 class="h2 fw-bold mb-2">
+                    <i class="fas fa-chart-line me-2"></i>PALWEB POS — Bienvenido <?php echo htmlspecialchars($_SESSION['admin_user_name'] ?? $_SESSION['user_name'] ?? 'Admin'); ?>
+                </h1>
                 <p class="mb-3 text-white-50">Vista integral de ventas, inventario, reservas, ecommerce y auditoria operativa.</p>
                 <div class="d-flex flex-wrap gap-2">
                     <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i><?= $scope === 'global' ? 'Alcance global' : 'Sucursal actual' ?></span>

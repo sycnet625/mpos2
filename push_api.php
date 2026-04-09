@@ -78,20 +78,24 @@ if ($action === 'latest') {
     try {
         if ($tipo) {
             $st = $pdo->prepare(
-                "SELECT id, titulo, cuerpo, url FROM push_notifications
+                "SELECT id, titulo, cuerpo, url, acciones FROM push_notifications
                   WHERE tipo = ? AND leida = 0
                   ORDER BY created_at DESC LIMIT 1"
             );
             $st->execute([$tipo]);
         } else {
             $st = $pdo->query(
-                "SELECT id, titulo, cuerpo, url FROM push_notifications
+                "SELECT id, titulo, cuerpo, url, acciones FROM push_notifications
                   WHERE leida = 0 ORDER BY created_at DESC LIMIT 1"
             );
         }
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if ($row) {
             $pdo->prepare("UPDATE push_notifications SET leida = 1 WHERE id = ?")->execute([$row['id']]);
+            // Decodificar acciones si existen
+            if (!empty($row['acciones'])) {
+                $row['acciones'] = json_decode($row['acciones'], true);
+            }
             echo json_encode($row);
         } else {
             echo json_encode(['titulo' => null]);
