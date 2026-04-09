@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-09T12:15:28.669Z",
+  "updated_at": "2026-04-09T13:01:29.008Z",
   "rows": [
     {
       "id": "17905869652079@lid",
@@ -20,14 +20,44 @@
       "is_contact": true
     },
     {
-      "id": "120363295392149188@g.us",
-      "name": "3° “Al Pan Pan” Venta de confituras y más…!",
+      "id": "120363208098502354@g.us",
+      "name": "Servicio Ángel S.U.R.L",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363045749115649@g.us",
-      "name": "Grupo de la bodega 1362",
+      "id": "120363290425164967@g.us",
+      "name": "Mercado✨️Larga Vida✨️20 de mayo",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363360932598727@g.us",
+      "name": "ELECTRODOMÉSTICOS NEKY",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363371593990080@g.us",
+      "name": "Landy bodega 1362 y 1365",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363146276338458@g.us",
+      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363399656158378@g.us",
+      "name": "Mipyme Carpa Roja 240 2️⃣",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363284221041847@g.us",
+      "name": "KAVY SURL (grupo 2)",
       "is_group": true,
       "is_contact": false
     },
@@ -38,32 +68,32 @@
       "is_contact": false
     },
     {
-      "id": "120363403072638777@g.us",
-      "name": "Havana_SuperMarket 🛒7️⃣",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363398534170013@g.us",
-      "name": "D ADRIAN #2",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417843314195@g.us",
-      "name": "Ventas en Luyano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363018307699587@g.us",
-      "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363154630055070@g.us",
       "name": "Ventas Sevillano y 10 de Octubre🛍️",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363320342931722@g.us",
+      "name": "Proyecto Manantial ✨",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363092735489534@g.us",
+      "name": "CRenta (LaHabana)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363045749115649@g.us",
+      "name": "Grupo de la bodega 1362",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363143811700257@g.us",
+      "name": "Ofertas Imperial #4",
       "is_group": true,
       "is_contact": false
     },
@@ -74,14 +104,104 @@
       "is_contact": false
     },
     {
-      "id": "120363308533081066@g.us",
-      "name": "VENTAS #1MAGUI💪😎✌️💜",
+      "id": "120363272765626601@g.us",
+      "name": "La Azulita",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363284472545099@g.us",
       "name": "En el Cerro si se vende ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363018307699587@g.us",
+      "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363381582979126@g.us",
+      "name": "Las ventas del sevillano ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363419458884436@g.us",
+      "name": "10deOctubre#4(LOSVIDALES)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363178955447707@g.us",
+      "name": "Confituras rasta y más",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363369056045854@g.us",
+      "name": "Ventas GIVENT CyC",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363292278532360@g.us",
+      "name": "Ventas Nana en todo 10 de oct",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363350818457900@g.us",
+      "name": "CAKEREY",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363275735207600@g.us",
+      "name": "De todo un poco...sin límites",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363295596458291@g.us",
+      "name": "1 El bodegon",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363308533081066@g.us",
+      "name": "VENTAS #1MAGUI💪😎✌️💜",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363417843314195@g.us",
+      "name": "Ventas en Luyano",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363398534170013@g.us",
+      "name": "D ADRIAN #2",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363403072638777@g.us",
+      "name": "Havana_SuperMarket 🛒7️⃣",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363295392149188@g.us",
+      "name": "3° “Al Pan Pan” Venta de confituras y más…!",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363419313606665@g.us",
+      "name": "Joe Supply LLC #8(USA)- Envio Contendores a Cuba",
       "is_group": true,
       "is_contact": false
     },
@@ -98,18 +218,6 @@
       "is_contact": false
     },
     {
-      "id": "120363381582979126@g.us",
-      "name": "Las ventas del sevillano ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363092735489534@g.us",
-      "name": "CRenta (LaHabana)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363166730745941@g.us",
       "name": "Ridel Export 1 aquí 👈 Ofertas de Productos a Importar desde España hacia Cuba (Puerto Mariel)🍺🍻🇨🇺🇪🇸🇨🇴🇺🇸",
       "is_group": true,
@@ -122,38 +230,14 @@
       "is_contact": false
     },
     {
-      "id": "120363272765626601@g.us",
-      "name": "La Azulita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363371593990080@g.us",
-      "name": "Landy bodega 1362 y 1365",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363296068485788@g.us",
       "name": "Grupo de venta",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363295596458291@g.us",
-      "name": "1 El bodegon",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363406529581714@g.us",
       "name": "Ventas de todo tipo 🍩🎽🎁",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363399656158378@g.us",
-      "name": "Mipyme Carpa Roja 240 2️⃣",
       "is_group": true,
       "is_contact": false
     },
@@ -172,12 +256,6 @@
     {
       "id": "120363417744793559@g.us",
       "name": "S/B ~ Grupo 7mo1🥰🥰",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363369056045854@g.us",
-      "name": "Ventas GIVENT CyC",
       "is_group": true,
       "is_contact": false
     },
@@ -218,18 +296,6 @@
       "is_contact": false
     },
     {
-      "id": "120363419313606665@g.us",
-      "name": "Joe Supply LLC #8(USA)- Envio Contendores a Cuba",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363320342931722@g.us",
-      "name": "Proyecto Manantial ✨",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363421148919027@g.us",
       "name": "De todo un poco Latino Cerro",
       "is_group": true,
@@ -266,26 +332,8 @@
       "is_contact": false
     },
     {
-      "id": "120363146276338458@g.us",
-      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363285750524798@g.us",
       "name": "5 MPM Bajo Cero Mayorista y minorista ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419458884436@g.us",
-      "name": "10deOctubre#4(LOSVIDALES)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363275735207600@g.us",
-      "name": "De todo un poco...sin límites",
       "is_group": true,
       "is_contact": false
     },
@@ -320,12 +368,6 @@
       "is_contact": false
     },
     {
-      "id": "120363360932598727@g.us",
-      "name": "ELECTRODOMÉSTICOS NEKY",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363294384459536@g.us",
       "name": "GARAJE-🛍-ANDO                \"Por Un Sueño de ❤️\"",
       "is_group": true,
@@ -334,12 +376,6 @@
     {
       "id": "120363214081388365@g.us",
       "name": "La Casa del Zuko ll Ayestaran ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363178955447707@g.us",
-      "name": "Confituras rasta y más",
       "is_group": true,
       "is_contact": false
     },
@@ -374,18 +410,6 @@
       "is_contact": false
     },
     {
-      "id": "120363208098502354@g.us",
-      "name": "Servicio Ángel S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363290425164967@g.us",
-      "name": "Mercado✨️Larga Vida✨️20 de mayo",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363168217815182@g.us",
       "name": "¡Las Ventas en el Sevillano !",
       "is_group": true,
@@ -416,20 +440,8 @@
       "is_contact": false
     },
     {
-      "id": "120363284221041847@g.us",
-      "name": "KAVY SURL (grupo 2)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363402026168995@g.us",
       "name": "Mayorista 10 de Octubre (1)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363143811700257@g.us",
-      "name": "Ofertas Imperial #4",
       "is_group": true,
       "is_contact": false
     },

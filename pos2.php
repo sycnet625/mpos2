@@ -57,7 +57,7 @@ if (isset($_GET['load_products'])) {
         $almacenID = intval($config['id_almacen']);
         $params = $config['categorias_ocultas'];
 
-        $sql = "SELECT p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock FROM productos p WHERE $where ORDER BY p.nombre";
+        $sql = "SELECT p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, p.codigo_barra_1, p.codigo_barra_2, (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock FROM productos p WHERE $where ORDER BY p.nombre";
         $stmt = $pdo->prepare($sql); $stmt->execute($params); $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
         $localPath = '/var/www/assets/product_images/';
@@ -94,7 +94,7 @@ try {
     $where = implode(" AND ", $cond);
     $almacenID = intval($config['id_almacen']);
     
-    $prods = $pdo->query("SELECT p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock FROM productos p WHERE $where ORDER BY p.nombre")->fetchAll(PDO::FETCH_ASSOC);
+    $prods = $pdo->query("SELECT p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, p.codigo_barra_1, p.codigo_barra_2, (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock FROM productos p WHERE $where ORDER BY p.nombre")->fetchAll(PDO::FETCH_ASSOC);
     $cats = array_unique(array_column($prods, 'categoria')); sort($cats);
     $localPath = '/var/www/assets/product_images/';
     foreach ($prods as &$p) { $p['has_image'] = file_exists($localPath . $p['codigo'] . '.jpg'); $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6); $p['stock'] = floatval($p['stock']); } unset($p);

@@ -214,6 +214,22 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     require_once 'db.php';
     require_once 'kardex_engine.php';
 
+    // Actualización de códigos de barras desde el POS (Modo Inventario)
+    if ($accion === 'update_barcodes') {
+        $sku = trim($input['sku'] ?? '');
+        $b1  = trim($input['barcode'] ?? '');
+        $b2  = trim($input['barcode2'] ?? '');
+        if (!$sku) { echo json_encode(['status'=>'error','msg'=>'SKU no proporcionado']); exit; }
+        
+        $q = $pdo->prepare("UPDATE productos SET codigo_barra_1=?, codigo_barra_2=? WHERE codigo=? AND id_empresa=?");
+        if ($q->execute([$b1, $b2, $sku, $EMP])) {
+            echo json_encode(['status'=>'success', 'msg'=>'Códigos actualizados']);
+        } else {
+            echo json_encode(['status'=>'error', 'msg'=>'Error en base de datos']);
+        }
+        exit;
+    }
+
     // Consulta bulk de stock para el conteo visual (sin modificar datos)
     if ($accion === 'consultar_bulk') {
         $skus = $input['skus'] ?? [];
@@ -939,8 +955,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <button class="inv-btn" style="background:linear-gradient(175deg,#4d96ff 0%,#0d6efd 60%,#0a54d4 100%);color:white;" onclick="openInvModal('transferencia')">
                         <i class="fas fa-exchange-alt"></i> Transferir
                     </button>
-                    <button class="inv-btn" style="background:linear-gradient(175deg,#909aa3 0%,#6c757d 60%,#545b62 100%);color:white;" onclick="openInvModal('consultar')">
-                        <i class="fas fa-search"></i> Consultar
+                    <button class="inv-btn" style="background:linear-gradient(175deg,#909aa3 0%,#6c757d 60%,#545b62 100%);color:white;" onclick="openBarcodeModal()">
+                        <i class="fas fa-barcode"></i> Cód. Barras
                     </button>
                 </div>
             </div>
@@ -1257,6 +1273,39 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                 <button type="button" id="btnInvConfirmar" class="btn btn-primary fw-bold" onclick="invConfirmar()">
                     <i class="fas fa-check me-1"></i> Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="barcodeModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header py-2 bg-primary text-white">
+                <h6 class="modal-title fw-bold"><i class="fas fa-barcode me-2"></i>Editar Códigos de Barras</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div id="barcodeProductInfo" class="mb-4">
+                    <h6 id="barcodeProductName" class="fw-bold mb-1">Cargando...</h6>
+                    <small id="barcodeProductSku" class="text-muted d-block"></small>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted">Código de Barras 1 (Principal)</label>
+                    <input type="text" class="form-control" id="barcodeInput1" placeholder="Escanee o escriba..." autocomplete="off">
+                </div>
+
+                <div class="mb-0">
+                    <label class="form-label small fw-bold text-muted">Código de Barras 2 (Alternativo)</label>
+                    <input type="text" class="form-control" id="barcodeInput2" placeholder="Escanee o escriba..." autocomplete="off">
+                </div>
+            </div>
+            <div class="modal-footer py-2 bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" id="btnSaveBarcodes" class="btn btn-primary fw-bold" onclick="saveBarcodes()">
+                    <i class="fas fa-save me-1"></i> Guardar
                 </button>
             </div>
         </div>

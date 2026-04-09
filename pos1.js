@@ -2056,3 +2056,70 @@ window.invConfirmar = async function() {
 };
 
 console.log('POS.js v3.4 cargado');
+
+window.openBarcodeModal = function() {
+    if (cart.length === 0 || selectedIndex < 0) {
+        showToast('Seleccione un producto en el carrito primero', 'warning');
+        return;
+    }
+    const item = cart[selectedIndex];
+    const prod = productsDB.find(p => p.codigo == item.id);
+    if (!prod) {
+        showToast('Producto no encontrado en base de datos local', 'error');
+        return;
+    }
+
+    document.getElementById('barcodeProductName').innerText = prod.nombre;
+    document.getElementById('barcodeProductSku').innerText = 'SKU: ' + prod.codigo;
+    document.getElementById('barcodeInput1').value = prod.codigo_barra_1 || '';
+    document.getElementById('barcodeInput2').value = prod.codigo_barra_2 || '';
+
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('barcodeModal')).show();
+    setTimeout(() => document.getElementById('barcodeInput1').focus(), 350);
+};
+
+window.saveBarcodes = async function() {
+    const item = cart[selectedIndex];
+    const b1 = document.getElementById('barcodeInput1').value.trim();
+    const b2 = document.getElementById('barcodeInput2').value.trim();
+
+    const btn = document.getElementById('btnSaveBarcodes');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Guardando...';
+
+    try {
+        const payload = {
+            accion: 'update_barcodes',
+            sku: item.id,
+            barcode: b1,
+            barcode2: b2
+        };
+
+        const r = await fetch('pos.php?inventario_api=1', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const d = await r.json();
+
+        if (d.status === 'success') {
+            showToast('Códigos actualizados correctamente', 'success');
+            // Actualizar en DB local
+            const prod = productsDB.find(p => p.codigo == item.id);
+            if (prod) {
+                prod.codigo_barra_1 = b1;
+                prod.codigo_barra_2 = b2;
+            }
+            bootstrap.Modal.getInstance(document.getElementById('barcodeModal')).hide();
+            // Opcionalmente refrescar productos si los códigos se muestran en la UI
+        } else {
+            showToast(d.msg || 'Error al guardar', 'error');
+        }
+    } catch(e) {
+        console.error(e);
+        showToast('Error de conexión', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save me-1"></i>Guardar';
+    }
+};
