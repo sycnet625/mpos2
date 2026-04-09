@@ -26,16 +26,13 @@ try {
     $SUC_ID = intval($config['id_sucursal']);
 
     // 2. FILTROS DE VISTA (GLOBAL vs LOCAL)
-    $viewMode = $_GET['view'] ?? 'local'; // 'local' por defecto
+    $viewMode = $_GET['view'] ?? 'local';
     $isGlobal = ($viewMode === 'global');
     $excludeRaw = isset($_GET['exclude_raw']) ? true : false;
 
-    // Construcción de condiciones SQL
     $sqlFilterProduct = $excludeRaw ? " AND p.es_elaborado = 1 " : "";
     
-    // Filtro de Sucursal Dinámico
     if ($isGlobal) {
-        // Si es global, NO filtramos por sucursal (vemos todo lo de la empresa)
         $sqlFilterSucursal = ""; 
         $queryParams = [':emp' => $EMP_ID];
         $tituloVista = "VISTA GLOBAL (Todas las Sucursales)";
@@ -43,7 +40,6 @@ try {
         $btnLink = "?view=local" . ($excludeRaw ? "&exclude_raw=1" : "");
         $btnClass = "btn-warning";
     } else {
-        // Si es local, filtramos por la sucursal del archivo de config
         $sqlFilterSucursal = " AND v.id_sucursal = :suc ";
         $queryParams = [':emp' => $EMP_ID, ':suc' => $SUC_ID];
         $tituloVista = "SUCURSAL #$SUC_ID (Local)";
@@ -61,7 +57,6 @@ try {
         $dates[$date] = ['venta' => 0, 'ganancia' => 0, 'label' => date('d/m', strtotime($date))];
     }
 
-    // CONSULTA GRÁFICO USANDO FECHA CONTABLE + FILTRO SUCURSAL
     $sqlGraph = "SELECT 
                 s.fecha_contable as dia,
                 SUM(d.precio * d.cantidad) as total_venta,
@@ -93,7 +88,6 @@ try {
     $chartSales = array_column($dates, 'venta');
     $chartProfit = array_column($dates, 'ganancia');
 
-    // TOP PRODUCTOS USANDO FECHA CONTABLE + FILTRO SUCURSAL
     $sqlBaseProducts = "SELECT 
                 p.nombre, p.categoria,
                 SUM(d.cantidad) as unidades,
@@ -117,92 +111,156 @@ try {
     $lowProducts = $stmtLow->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (Exception $e) { die("Error: " . $e->getMessage()); }
-?>
-<!DOCTYPE html>
+?><!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Análisis de Rentabilidad 💰</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analisis de Rentabilidad</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f8f9fc; font-family: 'Segoe UI', sans-serif; }
-        .card-kpi { border: none; border-radius: 15px; overflow: hidden; transition: transform 0.2s; }
-        .bg-gradient-blue { background: linear-gradient(135deg, #4e73df 0%, #224abe 100%); color: white; }
-        .bg-gradient-green { background: linear-gradient(135deg, #1cc88a 0%, #13855c 100%); color: white; }
-        .bg-gradient-purple { background: linear-gradient(135deg, #6f42c1 0%, #59359a 100%); color: white; }
-        .kpi-value { font-size: 2rem; font-weight: 800; }
+        body { background-color: #f8f9fc; }
+        .table thead th { white-space: nowrap; }
     </style>
 </head>
-<body class="p-4">
-<div class="container-fluid">
-    <div class="row mb-4 align-items-center">
-        <div class="col-md-5">
-            <h2 class="fw-bold text-dark mb-0"><i class="fas fa-chart-pie text-success"></i> Rentabilidad</h2>
-            <p class="text-muted mb-0">
-                <span class="badge bg-dark"><?php echo $tituloVista; ?></span> 
-                <small class="ms-2">Últimos 30 días (Fecha Contable)</small>
-            </p>
-        </div>
-        <div class="col-md-7 d-flex justify-content-end align-items-center gap-2 flex-wrap">
-            <a href="<?php echo $btnLink; ?>" class="btn <?php echo $btnClass; ?> fw-bold shadow-sm">
-                <?php echo $btnText; ?>
-            </a>
-
-            <form method="GET" id="filterForm" class="d-flex align-items-center bg-white p-2 rounded shadow-sm border m-0">
-                <input type="hidden" name="view" value="<?php echo $viewMode; ?>">
-                
-                <div class="form-check form-switch m-0">
-                    <input class="form-check-input" type="checkbox" id="excludeRaw" name="exclude_raw" value="1" <?php echo $excludeRaw ? 'checked' : ''; ?> onchange="document.getElementById('filterForm').submit()">
-                    <label class="form-check-label fw-bold text-dark small text-nowrap" for="excludeRaw">Solo Prod. Finales</label>
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Finanzas / KPI</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-pie me-2"></i>Analisis de Rentabilidad</h1>
+                <p class="mb-3 text-white-50">Ventas y ganancias de los ultimos 30 dias por fecha contable.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i><?php echo htmlspecialchars($tituloVista); ?></span>
+                    <span class="kpi-chip"><i class="fas fa-calendar me-1"></i>Ultimos 30 dias</span>
                 </div>
-            </form>
-            <a href="dashboard.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Volver</a>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="<?php echo $btnLink; ?>" class="btn <?php echo $btnClass; ?> fw-bold">
+                    <?php echo $btnText; ?>
+                </a>
+                <form method="GET" id="filterForm" class="d-flex align-items-center bg-white p-2 rounded shadow-sm border m-0">
+                    <input type="hidden" name="view" value="<?php echo $viewMode; ?>">
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" id="excludeRaw" name="exclude_raw" value="1" <?php echo $excludeRaw ? 'checked' : ''; ?> onchange="document.getElementById('filterForm').submit()">
+                        <label class="form-check-label fw-bold text-dark small text-nowrap" for="excludeRaw">Solo Prod. Finales</label>
+                    </div>
+                </form>
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
+            </div>
         </div>
-    </div>
+    </section>
 
     <div class="row g-4 mb-4">
-        <div class="col-md-4"><div class="card card-kpi bg-gradient-blue shadow h-100 p-4"><div class="text-uppercase opacity-75 fw-bold">Ventas Totales</div><div class="kpi-value">$<?php echo number_format($kpiSales, 2); ?></div></div></div>
-        <div class="col-md-4"><div class="card card-kpi bg-gradient-green shadow h-100 p-4"><div class="text-uppercase opacity-75 fw-bold">Ganancia Neta</div><div class="kpi-value">$<?php echo number_format($kpiProfit, 2); ?></div></div></div>
-        <div class="col-md-4"><div class="card card-kpi bg-gradient-purple shadow h-100 p-4"><div class="text-uppercase opacity-75 fw-bold">Rentabilidad</div><div class="kpi-value"><?php echo number_format($kpiMargin, 1); ?>%</div></div></div>
+        <div class="col-md-4">
+            <div class="glass-card p-4 h-100">
+                <div class="stat-box">
+                    <div class="tiny text-muted">Ventas Totales</div>
+                    <div class="summary-total text-primary">$<?php echo number_format($kpiSales, 2); ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="glass-card p-4 h-100">
+                <div class="stat-box">
+                    <div class="tiny text-muted">Ganancia Neta</div>
+                    <div class="summary-total text-success">$<?php echo number_format($kpiProfit, 2); ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="glass-card p-4 h-100">
+                <div class="stat-box">
+                    <div class="tiny text-muted">Rentabilidad</div>
+                    <div class="summary-total text-warning"><?php echo number_format($kpiMargin, 1); ?>%</div>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <div class="card shadow mb-4">
-        <div class="card-header py-3 bg-white d-flex justify-content-between">
-            <h6 class="m-0 fw-bold text-primary">📊 Evolución Diaria Administrativa</h6>
-            <span class="badge bg-light text-dark border"><?php echo $tituloVista; ?></span>
+    <div class="glass-card p-4 mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <div class="section-title">Grafico</div>
+                <h2 class="h5 fw-bold mb-0">Evolucion Diaria Administrativa</h2>
+            </div>
+            <span class="soft-pill"><?php echo $tituloVista; ?></span>
         </div>
-        <div class="card-body"><div style="height: 350px;"><canvas id="profitChart"></canvas></div></div>
+        <div style="height: 350px;"><canvas id="profitChart"></canvas></div>
     </div>
 
     <div class="row g-4">
         <div class="col-md-6">
-            <div class="card shadow h-100 border-start border-success border-5">
-                <div class="card-header bg-white"><h6 class="m-0 fw-bold text-success">Top 10 Más Rentables</h6></div>
-                <div class="card-body p-0">
-                    <table class="table table-striped mb-0">
-                        <thead><tr><th>Producto</th><th class="text-center">Cant.</th><th class="text-end">Ganancia</th></tr></thead>
+            <div class="glass-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Top</div>
+                        <h2 class="h5 fw-bold mb-0 text-success">Top 10 Mas Rentables</h2>
+                    </div>
+                    <span class="soft-pill"><i class="fas fa-crown me-1"></i>Mayores ganancias</span>
+                </div>
+                <div class="table-responsive border rounded-4 bg-white" style="max-height: 400px; overflow:auto;">
+                    <table class="table align-middle mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Producto</th>
+                                <th class="text-center">Cant.</th>
+                                <th class="text-end">Ganancia</th>
+                            </tr>
+                        </thead>
                         <tbody>
-                            <?php foreach ($topProducts as $p): ?>
-                            <tr><td><strong><?php echo htmlspecialchars($p['nombre']); ?></strong></td><td class="text-center"><?php echo number_format($p['unidades']); ?></td><td class="text-end text-success">+$<?php echo number_format($p['ganancia_total'], 2); ?></td></tr>
-                            <?php endforeach; ?>
+                            <?php if (empty($topProducts)): ?>
+                            <tr><td colspan="3" class="text-center py-4 text-muted">Sin datos disponibles.</td></tr>
+                            <?php else: foreach ($topProducts as $p): ?>
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold"><?php echo htmlspecialchars($p['nombre']); ?></div>
+                                    <div class="tiny text-muted"><?php echo htmlspecialchars($p['categoria']); ?></div>
+                                </td>
+                                <td class="text-center"><?php echo number_format($p['unidades']); ?></td>
+                                <td class="text-end text-success fw-bold">+$<?php echo number_format($p['ganancia_total'], 2); ?></td>
+                            </tr>
+                            <?php endforeach; endif; ?>
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
         <div class="col-md-6">
-            <div class="card shadow h-100 border-start border-danger border-5">
-                <div class="card-header bg-white"><h6 class="m-0 fw-bold text-danger">Top 10 Menos Rentables</h6></div>
-                <div class="card-body p-0">
-                    <table class="table table-striped mb-0">
-                        <thead><tr><th>Producto</th><th class="text-center">Cant.</th><th class="text-end">Ganancia</th></tr></thead>
+            <div class="glass-card p-4 h-100">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Top</div>
+                        <h2 class="h5 fw-bold mb-0 text-danger">Top 10 Menos Rentables</h2>
+                    </div>
+                    <span class="soft-pill"><i class="fas fa-exclamation-triangle me-1"></i>Menores ganancias</span>
+                </div>
+                <div class="table-responsive border rounded-4 bg-white" style="max-height: 400px; overflow:auto;">
+                    <table class="table align-middle mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Producto</th>
+                                <th class="text-center">Cant.</th>
+                                <th class="text-end">Ganancia</th>
+                            </tr>
+                        </thead>
                         <tbody>
-                            <?php foreach ($lowProducts as $p): ?>
-                            <tr><td><strong><?php echo htmlspecialchars($p['nombre']); ?></strong></td><td class="text-center"><?php echo number_format($p['unidades']); ?></td><td class="text-end text-danger">$<?php echo number_format($p['ganancia_total'], 2); ?></td></tr>
-                            <?php endforeach; ?>
+                            <?php if (empty($lowProducts)): ?>
+                            <tr><td colspan="3" class="text-center py-4 text-muted">Sin datos disponibles.</td></tr>
+                            <?php else: foreach ($lowProducts as $p): ?>
+                            <tr>
+                                <td>
+                                    <div class="fw-semibold"><?php echo htmlspecialchars($p['nombre']); ?></div>
+                                    <div class="tiny text-muted"><?php echo htmlspecialchars($p['categoria']); ?></div>
+                                </td>
+                                <td class="text-center"><?php echo number_format($p['unidades']); ?></td>
+                                <td class="text-end text-danger fw-bold">$<?php echo number_format($p['ganancia_total'], 2); ?></td>
+                            </tr>
+                            <?php endforeach; endif; ?>
                         </tbody>
                     </table>
                 </div>

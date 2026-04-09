@@ -6885,3 +6885,18 @@ Ya nos mandaron a decir que llev"
 2026-04-09T13:01:29.348Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Es que esa se llama desde inventario"
 2026-04-09T13:01:29.355Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
 2026-04-09T13:01:32.776Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:01:37.537Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Ve a inventario y a nuevo productos"
+2026-04-09T13:01:37.543Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:02:08.069Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Agregar editor de unidades de medida...ya"
+2026-04-09T13:02:08.077Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:02:21.928Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Usuario rocafer"
+2026-04-09T13:02:21.935Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:02:26.426Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Password 3412"
+2026-04-09T13:02:26.432Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:02:31.949Z [INFO] [bridge] inbound from=17905869652079@lid type=chat text="Es con ese ???"
+2026-04-09T13:02:31.958Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=web_incoming: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:02:32.775Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:03:32.776Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:04:32.777Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:05:32.776Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID
+2026-04-09T13:06:32.779Z [ERROR] [bridge] fetch intento 1/2 falló (fetch) http://127.0.0.1/pos_bot_api.php?action=bridge_scan_jobs: fetch failed cause=ERR_TLS_CERT_ALTNAME_INVALID

@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-09T13:01:29.008Z",
+  "updated_at": "2026-04-09T13:05:29.011Z",
   "rows": [
     {
       "id": "17905869652079@lid",
@@ -20,8 +20,20 @@
       "is_contact": true
     },
     {
-      "id": "120363208098502354@g.us",
-      "name": "Servicio Ángel S.U.R.L",
+      "id": "120363360932598727@g.us",
+      "name": "ELECTRODOMÉSTICOS NEKY",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363292278532360@g.us",
+      "name": "Ventas Nana en todo 10 de oct",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363417843314195@g.us",
+      "name": "Ventas en Luyano",
       "is_group": true,
       "is_contact": false
     },
@@ -32,8 +44,14 @@
       "is_contact": false
     },
     {
-      "id": "120363360932598727@g.us",
-      "name": "ELECTRODOMÉSTICOS NEKY",
+      "id": "120363308533081066@g.us",
+      "name": "VENTAS #1MAGUI💪😎✌️💜",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363208098502354@g.us",
+      "name": "Servicio Ángel S.U.R.L",
       "is_group": true,
       "is_contact": false
     },
@@ -146,12 +164,6 @@
       "is_contact": false
     },
     {
-      "id": "120363292278532360@g.us",
-      "name": "Ventas Nana en todo 10 de oct",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363350818457900@g.us",
       "name": "CAKEREY",
       "is_group": true,
@@ -166,18 +178,6 @@
     {
       "id": "120363295596458291@g.us",
       "name": "1 El bodegon",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363308533081066@g.us",
-      "name": "VENTAS #1MAGUI💪😎✌️💜",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417843314195@g.us",
-      "name": "Ventas en Luyano",
       "is_group": true,
       "is_contact": false
     },
