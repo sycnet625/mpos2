@@ -245,9 +245,14 @@ $menuCategories = [
             <?php endif; ?>
 
             <br>
-            <button class="pw-expand-all-btn" onclick="toggleAllCategories(true)">Abrir todo</button>
-            <button class="pw-expand-all-btn" onclick="toggleAllCategories(false)">Cerrar todo</button>
-            <a href="logout.php" class="pw-expand-all-btn text-danger fw-bold" style="text-decoration:none;"><i class="fas fa-sign-out-alt"></i> Salir</a>
+            <button class="pw-expand-all-btn" onclick="toggleAllCategories(true)">Abrir</button>
+            <button class="pw-expand-all-btn" onclick="toggleAllCategories(false)">Cerrar</button>
+            <a href="#" class="pw-expand-all-btn text-primary fw-bold" style="text-decoration:none;" onclick="openChangePassModal(event)">
+                <i class="fas fa-key"></i> Pass
+            </a>
+            <a href="logout.php" class="pw-expand-all-btn text-danger fw-bold" style="text-decoration:none;">
+                <i class="fas fa-sign-out-alt"></i> Salir (<?php echo htmlspecialchars($_SESSION['admin_user_name'] ?? $_SESSION['user_name'] ?? 'Admin'); ?>)
+            </a>
         </div>
         
         <?php foreach($menuCategories as $catName => $links): ?>
@@ -750,4 +755,95 @@ window.sendAdminMsg = async function() {
 
     window.addEventListener('load', () => { initPush().catch(console.error); });
 })();
+</script>
+
+<!-- MODAL CAMBIO DE CONTRASEÑA -->
+<div class="modal fade" id="changePassModal" tabindex="-1" style="z-index: 9999;">
+    <div class="modal-dialog modal-sm modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg" style="border-radius: 15px;">
+            <div class="modal-header bg-primary text-white py-2">
+                <h6 class="modal-title fw-bold"><i class="fas fa-key me-2"></i>Cambiar Contraseña</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div id="changePassAlert" class="alert d-none py-2 small"></div>
+                <form id="formChangePass">
+                    <div class="mb-3">
+                        <label class="small fw-bold text-muted">Contraseña Actual</label>
+                        <input type="password" id="cp_current" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="small fw-bold text-muted">Nueva Contraseña</label>
+                        <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="4">
+                    </div>
+                    <div class="mb-0">
+                        <label class="small fw-bold text-muted">Confirmar Nueva</label>
+                        <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="4">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer bg-light p-2 border-0">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+                <button type="button" class="btn btn-primary btn-sm fw-bold" onclick="submitChangePass()">Actualizar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function openChangePassModal(e) {
+    if(e) e.preventDefault();
+    const modalEl = document.getElementById('changePassModal');
+    const modal = new bootstrap.Modal(modalEl);
+    document.getElementById('formChangePass').reset();
+    document.getElementById('changePassAlert').classList.add('d-none');
+    modal.show();
+}
+
+async function submitChangePass() {
+    const current = document.getElementById('cp_current').value;
+    const newP = document.getElementById('cp_new').value;
+    const confirmP = document.getElementById('cp_confirm').value;
+    const alertEl = document.getElementById('changePassAlert');
+
+    if (!current || !newP || !confirmP) {
+        alertEl.className = 'alert alert-warning py-2 small';
+        alertEl.innerText = 'Llene todos los campos.';
+        alertEl.classList.remove('d-none');
+        return;
+    }
+
+    if (newP !== confirmP) {
+        alertEl.className = 'alert alert-danger py-2 small';
+        alertEl.innerText = 'Las contraseñas no coinciden.';
+        alertEl.classList.remove('d-none');
+        return;
+    }
+
+    try {
+        const res = await fetch('profile_api.php?action=change_password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_pass: current, new_pass: newP })
+        });
+        const data = await res.json();
+
+        if (data.status === 'success') {
+            alertEl.className = 'alert alert-success py-2 small';
+            alertEl.innerText = data.msg;
+            alertEl.classList.remove('d-none');
+            setTimeout(() => {
+                bootstrap.Modal.getInstance(document.getElementById('changePassModal')).hide();
+            }, 1500);
+        } else {
+            alertEl.className = 'alert alert-danger py-2 small';
+            alertEl.innerText = data.msg;
+            alertEl.classList.remove('d-none');
+        }
+    } catch(e) {
+        alertEl.className = 'alert alert-danger py-2 small';
+        alertEl.innerText = 'Error de conexión.';
+        alertEl.classList.remove('d-none');
+    }
+}
 </script>

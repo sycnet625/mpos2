@@ -255,7 +255,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$pdo->inTransaction()) $pdo->beginTransaction();
         // Crear tablas merma si hacen falta (solo una vez)
         if ($accion === 'merma') {
-            $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, id_empresa INT DEFAULT 1, id_almacen INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_detalle (id INT AUTO_INCREMENT PRIMARY KEY, id_merma INT, id_producto VARCHAR(50), cantidad DECIMAL(10,3), costo_al_momento DECIMAL(12,2), motivo_especifico TEXT) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             $totalCosto = 0;
             foreach ($items as $it) {
@@ -263,14 +263,65 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $p->execute([trim($it['sku']??''), $EMP]);
                 $totalCosto += abs(floatval($it['cantidad']??0)) * floatval($p->fetchColumn()?:0);
             }
-            $pdo->prepare("INSERT INTO mermas_cabecera (usuario,motivo_general,total_costo_perdida,id_sucursal,fecha_registro) VALUES(?,?,?,?,?)")->execute([$usuario,$motivo,$totalCosto,$SUC,$fecha]);
+            $pdo->prepare("INSERT INTO mermas_cabecera (usuario,motivo_general,total_costo_perdida,id_sucursal,id_empresa,id_almacen,fecha_registro) VALUES(?,?,?,?,?,?,?)")->execute([$usuario,$motivo,$totalCosto,$SUC,$EMP,$ALM,$fecha]);
             $idMerma = $pdo->lastInsertId();
+        }
+
+        if ($accion === 'entrada') {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS entradas_cabecera (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                motivo TEXT NULL,
+                total DECIMAL(12,2) DEFAULT 0,
+                usuario VARCHAR(100) NULL,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP,
+                id_empresa INT DEFAULT 1,
+                id_sucursal INT DEFAULT 1,
+                id_almacen INT DEFAULT 1
+            ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS entradas_detalle (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                id_entrada INT NOT NULL,
+                id_producto VARCHAR(50) NOT NULL,
+                cantidad DECIMAL(12,2) NOT NULL,
+                costo_unitario DECIMAL(12,2) NOT NULL,
+                subtotal DECIMAL(12,2) NOT NULL
+            ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $totalEntrada = 0;
+            foreach ($items as $it) {
+                $p = $pdo->prepare("SELECT costo FROM productos WHERE codigo=? AND id_empresa=?");
+                $p->execute([trim($it['sku']??''), $EMP]);
+                $totalEntrada += abs(floatval($it['cantidad']??0)) * floatval($p->fetchColumn()?:0);
+            }
+            $pdo->prepare("INSERT INTO entradas_cabecera (motivo,total,usuario,fecha,id_empresa,id_sucursal,id_almacen) VALUES(?,?,?,?,?,?,?)")->execute([$motivo,$totalEntrada,$usuario,$fecha,$EMP,$SUC,$ALM]);
+            $idEntrada = $pdo->lastInsertId();
         }
 
         if ($accion === 'transferencia') {
             $destino = trim($input['destino'] ?? '');
             if (!$destino) { echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']); exit; }
-            $pdo->exec("CREATE TABLE IF NOT EXISTS transfer_pendiente (id INT AUTO_INCREMENT PRIMARY KEY, sku VARCHAR(50), cantidad DECIMAL(10,3), costo DECIMAL(12,2), sucursal_origen INT, destino_nombre VARCHAR(100), usuario VARCHAR(100), motivo TEXT, estado VARCHAR(20) DEFAULT 'PENDIENTE', fecha DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS transferencias_cabecera (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                destino_nombre VARCHAR(100) NULL,
+                total_items INT DEFAULT 0,
+                usuario VARCHAR(100) NULL,
+                motivo TEXT NULL,
+                estado VARCHAR(20) DEFAULT 'PENDIENTE',
+                id_empresa INT DEFAULT 1,
+                id_sucursal_origen INT DEFAULT 1,
+                id_almacen_origen INT DEFAULT 1,
+                fecha DATETIME DEFAULT CURRENT_TIMESTAMP
+            ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $pdo->exec("CREATE TABLE IF NOT EXISTS transferencias_detalle (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                id_transferencia INT NOT NULL,
+                id_producto VARCHAR(50) NOT NULL,
+                cantidad DECIMAL(12,2) NOT NULL,
+                costo_unitario DECIMAL(12,2) NOT NULL,
+                subtotal DECIMAL(12,2) NOT NULL
+            ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            $totalItems = count($items);
+            $pdo->prepare("INSERT INTO transferencias_cabecera (destino_nombre,total_items,usuario,motivo,estado,id_empresa,id_sucursal_origen,id_almacen_origen,fecha) VALUES(?,?,?,?,?,?,?,?,?)")->execute([$destino,$totalItems,$usuario,$motivo,'PENDIENTE',$EMP,$SUC,$ALM,$fecha]);
+            $idTransferencia = $pdo->lastInsertId();
         }
 
         foreach ($items as $item) {
@@ -286,6 +337,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if ($accion === 'entrada') {
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'ENTRADA',abs($qty),"ENTRADA POS: $motivo",$costo,$usuario,$fecha);
+                $pdo->prepare("INSERT INTO entradas_detalle (id_entrada,id_producto,cantidad,costo_unitario,subtotal) VALUES(?,?,?,?,?)")->execute([$idEntrada,$sku,abs($qty),$costo,abs($qty)*$costo]);
                 $results[] = "+".abs($qty)." ".$prod['nombre'];
 
             } elseif ($accion === 'merma') {
@@ -307,7 +359,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } elseif ($accion === 'transferencia') {
                 $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSFER→$destino POS: $motivo",$costo,$usuario,$fecha);
-                $pdo->prepare("INSERT INTO transfer_pendiente (sku,cantidad,costo,sucursal_origen,destino_nombre,usuario,motivo,fecha) VALUES(?,?,?,?,?,?,?,?)")->execute([$sku,abs($qty),$costo,$SUC,$destino,$usuario,$motivo,$fecha]);
+                $pdo->prepare("INSERT INTO transferencias_detalle (id_transferencia,id_producto,cantidad,costo_unitario,subtotal) VALUES(?,?,?,?,?)")->execute([$idTransferencia,$sku,abs($qty),$costo,abs($qty)*$costo]);
                 $results[] = "-".abs($qty)." ".$prod['nombre']." → $destino";
             }
 
