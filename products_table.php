@@ -2,6 +2,16 @@
 // ARCHIVO: products_table.php v3.2 (MEJORAS DE AUDITORÍA, KPI, IMPORT/EXPORT, MOBILE)
 ini_set('display_errors', 0);
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+// Si es AJAX, registrar un manejador de errores que devuelva JSON
+if (isset($_GET['ajax_load'])) {
+    set_error_handler(function($errno, $errstr, $errfile, $errline) {
+        if (!(error_reporting() & $errno)) return false;
+        echo json_encode(['status' => 'error', 'msg' => "PHP Error [$errno]: $errstr in $errfile on line $errline"]);
+        exit;
+    });
+}
+
 require_once 'db.php';
 require_once 'pos_audit.php'; 
 
@@ -1250,14 +1260,19 @@ $valorInventario = floatval($stmtValor->fetchColumn() ?: 0);
 
 // --- RESPUESTA AJAX ---
 if ($isAjax) {
-    echo json_encode([
-        'html' => renderProductRows($productosPagina, $localPath),
-        'total' => $totalProducts,
-        'page' => $page,
-        'pages' => $totalPages,
-        'valor' => number_format($valorInventario, 2),
-        'kpi' => $kpiData
-    ]);
+    try {
+        echo json_encode([
+            'status' => 'success',
+            'html' => renderProductRows($productosPagina, $localPath),
+            'total' => $totalProducts,
+            'page' => $page,
+            'pages' => $totalPages,
+            'valor' => number_format($valorInventario, 2),
+            'kpi' => $kpiData
+        ]);
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+    }
     exit;
 }
 ?>
@@ -1281,7 +1296,8 @@ if ($isAjax) {
         .kpi-row { margin-bottom: 1rem; }
         .kpi-card { border: 1px solid var(--pw-line); border-radius: 18px; padding: 0.85rem 1rem; background: rgba(255,255,255,.72); box-shadow: 0 8px 18px rgba(15,23,42,.06); }
         .context-badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1); }
-        .row-inactive { background-color: #fff5f5 !important; opacity: 0.8; }
+        .row-inactive { background-color: rgba(248, 113, 113, 0.05) !important; opacity: 0.95; }
+        .row-inactive td { color: #64748b; }
         .editable-cell { position: relative; cursor: cell; transition: background 0.2s; }
         .editable-cell:hover { background-color: #eef2ff; }
         .editable-cell:hover::after { content: '✎'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #3b82f6; font-size: 0.8rem; opacity: 0.5; }
@@ -1658,6 +1674,11 @@ async function loadData(page) {
         const res = await fetch(url);
         const data = await res.json();
         
+        if (data.status === 'error') {
+            showToast('❌ Error del servidor: ' + data.msg);
+            return;
+        }
+
         document.getElementById('tableBody').innerHTML = data.html;
         document.getElementById('totalCountDisplay').innerText = data.total;
         document.getElementById('currentPageDisplay').innerText = data.page;
@@ -1675,7 +1696,12 @@ async function loadData(page) {
         initInlineEdit();
         updateSortIcons();
         
-    } catch(e) { console.error(e); showToast('❌ Error cargando datos'); }
+    } catch(e) { 
+        console.error(e); 
+        showToast('❌ Error cargando datos'); 
+    } finally {
+        document.getElementById('tableBody').style.opacity = '1';
+    }
 }
 
 function exportCsv() {
