@@ -505,8 +505,19 @@ function handleBarcodeScanner(e) {
 }
 
 function processBarcode(c) { 
-    const p = productsDB.find(x => x.codigo == c); 
+    const code = String(c || '').trim();
+    let matchType = '';
+    const p = productsDB.find(x => {
+        const sku = String(x.codigo || '').trim();
+        const cb1 = String(x.codigo_barra_1 || '').trim();
+        const cb2 = String(x.codigo_barra_2 || '').trim();
+        if (sku === code) { matchType = 'SKU'; return true; }
+        if (cb1 && cb1 === code) { matchType = 'CB1'; return true; }
+        if (cb2 && cb2 === code) { matchType = 'CB2'; return true; }
+        return false;
+    });
     if(p) { 
+        showToast('Encontrado por ' + (matchType || 'SKU'));
         if(parseFloat(p.stock) <= 0 && !p.es_servicio) { 
             showToast('AGOTADO', 'error'); 
             return; 
@@ -882,9 +893,11 @@ function renderProducts(category, searchTerm) {
 
     let filtered = sourceData.filter(p => {
         const matchCat = category === 'all' || p.categoria === category;
-        const matchSearch = !term || 
-            (p.nombre && p.nombre.toLowerCase().includes(term)) || 
-            (p.codigo && p.codigo.toLowerCase().includes(term));
+        const matchSearch = !term ||
+            (p.nombre && p.nombre.toLowerCase().includes(term)) ||
+            (p.codigo && p.codigo.toLowerCase().includes(term)) ||
+            (p.codigo_barra_1 && String(p.codigo_barra_1).toLowerCase().includes(term)) ||
+            (p.codigo_barra_2 && String(p.codigo_barra_2).toLowerCase().includes(term));
         return matchCat && matchSearch;
     });
     

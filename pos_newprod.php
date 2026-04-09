@@ -5,6 +5,24 @@
 
 // 1. LÓGICA DE BACKEND (Solo se ejecuta si hay petición AJAX)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array($_GET['action'], ['get_next_sku', 'get_categories']))) {
+    if (!function_exists('pos_newprod_ensure_barcode_columns')) {
+        function pos_newprod_ensure_barcode_columns(PDO $pdo): void {
+            static $ready = false;
+            if ($ready) return;
+            $stmt = $pdo->query("SHOW COLUMNS FROM productos");
+            $existing = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+                $existing[(string)($col['Field'] ?? '')] = true;
+            }
+            $add = [];
+            if (!isset($existing['codigo_barra_1'])) $add[] = "ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo";
+            if (!isset($existing['codigo_barra_2'])) $add[] = "ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1";
+            if ($add) {
+                $pdo->exec("ALTER TABLE productos " . implode(', ', $add));
+            }
+            $ready = true;
+        }
+    }
     
     // Evitar conflictos si ya se incluyó db.php antes
     if (!isset($pdo)) {
@@ -67,6 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
     if (isset($_POST['save_new_product'])) {
         header('Content-Type: application/json');
         try {
+            pos_newprod_ensure_barcode_columns($pdo);
             // Recoger datos del POST
             $codigo = $_POST['codigo'];
             if (empty($codigo)) throw new Exception("El código es obligatorio");
@@ -79,6 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
             // Preparar Query con TODAS las columnas
             $sql = "INSERT INTO productos (
                 codigo, id_empresa, nombre, descripcion, categoria,
+                codigo_barra_1, codigo_barra_2,
                 precio, costo, precio_mayorista, impuesto, activo, stock_minimo,
                 es_materia_prima, es_servicio, unidad_medida, peso, color,
                 es_web, es_reservable, sucursales_web, es_pos,
@@ -86,6 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 id_sucursal_origen
             ) VALUES (
                 ?, ?, ?, ?, ?,
+                ?, ?,
                 ?, ?, ?, ?, 1,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
@@ -99,6 +120,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 $_POST['nombre'],
                 $_POST['descripcion'] ?? '',
                 $_POST['categoria'] ?? 'General',
+                trim((string)($_POST['codigo_barra_1'] ?? '')) ?: null,
+                trim((string)($_POST['codigo_barra_2'] ?? '')) ?: null,
                 floatval($_POST['precio']),
                 floatval($_POST['costo']),
                 floatval($_POST['precio_mayorista'] ?? 0),
@@ -186,6 +209,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                             <datalist id="cat_list_qp">
                                 <!-- Poblado dinámicamente -->
                             </datalist>
+                        </div>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="small fw-bold">Código de Barras 1</label>
+                            <input type="text" class="form-control font-monospace" name="codigo_barra_1" maxlength="64" placeholder="EAN/UPC principal">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="small fw-bold">Código de Barras 2</label>
+                            <input type="text" class="form-control font-monospace" name="codigo_barra_2" maxlength="64" placeholder="Código alternativo">
                         </div>
                     </div>
 

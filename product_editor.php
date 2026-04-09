@@ -6,6 +6,25 @@ require_once 'db.php';
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 
+function product_editor_ensure_barcode_columns(PDO $pdo): void {
+    static $ready = false;
+    if ($ready) return;
+    $stmt = $pdo->query("SHOW COLUMNS FROM productos");
+    $existing = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+        $existing[(string)($col['Field'] ?? '')] = true;
+    }
+    $add = [];
+    if (!isset($existing['codigo_barra_1'])) $add[] = "ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo";
+    if (!isset($existing['codigo_barra_2'])) $add[] = "ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1";
+    if ($add) {
+        $pdo->exec("ALTER TABLE productos " . implode(', ', $add));
+    }
+    $ready = true;
+}
+
+product_editor_ensure_barcode_columns($pdo);
+
 // --- ACCIÓN: GUARDAR CAMBIOS (POST) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -25,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $sql = "UPDATE productos SET
                     nombre            = ?,
+                    codigo_barra_1    = ?,
+                    codigo_barra_2    = ?,
                     categoria         = ?,
                     precio            = ?,
                     precio_mayorista  = ?,
@@ -58,6 +79,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
             $_POST['nombre'],
+            trim((string)($_POST['codigo_barra_1'] ?? '')) ?: null,
+            trim((string)($_POST['codigo_barra_2'] ?? '')) ?: null,
             $_POST['categoria'],
             floatval($_POST['precio']),
             floatval($_POST['precio_mayorista']),
@@ -126,14 +149,24 @@ $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#2
             <label class="form-label small fw-bold">Código SKU</label>
             <input type="text" class="form-control bg-light font-monospace" value="<?php echo htmlspecialchars($p['codigo']); ?>" readonly>
         </div>
-        <div class="col-md-6">
+        <div class="col-md-5">
             <label class="form-label small fw-bold">Nombre del Producto</label>
             <input type="text" name="nombre" class="form-control fw-bold" value="<?php echo htmlspecialchars($p['nombre']); ?>" required>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-4">
             <label class="form-label small fw-bold">Categoría</label>
             <input type="text" name="categoria" class="form-control" value="<?php echo htmlspecialchars($p['categoria']); ?>" list="catListEdit">
             <datalist id="catListEdit"></datalist>
+        </div>
+    </div>
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Código de Barras 1</label>
+            <input type="text" name="codigo_barra_1" class="form-control font-monospace" maxlength="64" value="<?php echo htmlspecialchars($p['codigo_barra_1'] ?? ''); ?>" placeholder="EAN/UPC principal">
+        </div>
+        <div class="col-md-6">
+            <label class="form-label small fw-bold">Código de Barras 2</label>
+            <input type="text" name="codigo_barra_2" class="form-control font-monospace" maxlength="64" value="<?php echo htmlspecialchars($p['codigo_barra_2'] ?? ''); ?>" placeholder="Código alternativo">
         </div>
     </div>
 

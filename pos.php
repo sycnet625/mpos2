@@ -137,6 +137,7 @@ if (isset($_GET['load_products'])) {
         $params = $ctxConfig['categorias_ocultas'] ?? [];
         
         $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
+                    p.codigo_barra_1, p.codigo_barra_2,
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
                      FROM stock_almacen s
@@ -327,6 +328,8 @@ $dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
 
 // Asegurar columna favorito en productos
 try { $pdo->exec("ALTER TABLE productos ADD COLUMN favorito TINYINT(1) NOT NULL DEFAULT 0"); } catch (Exception $e) {}
+try { $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo"); } catch (Exception $e) {}
+try { $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1"); } catch (Exception $e) {}
 
 // Carga de Datos
 $prods = [];
@@ -353,6 +356,7 @@ try {
 
     // Productos
     $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
+                p.codigo_barra_1, p.codigo_barra_2,
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
                  FROM stock_almacen s

@@ -173,8 +173,8 @@ try {
     <title>BI & Finanzas de Sucursal</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; padding-bottom: 80px; }
         .card-fin { border:none; border-radius:15px; box-shadow:0 5px 15px rgba(0,0,0,0.05); transition:transform 0.2s; height: 100%; }
         .card-fin:hover { transform: translateY(-5px); }
         .metric-value { font-size: 1.8rem; font-weight: 800; }
@@ -182,36 +182,40 @@ try {
         .header-title { border-left: 5px solid #0d6efd; padding-left: 15px; }
     </style>
 </head>
-<body class="p-4">
-<div class="container">
-    
-    <div class="d-flex justify-content-between align-items-center mb-5">
-        <div>
-            <h3 class="fw-bold text-primary mb-0"><i class="fas fa-chart-pie me-2"></i> Inteligencia Financiera</h3>
-            <small class="text-muted">
-                <span class="badge bg-dark"><?php echo $tituloVista; ?></span>
-                <span class="mx-2">|</span>
-                <?php if (!$isGlobal): ?>
-                    <i class="fas fa-building text-success"></i> Sucursal: <strong><?php echo $SUC_ID; ?></strong> 
-                    <span class="mx-2">|</span> 
-                    <i class="fas fa-warehouse text-warning"></i> Almacén: <strong><?php echo $ALM_ID; ?></strong>
-                <?php else: ?>
-                    <i class="fas fa-globe text-primary"></i> <strong>Todas las Sucursales</strong>
-                <?php endif; ?>
-            </small>
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
+
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Business Intelligence / Finanzas</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-pie me-2"></i>Inteligencia Financiera</h1>
+                <p class="mb-3 text-white-50">Estado de resultados, flujo de efectivo y situación financiera por sucursal.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i><?php echo $tituloVista; ?></span>
+                    <?php if (!$isGlobal): ?>
+                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén <?php echo $ALM_ID; ?></span>
+                    <?php else: ?>
+                    <span class="kpi-chip"><i class="fas fa-globe me-1"></i>Todas las Sucursales</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="<?php echo $btnLink; ?>" class="btn <?php echo $btnClass; ?> fw-bold">
+                    <?php echo $btnText; ?>
+                </a>
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
+            </div>
         </div>
-        <div class="d-flex gap-2 align-items-center">
-            <a href="<?php echo $btnLink; ?>" class="btn <?php echo $btnClass; ?> fw-bold shadow-sm">
-                <?php echo $btnText; ?>
-            </a>
-            <form class="d-flex gap-2 bg-white p-2 rounded shadow-sm m-0">
-                <input type="hidden" name="view" value="<?php echo $viewMode; ?>">
-                <input type="date" name="start" class="form-control" value="<?php echo $start; ?>">
-                <input type="date" name="end" class="form-control" value="<?php echo $end; ?>">
-                <button class="btn btn-primary fw-bold"><i class="fas fa-filter me-1"></i> Filtrar</button>
-            </form>
-        </div>
-    </div>
+    </section>
+
+    <form class="inventory-tablist d-inline-flex mb-4 flex-wrap gap-2">
+        <input type="hidden" name="view" value="<?php echo $viewMode; ?>">
+        <label class="form-label small fw-bold text-muted me-2">Periodo:</label>
+        <input type="date" name="start" class="form-control form-control-sm" value="<?php echo $start; ?>">
+        <input type="date" name="end" class="form-control form-control-sm" value="<?php echo $end; ?>">
+        <button class="btn btn-primary btn-sm fw-bold"><i class="fas fa-filter me-1"></i>Filtrar</button>
+    </form>
 
     <h5 class="text-secondary fw-bold mb-3 header-title">
         ESTADO DE RESULTADOS (P&L) - <?php echo $isGlobal ? 'TODAS LAS SUCURSALES' : "SUCURSAL $SUC_ID"; ?>
@@ -219,7 +223,7 @@ try {
     <div class="row g-3 mb-5">
         
         <div class="col-md-3">
-            <div class="card card-fin bg-white p-4 border-bottom border-5 border-primary">
+            <div class="card card-fin glass-card p-4 border-bottom border-5 border-primary">
                 <div class="d-flex justify-content-between">
                     <div>
                         <div class="metric-label">Ingresos por Ventas</div>
@@ -231,7 +235,7 @@ try {
         </div>
 
         <div class="col-md-3">
-            <div class="card card-fin bg-white p-4 border-bottom border-5 border-warning">
+            <div class="card card-fin glass-card p-4 border-bottom border-5 border-warning">
                 <div class="d-flex justify-content-between">
                     <div>
                         <div class="metric-label">Costo de Ventas (COGS)</div>
@@ -243,7 +247,7 @@ try {
         </div>
 
         <div class="col-md-3">
-            <div class="card card-fin bg-white p-4 border-bottom border-5 border-info">
+            <div class="card card-fin glass-card p-4 border-bottom border-5 border-info">
                 <div class="d-flex justify-content-between">
                     <div>
                         <div class="metric-label">Utilidad Bruta</div>
@@ -255,7 +259,7 @@ try {
         </div>
 
         <div class="col-md-3">
-            <div class="card card-fin bg-white p-4 border-bottom border-5 border-success">
+            <div class="card card-fin glass-card p-4 border-bottom border-5 border-success">
                 <div class="d-flex justify-content-between">
                     <div>
                         <div class="metric-label">Utilidad Neta (Operativa)</div>
@@ -272,8 +276,8 @@ try {
 
     <div class="row g-4 mb-5">
         <div class="col-md-6">
-            <div class="card card-fin">
-                <div class="card-header bg-white fw-bold py-3 border-bottom">
+            <div class="glass-card">
+                <div class="card-header bg-transparent fw-bold py-3 border-bottom">
                     <i class="fas fa-file-invoice-dollar text-danger me-2"></i> Desglose de Gastos & Pérdidas
                 </div>
                 <div class="card-body p-0">
@@ -297,15 +301,15 @@ try {
                         <?php endif; ?>
                     </ul>
                 </div>
-                <div class="card-footer bg-white text-end fw-bold text-danger">
+                <div class="card-footer bg-transparent text-end fw-bold text-danger">
                     Total Gastos: -$<?php echo number_format($totalGastos + $totalMermas, 2); ?>
                 </div>
             </div>
         </div>
 
         <div class="col-md-6">
-            <div class="card card-fin">
-                <div class="card-header bg-white fw-bold py-3 border-bottom">
+            <div class="glass-card">
+                <div class="card-header bg-transparent fw-bold py-3 border-bottom">
                     <i class="fas fa-exchange-alt text-dark me-2"></i> Flujo de Efectivo (Cash Flow)
                 </div>
                 <div class="card-body p-4">
@@ -371,8 +375,6 @@ try {
     </div>
 
 </div>
-
-
 
 <?php include_once 'menu_master.php'; ?>
 </body>

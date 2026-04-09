@@ -235,40 +235,168 @@ try {
 
 $jC=floatval($saldos['caja_fuerte']); $jB=floatval($saldos['banco']); $jO=$saldos['observaciones']; $act=$jC+$jB+$invVal; $pas=0; $cap=$act-$pas;
 ?>
-<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Contabilidad</title><link href="assets/css/bootstrap.min.css" rel="stylesheet"><link rel="stylesheet" href="assets/css/all.min.css"><script src="assets/js/vue.min.js"></script><style>.card-stat{border-radius:12px;border:none;box-shadow:0 4px 6px rgba(0,0,0,0.05)} .month-selector{background:#343a40;padding:10px;color:white;border-radius:0 0 10px 10px;margin-bottom:20px}</style></head><body class="pb-5 bg-light"><div id="app" class="container-fluid px-4">
-<div class="row month-selector align-items-center">
-    <div class="col-md-3"><i class="fas fa-calendar-alt text-warning me-2"></i><span class="fw-bold">PERIODO:</span></div>
-    <div class="col-md-4 d-flex gap-2">
-        <select class="form-select form-select-sm fw-bold" v-model="selMes" @change="checkStatus"><option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option><option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option><option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option><option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option></select>
-        <select class="form-select form-select-sm fw-bold" style="width:100px" v-model="selAnio" @change="checkStatus"><option value="2025">2025</option><option value="2026">2026</option></select>
-    </div>
-    <div class="col-md-5 text-end d-flex justify-content-end align-items-center gap-2">
-        <div class="btn-group btn-group-sm" role="group">
-            <button type="button" class="btn" :class="scope=='local'?'btn-light fw-bold':'btn-outline-secondary text-white'" @click="changeScope('local')">🏢 Sucursal</button>
-            <button type="button" class="btn" :class="scope=='global'?'btn-light fw-bold':'btn-outline-secondary text-white'" @click="changeScope('global')">🌍 Empresa</button>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Contabilidad</title>
+    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
+    <script src="assets/js/vue.min.js"></script>
+    <style>
+        .table thead th { white-space: nowrap; }
+        .card-stat{border-radius:12px;border:none;box-shadow:0 4px 6px rgba(0,0,0,0.05)}
+        .month-selector{background:#343a40;padding:10px;color:white;border-radius:0 0 10px 10px;margin-bottom:20px}
+    </style>
+</head>
+<body class="pb-5 inventory-suite">
+<div id="app" class="container-fluid shell inventory-shell py-4 py-lg-5">
+
+    <div class="row month-selector align-items-center">
+        <div class="col-md-3"><i class="fas fa-calendar-alt text-warning me-2"></i><span class="fw-bold">PERIODO:</span></div>
+        <div class="col-md-4 d-flex gap-2">
+            <select class="form-select form-select-sm fw-bold" v-model="selMes" @change="checkStatus"><option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option><option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option><option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option><option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option></select>
+            <select class="form-select form-select-sm fw-bold" style="width:100px" v-model="selAnio" @change="checkStatus"><option value="2025">2025</option><option value="2026">2026</option></select>
         </div>
-        <span class="badge me-1 ms-2" :class="{'bg-success':status=='ABIERTO','bg-danger':status=='CERRADO','bg-secondary':status=='FUTURO','bg-info text-dark':status=='SIN_INICIAR'}">{{status}}</span>
-        <button v-if="status=='ABIERTO'" class="btn btn-warning btn-sm fw-bold" @click="closeMonth"><i class="fas fa-lock me-1"></i> CERRAR</button>
-        <button v-if="status=='SIN_INICIAR'" class="btn btn-primary btn-sm fw-bold" @click="setInitial">INICIAR</button>
+        <div class="col-md-5 text-end d-flex justify-content-end align-items-center gap-2">
+            <div class="btn-group btn-group-sm" role="group">
+                <button type="button" class="btn" :class="{'btn-light fw-bold':scope=='local','btn-outline-secondary text-white':scope!='local'}" @click="changeScope('local')">🏢 Sucursal</button>
+                <button type="button" class="btn" :class="{'btn-light fw-bold':scope=='global','btn-outline-secondary text-white':scope!='global'}" @click="changeScope('global')">🌍 Empresa</button>
+            </div>
+            <span class="badge me-1 ms-2" :class="{'bg-success':status=='ABIERTO','bg-danger':status=='CERRADO','bg-secondary':status=='FUTURO','bg-info text-dark':status=='SIN_INICIAR'}">{{status}}</span>
+            <button v-if="status=='ABIERTO'" class="btn btn-warning btn-sm fw-bold" @click="closeMonth"><i class="fas fa-lock me-1"></i> CERRAR</button>
+            <button v-if="status=='SIN_INICIAR'" class="btn btn-primary btn-sm fw-bold" @click="setInitial">INICIAR</button>
+        </div>
     </div>
+
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Contabilidad / Finanzas</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-balance-scale me-2"></i>Contabilidad</h1>
+                <p class="mb-3 text-white-50">Gestión de libro diario, estados financieros y cierre de periodos.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i>{{ scope == 'local' ? 'Sucursal Actual' : 'Consolidado Empresa' }}</span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="accounting_accounts.php" class="btn btn-light"><i class="fas fa-list me-1"></i>Cuentas</a>
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
+            </div>
+        </div>
+    </section>
+
+    <ul class="nav nav-tabs mb-3 inventory-tablist d-inline-flex"><li class="nav-item"><a class="nav-link px-4 py-2 fw-bold" :class="{active:tab=='diario'}" @click="tab='diario'" href="#">Operaciones</a></li><li class="nav-item"><a class="nav-link px-4 py-2 fw-bold text-success" :class="{active:tab=='patrimonio'}" @click="tab='patrimonio'" href="#">Patrimonio (PC-28)</a></li></ul>
+
+    <div v-if="tab=='diario'">
+        <div class="row g-4 mb-4">
+            <div class="col-md-4"><div class="card card-stat border-start border-4 border-primary p-3"><h6 class="text-primary fw-bold">ACTIVO ({{scope}})</h6><h3>$<?php echo number_format($act,2); ?></h3></div></div>
+            <div class="col-md-4"><div class="card card-stat border-start border-4 border-danger p-3"><h6 class="text-danger fw-bold">PASIVO</h6><h3>$<?php echo number_format($pas,2); ?></h3></div></div>
+            <div class="col-md-4"><div class="card card-stat border-start border-4 border-success p-3"><h6 class="text-success fw-bold">PATRIMONIO</h6><h3>$<?php echo number_format($cap,2); ?></h3></div></div>
+        </div>
+
+        <div class="row g-4">
+            <div class="col-lg-4">
+                <div class="glass-card p-4 mb-4 inventory-fade-in">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Diario</div>
+                            <h2 class="h5 fw-bold mb-0">Arqueo Diario</h2>
+                        </div>
+                    </div>
+                    <input type="date" class="form-control mb-2" v-model="fecha" @change="reload" :disabled="status!='ABIERTO'">
+                    <div class="input-group mb-2"><span class="input-group-text">Caja</span><input type="number" class="form-control" v-model.number="saldos.caja_fuerte" :disabled="status!='ABIERTO'"></div>
+                    <div class="input-group mb-2"><span class="input-group-text">Banco</span><input type="number" class="form-control" v-model.number="saldos.banco" :disabled="status!='ABIERTO'"></div>
+                    <button class="btn btn-success w-100" @click="saveSaldos" :disabled="status!='ABIERTO'">Guardar</button>
+                </div>
+
+                <div class="glass-card p-4 mb-4 inventory-fade-in">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Gastos</div>
+                            <h2 class="h5 fw-bold mb-0">Gastos Hoy</h2>
+                        </div>
+                        <span class="badge bg-secondary"><?php echo count($gastosDia); ?></span>
+                    </div>
+                    <div class="table-responsive" style="max-height:250px"><table class="table table-sm table-striped mb-0 small"><tbody><?php $tg=0; foreach($gastosDia as $g): $tg+=$g['monto']; ?><tr><td><?php echo substr($g['concepto'],0,20); ?></td><td class="text-end fw-bold text-danger">$<?php echo number_format($g['monto'],2); ?></td></tr><?php endforeach; ?></tbody><tfoot class="fw-bold bg-light"><tr><td>Total</td><td class="text-end text-danger">$<?php echo number_format($tg,2); ?></td></tr></tfoot></table></div>
+                </div>
+            </div>
+
+            <div class="col-lg-8">
+                <div class="glass-card p-4 inventory-fade-in">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Libro</div>
+                            <h2 class="h5 fw-bold mb-0">Libro Diario (<?php echo date('d/m/Y',strtotime($ff)); ?>)</h2>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <div class="form-check form-switch pt-1" title="Calcular Impuestos Automáticamente">
+                                <input class="form-check-input" type="checkbox" v-model="autoOnat">
+                                <label class="form-check-label small fw-bold text-muted">ONAT</label>
+                            </div>
+                            <button class="btn btn-primary btn-sm" @click="syncMonth" :disabled="status!='ABIERTO'" title="Sync Mes"><i class="fas fa-sync"></i> Sync</button>
+                            <button class="btn btn-secondary btn-sm" @click="print"><i class="fas fa-print"></i> Reportes</button>
+                        </div>
+                    </div>
+                    <div class="table-responsive"><table class="table table-sm table-hover mb-0 small"><thead class="table-light"><tr><th>Cuenta</th><th>Detalle</th><th class="text-end">Debe</th><th class="text-end">Haber</th></tr></thead><tbody><?php foreach($diarioRows as $d): ?><tr><td><?php echo $d['cuenta']; ?></td><td><?php echo $d['detalle']; ?></td><td class="text-end"><?php echo $d['debe']>0?number_format($d['debe'],2):'-'; ?></td><td class="text-end"><?php echo $d['haber']>0?number_format($d['haber'],2):'-'; ?></td></tr><?php endforeach; ?></tbody></table></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div v-if="tab=='patrimonio'">
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="glass-card p-4 inventory-fade-in border-start border-4 border-primary">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Capital</div>
+                            <h2 class="h5 fw-bold mb-0">Aportes Capital</h2>
+                        </div>
+                    </div>
+                    <input type="number" class="form-control mb-2" v-model.number="formPat.aporte" :disabled="status!='ABIERTO'">
+                    <button class="btn btn-primary w-100" @click="op('APORTE')" :disabled="status!='ABIERTO'">Registrar</button>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-card p-4 inventory-fade-in border-start border-4 border-success">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Dividendos</div>
+                            <h2 class="h5 fw-bold mb-0">Dividendos</h2>
+                        </div>
+                    </div>
+                    <input type="number" class="form-control mb-2" v-model.number="formPat.dividendo" :disabled="status!='ABIERTO'">
+                    <button class="btn btn-success w-100" @click="op('DIVIDENDO')" :disabled="status!='ABIERTO'">Pagar</button>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="glass-card p-4 mb-4 inventory-fade-in border-start border-4 border-danger">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Cierre</div>
+                            <h2 class="h5 fw-bold mb-0">Cierre Año Fiscal</h2>
+                        </div>
+                    </div>
+                    <button class="btn btn-danger w-100" @click="closeYear">Cerrar Año Actual</button>
+                </div>
+                <div class="glass-card p-4 inventory-fade-in border-start border-4 border-warning">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="section-title">Ajuste</div>
+                            <h2 class="h5 fw-bold mb-0">Ajuste Inventario</h2>
+                        </div>
+                    </div>
+                    <p class="small text-muted mb-2">Sincroniza stock físico con contable.</p>
+                    <button class="btn btn-warning w-100 fw-bold" @click="adjustInventory" :disabled="status!='ABIERTO'"><i class="fas fa-tools"></i> AJUSTAR INVENTARIO</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </div>
 
-<div class="d-flex justify-content-between mb-4"><h3><i class="fas fa-balance-scale"></i> Contabilidad <small class="text-muted fs-6">({{ scope == 'local' ? 'Sucursal Actual' : 'Consolidado Empresa' }})</small></h3><div><a href="accounting_accounts.php" class="btn btn-dark btn-sm">Cuentas</a> <a href="dashboard.php" class="btn btn-primary btn-sm">Salir</a></div></div>
-<div v-if="errorDb" class="alert alert-danger">{{errorDb}}</div>
-<ul class="nav nav-tabs mb-3"><li class="nav-item"><a class="nav-link" :class="{active:tab=='diario'}" @click="tab='diario'" href="#">Operaciones</a></li><li class="nav-item"><a class="nav-link text-success fw-bold" :class="{active:tab=='patrimonio'}" @click="tab='patrimonio'" href="#">Patrimonio (PC-28)</a></li></ul>
-<div v-if="tab=='diario'"><div class="row g-4 mb-4"><div class="col-md-4"><div class="card card-stat border-start border-4 border-primary p-3"><h6 class="text-primary fw-bold">ACTIVO ({{scope}})</h6><h3>$<?php echo number_format($act,2); ?></h3></div></div><div class="col-md-4"><div class="card card-stat border-start border-4 border-danger p-3"><h6 class="text-danger fw-bold">PASIVO</h6><h3>$<?php echo number_format($pas,2); ?></h3></div></div><div class="col-md-4"><div class="card card-stat border-start border-4 border-success p-3"><h6 class="text-success fw-bold">PATRIMONIO</h6><h3>$<?php echo number_format($cap,2); ?></h3></div></div></div><div class="row"><div class="col-lg-4"><div class="card shadow-sm mb-4"><div class="card-header bg-white fw-bold">Arqueo Diario</div><div class="card-body"><input type="date" class="form-control mb-2" v-model="fecha" @change="reload" :disabled="status!='ABIERTO'"><div class="input-group mb-2"><span class="input-group-text">Caja</span><input type="number" class="form-control" v-model.number="saldos.caja_fuerte" :disabled="status!='ABIERTO'"></div><div class="input-group mb-2"><span class="input-group-text">Banco</span><input type="number" class="form-control" v-model.number="saldos.banco" :disabled="status!='ABIERTO'"></div><button class="btn btn-success w-100" @click="saveSaldos" :disabled="status!='ABIERTO'">Guardar</button></div></div><div class="card shadow-sm mb-4"><div class="card-header bg-white fw-bold d-flex justify-content-between"><span class="text-danger">Gastos Hoy</span><span class="badge bg-secondary"><?php echo count($gastosDia); ?></span></div><div class="table-responsive" style="max-height:250px"><table class="table table-sm table-striped mb-0 small"><tbody><?php $tg=0; foreach($gastosDia as $g): $tg+=$g['monto']; ?><tr><td><?php echo substr($g['concepto'],0,20); ?></td><td class="text-end fw-bold text-danger">$<?php echo number_format($g['monto'],2); ?></td></tr><?php endforeach; ?></tbody><tfoot class="fw-bold"><tr><td>TOTAL</td><td class="text-end">$<?php echo number_format($tg,2); ?></td></tr></tfoot></table></div><div class="card-footer text-center"><a href="pos_expenses.php" class="btn btn-link btn-sm">Gestión Gastos</a></div></div></div><div class="col-lg-8"><div class="card shadow-sm mb-3 bg-light border-0"><div class="card-body py-2 d-flex justify-content-around text-center"><div><small>VENTAS MES</small><div class="h5 text-success fw-bold">$<?php echo number_format($vtaM,2); ?></div></div><div><small>GASTOS MES</small><div class="h5 text-danger fw-bold">$<?php echo number_format($resM['total'],2); ?></div></div><div><small>RESULTADO</small><div class="h5 fw-bold">$<?php echo number_format($vtaM-$resM['total'],2); ?></div></div></div></div><div class="card shadow-sm h-100">
-<div class="card-header bg-white d-flex justify-content-between align-items-center">
-    <h6 class="m-0 text-primary">Libro Diario (<?php echo date('d/m/Y',strtotime($ff)); ?>)</h6>
-    <div class="d-flex align-items-center gap-2">
-        <div class="form-check form-switch pt-1" title="Calcular Impuestos Automáticamente">
-            <input class="form-check-input" type="checkbox" v-model="autoOnat">
-            <label class="form-check-label small fw-bold text-muted">ONAT</label>
-        </div>
-        <button class="btn btn-primary btn-sm" @click="syncMonth" :disabled="status!='ABIERTO'" title="Sync Mes"><i class="fas fa-sync"></i> Sync</button>
-        <button class="btn btn-secondary btn-sm" @click="print"><i class="fas fa-print"></i> Reportes</button>
-    </div>
-</div><div class="table-responsive"><table class="table table-sm table-hover mb-0 small"><thead class="table-light"><tr><th>Cuenta</th><th>Detalle</th><th class="text-end">Debe</th><th class="text-end">Haber</th></tr></thead><tbody><?php foreach($diarioRows as $d): ?><tr><td><?php echo $d['cuenta']; ?></td><td><?php echo $d['detalle']; ?></td><td class="text-end"><?php echo $d['debe']>0?number_format($d['debe'],2):'-'; ?></td><td class="text-end"><?php echo $d['haber']>0?number_format($d['haber'],2):'-'; ?></td></tr><?php endforeach; ?></tbody></table></div></div></div></div></div>
-<div v-if="tab=='patrimonio'"><div class="row g-4"><div class="col-md-4"><div class="card border-primary p-3"><h6>Aportes Capital</h6><input type="number" class="form-control mb-2" v-model.number="formPat.aporte" :disabled="status!='ABIERTO'"><button class="btn btn-primary w-100" @click="op('APORTE')" :disabled="status!='ABIERTO'">Registrar</button></div></div><div class="col-md-4"><div class="card border-success p-3"><h6>Dividendos</h6><input type="number" class="form-control mb-2" v-model.number="formPat.dividendo" :disabled="status!='ABIERTO'"><button class="btn btn-success w-100" @click="op('DIVIDENDO')" :disabled="status!='ABIERTO'">Pagar</button></div></div><div class="col-md-4"><div class="card border-danger p-3 mb-2"><h6>Cierre Año Fiscal</h6><button class="btn btn-danger w-100" @click="closeYear">Cerrar Año Actual</button></div><div class="card border-warning p-3"><h6>Ajuste Inventario</h6><p class="small text-muted mb-2">Sincroniza stock físico con contable.</p><button class="btn btn-warning w-100 fw-bold" @click="adjustInventory" :disabled="status!='ABIERTO'"><i class="fas fa-tools"></i> AJUSTAR INVENTARIO</button></div></div></div></div></div>
 <script>
 new Vue({
     el:'#app',
@@ -301,5 +429,7 @@ new Vue({
         print(){ const s=`${this.selAnio}-${String(this.selMes).padStart(2,'0')}-01`; const e=new Date(this.selAnio,this.selMes,0).toISOString().split('T')[0]; window.open(`accounting_reports_print.php?start=${s}&end=${e}`, '_blank'); }
     }
 });
-</script><?php include_once 'menu_master.php'; ?>
-</body></html>
+</script>
+<?php include_once 'menu_master.php'; ?>
+</body>
+</html>

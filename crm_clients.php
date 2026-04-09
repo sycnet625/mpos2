@@ -139,12 +139,12 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
     <title>CRM Clientes - PalWeb</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .table thead th { white-space: nowrap; }
         .kpi-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); transition: transform 0.2s; }
         .kpi-card:hover { transform: translateY(-3px); }
         .avatar-circle { width: 40px; height: 40px; background-color: #e9ecef; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #495057; }
-        .table-card { border-radius: 12px; border: none; box-shadow: 0 2px 15px rgba(0,0,0,0.03); }
         .badge-cat-VIP { background-color: #ffd700; color: #000; }
         .badge-cat-Regular { background-color: #e2e6ea; color: #000; }
         .badge-cat-Corporativo { background-color: #0d6efd; color: #fff; }
@@ -152,19 +152,37 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
         .msj-badge { font-size: 0.7rem; background: #6f42c1; color: white; padding: 2px 6px; border-radius: 4px; margin-left: 5px; }
     </style>
 </head>
-<body class="p-4">
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-<div class="container-fluid">
-    
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h3 class="fw-bold text-dark"><i class="fas fa-users text-primary"></i> Gestión de Clientes (CRM)</h3>
-            <p class="text-muted mb-0">Administra perfiles, historial y categorías.</p>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">CRM / Clientes</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-users me-2"></i>Gestión de Clientes (CRM)</h1>
+                <p class="mb-3 text-white-50">Administra perfiles, historial de compras, categorías y mensajeros.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-address-book me-1"></i><?php echo $totalClientes; ?> clientes</span>
+                    <span class="kpi-chip"><i class="fas fa-crown me-1"></i><?php echo $vips; ?> VIPs</span>
+                    <span class="kpi-chip"><i class="fas fa-user-clock me-1"></i>+<?php echo $nuevosMes; ?> nuevos este mes</span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-light fw-bold" onclick="openModal()"><i class="fas fa-user-plus me-1"></i>Nuevo Cliente</button>
+                <a href="pos.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver al POS</a>
+            </div>
         </div>
-        <div>
-            <button class="btn btn-primary" onclick="openModal()"><i class="fas fa-user-plus"></i> Nuevo Cliente</button>
-            <a href="pos.php" class="btn btn-outline-secondary">Volver al POS</a>
-        </div>
+    </section>
+
+    <div class="glass-card p-3 mb-4 inventory-fade-in">
+        <form class="d-flex gap-2 align-items-center" method="GET">
+            <div class="input-group input-group-sm" style="max-width: 400px;">
+                <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+                <input type="text" name="q" class="form-control" placeholder="Buscar por nombre, teléfono o carnet..." value="<?php echo htmlspecialchars($filter); ?>">
+                <button class="btn btn-outline-secondary" type="submit"><i class="fas fa-search"></i></button>
+            </div>
+            <?php if($filter): ?><a href="crm_clients.php" class="btn btn-outline-danger btn-sm">Limpiar</a><?php endif; ?>
+        </form>
     </div>
 
     <div class="row g-3 mb-4">
@@ -214,80 +232,71 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
         </div>
     </div>
 
-    <div class="card table-card">
-        <div class="card-header bg-white py-3">
-            <form class="d-flex gap-2" method="GET">
-                <input type="text" name="q" class="form-control" placeholder="Buscar por nombre, teléfono o carnet..." value="<?php echo htmlspecialchars($filter); ?>">
-                <button class="btn btn-outline-primary"><i class="fas fa-search"></i></button>
-                <?php if($filter): ?><a href="crm_clients.php" class="btn btn-outline-secondary">Limpiar</a><?php endif; ?>
-            </form>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th class="ps-4">Cliente</th>
-                            <th>Contacto</th>
-                            <th>Categoría</th>
-                            <th>Historial (LTV)</th>
-                            <th>Última Visita</th>
-                            <th class="text-end pe-4">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach($clientes as $c): 
-                            $initials = strtoupper(substr($c['nombre'], 0, 2));
-                            $bgClass = "badge-cat-" . $c['categoria'];
-                        ?>
-                        <tr>
-                            <td class="ps-4">
-                                <div class="d-flex align-items-center">
-                                    <div class="avatar-circle me-3"><?php echo $initials; ?></div>
-                                    <div>
-                                        <div class="fw-bold text-dark">
-                                            <?php echo htmlspecialchars($c['nombre']); ?>
-                                            <?php if($c['es_mensajero']): ?><span class="msj-badge"><i class="fas fa-motorcycle"></i> MSJ</span><?php endif; ?>
-                                        </div>
-                                        <small class="text-muted"><i class="fas fa-id-card me-1"></i> <?php echo $c['nit_ci'] ?: 'S/N'; ?></small>
+    <div class="glass-card inventory-fade-in">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-4">Cliente</th>
+                        <th>Contacto</th>
+                        <th>Categoría</th>
+                        <th>Historial (LTV)</th>
+                        <th>Última Visita</th>
+                        <th class="text-end pe-4">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach($clientes as $c): 
+                        $initials = strtoupper(substr($c['nombre'], 0, 2));
+                        $bgClass = "badge-cat-" . $c['categoria'];
+                    ?>
+                    <tr>
+                        <td class="ps-4">
+                            <div class="d-flex align-items-center">
+                                <div class="avatar-circle me-3"><?php echo $initials; ?></div>
+                                <div>
+                                    <div class="fw-bold text-dark">
+                                        <?php echo htmlspecialchars($c['nombre']); ?>
+                                        <?php if($c['es_mensajero']): ?><span class="msj-badge"><i class="fas fa-motorcycle"></i> MSJ</span><?php endif; ?>
                                     </div>
+                                    <small class="text-muted"><i class="fas fa-id-card me-1"></i> <?php echo $c['nit_ci'] ?: 'S/N'; ?></small>
                                 </div>
-                            </td>
-                            <td>
-                                <div><i class="fas fa-phone me-1 text-muted"></i> <?php echo $c['telefono'] ?: '-'; ?></div>
-                                <div class="small text-muted"><?php echo $c['direccion'] ?: 'Sin dirección'; ?></div>
-                                <?php if (!empty($c['preferencias'])): ?>
-                                    <div class="small mt-1 text-info"><i class="fas fa-star me-1"></i> <?php echo nl2br(htmlspecialchars(mb_strimwidth($c['preferencias'], 0, 120, '...'))); ?></div>
-                                <?php endif; ?>
-                            </td>
-                            <td>
-                                <span class="badge <?php echo $bgClass; ?> rounded-pill"><?php echo $c['categoria']; ?></span>
-                                <div class="small text-muted mt-1"><?php echo $c['origen']; ?></div>
-                            </td>
-                            <td>
-                                <div class="fw-bold text-success">$<?php echo number_format($c['ltv'], 2); ?></div>
-                                <small class="text-muted"><?php echo $c['visitas']; ?> Compras</small>
-                            </td>
-                            <td>
-                                <?php if($c['ultima_visita']): ?>
-                                    <div><?php echo date('d/m/Y', strtotime($c['ultima_visita'])); ?></div>
-                                    <span class="badge bg-light text-dark border"><?php echo $c['status_calc']; ?></span>
-                                <?php else: ?>
-                                    <span class="text-muted">-</span>
-                                <?php endif; ?>
-                            </td>
-                            <td class="text-end pe-4">
-                                <button class="btn btn-sm btn-outline-primary me-1" onclick='editClient(<?php echo json_encode($c); ?>)' title="Editar"><i class="fas fa-edit"></i></button>
-                                <button class="btn btn-sm btn-outline-danger" onclick="deleteClient(<?php echo $c['id']; ?>, '<?php echo htmlspecialchars($c['nombre']); ?>')" title="Eliminar"><i class="fas fa-trash"></i></button>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
-                        <?php if(empty($clientes)): ?>
-                            <tr><td colspan="6" class="text-center py-5 text-muted">No se encontraron clientes.</td></tr>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
+                            </div>
+                        </td>
+                        <td>
+                            <div><i class="fas fa-phone me-1 text-muted"></i> <?php echo $c['telefono'] ?: '-'; ?></div>
+                            <div class="small text-muted"><?php echo $c['direccion'] ?: 'Sin dirección'; ?></div>
+                            <?php if (!empty($c['preferencias'])): ?>
+                                <div class="small mt-1 text-info"><i class="fas fa-star me-1"></i> <?php echo nl2br(htmlspecialchars(mb_strimwidth($c['preferencias'], 0, 120, '...'))); ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td>
+                            <span class="badge <?php echo $bgClass; ?> rounded-pill"><?php echo $c['categoria']; ?></span>
+                            <div class="small text-muted mt-1"><?php echo $c['origen']; ?></div>
+                        </td>
+                        <td>
+                            <div class="fw-bold text-success">$<?php echo number_format($c['ltv'], 2); ?></div>
+                            <small class="text-muted"><?php echo $c['visitas']; ?> Compras</small>
+                        </td>
+                        <td>
+                            <?php if($c['ultima_visita']): ?>
+                                <div><?php echo date('d/m/Y', strtotime($c['ultima_visita'])); ?></div>
+                                <span class="badge bg-light text-dark border"><?php echo $c['status_calc']; ?></span>
+                            <?php else: ?>
+                                <span class="text-muted">-</span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="text-end pe-4">
+                            <button class="btn btn-sm btn-outline-primary me-1" onclick='editClient(<?php echo json_encode($c); ?>)' title="Editar"><i class="fas fa-edit"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="deleteClient(<?php echo $c['id']; ?>, '<?php echo htmlspecialchars($c['nombre']); ?>')" title="Eliminar"><i class="fas fa-trash"></i></button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php if(empty($clientes)): ?>
+                        <tr><td colspan="6" class="text-center py-5 text-muted">No se encontraron clientes.</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
     </div>
 
@@ -463,7 +472,6 @@ $vips = $pdo->query("SELECT COUNT(*) FROM clientes WHERE categoria = 'VIP'")->fe
         }
     }
 </script>
-
 
 <?php include_once 'menu_master.php'; ?>
 </body>

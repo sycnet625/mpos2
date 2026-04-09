@@ -270,10 +270,11 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
     <title>Reporte Financiero Contable</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
     <style>
-        body { background-color: #f0f2f5; font-family: 'Segoe UI', sans-serif; }
+        .table thead th { white-space: nowrap; }
         .session-card { border-left: 5px solid #0d6efd; margin-bottom: 20px; transition: all 0.2s; }
         .session-card:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
         .session-closed { border-left-color: #198754; } 
@@ -284,41 +285,55 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         .scope-badge { font-size: 0.7rem; vertical-align: middle; margin-left: 8px; }
     </style>
 </head>
-<body class="p-4">
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-<div class="container">
-    <div class="d-flex justify-content-between align-items-center mb-4 bg-white p-3 rounded shadow-sm">
-        <div>
-            <h4 class="fw-bold mb-0">
-                <i class="fas fa-chart-line text-primary"></i> Reporte Financiero 
-                <span class="badge <?php echo $scope==='global'?'bg-danger':'bg-primary'; ?> scope-badge">
-                    <?php echo $scope==='global'?'VISTA GLOBAL':'SUCURSAL '.$SUC_ID_LOCAL; ?>
-                </span>
-            </h4>
-        </div>
-        <div class="d-flex gap-2 align-items-end">
-            <div class="btn-group btn-group-sm me-2 shadow-sm" role="group">
-                <a href="?scope=local&start=<?php echo $start; ?>&end=<?php echo $end; ?>" class="btn btn-outline-primary <?php echo $scope==='local'?'active':''; ?>"><i class="fas fa-store"></i> Local</a>
-                <a href="?scope=global&start=<?php echo $start; ?>&end=<?php echo $end; ?>" class="btn btn-outline-primary <?php echo $scope==='global'?'active':''; ?>"><i class="fas fa-globe"></i> Global</a>
-            </div>
-
-            <form class="d-flex gap-2 align-items-end">
-                <input type="hidden" name="scope" value="<?php echo $scope; ?>">
-                <div class="form-check form-switch me-2 mb-1">
-                    <input class="form-check-input" type="checkbox" id="toggleInventory" checked onchange="toggleChartDataset(2)">
-                    <label class="form-check-label small fw-bold text-muted" for="toggleInventory">📉 Inventario</label>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Contabilidad / Reportes</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-line me-2"></i>Reporte Financiero Contable</h1>
+                <p class="mb-3 text-white-50">Análisis de ventas, ganancias, métodos de pago y sesiones de caja.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-<?php echo $scope==='global'?'globe':'store'; ?> me-1"></i><?php echo $scope==='global'?'VISTA GLOBAL':'SUCURSAL '.$SUC_ID_LOCAL; ?></span>
                 </div>
-                <div><label class="small fw-bold">Desde</label><input type="date" name="start" class="form-control form-control-sm" value="<?php echo $start; ?>"></div>
-                <div><label class="small fw-bold">Hasta</label><input type="date" name="end" class="form-control form-control-sm" value="<?php echo $end; ?>"></div>
-                <button class="btn btn-primary btn-sm"><i class="fas fa-search"></i></button>
-            </form>
-            <button class="btn btn-dark btn-sm align-self-end" onclick="printRange()"><i class="fas fa-print"></i> PDF</button>
-            <button class="btn btn-success btn-sm align-self-end" onclick="openInvoiceModal()"><i class="fas fa-file-invoice-dollar"></i> Facturar</button>
-            <a href="pos.php" class="btn btn-outline-secondary btn-sm align-self-end">Volver</a>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <div class="form-check form-switch me-2 mb-0 align-self-center">
+                    <input class="form-check-input" type="checkbox" id="toggleInventory" checked onchange="toggleChartDataset(2)">
+                    <label class="form-check-label small fw-bold text-white" for="toggleInventory">📉 Inventario</label>
+                </div>
+                <button class="btn btn-light" onclick="printRange()"><i class="fas fa-print me-1"></i>PDF</button>
+                <button class="btn btn-outline-light" onclick="openInvoiceModal()"><i class="fas fa-file-invoice-dollar me-1"></i>Facturar</button>
+                <a href="pos.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
+            </div>
         </div>
+    </section>
+
+    <div class="glass-card p-3 mb-4 inventory-fade-in">
+        <form class="row g-2 align-items-end" method="GET">
+            <input type="hidden" name="scope" value="<?php echo $scope; ?>">
+            <div class="col-auto">
+                <div class="btn-group btn-group-sm shadow-sm" role="group">
+                    <a href="?scope=local&start=<?php echo $start; ?>&end=<?php echo $end; ?>" class="btn btn-outline-primary <?php echo $scope==='local'?'active':''; ?>"><i class="fas fa-store"></i> Local</a>
+                    <a href="?scope=global&start=<?php echo $start; ?>&end=<?php echo $end; ?>" class="btn btn-outline-primary <?php echo $scope==='global'?'active':''; ?>"><i class="fas fa-globe"></i> Global</a>
+                </div>
+            </div>
+            <div class="col-auto">
+                <label class="small fw-bold text-muted">Desde</label>
+                <input type="date" name="start" class="form-control form-control-sm" value="<?php echo $start; ?>">
+            </div>
+            <div class="col-auto">
+                <label class="small fw-bold text-muted">Hasta</label>
+                <input type="date" name="end" class="form-control form-control-sm" value="<?php echo $end; ?>">
+            </div>
+            <div class="col">
+                <button class="btn btn-primary btn-sm"><i class="fas fa-search"></i></button>
+            </div>
+        </form>
     </div>
 
-    <div class="row g-3 mb-3">
+    <div class="row g-3 mb-4">
         <div class="col-md-3">
             <div class="card card-stat h-100 p-3">
                 <div class="d-flex justify-content-between align-items-start">
@@ -357,8 +372,8 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         </div>
     </div>
 
-    <div class="card card-stat mb-4 shadow-sm">
-        <div class="card-header bg-white fw-bold text-muted border-0">
+    <div class="glass-card mb-4 shadow-sm inventory-fade-in">
+        <div class="card-header bg-transparent fw-bold text-muted border-0">
             <i class="fas fa-chart-area me-2"></i> Evolución Financiera (Vista <?php echo strtoupper($scope); ?>)
         </div>
         <div class="card-body">
@@ -368,8 +383,8 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
 
     <div class="row g-3 mb-4">
         <div class="col-md-4">
-            <div class="card card-stat h-100 shadow-sm">
-                <div class="card-header bg-white fw-bold text-primary"><i class="fas fa-motorcycle me-1"></i> Mensajería</div>
+            <div class="glass-card h-100 shadow-sm inventory-fade-in">
+                <div class="card-header bg-transparent fw-bold text-primary"><i class="fas fa-motorcycle me-1"></i> Mensajería</div>
                 <div class="card-body p-2">
                     <div class="d-flex justify-content-between border-bottom pb-2 mb-2 px-2">
                         <span class="text-muted">Total Envíos:</span><span class="fw-bold"><?php echo $cntDelivery; ?></span>
@@ -384,7 +399,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
             </div>
         </div>
         <div class="col-md-4">
-            <div class="card card-stat h-100 shadow-sm border-start border-4 border-info">
+            <div class="glass-card h-100 shadow-sm border-start border-4 border-info inventory-fade-in">
                 <div class="card-body text-center d-flex flex-column justify-content-center">
                     <h6 class="text-muted text-uppercase fw-bold mb-3"><i class="fas fa-globe me-2"></i> Ventas Web</h6>
                     <h2 class="fw-bold text-info mb-0">$<?php echo number_format($kpiWeb['total'] ?? 0, 2); ?></h2>
@@ -393,7 +408,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
             </div>
         </div>
         <div class="col-md-4">
-            <div class="card card-stat h-100 shadow-sm border-start border-4 border-warning">
+            <div class="glass-card h-100 shadow-sm border-start border-4 border-warning inventory-fade-in">
                 <div class="card-body">
                     <h6 class="text-muted text-uppercase fw-bold mb-3"><i class="fas fa-calendar-check me-2"></i> Reservas Entregadas</h6>
                     <div class="d-flex justify-content-between align-items-end mb-2"><span>Ingreso Total</span><span class="fs-4 fw-bold text-dark">$<?php echo number_format($kpiReserva['venta'] ?? 0, 2); ?></span></div>
@@ -432,7 +447,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
             <div class="card card-stat h-100 p-3">
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
-                        <small class="text-muted fw-bold">PROM. DIARIO</small>
+                        <small class="text-muted fw-bold text-uppercase">PROM. DIARIO</small>
                         <h3 class="fw-bold text-dark mb-0">$<?php echo number_format($promedioVentaDiaria, 2); ?></h3>
                         <small class="text-success fw-bold" style="font-size: 0.8rem;">+<?php echo number_format($promedioGananciaDiaria, 2); ?> ganancia</small>
                     </div>
@@ -490,8 +505,8 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         $fechaContableStr = date('d/m/Y', strtotime($s['fecha_contable']));
         $fechaContableISO = $s['fecha_contable'];
     ?>
-    <div class="card session-card <?php echo $isOpen?'session-open':'session-closed'; ?> shadow-sm">
-        <div class="card-header bg-white">
+    <div class="glass-card session-card <?php echo $isOpen?'session-open':'session-closed'; ?> shadow-sm inventory-fade-in">
+        <div class="card-header bg-transparent">
             <div class="row align-items-center">
                 <div class="col-md-4">
                     <div class="d-flex align-items-center gap-2">
@@ -506,7 +521,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
                     <?php if($isContabilizado): ?>
                         <span class="badge bg-info text-dark"><i class="fas fa-check-double"></i> Contabilizado</span>
                     <?php elseif(!$isOpen): ?>
-                        <form method="POST" onsubmit="return confirm('¿Contabilizar esta sesión?')">
+                        <form method="POST" onsubmit="return confirm('¿Contabilizar esta sesión?')" class="d-inline">
                             <input type="hidden" name="action" value="contabilizar_sesion">
                             <input type="hidden" name="session_id" value="<?php echo $sid; ?>">
                             <input type="hidden" name="cajero" value="<?php echo htmlspecialchars($s['nombre_cajero'] ?? 'Cajero'); ?>">

@@ -187,9 +187,10 @@ try {
     <title>Cierre de Negocio | PalWeb</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f1f3f9; font-family: 'Segoe UI', sans-serif; }
+        .table thead th { white-space: nowrap; }
         .kpi-card { border: none; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
         .bg-gradient-primary { background: linear-gradient(135deg, #0d6efd, #0a58ca); color: white; }
         .bg-gradient-success { background: linear-gradient(135deg, #198754, #146c43); color: white; }
@@ -200,71 +201,71 @@ try {
         .small-pct { font-size: 0.85rem; background: rgba(255,255,255,0.25); padding: 2px 8px; border-radius: 10px; margin-left: 5px; font-weight: bold; }
         .btn-print-custom { background-color: #6610f2; color: white; border: none; }
         .btn-print-custom:hover { background-color: #520dc2; color: white; }
-        /* Estilo sutil para botones de navegacion */
         .btn-nav-date { font-size: 0.8rem; padding: 2px 8px; }
     </style>
 </head>
-<body class="p-3">
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-<div class="container-fluid">
     <?php echo $mensaje_accion; ?>
 
-    <div class="bg-gradient-dark p-3 rounded-3 shadow-sm mb-4 d-flex justify-content-between align-items-center">
-        <div>
-            <h3 class="m-0 fw-bold"><i class="fas fa-chart-line text-warning me-2"></i> CIERRE DE NEGOCIO</h3>
-            <div class="mt-2">
-                <span class="badge-header me-2"><i class="fas fa-store"></i> Sucursal: <?php echo $id_sucursal; ?></span>
-                <span class="badge-header"><i class="fas fa-warehouse"></i> Almacén: <?php echo $id_almacen; ?></span>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Contabilidad / Cierres</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-chart-line me-2"></i>Cierre de Negocio</h1>
+                <p class="mb-3 text-white-50">Análisis de rentabilidad, desglose diario y métricas de rendimiento por periodo.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-store me-1"></i>Sucursal: <?php echo $id_sucursal; ?></span>
+                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén: <?php echo $id_almacen; ?></span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
+                <a href="print_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>" target="_blank" class="btn btn-light fw-bold"><i class="fas fa-print me-1"></i>IMPRIMIR A4</a>
             </div>
         </div>
-        <div class="text-end">
-            <a href="dashboard.php" class="btn btn-outline-light btn-sm me-2"><i class="fas fa-home"></i></a>
-            <a href="print_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>" target="_blank" class="btn btn-print-custom btn-sm fw-bold"><i class="fas fa-print"></i> IMPRIMIR A4</a>
-        </div>
-    </div>
+    </section>
 
-    <div class="card mb-4 kpi-card">
-        <div class="card-body">
-            <form method="GET" class="row g-2 align-items-end">
-                <div class="col-md-2">
-                    <label class="small fw-bold">Desde</label>
-                    <input type="date" name="fecha_inicio" class="form-control form-control-sm" value="<?php echo $fecha_inicio; ?>">
+    <div class="glass-card p-4 mb-4 inventory-fade-in">
+        <form method="GET" class="row g-2 align-items-end">
+            <div class="col-md-2">
+                <label class="small fw-bold text-muted">Desde</label>
+                <input type="date" name="fecha_inicio" class="form-control form-control-sm" value="<?php echo $fecha_inicio; ?>">
+            </div>
+            <div class="col-md-2">
+                <label class="small fw-bold text-muted">Hasta</label>
+                <input type="date" name="fecha_fin" class="form-control form-control-sm" value="<?php echo $fecha_fin; ?>">
+            </div>
+            <div class="col-md-5">
+                <div class="btn-group btn-group-sm">
+                    <a href="?periodo=week" class="btn btn-outline-primary">Semana</a>
+                    <a href="?periodo=month" class="btn btn-outline-primary">Mes</a>
+                    <a href="?periodo=year" class="btn btn-outline-primary">Año</a>
+                    <a href="?periodo=30d" class="btn btn-outline-primary">30 Días</a>
                 </div>
-                <div class="col-md-2">
-                    <label class="small fw-bold">Hasta</label>
-                    <input type="date" name="fecha_fin" class="form-control form-control-sm" value="<?php echo $fecha_fin; ?>">
+                <button type="submit" class="btn btn-primary btn-sm ms-2 px-3 fw-bold">FILTRAR</button>
+            </div>
+        </form>
+        
+        <div class="row mt-3">
+            <div class="col-md-4">
+                <div class="btn-group btn-group-sm">
+                    <a href="?fecha_inicio=<?php echo $prev30_ini; ?>&fecha_fin=<?php echo $prev30_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Retroceder 30 días"><i class="fas fa-angle-double-left"></i> -30d</a>
+                    <a href="?fecha_inicio=<?php echo $prev7_ini; ?>&fecha_fin=<?php echo $prev7_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Retroceder 7 días"><i class="fas fa-angle-left"></i> -7d</a>
+                    <a href="?fecha_inicio=<?php echo $next7_ini; ?>&fecha_fin=<?php echo $next7_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Avanzar 7 días">+7d <i class="fas fa-angle-right"></i></a>
+                    <a href="?fecha_inicio=<?php echo $next30_ini; ?>&fecha_fin=<?php echo $next30_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Avanzar 30 días">+30d <i class="fas fa-angle-double-right"></i></a>
                 </div>
-                <div class="col-md-5">
-                    <div class="btn-group btn-group-sm">
-                        <a href="?periodo=week" class="btn btn-outline-primary">Semana</a>
-                        <a href="?periodo=month" class="btn btn-outline-primary">Mes</a>
-                        <a href="?periodo=year" class="btn btn-outline-primary">Año</a>
-                        <a href="?periodo=30d" class="btn btn-outline-primary">30 Días</a>
-                    </div>
-                    <button type="submit" class="btn btn-primary btn-sm ms-2 px-3 fw-bold">FILTRAR</button>
-                </div>
-            </form>
-            
-            <div class="row mt-2">
-                <div class="col-md-4">
-                    <div class="btn-group btn-group-sm">
-                        <a href="?fecha_inicio=<?php echo $prev30_ini; ?>&fecha_fin=<?php echo $prev30_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Retroceder 30 días"><i class="fas fa-angle-double-left"></i> -30d</a>
-                        <a href="?fecha_inicio=<?php echo $prev7_ini; ?>&fecha_fin=<?php echo $prev7_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Retroceder 7 días"><i class="fas fa-angle-left"></i> -7d</a>
-...
-                        <a href="?fecha_inicio=<?php echo $next7_ini; ?>&fecha_fin=<?php echo $next7_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Avanzar 7 días">+7d <i class="fas fa-angle-right"></i></a>
-                        <a href="?fecha_inicio=<?php echo $next30_ini; ?>&fecha_fin=<?php echo $next30_fin; ?>" class="btn btn-outline-secondary btn-nav-date" title="Avanzar 30 días">+30d <i class="fas fa-angle-double-right"></i></a>
-
-                    </div>
-                </div>
-            <form method="POST" class="mt-2 text-end border-top pt-2">
-                <input type="hidden" name="action" value="guardar">
-                <input type="hidden" name="f_inicio" value="<?php echo $fecha_inicio; ?>">
-                <input type="hidden" name="f_fin" value="<?php echo $fecha_fin; ?>">
-                <input type="hidden" name="v_total" value="<?php echo $venta_total; ?>">
-                <input type="hidden" name="g_neta" value="<?php echo $ganancia_limpia; ?>">
-                <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-save"></i> Guardar este Reporte en Historial</button>
-            </form>
+            </div>
         </div>
+        <form method="POST" class="mt-3 text-end border-top pt-3">
+            <input type="hidden" name="action" value="guardar">
+            <input type="hidden" name="f_inicio" value="<?php echo $fecha_inicio; ?>">
+            <input type="hidden" name="f_fin" value="<?php echo $fecha_fin; ?>">
+            <input type="hidden" name="v_total" value="<?php echo $venta_total; ?>">
+            <input type="hidden" name="g_neta" value="<?php echo $ganancia_limpia; ?>">
+            <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-save"></i> Guardar este Reporte en Historial</button>
+        </form>
     </div>
 
     <div class="row g-3 mb-4">
@@ -308,8 +309,8 @@ try {
 
     <div class="row mb-4">
         <div class="col-12">
-            <div class="card kpi-card shadow-sm">
-                <div class="card-header bg-white fw-bold">
+            <div class="glass-card shadow-sm">
+                <div class="card-header bg-transparent fw-bold">
                     <i class="fas fa-calendar-alt text-primary me-2"></i> DESGLOSE DIARIO DE OPERACIONES
                 </div>
                 <div class="card-body p-0">
@@ -362,8 +363,8 @@ try {
 
     <div class="row g-3 mb-4">
         <div class="col-md-8">
-            <div class="card kpi-card mb-4">
-                <div class="card-header bg-white fw-bold">Tendencia de Ventas Diarias</div>
+            <div class="glass-card mb-4">
+                <div class="card-header bg-transparent fw-bold">Tendencia de Ventas Diarias</div>
                 <div class="card-body">
                     <canvas id="dailyChart" height="100"></canvas>
                 </div>
@@ -371,8 +372,8 @@ try {
             
             <div class="row g-3">
                 <div class="col-md-6">
-                    <div class="card kpi-card">
-                        <div class="card-header bg-white fw-bold">Métodos de Pago</div>
+                    <div class="glass-card">
+                        <div class="card-header bg-transparent fw-bold">Métodos de Pago</div>
                         <div class="card-body">
                             <canvas id="paymentChart"></canvas>
                         </div>
@@ -380,8 +381,8 @@ try {
                 </div>
                 
                 <div class="col-md-6">
-                    <div class="card kpi-card h-100">
-                        <div class="card-header bg-white fw-bold text-primary">
+                    <div class="glass-card h-100">
+                        <div class="card-header bg-transparent fw-bold text-primary">
                             <i class="fas fa-calculator me-1"></i> Métricas de Rendimiento Diario
                         </div>
                         <div class="card-body">
@@ -413,8 +414,8 @@ try {
         </div>
 
         <div class="col-md-4">
-            <div class="card kpi-card h-100">
-                <div class="card-header bg-white fw-bold">Resumen Detallado de Pagos</div>
+            <div class="glass-card h-100">
+                <div class="card-header bg-transparent fw-bold">Resumen Detallado de Pagos</div>
                 <div class="card-body p-0">
                     <table class="table table-hover mb-0">
                         <thead>
@@ -444,8 +445,8 @@ try {
 
     <div class="row">
         <div class="col-12">
-            <div class="card kpi-card shadow-sm border-top border-3 border-secondary">
-                <div class="card-header bg-white fw-bold d-flex justify-content-between">
+            <div class="glass-card shadow-sm border-top border-3 border-secondary">
+                <div class="card-header bg-transparent fw-bold d-flex justify-content-between">
                     <span><i class="fas fa-history text-secondary me-2"></i> HISTORIAL DE CIERRES GUARDADOS</span>
                 </div>
                 <div class="card-body p-0">

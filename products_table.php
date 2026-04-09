@@ -158,6 +158,23 @@ function ptable_fetch_categories(PDO $pdo): array {
     }
 }
 
+function ptable_ensure_barcode_columns(PDO $pdo): void {
+    static $ready = false;
+    if ($ready) return;
+    $stmt = $pdo->query("SHOW COLUMNS FROM productos");
+    $existing = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+        $existing[(string)($col['Field'] ?? '')] = true;
+    }
+    $add = [];
+    if (!isset($existing['codigo_barra_1'])) $add[] = "ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo";
+    if (!isset($existing['codigo_barra_2'])) $add[] = "ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1";
+    if ($add) {
+        $pdo->exec("ALTER TABLE productos " . implode(', ', $add));
+    }
+    $ready = true;
+}
+
 function ptable_is_allowed_category(array $allowed, string $category): bool {
     if ($category === '' || in_array($category, $allowed, true)) return true;
     $lower = mb_strtolower(trim($category), 'UTF-8');
@@ -226,6 +243,7 @@ function ptable_register_upload_shutdown(): void {
 }
 
 $allowedCategories = ptable_fetch_categories($pdo);
+ptable_ensure_barcode_columns($pdo);
 
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)

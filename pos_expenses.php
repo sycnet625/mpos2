@@ -83,8 +83,9 @@ $plantillasRapidas = [
     <title>Control de Gastos | PalWeb</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background-color: #f4f6f9; font-family: 'Segoe UI', sans-serif; }
+        .table thead th { white-space: nowrap; }
         .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
         .calendar-header { font-weight: bold; text-align: center; background: #e9ecef; padding: 5px; border-radius: 4px; font-size: 0.8rem; text-transform: uppercase; }
         .calendar-day { background: white; border: 1px solid #dee2e6; border-radius: 6px; min-height: 80px; padding: 5px; position: relative; transition: 0.2s; }
@@ -100,75 +101,97 @@ $plantillasRapidas = [
     </style>
     <script src="assets/js/bootstrap.bundle.min.js"></script>
 </head>
-<body>
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-<div class="container-fluid px-4 py-4">
-    
-    <div class="row g-3 mb-4">
-        <div class="col-md-5">
-            <h3 class="fw-bold text-dark"><i class="fas fa-wallet me-2"></i> Control de Gastos</h3>
-            <p class="text-muted mb-0">Gestión de gastos operativos. <span class="badge bg-primary">Sucursal #<?php echo $SUC_ID; ?></span></p>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Contabilidad / Gastos</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-wallet me-2"></i>Control de Gastos</h1>
+                <p class="mb-3 text-white-50">Gestión de gastos operativos. Registro individual, nómina y copia de meses anteriores.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i>Sucursal #<?php echo $SUC_ID; ?></span>
+                    <span class="kpi-chip"><i class="fas fa-chart-line me-1"></i>Total <?php echo date('M'); ?>: $<?php echo number_format($totalMes, 2); ?></span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
+            </div>
         </div>
-        <div class="col-md-3">
+    </section>
+
+    <div class="row g-3 mb-4">
+        <div class="col-12">
             <div class="d-flex flex-wrap gap-2">
                 <button class="btn btn-outline-primary btn-sm" onclick="showCopyPreviousMonthModal()"><i class="fas fa-copy me-1"></i> Copiar Mes Ant.</button>
                 <button class="btn btn-warning btn-sm" onclick="showDailyExpensesModal()"><i class="fas fa-calendar-day me-1"></i> Gastos del Día</button>
                 <button class="btn btn-outline-secondary btn-sm" onclick="showTemplatesModal()"><i class="fas fa-cog me-1"></i> Configurar Plantillas</button>
             </div>
         </div>
-        <div class="col-md-4">
-            <div class="card kpi-card bg-danger text-white">
-                <div class="card-body d-flex justify-content-between align-items-center">
-                    <div><small class="text-uppercase opacity-75 fw-bold">Total Gastado (<?php echo date('M'); ?>)</small><h2 class="m-0 fw-bold">$<?php echo number_format($totalMes, 2); ?></h2></div>
-                    <i class="fas fa-chart-line fa-3x opacity-25"></i>
-                </div>
-            </div>
-        </div>
     </div>
 
     <div class="row g-4">
         <div class="col-lg-5">
-            <div class="card shadow-sm border-0 mb-4 rounded-4">
-                <div class="card-header bg-white border-bottom-0 pt-3"><h5 class="fw-bold m-0 text-primary"><i class="fas fa-plus-circle me-2"></i> Registrar Gasto Individual</h5></div>
-                <div class="card-body">
-                    <form id="formExpense" onsubmit="saveExpense(event)">
-                        <input type="hidden" name="id" id="inputId"> <div class="row g-2">
-                            <div class="col-6"><label class="small fw-bold">Fecha</label><input type="date" name="fecha" id="inputFecha" class="form-control" value="<?php echo date('Y-m-d'); ?>" required></div>
-                            <div class="col-6"><label class="small fw-bold">Tipo</label><select name="tipo" id="inputTipo" class="form-select fw-bold text-secondary"><option value="VARIABLE">⚡ Variable</option><option value="FIJO">🔒 Fijo</option></select></div>
-                            <div class="col-12"><label class="small fw-bold">Concepto</label><input type="text" name="concepto" id="inputConcepto" class="form-control" placeholder="Ej: Compra de hielo" required></div>
-                            <div class="col-6"><label class="small fw-bold">Monto</label><div class="input-group"><span class="input-group-text">$</span><input type="number" step="0.01" name="monto" id="inputMonto" class="form-control fw-bold" required></div></div>
-                            <div class="col-6"><label class="small fw-bold">Categoría</label><select name="categoria" id="inputCat" class="form-select"><option value="GENERAL">General</option><option value="INSUMOS">Insumos</option><option value="SERVICIOS">Servicios</option><option value="NOMINA">Nómina</option><option value="MANTENIMIENTO">Mantenimiento</option><option value="RENTA">Renta</option></select></div>
-                            <div class="col-12 mt-3"><button type="submit" class="btn btn-success w-100 fw-bold shadow-sm" id="btnSave"><i class="fas fa-save me-2"></i> GUARDAR GASTO</button><button type="button" class="btn btn-secondary w-100 mt-2 d-none" id="btnCancel" onclick="resetForm()">Cancelar Edición</button></div>
-                        </div>
-                    </form>
+            <div class="glass-card p-4 mb-4 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Operación</div>
+                        <h2 class="h5 fw-bold mb-0"><i class="fas fa-plus-circle me-2"></i>Registrar Gasto Individual</h2>
+                    </div>
                 </div>
+                <form id="formExpense" onsubmit="saveExpense(event)">
+                    <input type="hidden" name="id" id="inputId"> <div class="row g-2">
+                        <div class="col-6"><label class="small fw-bold">Fecha</label><input type="date" name="fecha" id="inputFecha" class="form-control" value="<?php echo date('Y-m-d'); ?>" required></div>
+                        <div class="col-6"><label class="small fw-bold">Tipo</label><select name="tipo" id="inputTipo" class="form-select fw-bold text-secondary"><option value="VARIABLE">⚡ Variable</option><option value="FIJO">🔒 Fijo</option></select></div>
+                        <div class="col-12"><label class="small fw-bold">Concepto</label><input type="text" name="concepto" id="inputConcepto" class="form-control" placeholder="Ej: Compra de hielo" required></div>
+                        <div class="col-6"><label class="small fw-bold">Monto</label><div class="input-group"><span class="input-group-text">$</span><input type="number" step="0.01" name="monto" id="inputMonto" class="form-control fw-bold" required></div></div>
+                        <div class="col-6"><label class="small fw-bold">Categoría</label><select name="categoria" id="inputCat" class="form-select"><option value="GENERAL">General</option><option value="INSUMOS">Insumos</option><option value="SERVICIOS">Servicios</option><option value="NOMINA">Nómina</option><option value="MANTENIMIENTO">Mantenimiento</option><option value="RENTA">Renta</option></select></div>
+                        <div class="col-12 mt-3"><button type="submit" class="btn btn-success w-100 fw-bold shadow-sm" id="btnSave"><i class="fas fa-save me-2"></i> GUARDAR GASTO</button><button type="button" class="btn btn-secondary w-100 mt-2 d-none" id="btnCancel" onclick="resetForm()">Cancelar Edición</button></div>
+                    </div>
+                </form>
             </div>
             
-            <div class="card shadow-sm border-0 mb-4">
-                <div class="card-header bg-light"><small class="fw-bold text-muted">ACCESOS RÁPIDOS</small></div>
-                <div class="card-body p-2">
-                    <div class="d-flex flex-wrap gap-2">
-                        <?php foreach($plantillasRapidas as $p): ?>
-                        <button class="btn btn-outline-secondary btn-sm" onclick="fillTemplate('<?php echo $p['concepto']; ?>', <?php echo $p['monto']; ?>, '<?php echo $p['cat']; ?>')">
-                            <i class="fas fa-bolt text-warning me-1"></i> <?php echo $p['concepto']; ?>
-                        </button>
-                        <?php endforeach; ?>
+            <div class="glass-card p-4 mb-4 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Accesos</div>
+                        <h2 class="h5 fw-bold mb-0">Accesos Rápidos</h2>
                     </div>
+                </div>
+                <div class="d-flex flex-wrap gap-2">
+                    <?php foreach($plantillasRapidas as $p): ?>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="fillTemplate('<?php echo $p['concepto']; ?>', <?php echo $p['monto']; ?>, '<?php echo $p['cat']; ?>')">
+                        <i class="fas fa-bolt text-warning me-1"></i> <?php echo $p['concepto']; ?>
+                    </button>
+                    <?php endforeach; ?>
                 </div>
             </div>
         </div>
 
         <div class="col-lg-7">
-            <div class="card shadow-sm border-0 mb-4">
-                <div class="card-header bg-white d-flex justify-content-between align-items-center"><h5 class="fw-bold m-0"><i class="far fa-calendar-alt me-2"></i> Calendario <?php echo date('M Y'); ?></h5><span class="badge bg-light text-dark border">Vista Diaria</span></div>
-                <div class="card-body p-3"><div class="calendar-grid"><div class="calendar-header text-danger">Dom</div><div class="calendar-header">Lun</div><div class="calendar-header">Mar</div><div class="calendar-header">Mie</div><div class="calendar-header">Jue</div><div class="calendar-header">Vie</div><div class="calendar-header">Sab</div><?php for($i=0; $i<$primerDiaSemana; $i++): ?><div class="empty-cell"></div><?php endfor; ?><?php for($dia=1; $dia<=$diasEnMes; $dia++): $info = $calendarData[$dia] ?? ['total'=>0, 'items'=>0]; $hasData = $info['total'] > 0; $bgClass = $hasData ? 'border-danger' : ''; ?><div class="calendar-day <?php echo $bgClass; ?>"><span class="day-num"><?php echo $dia; ?></span><?php if($hasData): ?><span class="day-total">-$<?php echo number_format($info['total']); ?></span><span class="day-items"><?php echo $info['items']; ?> movs.</span><?php endif; ?></div><?php endfor; ?></div></div>
+            <div class="glass-card p-4 mb-4 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Calendario</div>
+                        <h2 class="h5 fw-bold mb-0"><i class="far fa-calendar-alt me-2"></i>Calendario <?php echo date('M Y'); ?></h2>
+                    </div>
+                    <span class="badge bg-light text-dark border">Vista Diaria</span>
+                </div>
+                <div class="calendar-grid"><div class="calendar-header text-danger">Dom</div><div class="calendar-header">Lun</div><div class="calendar-header">Mar</div><div class="calendar-header">Mie</div><div class="calendar-header">Jue</div><div class="calendar-header">Vie</div><div class="calendar-header">Sab</div><?php for($i=0; $i<$primerDiaSemana; $i++): ?><div class="empty-cell"></div><?php endfor; ?><?php for($dia=1; $dia<=$diasEnMes; $dia++): $info = $calendarData[$dia] ?? ['total'=>0, 'items'=>0]; $hasData = $info['total'] > 0; $bgClass = $hasData ? 'border-danger' : ''; ?><div class="calendar-day <?php echo $bgClass; ?>"><span class="day-num"><?php echo $dia; ?></span><?php if($hasData): ?><span class="day-total">-$<?php echo number_format($info['total']); ?></span><span class="day-items"><?php echo $info['items']; ?> movs.</span><?php endif; ?></div><?php endfor; ?></div>
             </div>
-            <div class="card shadow-sm border-0">
-                <div class="card-header bg-white"><h5 class="fw-bold m-0"><i class="fas fa-list me-2"></i> Historial Reciente</h5></div>
+            <div class="glass-card p-4 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Historial</div>
+                        <h2 class="h5 fw-bold mb-0"><i class="fas fa-list me-2"></i>Historial Reciente</h2>
+                    </div>
+                </div>
                 <div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light small"><tr><th>Fecha</th><th>Concepto</th><th>Categ.</th><th>Tipo</th><th class="text-end">Monto</th><th class="text-end">Acciones</th></tr></thead><tbody><?php foreach($gastos as $g): ?><tr id="row-<?php echo $g['id']; ?>"><td><?php echo date('d/m', strtotime($g['fecha'])); ?></td><td class="fw-bold text-dark"><?php echo htmlspecialchars($g['concepto']); ?></td><td><span class="badge bg-light text-dark border"><?php echo $g['categoria']; ?></span></td><td><?php if($g['tipo']=='FIJO'): ?><span class="badge badge-fijo" style="font-size:0.65rem">FIJO</span><?php else: ?><span class="badge badge-variable" style="font-size:0.65rem">VAR</span><?php endif; ?></td><td class="text-end fw-bold text-danger">-$<?php echo number_format($g['monto'], 2); ?></td><td class="text-end"><button class="btn btn-sm btn-link text-primary p-0 me-2" onclick='editExpense(<?php echo json_encode($g); ?>)'><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-link text-secondary p-0" onclick="deleteExpense(<?php echo $g['id']; ?>)"><i class="fas fa-trash"></i></button></td></tr><?php endforeach; ?></tbody></table></div>
             </div>
         </div>
     </div>
+
 </div>
 
 <div class="modal fade" id="modalCopyMonth" tabindex="-1">
