@@ -3,7 +3,11 @@
 // UI COMPONENTS FOR INVENTORY SUITE
 
 // Inyectar CSS dinámico basado en configuración si existe
-if (isset($config) || isset($currentConfig)) {
+// Evitar inyectar en respuestas AJAX o POST (que suelen ser API)
+if ((isset($config) || isset($currentConfig)) 
+    && !isset($_GET['ajax_load']) 
+    && !isset($_GET['inventario_api'])
+    && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     $_c = $config ?? $currentConfig;
     $c1 = $_c['hero_color_1'] ?? '#0f766e';
     $c2 = $_c['hero_color_2'] ?? '#15803d';

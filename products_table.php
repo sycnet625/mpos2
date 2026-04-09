@@ -335,7 +335,7 @@ function renderProductRows($rows, $localPath) {
 // ---------------------------------------------------------
 // 3. PROCESAMIENTO POST (EDICIÓN, IMÁGENES, BULK)
 // ---------------------------------------------------------
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
     header('Content-Type: application/json');
 
     // EDICIÓN RÁPIDA (INLINE EDIT)

@@ -135,6 +135,7 @@ function getDiaSemana($fecha) {
     <style>
         :root { --bg-inv: #f1f8e9; --bg-ing: #e3f2fd; --bg-gst: #fff3e0; --header-bg: #2c3e50; }
         body { background-color: #f4f7f6; font-family: 'Segoe UI', sans-serif; font-size: 0.8rem; }
+        .admin-chat-overlay { display: none !important; }
         .navbar-custom { background: var(--header-bg); color: white; padding: 0.5rem 1rem; }
         .excel-wrapper { overflow-x: auto; background: white; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); margin-bottom: 20px; }
         table { border-collapse: separate; border-spacing: 0; width: 100%; }
@@ -788,36 +789,6 @@ function getDiaSemana($fecha) {
     }
 </script>
 
-    // Inicializar data-json al cargar
-    document.querySelectorAll('.gst-val[data-key="costos"]').forEach(inp => {
-        // Necesitamos pasar el valor inicial que es JSON desde PHP al atributo
-        // Vamos a hacer una pequeña corrección en el PHP anterior para que esto funcione
-    });
-
-
-    function initChart() {
-        chart = new Chart(document.getElementById('flowChart'), {
-            type: 'line',
-            data: { labels: Array.from({length:numDias}, (_,i)=>i+1), datasets: [
-                {label:'Saldo Neto', data:[], borderColor:'#2c3e50', fill:false},
-                {label:'Inventario Total', data:[], borderColor:'#2e7d32', borderDash:[5,5]}
-            ]},
-            options: { responsive:true, maintainAspectRatio:false }
-        });
-        updateChart();
-    }
-
-    function updateChart() {
-        const netos = [], invs = [];
-        for(let i=1; i<=numDias; i++) {
-            netos.push(parseFloat(document.getElementById(`total_fin_${i}`).value)||0);
-            invs.push(parseFloat(document.getElementById(`sub_inv_${i}`).innerText.replace(/\./g,'').replace(',','.'))||0);
-        }
-        chart.data.datasets[0].data = netos;
-        chart.data.datasets[1].data = invs;
-        chart.update();
-    }
-</script>
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>

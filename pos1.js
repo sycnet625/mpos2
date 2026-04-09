@@ -79,7 +79,7 @@ let accountingDate = "";
 let barcodeBuffer = ""; 
 let barcodeTimeout; 
 let globalDiscountPct = 0;
-window.stockFilterActive = false;
+window.stockFilterActive = localStorage.getItem('pos_stock_filter') === 'true';
 
 // ── Roles y seguridad ─────────────────────────────────────────────────────────
 let currentRole     = 'cajero';   // rol del usuario logueado
@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     updateOnlineStatus();
+    syncStockFilterUI();
     setInterval(updateSyncKeypadButton, 5000);
 });
 
@@ -834,6 +835,7 @@ window.shouldShowProduct = function(p) {
 
 window.toggleStockFilter = function() {
     window.stockFilterActive = !window.stockFilterActive;
+    localStorage.setItem('pos_stock_filter', window.stockFilterActive);
     const btn = document.getElementById('btnStockFilter');
     
     if (btn) {
@@ -847,6 +849,19 @@ window.toggleStockFilter = function() {
     }
     
     renderProducts();
+};
+
+window.syncStockFilterUI = function() {
+    const btn = document.getElementById('btnStockFilter');
+    if (btn) {
+        if (window.stockFilterActive) {
+            btn.classList.add('btn-filter-active');
+            btn.title = 'Mostrando solo productos con stock';
+        } else {
+            btn.classList.remove('btn-filter-active');
+            btn.title = 'Mostrando todos los productos';
+        }
+    }
 };
 
 window.toggleBars = function() {
