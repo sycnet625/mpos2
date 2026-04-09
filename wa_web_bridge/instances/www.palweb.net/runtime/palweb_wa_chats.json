@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-04-08T23:15:28.813Z",
+  "updated_at": "2026-04-09T01:35:29.299Z",
   "rows": [
     {
       "id": "17905869652079@lid",
@@ -20,34 +20,16 @@
       "is_contact": true
     },
     {
-      "id": "120363097952048749@g.us",
-      "name": "Sevillano Cambalache",
+      "id": "120363045749115649@g.us",
+      "name": "Grupo de la bodega 1362",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363417843314195@g.us",
-      "name": "Ventas en Luyano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363018307699587@g.us",
-      "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363284472545099@g.us",
-      "name": "En el Cerro si se vende ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363346146748512@g.us",
-      "name": "Confituras y mas🍡🍬🍭",
-      "is_group": true,
-      "is_contact": false
+      "id": "97259752534178@lid",
+      "name": "$ Espe",
+      "is_group": false,
+      "is_contact": true
     },
     {
       "id": "120363320342931722@g.us",
@@ -56,44 +38,8 @@
       "is_contact": false
     },
     {
-      "id": "120363406529581714@g.us",
-      "name": "Ventas de todo tipo 🍩🎽🎁",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363154630055070@g.us",
-      "name": "Ventas Sevillano y 10 de Octubre🛍️",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363275735207600@g.us",
-      "name": "De todo un poco...sin límites",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363150264148584@g.us",
-      "name": "Las ventas Sevillano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363191920265539@g.us",
-      "name": "Información de Bodega 1376",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363045749115649@g.us",
-      "name": "Grupo de la bodega 1362",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363092735489534@g.us",
-      "name": "CRenta (LaHabana)",
+      "id": "120363097952048749@g.us",
+      "name": "Sevillano Cambalache",
       "is_group": true,
       "is_contact": false
     },
@@ -104,8 +50,134 @@
       "is_contact": false
     },
     {
+      "id": "120363150264148584@g.us",
+      "name": "Las ventas Sevillano",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363154630055070@g.us",
+      "name": "Ventas Sevillano y 10 de Octubre🛍️",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363272765626601@g.us",
+      "name": "La Azulita",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363018307699587@g.us",
+      "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363092735489534@g.us",
+      "name": "CRenta (LaHabana)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
       "id": "120363308533081066@g.us",
       "name": "VENTAS #1MAGUI💪😎✌️💜",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363284472545099@g.us",
+      "name": "En el Cerro si se vende ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363417843314195@g.us",
+      "name": "Ventas en Luyano",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363419313606665@g.us",
+      "name": "Joe Supply LLC #8(USA)- Envio Contendores a Cuba",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363371593990080@g.us",
+      "name": "Landy bodega 1362 y 1365",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363295596458291@g.us",
+      "name": "1 El bodegon",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363319505658337@g.us",
+      "name": "Bodegón de Santa Teresa 🥩🍗🧀🍟🍫",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363406529581714@g.us",
+      "name": "Ventas de todo tipo 🍩🎽🎁",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363319691633869@g.us",
+      "name": "NuevoVedado#7(LOS VIDALES)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363166730745941@g.us",
+      "name": "Ridel Export 1 aquí 👈 Ofertas de Productos a Importar desde España hacia Cuba (Puerto Mariel)🍺🍻🇨🇺🇪🇸🇨🇴🇺🇸",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363346146748512@g.us",
+      "name": "Confituras y mas🍡🍬🍭",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363423759484549@g.us",
+      "name": "Cargas Locales  Full y Sencillo 😎",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363146276338458@g.us",
+      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363285750524798@g.us",
+      "name": "5 MPM Bajo Cero Mayorista y minorista ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363419458884436@g.us",
+      "name": "10deOctubre#4(LOSVIDALES)",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363275735207600@g.us",
+      "name": "De todo un poco...sin límites",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363191920265539@g.us",
+      "name": "Información de Bodega 1376",
       "is_group": true,
       "is_contact": false
     },
@@ -118,18 +190,6 @@
     {
       "id": "120363295392149188@g.us",
       "name": "3° “Al Pan Pan” Venta de confituras y más…!",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363371593990080@g.us",
-      "name": "Landy bodega 1362 y 1365",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423759484549@g.us",
-      "name": "Cargas Locales  Full y Sencillo 😎",
       "is_group": true,
       "is_contact": false
     },
@@ -164,18 +224,6 @@
       "is_contact": false
     },
     {
-      "id": "120363319505658337@g.us",
-      "name": "Bodegón de Santa Teresa 🥩🍗🧀🍟🍫",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363295596458291@g.us",
-      "name": "1 El bodegon",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363296068485788@g.us",
       "name": "Grupo de venta",
       "is_group": true,
@@ -194,44 +242,14 @@
       "is_contact": false
     },
     {
-      "id": "120363272765626601@g.us",
-      "name": "La Azulita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363294384459536@g.us",
       "name": "GARAJE-🛍-ANDO                \"Por Un Sueño de ❤️\"",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363166730745941@g.us",
-      "name": "Ridel Export 1 aquí 👈 Ofertas de Productos a Importar desde España hacia Cuba (Puerto Mariel)🍺🍻🇨🇺🇪🇸🇨🇴🇺🇸",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363319691633869@g.us",
-      "name": "NuevoVedado#7(LOS VIDALES)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419313606665@g.us",
-      "name": "Joe Supply LLC #8(USA)- Envio Contendores a Cuba",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363163702070098@g.us",
       "name": "Venta de Cerveza Habana Vieja 🍺🍻",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419458884436@g.us",
-      "name": "10deOctubre#4(LOSVIDALES)",
       "is_group": true,
       "is_contact": false
     },
@@ -410,12 +428,6 @@
       "is_contact": false
     },
     {
-      "id": "120363285750524798@g.us",
-      "name": "5 MPM Bajo Cero Mayorista y minorista ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
       "id": "120363316989802283@g.us",
       "name": "Venta de Garage Parque Ermita",
       "is_group": true,
@@ -466,12 +478,6 @@
     {
       "id": "120363037872418602@g.us",
       "name": "De todo un poco ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363146276338458@g.us",
-      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
       "is_group": true,
       "is_contact": false
     },
@@ -1024,12 +1030,6 @@
     {
       "id": "13778271871066@lid",
       "name": "Alonso (Buscar Clientes Iglesia)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "97259752534178@lid",
-      "name": "$ Espe",
       "is_group": false,
       "is_contact": true
     },

@@ -163,69 +163,91 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Gestor Web</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestor E-commerce</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background: #f0f2f5; font-family: 'Segoe UI', sans-serif; padding-bottom: 80px; }
-        .sticky-top-custom { position: sticky; top: 0; z-index: 1020; background: white; border-bottom: 1px solid #ddd; padding: 15px 0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
-        .img-thumb { width: 50px; height: 50px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 1px solid #dee2e6; transition: transform 0.2s; }
+        .table thead th { white-space: nowrap; }
+        .img-thumb { width: 50px; height: 50px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 1px solid var(--pw-line); transition: transform 0.2s; }
         .img-thumb:hover { transform: scale(1.5); z-index: 10; position: relative; }
-        .suc-btn { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; border-radius: 50%; border: 1px solid #dee2e6; background: #fff; color: #ccc; cursor: pointer; transition: all 0.2s; font-weight: bold; }
+        .suc-btn { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; border-radius: 50%; border: 1px solid var(--pw-line); background: var(--pw-card); color: #ccc; cursor: pointer; transition: all 0.2s; font-weight: bold; }
         .suc-btn.active { background: #0d6efd; color: white; border-color: #0d6efd; box-shadow: 0 2px 5px rgba(13,110,253,0.4); }
         .suc-btn:hover { border-color: #0d6efd; color: #0d6efd; }
         .suc-btn.active:hover { color: white; }
         .table-align-middle td { vertical-align: middle; }
-        .desc-truncate { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; color: #6c757d; font-size: 0.9em; }
+        .desc-truncate { max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: middle; color: var(--pw-muted); font-size: 0.9em; }
         .badge-type { font-size: 0.7rem; padding: 2px 5px; margin-right: 3px; }
         .bg-orange { background-color: #fd7e14 !important; color: white !important; }
     </style>
 </head>
-<body>
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-
-
-<div class="container-fluid px-4">
-    
-    <div class="sticky-top-custom mb-4">
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
             <div>
-                <h4 class="m-0 fw-bold text-primary"><i class="fas fa-globe me-2"></i> Gestor E-commerce</h4>
-                <small class="text-muted">Administra la visibilidad y contenido web</small>
+                <div class="section-title text-white-50 mb-2">E-commerce / Catálogo</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-globe me-2"></i>Gestor E-commerce</h1>
+                <p class="mb-3 text-white-50">Administra la visibilidad, contenido y propiedades de productos en la tienda web.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-box me-1"></i><?= $total ?> productos</span>
+                    <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i>Pág <?= $page ?>/<?= $totalPages ?></span>
+                    <span class="kpi-chip"><i class="fas fa-tags me-1"></i><?= count($cats) ?> categorías</span>
+                </div>
             </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
+            </div>
+        </div>
+    </section>
 
-            <form class="d-flex gap-2 flex-grow-1 flex-wrap justify-content-end" style="max-width: 1000px;">
-                <select class="form-select w-auto" name="prod_type" onchange="this.form.submit()">
+    <!-- ── Filtros ─────────────────────────────────────────────────────────── -->
+    <div class="glass-card p-3 mb-4 inventory-fade-in no-print">
+        <form class="row g-2 align-items-center" method="get">
+            <div class="col-auto">
+                <select class="form-select form-select-sm" name="prod_type" onchange="this.form.submit()">
                     <option value="">Todos los Tipos</option>
-                    <option value="merchandise" <?php echo $filterType=='merchandise'?'selected':''; ?>>📦 Mercancía General</option>
+                    <option value="merchandise" <?php echo $filterType=='merchandise'?'selected':''; ?>>📦 Mercancía</option>
                     <option value="elaborated" <?php echo $filterType=='elaborated'?'selected':''; ?>>🍳 Elaborados</option>
                     <option value="service" <?php echo $filterType=='service'?'selected':''; ?>>🛠️ Servicios</option>
                     <option value="raw" <?php echo $filterType=='raw'?'selected':''; ?>>🥩 Materias Primas</option>
                 </select>
-
-                <select class="form-select w-auto" name="status" onchange="this.form.submit()">
+            </div>
+            <div class="col-auto">
+                <select class="form-select form-select-sm" name="status" onchange="this.form.submit()">
                     <option value="all">Estado: Todos</option>
-                    <option value="web_only" <?php echo $filterStatus=='web_only'?'selected':''; ?>>🟢 Solo Web Activos</option>
+                    <option value="web_only" <?php echo $filterStatus=='web_only'?'selected':''; ?>>🟢 Web Activos</option>
                     <option value="no_desc" <?php echo $filterStatus=='no_desc'?'selected':''; ?>>⚠️ Sin Descripción</option>
                 </select>
-                
-                <select class="form-select w-auto" name="cat" onchange="this.form.submit()">
+            </div>
+            <div class="col-auto">
+                <select class="form-select form-select-sm" name="cat" onchange="this.form.submit()">
                     <option value="">Todas las Categorías</option>
                     <?php foreach($cats as $c): ?><option value="<?php echo $c; ?>" <?php echo $cat==$c?'selected':''; ?>><?php echo $c; ?></option><?php endforeach; ?>
                 </select>
-
-                <div class="input-group" style="min-width: 250px;">
+            </div>
+            <div class="col">
+                <div class="input-group input-group-sm">
+                    <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
                     <input type="text" class="form-control" name="q" placeholder="Nombre o SKUs (sep. comas)" value="<?php echo htmlspecialchars($search); ?>">
-                    <button class="btn btn-outline-primary"><i class="fas fa-search"></i></button>
+                    <button class="btn btn-outline-secondary" type="submit"><i class="fas fa-search"></i></button>
                 </div>
-            </form>
-        </div>
+            </div>
+            <?php if ($search || $cat || $filterStatus !== 'all' || $filterType): ?>
+            <div class="col-auto">
+                <a class="btn btn-outline-danger btn-sm" href="web_manager.php">✕ Limpiar</a>
+            </div>
+            <?php endif; ?>
+        </form>
     </div>
 
-    <div class="card border-0 shadow-sm">
+    <!-- ── Tabla ───────────────────────────────────────────────────────────── -->
+    <div class="glass-card p-0 inventory-fade-in">
         <div class="table-responsive">
             <table class="table table-hover table-align-middle mb-0">
-                <thead class="table-light text-uppercase small text-muted">
+                <thead class="table-light small text-muted">
                     <tr>
                         <th class="text-center" width="80">Foto</th>
                         <th>Producto</th>
@@ -236,7 +258,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                     </tr>
                 </thead>
                 <tbody>
-                    <?php foreach ($products as $p): 
+                    <?php foreach ($products as $p):
                         $hasImg = webmgr_has_image((string)$p['codigo']);
                         $imgUrl = $hasImg ? "image.php?code=" . $p['codigo'] : "assets/img/no-image-50.png";
                         $sucs = explode(',', $p['sucursales_web'] ?? '');
@@ -260,7 +282,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                             <span class="badge bg-light text-dark border"><?php echo $p['categoria']; ?></span>
                             <small class="text-muted font-monospace ms-2"><?php echo $p['codigo']; ?></small>
                         </td>
-                        
+
                         <td class="text-center">
                             <div class="form-check form-switch d-inline-block" title="Visible en tienda web">
                                 <input class="form-check-input" type="checkbox" style="cursor:pointer; transform: scale(1.4);"
@@ -277,10 +299,10 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
 
                         <td class="text-center">
                             <div class="d-flex justify-content-center gap-1">
-                                <?php for($i=1; $i<=6; $i++): 
+                                <?php for($i=1; $i<=6; $i++):
                                     $active = in_array($i, $sucs) ? 'active' : '';
                                 ?>
-                                    <button class="suc-btn <?php echo $active; ?>" 
+                                    <button class="suc-btn <?php echo $active; ?>"
                                             onclick="toggleSucursal('<?php echo $p['codigo']; ?>', <?php echo $i; ?>, this)">
                                         <?php echo $i; ?>
                                     </button>
@@ -290,10 +312,10 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
 
                         <td>
                             <div class="d-flex align-items-center">
-                                <button class="btn btn-sm btn-outline-secondary me-2" 
+                                <button class="btn btn-sm btn-outline-secondary me-2"
                                         title="Editar Detalles"
                                         onclick="openDescEditor(
-                                            '<?php echo $p['codigo']; ?>', 
+                                            '<?php echo $p['codigo']; ?>',
                                             `<?php echo addslashes($desc); ?>`,
                                             `<?php echo addslashes($color); ?>`,
                                             `<?php echo addslashes($unit); ?>`,
@@ -303,16 +325,16 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                                         )">
                                     <i class="fas fa-pen"></i>
                                 </button>
-                                
+
                                 <div class="d-flex flex-column lh-1">
                                     <?php if($desc): ?>
                                         <span class="desc-truncate"><?php echo htmlspecialchars($desc); ?></span>
                                     <?php else: ?>
                                         <span class="text-danger small fst-italic mb-1"><i class="fas fa-exclamation-circle"></i> Sin desc.</span>
                                     <?php endif; ?>
-                                    
+
                                     <small class="text-muted" style="font-size:0.75rem;">
-                                        <?php 
+                                        <?php
                                             $props = [];
                                             if($color) $props[] = "Col: $color";
                                             if($unit) $props[] = "Tam: $unit";
@@ -327,11 +349,17 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                         <td class="text-end fw-bold text-dark">$<?php echo number_format($p['precio'], 2); ?></td>
                     </tr>
                     <?php endforeach; ?>
+                    <?php if (empty($products)): ?>
+                    <tr><td colspan="6" class="text-center py-5 text-muted">
+                        <i class="fas fa-globe fa-3x mb-3 d-block opacity-25"></i>
+                        No hay productos con estos filtros.
+                    </td></tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
-        
-        <div class="card-footer bg-white d-flex justify-content-between align-items-center py-3">
+
+        <div class="d-flex justify-content-between align-items-center py-3 px-3" style="border-top:1px solid var(--pw-line)">
             <small class="text-muted">Total: <?php echo $total; ?> productos</small>
             <nav>
                 <ul class="pagination pagination-sm mb-0">
@@ -340,9 +368,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                             <a class="page-link" href="?page=<?php echo $page-1; ?>&q=<?php echo urlencode($search); ?>&status=<?php echo $filterStatus; ?>&cat=<?php echo urlencode($cat); ?>&prod_type=<?php echo $filterType; ?>">Anterior</a>
                         </li>
                     <?php endif; ?>
-                    
                     <li class="page-item disabled"><span class="page-link"><?php echo $page; ?> / <?php echo $totalPages; ?></span></li>
-                    
                     <?php if($page < $totalPages): ?>
                         <li class="page-item">
                             <a class="page-link" href="?page=<?php echo $page+1; ?>&q=<?php echo urlencode($search); ?>&status=<?php echo $filterStatus; ?>&cat=<?php echo urlencode($cat); ?>&prod_type=<?php echo $filterType; ?>">Siguiente</a>
@@ -352,6 +378,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
             </nav>
         </div>
     </div>
+
 </div>
 
 <input type="file" id="uploadInput" style="display:none" accept="image/*">
@@ -360,28 +387,28 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header bg-light">
-                <h6 class="modal-title fw-bold">Editar Detalles Web</h6>
+                <h6 class="modal-title fw-bold"><i class="fas fa-pen me-2"></i>Editar Detalles Web</h6>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div class="row g-2 mb-3">
                     <div class="col-4">
-                        <label class="form-label small text-muted fw-bold">Color</label>
+                        <label class="form-label small fw-bold text-muted">Color</label>
                         <input type="text" id="editColor" class="form-control form-control-sm" placeholder="Ej: Rojo">
                     </div>
                     <div class="col-4">
-                        <label class="form-label small text-muted fw-bold">Tamaño/Unidad</label>
+                        <label class="form-label small fw-bold text-muted">Tamaño/Unidad</label>
                         <input type="text" id="editUnit" class="form-control form-control-sm" placeholder="Ej: XL / Litro">
                     </div>
                     <div class="col-4">
-                        <label class="form-label small text-muted fw-bold">Peso (kg)</label>
+                        <label class="form-label small fw-bold text-muted">Peso (kg)</label>
                         <input type="number" step="0.01" id="editWeight" class="form-control form-control-sm" placeholder="0.00">
                     </div>
                 </div>
 
                 <div class="row g-2 mb-3">
                     <div class="col-8">
-                        <label class="form-label small text-muted fw-bold">Cinta/Etiqueta (E-commerce)</label>
+                        <label class="form-label small fw-bold text-muted">Cinta/Etiqueta (E-commerce)</label>
                         <select id="editEtiqueta" class="form-select form-select-sm">
                             <option value="">Sin Cinta</option>
                             <option value="OFERTA">🔥 OFERTA</option>
@@ -397,7 +424,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                         </select>
                     </div>
                     <div class="col-4">
-                        <label class="form-label small text-muted fw-bold">Color Cinta</label>
+                        <label class="form-label small fw-bold text-muted">Color Cinta</label>
                         <select id="editEtiquetaColor" class="form-select form-select-sm">
                             <option value="bg-danger">Rojo</option>
                             <option value="bg-warning text-dark">Amarillo</option>
@@ -406,7 +433,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                     </div>
                 </div>
 
-                <label class="form-label small text-muted fw-bold">Descripción Detallada</label>
+                <label class="form-label small fw-bold text-muted">Descripción Detallada</label>
                 <textarea id="descText" class="form-control" rows="5" placeholder="Escribe detalles atractivos del producto..."></textarea>
                 <input type="hidden" id="descCode">
             </div>
@@ -421,7 +448,6 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
-    // --- 1. TOGGLE ESTADO WEB ---
     async function toggleWeb(id, checkbox) {
         const val = checkbox.checked ? 1 : 0;
         try {
@@ -435,7 +461,6 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         }
     }
 
-    // --- 1b. TOGGLE RESERVABLE ---
     async function toggleReservable(id, checkbox) {
         const val = checkbox.checked ? 1 : 0;
         try {
@@ -457,7 +482,6 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         }
     }
 
-    // --- 2. GESTIÓN SUCURSALES ---
     async function toggleSucursal(id, num, btn) {
         btn.classList.toggle('active');
         const parent = btn.parentElement;
@@ -465,7 +489,6 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         parent.querySelectorAll('.suc-btn').forEach(b => {
             if (b.classList.contains('active')) activeNums.push(b.innerText);
         });
-
         try {
             await fetch('web_manager.php', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -474,9 +497,8 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         } catch(e) { alert('Error guardando sucursal'); }
     }
 
-    // --- 3. EDITOR DE DETALLES (DESC + PROPIEDADES) ---
     const descModal = new bootstrap.Modal('#descModal');
-    
+
     function openDescEditor(id, text, color, unit, weight, etiqueta, eColor) {
         document.getElementById('descCode').value = id;
         document.getElementById('descText').value = text;
@@ -487,10 +509,9 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         document.getElementById('editEtiquetaColor').value = eColor || "bg-danger";
         descModal.show();
     }
-    
+
     async function saveDetails() {
         const id = document.getElementById('descCode').value;
-        
         const data = {
             action: 'update_details',
             id: id,
@@ -501,24 +522,21 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
             etiqueta: document.getElementById('editEtiqueta').value,
             etiqueta_color: document.getElementById('editEtiquetaColor').value
         };
-        
         try {
             const res = await fetch('web_manager.php', {
                 method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(data)
             });
             const json = await res.json();
-            
             if(json.status === 'success') {
                 descModal.hide();
-                location.reload(); 
+                location.reload();
             } else {
                 alert('Error al guardar: ' + (json.msg || 'Desconocido'));
             }
         } catch(e) { alert('Error de conexión'); }
     }
 
-    // --- 4. SUBIDA DE FOTOS ---
     let currentUploadCode = null;
     function triggerUpload(code) {
         currentUploadCode = code;
@@ -529,15 +547,12 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         const formData = new FormData();
         formData.append('new_photo', this.files[0]);
         formData.append('prod_code', currentUploadCode);
-        
         try {
             const res = await fetch('web_manager.php', { method: 'POST', body: formData });
             if ((await res.json()).status === 'success') location.reload();
         } catch (e) { alert("Error subiendo imagen."); }
     });
 </script>
-
-
 
 <?php include_once 'menu_master.php'; ?>
 </body>

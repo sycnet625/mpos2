@@ -21,6 +21,7 @@ try {
     try { $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN estado VARCHAR(20) DEFAULT 'PROCESADA'"); } catch(Exception $e){}
     // Asegurar que existe la columna id_sucursal
     try { $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN id_sucursal INT DEFAULT 1"); } catch(Exception $e){}
+    try { $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN id_almacen INT"); } catch(Exception $e){}
 } catch (Exception $e) {}
 
 // --- 1. CONFIGURACIÓN ---
@@ -28,6 +29,14 @@ require_once 'config_loader.php';
 $ALM_ID = intval($config['id_almacen']);
 $SUC_ID = intval($config['id_sucursal']);
 $EMP_ID = intval($config['id_empresa']);
+
+// --- CARGAR ALMACENES DE LA SUCURSAL ---
+$almacenes = [];
+try {
+    $stmtA = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id_sucursal = ? AND activo = 1 ORDER BY nombre ASC");
+    $stmtA->execute([$SUC_ID]);
+    $almacenes = $stmtA->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {}
 
 // --- API: BUSCADOR AJAX ---
 if (isset($_GET['action']) && $_GET['action'] === 'search_products') {
@@ -61,11 +70,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             $kardex = new KardexEngine($pdo);
 
-            $stmtCheck = $pdo->prepare("SELECT estado FROM mermas_cabecera WHERE id = ?");
+            $stmtCheck = $pdo->prepare("SELECT estado, id_almacen FROM mermas_cabecera WHERE id = ?");
             $stmtCheck->execute([$idMerma]);
-            $estado = $stmtCheck->fetchColumn();
+            $mermaData = $stmtCheck->fetch(PDO::FETCH_ASSOC);
 
-            if ($estado === 'CANCELADA') throw new Exception("Esta merma ya fue revertida.");
+            if ($mermaData['estado'] === 'CANCELADA') throw new Exception("Esta merma ya fue revertida.");
+            $mermaAlmId = !empty($mermaData['id_almacen']) ? intval($mermaData['id_almacen']) : $ALM_ID;
 
             $stmtItems = $pdo->prepare("SELECT * FROM mermas_detalle WHERE id_merma = ?");
             $stmtItems->execute([$idMerma]);
@@ -75,7 +85,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Devolver al stock
                 KardexEngine::registrarMovimiento(
                     $pdo,
-                    $item['id_producto'], $ALM_ID, $item['cantidad'], 'ENTRADA', 
+                    $item['id_producto'], $mermaAlmId, $item['cantidad'], 'ENTRADA', 
                     "REVERSION MERMA #$idMerma", $item['costo_al_momento'],
                     $SUC_ID
                 );
@@ -100,10 +110,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $fecha_salida = (!empty($input['fecha'])) ? $input['fecha'] . ' ' . date('H:i:s') : date('Y-m-d H:i:s');
         $motivo_gral = $input['motivo'] ?? 'General';
+        $mermaAlmId = isset($input['id_almacen']) ? intval($input['id_almacen']) : $ALM_ID;
 
-        // MODIFICADO: Guardar id_sucursal obtenida de pos.cfg
-        $stmtHead = $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, estado, id_sucursal, fecha_registro) VALUES (?, ?, ?, 'PROCESADA', ?, ?)");
-        $stmtHead->execute([$_SESSION['user_id']??'Admin', $motivo_gral, $input['total'], $SUC_ID, $fecha_salida]);
+        // MODIFICADO: Guardar id_sucursal e id_almacen
+        $stmtHead = $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, estado, id_sucursal, id_almacen, fecha_registro) VALUES (?, ?, ?, 'PROCESADA', ?, ?, ?)");
+        $stmtHead->execute([$_SESSION['user_id']??'Admin', $motivo_gral, $input['total'], $SUC_ID, $mermaAlmId, $fecha_salida]);
         $idMerma = $pdo->lastInsertId();
 
         foreach ($input['items'] as $item) {
@@ -120,7 +131,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Salida de stock
             KardexEngine::registrarMovimiento(
                 $pdo,
-                $sku, $ALM_ID, ($qty * -1), 'SALIDA', 
+                $sku, $mermaAlmId, ($qty * -1), 'SALIDA', 
                 "MERMA #$idMerma", $costo, 
                 $SUC_ID,
                 $fecha_salida
@@ -141,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // --- CARGAR HISTORIAL ---
 $recentMermas = [];
 try {
-    $stmtH = $pdo->query("SELECT * FROM mermas_cabecera ORDER BY id DESC LIMIT 15");
+    $stmtH = $pdo->query("SELECT m.*, a.nombre as nombre_almacen FROM mermas_cabecera m LEFT JOIN almacenes a ON m.id_almacen = a.id ORDER BY m.id DESC LIMIT 15");
     $headers = $stmtH->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($headers as $h) {
@@ -215,6 +226,12 @@ try {
                         <input type="date" class="form-control" v-model="fecha">
                     </div>
                     <div class="col-md-3">
+                        <label class="fw-bold text-muted small"><i class="fas fa-warehouse me-1"></i> ALMACÉN</label>
+                        <select class="form-select" v-model="selectedAlmacen">
+                            <option v-for="a in almacenes" :value="a.id">{{a.nombre}}</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
                         <label class="fw-bold text-muted small"><i class="fas fa-tag me-1"></i> MOTIVO GENERAL (CABECERA)</label>
                         <select class="form-select" v-model="generalReason">
                             <option>Vencimiento</option><option>Daño</option><option>Robo</option><option>Consumo</option><option>Error de Entrada</option>
@@ -273,15 +290,16 @@ try {
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table mb-0 align-middle">
-                        <thead class="table-light"><tr><th style="width:50px"></th><th>ID</th><th>Fecha</th><th>Usuario</th><th>Motivo Gral</th><th class="text-end">Total Pérdida</th><th class="text-center">Estado</th></tr></thead>
+                        <thead class="table-light"><tr><th style="width:50px"></th><th>ID</th><th>Fecha</th><th>Usuario</th><th>Almacén</th><th>Motivo Gral</th><th class="text-end">Total Pérdida</th><th class="text-center">Estado</th></tr></thead>
                         <tbody>
-                            <tr v-if="recentList.length===0"><td colspan="7" class="text-center py-4 text-muted">No hay historial reciente.</td></tr>
+                            <tr v-if="recentList.length===0"><td colspan="8" class="text-center py-4 text-muted">No hay historial reciente.</td></tr>
                             <template v-for="m in recentList">
                                 <tr :class="{'row-cancelled': m.estado === 'CANCELADA'}">
                                     <td class="text-center cursor-pointer text-muted" @click="m.expanded = !m.expanded"><i class="fas fa-chevron-down rotate-icon" :class="{'rotated': m.expanded}"></i></td>
                                     <td class="fw-bold">#{{m.id}}</td>
                                     <td>{{formatDate(m.fecha_registro)}}</td>
                                     <td>{{m.usuario}}</td>
+                                    <td>{{m.nombre_almacen || 'Principal'}}</td>
                                     <td>{{m.motivo_general}}</td>
                                     <td class="text-end fw-bold text-danger">${{parseFloat(m.total_costo_perdida).toFixed(2)}}</td>
                                     <td class="text-center">
@@ -325,6 +343,8 @@ try {
             selectedSku: '', currentProd: null, qty: 1, reason: 'Vencimiento', 
             generalReason: 'Vencimiento', fecha: new Date().toISOString().split('T')[0],
             cart: [],
+            almacenes: <?php echo json_encode($almacenes); ?>,
+            selectedAlmacen: <?php echo (int)$ALM_ID; ?>,
             recentList: <?php echo json_encode($recentMermas); ?>
         },
         computed: { totalLoss() { return this.cart.reduce((a, b) => a + (b.cantidad * b.costo), 0); } },
@@ -352,7 +372,7 @@ try {
             async submit() {
                 if(!confirm('⚠️ ¿Confirmar salida de inventario?')) return;
                 try {
-                    const res = await fetch('pos_shrinkage.php', { method: 'POST', body: JSON.stringify({ motivo: this.generalReason, fecha: this.fecha, total: this.totalLoss, items: this.cart }) });
+                    const res = await fetch('pos_shrinkage.php', { method: 'POST', body: JSON.stringify({ motivo: this.generalReason, fecha: this.fecha, total: this.totalLoss, items: this.cart, id_almacen: this.selectedAlmacen }) });
                     const d = await res.json();
                     if(d.status==='success') { alert('✅ Listo'); window.location.reload(); } else { alert('❌ Error: ' + d.msg); }
                 } catch(e) { alert('Error de conexión'); }

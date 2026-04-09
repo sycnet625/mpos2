@@ -662,31 +662,20 @@ if (isset($_GET['ajax'])) {
     <title>Gestión de Reservas — Sucursal <?= $sucursalID ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background:#f1f5f9; font-family:'Segoe UI',sans-serif; color:#1e293b; padding-bottom:80px; }
-        .navbar-custom { background:#0f172a; padding:.9rem 1.5rem; border-bottom:3px solid #6366f1; }
-        .kpi-card { border-radius:14px; padding:18px 20px; background:white; box-shadow:0 2px 8px rgba(0,0,0,.07); border-left:4px solid; }
-        .kpi-num  { font-size:2rem; font-weight:900; line-height:1; }
-        .kpi-lbl  { font-size:.78rem; color:#64748b; margin-top:4px; font-weight:600; }
-        .filter-bar { background:white; border-radius:12px; padding:14px 18px; box-shadow:0 2px 6px rgba(0,0,0,.06); }
-        .card-table { border:none; border-radius:12px; overflow:hidden; box-shadow:0 4px 16px rgba(0,0,0,.08); }
-        .table thead th { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em; background:#f8fafc; padding:12px; white-space:nowrap; }
-        .table tbody tr { transition:background .15s; }
-        .btn-group .btn { padding:.25rem .45rem; font-size:.75rem; }
-        /* Dropdown de búsqueda */
+        .table thead th { white-space: nowrap; }
         .search-dropdown { position:absolute; z-index:1050; background:white; border:1px solid #d1d5db;
             border-radius:10px; box-shadow:0 8px 25px rgba(0,0,0,.12); width:100%; max-height:220px; overflow-y:auto; }
         .search-dropdown .item { padding:10px 14px; cursor:pointer; font-size:.88rem; border-bottom:1px solid #f3f4f6; }
         .search-dropdown .item:hover { background:#eff6ff; }
         .search-dropdown .item:last-child { border-bottom:none; }
-        /* Lines table */
         #linesTable td,#linesTable th { padding:6px 10px; vertical-align:middle; }
-        .modal-xl { max-width:960px; }
+        .btn-group .btn { padding:.25rem .45rem; font-size:.75rem; }
         @media print { .no-print, .multi-print-col { display:none!important; } body { background:white; } }
         .crm-badge-ok  { background:#dcfce7; color:#166534; border:1px solid #86efac; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
         .crm-badge-no  { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; padding:2px 8px; border-radius:20px; font-size:.7rem; font-weight:700; display:inline-flex; align-items:center; gap:5px; }
         .crm-badge-no .btn-guardar-cliente { background:none; border:none; padding:0; font-size:.7rem; font-weight:700; color:#0d6efd; cursor:pointer; text-decoration:underline; }
-        /* Reporte imprimible */
         .print-section { display:none; }
         @media print { .print-section { display:block; } }
 
@@ -700,7 +689,7 @@ if (isset($_GET['ajax'])) {
         .cal-legend-dot { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
         .cal-day-names { display:grid; grid-template-columns:repeat(7,1fr); background:#f1f5f9; border-bottom:1px solid #e2e8f0; }
         .cal-day-name { padding:8px 4px; text-align:center; font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:#64748b; }
-        .cal-day-name:last-child, .cal-day-name:nth-child(6) { color:#ef4444; } /* Sab/Dom rojo */
+        .cal-day-name:last-child, .cal-day-name:nth-child(6) { color:#ef4444; }
         .cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:#e2e8f0; }
         .cal-day { background:white; min-height:90px; padding:6px 7px; display:flex; flex-direction:column; gap:3px; transition:background .15s; }
         .cal-day:hover { background:#f8fafc; }
@@ -722,7 +711,6 @@ if (isset($_GET['ajax'])) {
         .cal-res-entregado { background:#dcfce7; color:#166534; border-left:3px solid #22c55e; }
         .cal-res-cancelado { background:#f1f5f9; color:#64748b; border-left:3px solid #94a3b8; text-decoration:line-through; }
         .cal-more { background:#f1f5f9; color:#6366f1; border-left:3px solid #6366f1; cursor:pointer; }
-        /* Vista activa */
         .view-btn.active { background:#0f172a !important; color:white !important; border-color:#0f172a !important; }
         @media(max-width:640px) {
             .cal-day { min-height:60px; padding:4px; }
@@ -730,30 +718,9 @@ if (isset($_GET['ajax'])) {
         }
     </style>
 </head>
-<body>
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-<!-- ── Navbar ─────────────────────────────────────────────────────────────── -->
-<nav class="navbar-custom d-flex justify-content-between align-items-center flex-wrap gap-2 no-print">
-    <div class="d-flex align-items-center gap-3">
-        <h5 class="text-white fw-bold m-0"><i class="far fa-calendar-check me-2 text-indigo-400"></i>Gestión de Reservas</h5>
-        <span class="badge bg-indigo-600" style="background:#6366f1;">Suc. <?= $sucursalID ?></span>
-    </div>
-    <div class="d-flex gap-2 flex-wrap">
-        <a href="crm_clients.php"  class="btn btn-outline-light btn-sm"><i class="fas fa-users me-1"></i>CRM Clientes</a>
-        <a href="dashboard.php"    class="btn btn-outline-light btn-sm"><i class="fas fa-home me-1"></i>Dashboard</a>
-        <a href="guia_reservas.php" class="btn btn-outline-light btn-sm" target="_blank"><i class="fas fa-book-open me-1"></i>Guía</a>
-        <button class="btn btn-outline-info btn-sm" onclick="printReport()"><i class="fas fa-print me-1"></i>Reporte Stock</button>
-        <button class="btn btn-outline-light btn-sm" id="btnMultiPrint" onclick="toggleMultiPrint()" title="Seleccionar e imprimir tickets en A4">
-            <i class="fas fa-th-large me-1"></i>Imprimir múltiple
-        </button>
-        <button class="btn btn-outline-warning btn-sm" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
-        <button class="btn btn-primary btn-sm fw-bold px-3" onclick="openForm(null)"><i class="fas fa-plus me-1"></i>Nueva Reserva</button>
-    </div>
-</nav>
-
-<div class="container-fluid px-4 pt-4">
-
-    <!-- ── Alerta sin stock ──────────────────────────────────────────────────── -->
     <?php if (intval($kpis['sin_stock']) > 0): ?>
     <div class="alert alert-danger d-flex align-items-center mb-3 border-0 shadow-sm" role="alert">
         <i class="fas fa-exclamation-triangle fa-lg me-3"></i>
@@ -762,38 +729,34 @@ if (isset($_GET['ajax'])) {
     </div>
     <?php endif; ?>
 
-    <!-- ── KPIs ─────────────────────────────────────────────────────────────── -->
-    <div class="row g-3 mb-4 no-print">
-        <div class="col-6 col-md-3">
-            <div class="kpi-card" style="border-color:#6366f1">
-                <div class="kpi-num text-indigo" style="color:#6366f1"><?= intval($kpis['pendiente']) ?></div>
-                <div class="kpi-lbl">📋 Pendientes</div>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Ventas / Reservas</div>
+                <h1 class="h2 fw-bold mb-2"><i class="far fa-calendar-check me-2"></i>Gestión de Reservas</h1>
+                <p class="mb-3 text-white-50">Administra reservas, entregas, pagos y envíos a cocina. Vista de lista y almanaque.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-clipboard-list me-1"></i><?= intval($kpis['pendiente']) ?> Pendientes</span>
+                    <span class="kpi-chip"><i class="fas fa-calendar-day me-1"></i><?= intval($kpis['hoy']) ?> Para hoy</span>
+                    <span class="kpi-chip"><i class="fas fa-clock me-1"></i><?= intval($kpis['vencidas']) ?> Vencidas</span>
+                    <span class="kpi-chip"><i class="fas fa-credit-card me-1"></i><?= intval($kpis['verificando']) ?> Verificando</span>
+                    <span class="kpi-chip"><i class="fas fa-box-open me-1"></i>Sucursal <?= $sucursalID ?></span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-light fw-bold" onclick="openForm(null)"><i class="fas fa-plus me-1"></i>Nueva Reserva</button>
+                <button class="btn btn-outline-light" onclick="printReport()"><i class="fas fa-print me-1"></i>Reporte Stock</button>
+                <button class="btn btn-outline-light" id="btnMultiPrint" onclick="toggleMultiPrint()"><i class="fas fa-th-large me-1"></i>Imprimir múltiple</button>
+                <button class="btn btn-outline-light" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
+                <a href="crm_clients.php" class="btn btn-outline-light"><i class="fas fa-users me-1"></i>CRM</a>
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
             </div>
         </div>
-        <div class="col-6 col-md-3">
-            <div class="kpi-card" style="border-color:#f59e0b">
-                <div class="kpi-num" style="color:#f59e0b"><?= intval($kpis['hoy']) ?></div>
-                <div class="kpi-lbl">📅 Para hoy</div>
-            </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="kpi-card" style="border-color:#ef4444">
-                <div class="kpi-num" style="color:#ef4444"><?= intval($kpis['vencidas']) ?></div>
-                <div class="kpi-lbl">⏰ Vencidas</div>
-            </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="kpi-card" style="border-color:#22c55e">
-                <div class="kpi-num" style="color:#22c55e"><?= intval($kpis['verificando']) ?></div>
-                <div class="kpi-lbl">💳 Verificando pago</div>
-            </div>
-        </div>
-    </div>
+    </section>
 
     <!-- ── Barra de filtros ─────────────────────────────────────────────────── -->
-    <div class="filter-bar mb-3 no-print">
+    <div class="glass-card p-3 mb-4 inventory-fade-in no-print">
         <div class="row g-2 align-items-center">
-            <!-- Toggle de vista -->
             <div class="col-auto">
                 <div class="btn-group btn-group-sm" role="group">
                     <button class="btn btn-outline-secondary view-btn active" id="btnVistaTbl" onclick="setVista('tabla')"><i class="fas fa-list me-1"></i>Lista</button>
@@ -835,10 +798,10 @@ if (isset($_GET['ajax'])) {
 
     <!-- ── Tabla principal ─────────────────────────────────────────────────── -->
     <div id="tableSection">
-    <div class="card card-table shadow-sm">
+    <div class="glass-card p-0 inventory-fade-in">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
-                <thead>
+                <thead class="table-light">
                     <tr>
                         <th class="ps-2 no-print" style="width:80px;">
                             <label style="display:flex; align-items:center; gap:5px; cursor:pointer; font-size:.7rem; font-weight:600; text-transform:uppercase; letter-spacing:.04em; white-space:nowrap;">
@@ -860,7 +823,7 @@ if (isset($_GET['ajax'])) {
                 <tbody id="tableBody">
                     <?php $renderRows(); ?>
                     <?php if (empty($reservas)): ?>
-                    <tr><td colspan="9" class="text-center py-5 text-muted">
+                    <tr><td colspan="10" class="text-center py-5 text-muted">
                         <i class="far fa-calendar-times fa-3x mb-3 d-block opacity-25"></i>
                         No hay reservas con estos filtros.
                     </td></tr>
@@ -870,7 +833,7 @@ if (isset($_GET['ajax'])) {
         </div>
         <!-- Paginación -->
         <?php if ($totalPages > 1): ?>
-        <div class="card-footer bg-white d-flex justify-content-center py-2 no-print">
+        <div class="d-flex justify-content-center py-2 no-print" style="border-top:1px solid var(--pw-line)">
             <nav><ul class="pagination pagination-sm mb-0">
                 <?php if ($page > 1): ?>
                 <li class="page-item"><button class="page-link" onclick="goPage(<?= $page-1 ?>)">Anterior</button></li>
@@ -883,7 +846,7 @@ if (isset($_GET['ajax'])) {
         </div>
         <?php endif; ?>
     </div>
-    </div><!-- /#tableSection -->
+    </div>
 
     <!-- ── Almanaque ──────────────────────────────────────────────────────── -->
     <div id="calView" style="display:none;" class="mt-0">
@@ -916,7 +879,7 @@ if (isset($_GET['ajax'])) {
         </div>
     </div>
 
-</div><!-- /container -->
+</div>
 
 <!-- ══════════════════════════════════════════════════════════════════════════
      MODAL: CREAR / EDITAR RESERVA

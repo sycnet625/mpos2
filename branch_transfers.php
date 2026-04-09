@@ -273,323 +273,202 @@ if (isset($_GET['print_id'])) {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Transferencias entre Sucursales</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { font-family: 'Segoe UI', sans-serif; font-size: 0.92rem; }
-        .shell { max-width: 1480px; }
-        .search-results { position: absolute; width: 100%; z-index: 1000; max-height: 300px; overflow-y: auto; }
-        .card-transfer { border: 1px solid var(--pw-line); border-radius: 24px; box-shadow: 0 18px 45px rgba(15, 23, 42, .08); background: var(--pw-card); }
-        .btn-price { font-size: 0.72rem; padding: 2px 6px; }
         .table thead th { white-space: nowrap; }
-        .preview-modal .modal-lg { max-width: 900px; }
-        .invoice-preview { border: 1px solid #ccc; padding: 30px; background: white; font-family: 'Calibri', sans-serif; }
+        .search-results { position: absolute; width: 100%; z-index: 1000; max-height: 300px; overflow-y: auto; }
+        .btn-price { font-size: 0.72rem; padding: 2px 6px; }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
-    <?php inventory_suite_shell_open('shell'); ?>
-    <div id="app">
-        <?php
-        inventory_suite_render_hero([
-            'eyebrow' => 'Inventario / Logística',
-            'title' => '<i class="fas fa-exchange-alt me-2"></i>Transferencias e Inter-Facturación',
-            'description' => 'Movimiento entre sucursales con comprobante interno, vista previa documental y factura inter-sucursal.',
-            'chips' => [
-                '<i class="fas fa-building me-1"></i>Sucursal ' . (int)$SUC_ID . ' (' . htmlspecialchars((string)($sucOrigData['nombre'] ?? 'N/A'), ENT_QUOTES, 'UTF-8') . ')',
-                '<i class="fas fa-warehouse me-1"></i>Almacén ' . (int)$ALM_ID,
-                '<i class="fas fa-code-branch me-1"></i>' . count($sucursales) . ' sucursales destino',
-                '<i class="fas fa-boxes-stacked me-1"></i>' . count($almacenesSucursal) . ' almacenes locales',
-            ],
-            'actions' => [
-                '<a href="pos_purchases.php" class="btn btn-light inventory-btn"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>',
-                '<a href="dashboard.php" class="btn btn-outline-light inventory-btn"><i class="fas fa-arrow-left me-1"></i>Volver</a>',
-            ],
-        ]);
-        ?>
+<div id="app" class="container-fluid shell inventory-shell py-4 py-lg-5">
 
-        <div class="inventory-tablist d-inline-flex mb-4" role="tablist">
-            <button class="nav-link px-4 py-2 fw-bold" :class="{'active': mode==='inter'}" @click="setMode('inter')" role="tab">
-                <i class="fas fa-building me-1"></i> Entre Sucursales
-            </button>
-            <button class="nav-link px-4 py-2 fw-bold" :class="{'active': mode==='intra', 'disabled': almacenesSucursal.length <= 1}" :disabled="almacenesSucursal.length <= 1" @click="setMode('intra')" role="tab">
-                <i class="fas fa-warehouse me-1"></i> Entre Almacenes
-                <span class="badge bg-warning text-dark ms-1" v-if="almacenesSucursal.length <= 1">1 solo</span>
-            </button>
-        </div>
-
-        <div class="row g-4">
-            <!-- CARRITO Y CONFIGURACIÓN -->
-            <div class="col-md-8">
-                <div class="card card-transfer mb-4">
-                    <div class="card-header bg-transparent border-0 py-4 px-4">
-                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-                            <div>
-                                <div class="section-title">Operación</div>
-                                <div class="fw-bold fs-5">Armar transferencia</div>
-                            </div>
-                            <span class="soft-pill"><i class="fas fa-truck-ramp-box"></i>{{cart.length}} líneas</span>
-                        </div>
-                        <div class="row g-3">
-                            <!-- INTER-SUCURSAL: selector de sucursal destino -->
-                            <div class="col-md-6" v-if="mode==='inter'">
-                                <label class="form-label fw-bold small">1. SUCURSAL DESTINO</label>
-                                <select class="form-select" v-model="destSucursal" @change="fetchDestInfo">
-                                    <option value="">Seleccione destino...</option>
-                                    <?php foreach ($sucursales as $s): ?>
-                                    <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['nombre']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-                            <!-- INTRA-SUCURSAL: selector de almacén destino -->
-                            <div class="col-md-6" v-if="mode==='intra'">
-                                <label class="form-label fw-bold small">1. ALMACÉN DESTINO</label>
-                                <select class="form-select" v-model="destAlmacen">
-                                    <option value="">Seleccione almacén destino...</option>
-                                    <option v-for="alm in almacenesDestino" :value="alm.id" :key="alm.id">{{alm.nombre}}</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 position-relative">
-                                <label class="form-label fw-bold small">2. BUSCAR PRODUCTO ORIGEN</label>
-                                <div class="input-group">
-                                    <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
-                                    <input type="text" class="form-control border-start-0" placeholder="Nombre o SKU..." v-model="query" @input="searchProducts">
-                                </div>
-                                <div class="list-group search-results shadow" v-if="results.length > 0">
-                                    <button v-for="p in results" class="list-group-item list-group-item-action" @click="addToCart(p)">
-                                        <div class="d-flex justify-content-between">
-                                            <span><strong>{{p.nombre}}</strong> <small class="text-muted">[{{p.codigo}}]</small></span>
-                                            <span class="badge bg-success" v-if="p.stock > 0">Stock: {{p.stock}}</span>
-                                            <span class="badge bg-danger" v-else>Sin Stock</span>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover align-middle mb-0">
-                                <thead class="table-light small fw-bold">
-                                    <tr>
-                                        <th class="ps-4">Producto / SKU Origen</th>
-                                        <th v-if="mode==='inter'" style="width: 180px;">Buscador SKU Destino</th>
-                                        <th style="width: 80px;" class="text-center">Cant.</th>
-                                        <th style="width: 200px;">Precio Unit.</th>
-                                        <th class="text-end pe-4">Subtotal</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-if="cart.length === 0">
-                                        <td :colspan="mode==='inter' ? 6 : 5" class="text-center py-5 text-muted">
-                                            <i class="fas fa-shopping-cart fa-2x mb-2 opacity-50"></i><br>
-                                            Agregue productos para iniciar la transferencia.
-                                        </td>
-                                    </tr>
-                                    <tr v-for="(item, index) in cart" :key="index">
-                                        <td class="ps-4">
-                                            <div class="fw-bold">{{item.nombre}}</div>
-                                            <div class="small text-muted">SKU: <strong>{{item.sku}}</strong> | Stock: {{item.stock_max}}</div>
-                                        </td>
-                                        <td v-if="mode==='inter'" class="position-relative">
-                                            <input type="text" class="form-control form-control-sm" v-model="item.sku_dest_search" 
-                                                   @input="searchDestSku(index)" :placeholder="item.sku">
-                                            <div class="list-group search-results shadow-sm" v-if="item.dest_results && item.dest_results.length > 0" style="font-size: 0.75rem;">
-                                                <button v-for="rp in item.dest_results" class="list-group-item list-group-item-action py-1" @click="setDestSku(index, rp)">
-                                                    {{rp.nombre}} ({{rp.codigo}})
-                                                </button>
-                                            </div>
-                                            <div class="small text-primary mt-1" v-if="item.sku_dest">Dest: <strong>{{item.sku_dest}}</strong></div>
-                                        </td>
-                                        <td><input type="number" class="form-control form-control-sm text-center" v-model.number="item.qty" @input="validateQty(item)" min="1"></td>
-                                        <td>
-                                            <div class="input-group input-group-sm mb-1">
-                                                <span class="input-group-text">$</span>
-                                                <input type="number" class="form-control" v-model.number="item.price" step="0.01">
-                                            </div>
-                                            <div class="d-flex gap-1">
-                                                <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'cost')">Costo</button>
-                                                <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'wholesale')">Mayor.</button>
-                                                <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'retail')">Min. ({{retailProfit}}%)</button>
-                                            </div>
-                                        </td>
-                                        <td class="text-end pe-4 fw-bold text-primary">${{(item.qty * item.price).toFixed(2)}}</td>
-                                        <td class="pe-4 text-end"><button class="btn btn-sm btn-outline-danger border-0" @click="cart.splice(index, 1)">&times;</button></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Inventario / Logística</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-exchange-alt me-2"></i>Transferencias e Inter-Facturación</h1>
+                <p class="mb-3 text-white-50">Movimiento entre sucursales y almacenes con comprobante interno, vista previa documental y factura inter-sucursal.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-building me-1"></i>Sucursal <?= (int)$SUC_ID ?> (<?= htmlspecialchars((string)($sucOrigData['nombre'] ?? 'N/A'), ENT_QUOTES, 'UTF-8') ?>)</span>
+                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén <?= (int)$ALM_ID ?></span>
+                    <span class="kpi-chip"><i class="fas fa-code-branch me-1"></i><?= count($sucursales) ?> sucursales destino</span>
+                    <span class="kpi-chip"><i class="fas fa-boxes-stacked me-1"></i><?= count($almacenesSucursal) ?> almacenes locales</span>
                 </div>
             </div>
-
-            <!-- RESUMEN Y ACCIÓN -->
-            <div class="col-md-4">
-                <div class="card card-transfer">
-                    <div class="card-body p-4">
-                        <div class="section-title mb-2">Resumen</div>
-                        <h5 class="fw-bold mb-4">Resumen de operación</h5>
-                        
-                        <div class="mb-3" v-if="mode==='intra'">
-                            <div class="stat-box">
-                                <div class="small text-muted mb-1"><i class="fas fa-warehouse me-1"></i>Origen</div>
-                                <div class="fw-bold">{{almacenOrigName}}</div>
-                                <div class="small text-muted mt-1 mb-1"><i class="fas fa-arrow-right me-1"></i>Destino</div>
-                                <div class="fw-bold" v-if="destAlmacen">{{getAlmacenName(destAlmacen)}}</div>
-                                <div class="text-muted" v-else">Sin seleccionar</div>
-                            </div>
-                        </div>
-
-                        <div class="mb-4">
-                            <label class="form-label small fw-bold text-muted">Margen Mayorista (%)</label>
-                            <input type="number" class="form-control form-control-sm" v-model.number="wholesaleProfit" min="0">
-                        </div>
-
-                        <div class="stat-box mb-3">
-                            <div class="d-flex justify-content-between mb-2">
-                                <span>Total productos</span>
-                                <span class="fw-bold">{{cart.length}}</span>
-                            </div>
-                            <div class="d-flex justify-content-between">
-                                <span class="fs-6">Total</span>
-                                <span class="fs-4 fw-bold text-success">${{total.toFixed(2)}}</span>
-                            </div>
-                        </div>
-
-                        <div class="d-grid gap-2">
-                            <button class="btn btn-outline-info fw-bold" @click="showDocPreview" :disabled="cart.length==0">
-                                <i class="fas fa-file-alt me-2"></i> VISTA PREVIA MOVIMIENTO
-                            </button>
-                            <button v-if="mode==='inter'" class="btn btn-outline-primary fw-bold" @click="showInvPreview" :disabled="cart.length==0">
-                                <i class="fas fa-file-invoice-dollar me-2"></i> VISTA PREVIA FACTURA
-                            </button>
-                            <hr>
-                            <button class="btn btn-success btn-lg py-3 fw-bold shadow-sm" :disabled="!isReady" @click="submitTransfer">
-                                <i class="fas fa-check-circle me-2"></i> CONFIRMAR OPERACIÓN
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="pos_purchases.php" class="btn btn-light"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
             </div>
         </div>
+    </section>
 
-        <!-- MODAL PREVIEW MOVIMIENTO -->
-        <div class="modal fade preview-modal" id="docPreviewModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header bg-dark text-white">
-                        <h5 class="modal-title">Vista Previa: Comprobante de Movimiento</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body bg-light">
-                        <div id="docPreviewArea" class="bg-white shadow-sm mx-auto p-4" style="width: 148mm; min-height: 210mm;">
-                            <div class="text-center border-bottom pb-3 mb-4">
-                                <h4 class="m-0 fw-bold">COMPROBANTE DE TRANSFERENCIA</h4>
-                                <div class="text-muted small">DOCUMENTO INTERNO NO FISCAL</div>
-                            </div>
-                            <div class="row mb-4 small">
-                                <template v-if="mode==='inter'">
-                                    <div class="col-6">
-                                        <div class="fw-bold text-uppercase border-bottom mb-1">Sucursal Origen</div>
-                                        <div><strong>{{sucOrig.nombre}}</strong></div>
-                                        <div>ID Suc: {{sucOrig.id}}</div>
-                                    </div>
-                                    <div class="col-6 text-end">
-                                        <div class="fw-bold text-uppercase border-bottom mb-1">Sucursal Destino</div>
-                                        <div><strong>{{sucDest.nombre}}</strong></div>
-                                        <div>ID Suc: {{sucDest.id}}</div>
-                                    </div>
-                                </template>
-                                <template v-else>
-                                    <div class="col-6">
-                                        <div class="fw-bold text-uppercase border-bottom mb-1">Almacén Origen</div>
-                                        <div><strong>{{almacenOrigName}}</strong></div>
-                                    </div>
-                                    <div class="col-6 text-end">
-                                        <div class="fw-bold text-uppercase border-bottom mb-1">Almacén Destino</div>
-                                        <div><strong>{{destAlmacen ? getAlmacenName(destAlmacen) : '---'}}</strong></div>
-                                    </div>
-                                </template>
-                            </div>
-                            <table class="table table-bordered table-sm small">
-                                <thead class="table-light">
-                                    <tr><th>SKU</th><th>Descripción</th><th class="text-center">Cant</th></tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="it in cart">
-                                        <td>{{it.sku}}</td><td>{{it.nombre}}</td><td class="text-center">{{it.qty}}</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                            <div class="row mt-5 pt-5 text-center small">
-                                <div class="col-6"><div class="border-top pt-2">Entrega: _________________</div></div>
-                                <div class="col-6"><div class="border-top pt-2">Recibe: _________________</div></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- MODAL PREVIEW FACTURA -->
-        <div class="modal fade preview-modal" id="invPreviewModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
-                <div class="modal-content">
-                    <div class="modal-header bg-primary text-white">
-                        <h5 class="modal-title">Vista Previa: Factura Inter-Sucursal</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body bg-light">
-                        <div class="invoice-preview mx-auto shadow-sm" style="width: 21cm; min-height: 20cm;">
-                            <div class="d-flex justify-content-between align-items-start border-bottom pb-3 mb-4">
-                                <div>
-                                    <h2 class="m-0 fw-bold text-primary">PALWEB SURL</h2>
-                                    <div class="small">Casa Matriz - ID Sucursal: {{sucOrig.id}}</div>
-                                    <div class="small">Sucursal: {{sucOrig.nombre}}</div>
-                                </div>
-                                <div class="text-end">
-                                    <h1 class="m-0 fw-bold opacity-25">FACTURA</h1>
-                                    <div class="fw-bold fs-5"># 2026XXXXXXXX</div>
-                                    <div class="small">Fecha: <?php echo date('d/m/Y'); ?></div>
-                                </div>
-                            </div>
-                            <div class="row mb-5">
-                                <div class="col-6">
-                                    <div class="bg-primary text-white px-2 py-1 small fw-bold mb-2">FACTURAR A:</div>
-                                    <div class="fw-bold">{{sucDest.nombre}}</div>
-                                    <div class="small">Sucursal Destino ID: {{sucDest.id}}</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="bg-primary text-white px-2 py-1 small fw-bold mb-2">DETALLES DE PAGO:</div>
-                                    <div class="small">Términos: Transferencia Interna</div>
-                                    <div class="small">Estado: Pendiente de Conciliación</div>
-                                </div>
-                            </div>
-                            <table class="table table-sm table-bordered">
-                                <thead class="table-primary text-white">
-                                    <tr><th>Descripción</th><th class="text-center">Cant</th><th class="text-end">Precio</th><th class="text-end">Total</th></tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="it in cart">
-                                        <td>{{it.nombre}}</td><td class="text-center">{{it.qty}}</td>
-                                        <td class="text-end">${{it.price.toFixed(2)}}</td>
-                                        <td class="text-end">${{(it.qty * it.price).toFixed(2)}}</td>
-                                    </tr>
-                                </tbody>
-                                <tfoot>
-                                    <tr class="fw-bold fs-5"><td colspan="3" class="text-end">TOTAL FACTURA:</td><td class="text-end text-primary">${{total.toFixed(2)}}</td></tr>
-                                </tfoot>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
+    <div class="inventory-tablist d-inline-flex mb-4" role="tablist">
+        <button class="nav-link px-4 py-2 fw-bold" :class="{'active': mode==='inter'}" @click="setMode('inter')" role="tab">
+            <i class="fas fa-building me-1"></i> Entre Sucursales
+        </button>
+        <button class="nav-link px-4 py-2 fw-bold" :class="{'active': mode==='intra', 'disabled': almacenesSucursal.length <= 1}" :disabled="almacenesSucursal.length <= 1" @click="setMode('intra')" role="tab">
+            <i class="fas fa-warehouse me-1"></i> Entre Almacenes
+            <span class="badge bg-warning text-dark ms-1" v-if="almacenesSucursal.length <= 1">1 solo</span>
+        </button>
     </div>
-    <?php inventory_suite_shell_close(); ?>
+
+    <div class="row g-4 align-items-stretch">
+        <div class="col-12 col-lg-8">
+            <div class="glass-card p-4 h-100 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+                    <div>
+                        <div class="section-title">Operación</div>
+                        <h2 class="h5 fw-bold mb-0">Armar transferencia</h2>
+                    </div>
+                    <span class="soft-pill"><i class="fas fa-truck-ramp-box"></i>{{cart.length}} líneas</span>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6" v-if="mode==='inter'">
+                        <label class="form-label small fw-bold">1. Sucursal destino</label>
+                        <select class="form-select" v-model="destSucursal" @change="fetchDestInfo">
+                            <option value="">Seleccione destino...</option>
+                            <?php foreach ($sucursales as $s): ?>
+                            <option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['nombre']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-6" v-if="mode==='intra'">
+                        <label class="form-label small fw-bold">1. Almacén destino</label>
+                        <select class="form-select" v-model="destAlmacen">
+                            <option value="">Seleccione almacén destino...</option>
+                            <option v-for="alm in almacenesDestino" :value="alm.id" :key="alm.id">{{alm.nombre}}</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 position-relative">
+                        <label class="form-label small fw-bold">2. Buscar producto origen</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
+                            <input type="text" class="form-control border-start-0" placeholder="Nombre o SKU..." v-model="query" @input="searchProducts">
+                        </div>
+                        <div class="list-group search-results shadow" v-if="results.length > 0">
+                            <button v-for="p in results" class="list-group-item list-group-item-action" @click="addToCart(p)">
+                                <div class="d-flex justify-content-between">
+                                    <span><strong>{{p.nombre}}</strong> <small class="text-muted">[{{p.codigo}}]</small></span>
+                                    <span class="badge bg-success" v-if="p.stock > 0">Stock: {{p.stock}}</span>
+                                    <span class="badge bg-danger" v-else>Sin Stock</span>
+                                </div>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light small fw-bold">
+                            <tr>
+                                <th class="ps-4">Producto / SKU Origen</th>
+                                <th v-if="mode==='inter'" style="width: 180px;">Buscador SKU Destino</th>
+                                <th style="width: 80px;" class="text-center">Cant.</th>
+                                <th style="width: 200px;">Precio Unit.</th>
+                                <th class="text-end pe-4">Subtotal</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="cart.length === 0">
+                                <td :colspan="mode==='inter' ? 6 : 5" class="text-center py-5 text-muted">
+                                    <i class="fas fa-shopping-cart fa-2x mb-2 opacity-50"></i><br>
+                                    Agregue productos para iniciar la transferencia.
+                                </td>
+                            </tr>
+                            <tr v-for="(item, index) in cart" :key="index">
+                                <td class="ps-4">
+                                    <div class="fw-bold">{{item.nombre}}</div>
+                                    <div class="small text-muted">SKU: <strong>{{item.sku}}</strong> | Stock: {{item.stock_max}}</div>
+                                </td>
+                                <td v-if="mode==='inter'" class="position-relative">
+                                    <input type="text" class="form-control form-control-sm" v-model="item.sku_dest_search" 
+                                           @input="searchDestSku(index)" :placeholder="item.sku">
+                                    <div class="list-group search-results shadow-sm" v-if="item.dest_results && item.dest_results.length > 0" style="font-size: 0.75rem;">
+                                        <button v-for="rp in item.dest_results" class="list-group-item list-group-item-action py-1" @click="setDestSku(index, rp)">
+                                            {{rp.nombre}} ({{rp.codigo}})
+                                        </button>
+                                    </div>
+                                    <div class="small text-primary mt-1" v-if="item.sku_dest">Dest: <strong>{{item.sku_dest}}</strong></div>
+                                </td>
+                                <td><input type="number" class="form-control form-control-sm text-center" v-model.number="item.qty" @input="validateQty(item)" min="1"></td>
+                                <td>
+                                    <div class="input-group input-group-sm mb-1">
+                                        <span class="input-group-text">$</span>
+                                        <input type="number" class="form-control" v-model.number="item.price" step="0.01">
+                                    </div>
+                                    <div class="d-flex gap-1">
+                                        <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'cost')">Costo</button>
+                                        <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'wholesale')">Mayor.</button>
+                                        <button class="btn btn-outline-secondary btn-price" @click="setPrice(item, 'retail')">Min. ({{retailProfit}}%)</button>
+                                    </div>
+                                </td>
+                                <td class="text-end pe-4 fw-bold text-primary">${{(item.qty * item.price).toFixed(2)}}</td>
+                                <td class="pe-4 text-end"><button class="btn btn-sm btn-outline-danger border-0" @click="cart.splice(index, 1)">&times;</button></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-4">
+            <div class="glass-card p-4 h-100 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <div class="section-title">Contexto</div>
+                        <h2 class="h5 fw-bold mb-0">Resumen de operación</h2>
+                    </div>
+                </div>
+
+                <div class="mb-3" v-if="mode==='intra'">
+                    <div class="stat-box">
+                        <div class="small text-muted mb-1"><i class="fas fa-warehouse me-1"></i>Origen</div>
+                        <div class="fw-bold">{{almacenOrigName}}</div>
+                        <div class="small text-muted mt-1 mb-1"><i class="fas fa-arrow-right me-1"></i>Destino</div>
+                        <div class="fw-bold" v-if="destAlmacen">{{getAlmacenName(destAlmacen)}}</div>
+                        <div class="text-muted" v-else>Sin seleccionar</div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-bold text-muted">Margen Mayorista (%)</label>
+                    <input type="number" class="form-control form-control-sm" v-model.number="wholesaleProfit" min="0">
+                </div>
+
+                <div class="stat-box mb-3">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span>Total productos</span>
+                        <span class="fw-bold">{{cart.length}}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="fs-6">Total</span>
+                        <span class="summary-total text-success">${{total.toFixed(2)}}</span>
+                    </div>
+                </div>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-info fw-bold" @click="showDocPreview" :disabled="cart.length==0">
+                        <i class="fas fa-file-alt me-2"></i> VISTA PREVIA MOVIMIENTO
+                    </button>
+                    <button v-if="mode==='inter'" class="btn btn-outline-primary fw-bold" @click="showInvPreview" :disabled="cart.length==0">
+                        <i class="fas fa-file-invoice-dollar me-2"></i> VISTA PREVIA FACTURA
+                    </button>
+                    <hr>
+                    <button class="btn btn-success btn-lg py-3 fw-bold shadow-sm" :disabled="!isReady" @click="submitTransfer">
+                        <i class="fas fa-check-circle me-2"></i> CONFIRMAR OPERACIÓN
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
 
     <script src="assets/js/vue.min.js"></script>
     <script src="assets/js/bootstrap.bundle.min.js"></script>
@@ -628,14 +507,7 @@ if (isset($_GET['print_id'])) {
                     return this.almacenesSucursal.filter(a => a.id != this.almacenOrigId);
                 }
             },
-            mounted() {
-                this.$nextTick(() => {
-                    const docEl = document.getElementById('docPreviewModal');
-                    if (docEl) this.docPreviewModal = new bootstrap.Modal(docEl);
-                    const invEl = document.getElementById('invPreviewModal');
-                    if (invEl) this.invPreviewModal = new bootstrap.Modal(invEl);
-                });
-            },
+
             methods: {
                 setMode(m) {
                     if (m === 'intra' && this.almacenesSucursal.length <= 1) return;
@@ -699,10 +571,117 @@ if (isset($_GET['print_id'])) {
                     }
                 },
                 showDocPreview() {
-                    if (this.docPreviewModal) this.docPreviewModal.show();
+                    const origen = this.mode === 'inter'
+                        ? (this.sucOrig.nombre || '') + ' (Suc #' + (this.sucOrig.id || '') + ')'
+                        : this.almacenOrigName;
+                    const destino = this.mode === 'inter'
+                        ? (this.sucDest.nombre || '---') + ' (Suc #' + (this.sucDest.id || '?') + ')'
+                        : (this.destAlmacen ? this.getAlmacenName(this.destAlmacen) : '---');
+                    const fecha = new Date().toLocaleDateString('es-ES');
+                    let filas = '';
+                    this.cart.forEach(it => {
+                        filas += `<tr><td>${it.sku}</td><td>${it.nombre}</td><td style="text-align:center">${it.qty}</td></tr>`;
+                    });
+                    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+                        <title>Vista Previa - Comprobante</title>
+                        <style>
+                            body{font-family:sans-serif;margin:0;padding:20px;font-size:12px;background:#f0f0f0;}
+                            .doc{width:148mm;min-height:210mm;background:#fff;border:1px dashed #aaa;padding:10mm;box-sizing:border-box;margin:auto;}
+                            .header{text-align:center;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:14px;}
+                            .info{display:flex;justify-content:space-between;margin-bottom:12px;}
+                            table{width:100%;border-collapse:collapse;margin-top:10px;}
+                            th,td{border:1px solid #000;padding:5px;text-align:left;}
+                            th{background:#eee;}
+                            .footer{margin-top:30px;display:flex;justify-content:space-around;text-align:center;}
+                            .sign{border-top:1px solid #000;width:40%;padding-top:5px;margin-top:40px;}
+                            .no-print{text-align:center;margin-bottom:12px;}
+                            @media print{.no-print{display:none;}}
+                        </style></head><body>
+                        <div class="no-print"><button onclick="window.print()" style="padding:8px 20px;cursor:pointer;">IMPRIMIR</button></div>
+                        <div class="doc">
+                            <div class="header">
+                                <h3 style="margin:0">COMPROBANTE DE TRANSFERENCIA</h3>
+                                <div>DOCUMENTO INTERNO NO FISCAL &nbsp;|&nbsp; ${fecha}</div>
+                            </div>
+                            <div class="info">
+                                <div><strong>Origen:</strong><br>${origen}</div>
+                                <div style="text-align:right"><strong>Destino:</strong><br>${destino}</div>
+                            </div>
+                            <table>
+                                <thead><tr><th>SKU</th><th>Descripción</th><th style="text-align:center">Cant.</th></tr></thead>
+                                <tbody>${filas}</tbody>
+                            </table>
+                            <div class="footer">
+                                <div class="sign">Entregado por</div>
+                                <div class="sign">Recibido por</div>
+                            </div>
+                            <div style="margin-top:20px;text-align:center;color:#888;font-size:10px">Generado por PalWeb ERP</div>
+                        </div>
+                    </body></html>`;
+                    const w = window.open('', '_blank', 'width=700,height=800');
+                    w.document.write(html);
+                    w.document.close();
                 },
                 showInvPreview() {
-                    if (this.invPreviewModal) this.invPreviewModal.show();
+                    const fecha = new Date().toLocaleDateString('es-ES');
+                    let filas = '';
+                    let total = 0;
+                    this.cart.forEach(it => {
+                        const sub = it.qty * it.price;
+                        total += sub;
+                        filas += `<tr>
+                            <td>${it.nombre}</td>
+                            <td style="text-align:center">${it.qty}</td>
+                            <td style="text-align:right">$${it.price.toFixed(2)}</td>
+                            <td style="text-align:right">$${sub.toFixed(2)}</td>
+                        </tr>`;
+                    });
+                    const origen = this.sucOrig.nombre || '';
+                    const destino = this.sucDest.nombre || '---';
+                    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+                        <title>Vista Previa - Factura</title>
+                        <style>
+                            body{font-family:'Calibri',sans-serif;margin:0;padding:20px;font-size:13px;background:#f0f0f0;}
+                            .doc{width:21cm;min-height:20cm;background:#fff;border:1px solid #ccc;padding:20px 25px;box-sizing:border-box;margin:auto;}
+                            .head{display:flex;justify-content:space-between;border-bottom:2px solid #1a56db;padding-bottom:12px;margin-bottom:16px;}
+                            .title-fac{font-size:2.2rem;font-weight:900;opacity:.15;margin:0;}
+                            .billing{display:flex;gap:20px;margin-bottom:20px;}
+                            .billing-box{flex:1;border:1px solid #ddd;border-radius:6px;padding:10px;}
+                            .billing-box h6{background:#1a56db;color:#fff;margin:-10px -10px 8px;padding:5px 10px;border-radius:4px 4px 0 0;font-size:.8rem;}
+                            table{width:100%;border-collapse:collapse;}
+                            thead tr{background:#1a56db;color:#fff;}
+                            th,td{border:1px solid #ccc;padding:6px 8px;}
+                            tfoot td{font-weight:bold;font-size:1.1rem;}
+                            .no-print{text-align:center;margin-bottom:12px;}
+                            @media print{.no-print{display:none;}}
+                        </style></head><body>
+                        <div class="no-print"><button onclick="window.print()" style="padding:8px 20px;cursor:pointer;">IMPRIMIR</button></div>
+                        <div class="doc">
+                            <div class="head">
+                                <div>
+                                    <div style="font-size:1.4rem;font-weight:900;color:#1a56db">PALWEB SURL</div>
+                                    <div>${origen}</div>
+                                </div>
+                                <div style="text-align:right">
+                                    <div class="title-fac">FACTURA</div>
+                                    <div style="font-size:1rem;font-weight:bold">VISTA PREVIA</div>
+                                    <div>${fecha}</div>
+                                </div>
+                            </div>
+                            <div class="billing">
+                                <div class="billing-box"><h6>FACTURAR A:</h6><strong>${destino}</strong><br>Sucursal Destino ID: ${this.sucDest.id || '?'}</div>
+                                <div class="billing-box"><h6>DETALLES DE PAGO:</h6>Términos: Transferencia Interna<br>Estado: Pendiente de Conciliación</div>
+                            </div>
+                            <table>
+                                <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Precio</th><th style="text-align:right">Total</th></tr></thead>
+                                <tbody>${filas}</tbody>
+                                <tfoot><tr><td colspan="3" style="text-align:right">TOTAL FACTURA:</td><td style="text-align:right;color:#1a56db">$${total.toFixed(2)}</td></tr></tfoot>
+                            </table>
+                        </div>
+                    </body></html>`;
+                    const w = window.open('', '_blank', 'width=900,height=800');
+                    w.document.write(html);
+                    w.document.close();
                 },
                 async submitTransfer() {
                     if (this.isProcessing) return;

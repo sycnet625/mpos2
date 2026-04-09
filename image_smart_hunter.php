@@ -699,132 +699,132 @@ $providers = [
     <title>Buscador Inteligente de Imágenes</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body { background:#f3f4f7; padding:20px; }
-        .topbar { display:flex; gap:10px; align-items:center; justify-content:space-between; flex-wrap:wrap; margin-bottom:15px; }
-        .stat-card { background:#fff; border-radius:10px; padding:16px; box-shadow:0 2px 6px rgba(0,0,0,.06); }
-        .product-card { background:#fff; border-radius:12px; padding:12px; margin-bottom:10px; border:1px solid #e9ecef; }
-        .product-title { font-weight:700; line-height:1.3; }
-        .provider-row { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
-        .candidates { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px; margin-top:10px; }
-        .candidate { border:1px solid #dee2e6; border-radius:8px; padding:8px; background:#fff; display:flex; flex-direction:column; gap:6px; }
-        .candidate img { width:100%; height:130px; object-fit:cover; border-radius:6px; background:#e9ecef; }
-        .small-muted { color:#6c757d; font-size:.85rem; }
-        .badge-source { width:max-content; }
-        .status-area { margin-top:8px; font-size:.88rem; }
-        .status-ok { color:#146c43; font-weight:600; }
-        .status-ko { color:#a61e4d; font-weight:600; }
-        .manual-row { display:flex; gap:6px; margin-top:8px; }
-        .manual-row input { max-width:400px; }
-        .summary p { margin-bottom:5px; }
+        .table thead th { white-space: nowrap; }
+        .product-card { background: var(--pw-card); border: 1px solid var(--pw-line); border-radius: 18px; padding: 14px 16px; margin-bottom: 12px; }
+        .product-title { font-weight: 700; line-height: 1.3; font-size: 1.05rem; }
+        .provider-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+        .candidates { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 10px; }
+        .candidate { border: 1px solid var(--pw-line); border-radius: 10px; padding: 8px; background: #fff; display: flex; flex-direction: column; gap: 6px; }
+        .candidate img { width: 100%; height: 130px; object-fit: cover; border-radius: 6px; background: #e9ecef; }
+        .small-muted { color: var(--pw-muted); font-size: .85rem; }
+        .badge-source { width: max-content; border-radius: 999px; padding: .15rem .55rem; background: rgba(15,118,110,.08); font-size: .75rem; }
+        .status-area { margin-top: 8px; font-size: .88rem; }
+        .status-ok { color: #146c43; font-weight: 600; }
+        .status-ko { color: #a61e4d; font-weight: 600; }
+        .manual-row { display: flex; gap: 6px; margin-top: 8px; }
+        .manual-row input { max-width: 400px; }
+        .summary p { margin-bottom: 5px; }
+        .provider-all-btn { border-radius: 999px; padding: .35rem .9rem; font-size: .85rem; }
     </style>
 </head>
-<body>
-<div class="container" style="max-width:1220px;">
+<body class="pb-5 inventory-suite">
+<div id="app" class="container-fluid shell inventory-shell py-4 py-lg-5">
+
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="section-title text-white-50 mb-2">Productos / Imágenes</div>
+                <h1 class="h2 fw-bold mb-2"><i class="fas fa-magnifying-glass me-2"></i>Buscador Inteligente de Imágenes</h1>
+                <p class="mb-3 text-white-50">Búsqueda automática de imágenes por proveedor, aprobación con vista previa y guardado optimizado.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="kpi-chip"><i class="fas fa-box-open me-1"></i><?php echo count($sinImagen); ?> productos sin imagen</span>
+                    <span class="kpi-chip"><i class="fas fa-folder me-1"></i><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></span>
+                    <span class="kpi-chip"><i class="fas fa-clock me-1"></i><?php echo (int)$TEMP_IMAGE_COUNT; ?> pendientes /tmp</span>
+                    <span class="kpi-chip"><i class="fas fa-image me-1"></i>GD: <?php echo $GD_AVAILABLE ? 'Disponible' : 'No disponible'; ?></span>
+                </div>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
+            </div>
+        </div>
+    </section>
+
     <?php if (!$GD_AVAILABLE): ?>
-        <div class="alert alert-warning border-warning shadow-sm">
+        <div class="alert alert-warning border-warning shadow-sm mb-4">
             <div class="fw-bold mb-1"><i class="fas fa-triangle-exclamation"></i> Extensión GD no disponible en PHP</div>
-            <div class="small mb-2">
-                El módulo puede guardar imágenes originales, pero no podrá convertirlas ni generar variantes optimizadas desde PHP mientras falte GD.
-            </div>
-            <div class="small">
-                En Ubuntu instala GD con:
-                <code>sudo apt-get update && sudo apt-get install php-gd</code>
-                y luego reinicia Apache o PHP-FPM.
-            </div>
+            <div class="small mb-2">El módulo puede guardar imágenes originales, pero no podrá convertirlas ni generar variantes optimizadas desde PHP mientras falte GD.</div>
+            <div class="small">En Ubuntu instala GD con: <code>sudo apt-get update && sudo apt-get install php-gd</code> y luego reinicia Apache o PHP-FPM.</div>
         </div>
     <?php endif; ?>
     <?php if ($IMAGE_DIR_STATUS !== 'ok'): ?>
-        <div class="alert alert-danger border-danger shadow-sm">
+        <div class="alert alert-danger border-danger shadow-sm mb-4">
             <div class="fw-bold mb-1"><i class="fas fa-circle-exclamation"></i> Carpeta principal no escribible</div>
             <div class="small mb-1">Las imágenes deben guardarse en <code><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></code>.</div>
-            <div class="small">Corrija permisos de esa ruta. El módulo ya no usa <code>/tmp/palweb_product_images/</code> como destino silencioso.</div>
+            <div class="small">Corrija permisos de esa ruta.</div>
         </div>
     <?php endif; ?>
     <?php if ($TEMP_SYNC_RESULT['moved'] > 0): ?>
-        <div class="alert alert-info border-info shadow-sm">
+        <div class="alert alert-info border-info shadow-sm mb-4">
             <div class="fw-bold mb-1"><i class="fas fa-folder-open"></i> Imágenes migradas desde /tmp</div>
-            <div class="small">Se copiaron <strong><?php echo (int)$TEMP_SYNC_RESULT['moved']; ?></strong> imágenes desde <code>/tmp/palweb_product_images/</code> hacia <code><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></code>.</div>
+            <div class="small">Se copiaron <strong><?php echo (int)$TEMP_SYNC_RESULT['moved']; ?></strong> imágenes hacia <code><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></code>.</div>
         </div>
     <?php endif; ?>
-    <?php if ($TEMP_IMAGE_COUNT > 0 && $IMAGE_DIR_STATUS !== 'ok'): ?>
-        <div class="alert alert-warning border-warning shadow-sm">
-            <div class="fw-bold mb-1"><i class="fas fa-triangle-exclamation"></i> Imágenes pendientes en /tmp</div>
-            <div class="small">Quedan <strong><?php echo (int)$TEMP_IMAGE_COUNT; ?></strong> imágenes en <code>/tmp/palweb_product_images/</code> sin copiar porque la carpeta principal no es escribible.</div>
-        </div>
-    <?php endif; ?>
-    <div class="stat-card">
-        <div class="topbar">
-            <div>
-                <h3 class="mb-1">🔍 Buscador Inteligente de Imágenes</h3>
-                <p class="small text-muted m-0">Productos sin imagen: <strong><?php echo count($sinImagen); ?></strong></p>
-                <p class="small text-muted m-0">Carpeta de salida: <strong><?php echo htmlspecialchars($IMAGE_DIR, ENT_QUOTES, 'UTF-8'); ?></strong></p>
-                <p class="small text-muted m-0">Pendientes en /tmp: <strong><?php echo (int)$TEMP_IMAGE_COUNT; ?></strong></p>
-            </div>
-            <div>
-                <button class="btn btn-outline-secondary btn-sm" type="button" id="btnReload" onclick="window.location.reload()">
-                    <i class="fas fa-sync-alt"></i> Recargar
-                </button>
-            </div>
-        </div>
 
-        <hr>
-        <div class="summary">
-            <p class="mb-2"><strong>Acciones rápidas por proveedor:</strong></p>
-            <div class="provider-row">
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('wikipedia')"><i class="fas fa-book"></i> Auto Wikipedia</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('target')"><i class="fas fa-bullseye"></i> Auto Target</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('aliexpress')"><i class="fas fa-globe-asia"></i> Auto AliExpress</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('elyerromenu')"><i class="fas fa-store"></i> Auto El Yerro</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('walmart')"><i class="fab fa-wikipedia-w"></i> Auto Walmart</button>
-                <button class="btn btn-success btn-sm" onclick="runProviderAll('amazon')"><i class="fab fa-amazon"></i> Auto Amazon</button>
-                <button class="btn btn-primary btn-sm" onclick="runProviderAll('sku')"><i class="fas fa-barcode"></i> Auto por SKU</button>
+    <div class="glass-card p-4 mb-4 inventory-fade-in">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <div class="section-title">Acciones rápidas</div>
+                <h2 class="h5 fw-bold mb-0">Ejecutar por proveedor</h2>
             </div>
+            <button class="btn btn-outline-secondary btn-sm" onclick="window.location.reload()"><i class="fas fa-sync-alt me-1"></i>Recargar</button>
+        </div>
+        <div class="provider-row mb-3">
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('wikipedia')"><i class="fas fa-book me-1"></i>Wikipedia</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('target')"><i class="fas fa-bullseye me-1"></i>Target</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('aliexpress')"><i class="fas fa-globe-asia me-1"></i>AliExpress</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('elyerromenu')"><i class="fas fa-store me-1"></i>El Yerro</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('walmart')"><i class="fab fa-wikipedia-w me-1"></i>Walmart</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('amazon')"><i class="fab fa-amazon me-1"></i>Amazon</button>
+            <button class="btn btn-primary btn-sm provider-all-btn" onclick="runProviderAll('sku')"><i class="fas fa-barcode me-1"></i>Por SKU</button>
         </div>
     </div>
 
-    <div class="mt-3" id="listadoProductos">
+    <div class="row g-3" id="listadoProductos">
         <?php foreach ($sinImagen as $p): ?>
-            <div class="product-card" id="card-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" data-code="<?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?>">
-                <div class="product-title"><?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?></div>
-                <div class="small-muted">
-                    SKU: <strong><?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?></strong>
-                    <span class="ms-2"><?php echo htmlspecialchars($p['categoria'], ENT_QUOTES, 'UTF-8'); ?></span>
+        <div class="col-12">
+            <div class="product-card inventory-fade-in" id="card-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" data-code="<?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?>">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                    <div>
+                        <div class="product-title"><?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?></div>
+                        <div class="small-muted">
+                            SKU: <strong><?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?></strong>
+                            <span class="ms-2"><?php echo htmlspecialchars($p['categoria'], ENT_QUOTES, 'UTF-8'); ?></span>
+                        </div>
+                    </div>
                 </div>
-                <div class="manual-row">
-                    <input type="text" class="form-control form-control-sm" id="manual-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="Pega URL y aprueba manual">
-                    <button class="btn btn-outline-dark btn-sm" data-code="<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" onclick="approveManual('<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>')">
-                        <i class="fas fa-save"></i> Guardar URL manual
-                    </button>
+                <div class="manual-row mb-2">
+                    <input type="text" class="form-control form-control-sm" id="query-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" value="<?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?>" title="Modificar término de búsqueda">
+                    <span class="small-muted align-self-center" style="white-space: nowrap;"><i class="fas fa-edit"></i> Término de búsqueda</span>
                 </div>
-
+                <div class="manual-row mb-2">
+                    <input type="text" class="form-control form-control-sm" id="manual-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" placeholder="Pega URL de imagen y guarda manual">
+                    <button class="btn btn-outline-dark btn-sm" onclick="approveManual('<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>')"><i class="fas fa-save me-1"></i>Guardar URL</button>
+                </div>
                 <div class="provider-row">
                     <?php foreach ($providers as $prov): ?>
-                        <button
-                            class="btn btn-outline-primary btn-sm btn-provider"
-                            data-action="search-provider"
-                            data-code="<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-provider="<?php echo htmlspecialchars($prov['key'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-query="<?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?>"
-                            data-sku="<?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?>"
-                            onclick="searchProvider(this)">
+                        <button class="btn btn-outline-primary btn-sm btn-provider" data-action="search-provider" data-code="<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>" data-provider="<?php echo htmlspecialchars($prov['key'], ENT_QUOTES, 'UTF-8'); ?>" data-query="<?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?>" data-sku="<?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?>" onclick="searchProvider(this)">
                             <?php echo htmlspecialchars($prov['label'], ENT_QUOTES, 'UTF-8'); ?>
                         </button>
                     <?php endforeach; ?>
                 </div>
-
                 <div class="status-area" id="status-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>"></div>
                 <div class="candidates" id="cands-<?php echo htmlspecialchars($p['safe'], ENT_QUOTES, 'UTF-8'); ?>"></div>
             </div>
+        </div>
         <?php endforeach; ?>
 
         <?php if (empty($sinImagen)): ?>
+        <div class="col-12">
             <div class="product-card text-center">
                 <div class="text-success fw-bold fs-4"><i class="fas fa-check-circle"></i> Listo</div>
                 <p class="small text-muted m-0">No hay productos sin imagen disponibles.</p>
             </div>
+        </div>
         <?php endif; ?>
     </div>
+
 </div>
 
 <script>
@@ -857,7 +857,7 @@ function renderCandidates(code, candidates, sourceLabel) {
         wrap.className = 'candidate';
         wrap.innerHTML =
             `<img id="${id}" src="${escapeHtml(c.url)}" alt="preview" loading="lazy" onerror="this.style.display='none'">
-             <span class="badge text-bg-light badge-source">${escapeHtml(c.source || 'Proveedor')}</span>
+             <span class="badge badge-source">${escapeHtml(c.source || 'Proveedor')}</span>
              <span class="small-muted">${escapeHtml(c.title || '')}</span>
              <div><span class="small-muted">Score: ${parseInt(c.score || 0, 10)} / 100</span></div>
              <button class="btn btn-sm btn-success" onclick="approveCandidate('${code}', '${escapeHtml(c.url)}')"><i class="fas fa-check"></i> Aprobar imagen</button>`;
@@ -879,7 +879,6 @@ async function requestJson(payload, button) {
     const txt = await res.text();
     try {
         const parsed = JSON.parse(txt);
-        if (parsed.status === 'error') return parsed;
         return parsed;
     } catch (e) {
         if (button) {
@@ -908,7 +907,11 @@ function lockButton(btn, state) {
 async function searchProvider(button) {
     const code = button.getAttribute('data-code');
     const provider = button.getAttribute('data-provider');
-    const query = button.getAttribute('data-query');
+    let query = button.getAttribute('data-query');
+    const customQuery = document.getElementById('query-' + code);
+    if (customQuery && customQuery.value.trim() !== '') {
+        query = customQuery.value.trim();
+    }
     const sku = button.getAttribute('data-sku');
     const status = document.getElementById('status-' + code);
     const cands = document.getElementById('cands-' + code);
