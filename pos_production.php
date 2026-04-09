@@ -66,10 +66,11 @@ try {
         .input-qty { border: 1px solid transparent; background: transparent; text-align: center; font-weight: bold; width: 100%; border-radius: 4px; }
         .input-qty:focus { background: white; border-color: #3b82f6; outline: none; }
         .input-qty:hover { background: rgba(255,255,255,0.5); border-color: #e2e8f0; }
+        [v-cloak] { display: none; }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
-<div class="container-fluid shell inventory-shell py-4 py-lg-5" id="app">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5" id="app" v-cloak>
 
     <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
@@ -536,28 +537,28 @@ try {
         </div>
     </div>
 
-</div>
-
-<div class="modal fade" id="analyzeModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content border-0">
-            <div class="modal-header bg-info text-white"><h5 class="modal-title fw-bold">Simulador de Producción</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body text-center p-4">
-                <div class="input-group justify-content-center mb-4 shadow-sm"><span class="input-group-text bg-white fw-bold">Quiero producir</span><input type="number" class="form-control text-center fs-4 fw-bold text-primary" style="max-width:120px" v-model.number="analyzeLots" min="1"><span class="input-group-text bg-white fw-bold">lotes</span><button class="btn btn-info text-white fw-bold px-4" @click="runAnalysis">CALCULAR</button></div>
-                <div v-if="analysisResult">
-                    <div class="card bg-light border-0 mb-4 py-3">
-                        <small class="text-muted text-uppercase fw-bold">Capacidad Máxima (Stock Actual)</small>
-                        <h1 class="display-3 fw-bold text-primary mb-0">{{ analysisResult.max_lotes }} <span class="fs-5 text-muted">lotes</span></h1>
+    <div class="modal fade" id="analyzeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content border-0">
+                <div class="modal-header bg-info text-white"><h5 class="modal-title fw-bold">Simulador de Producción</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body text-center p-4">
+                    <div class="input-group justify-content-center mb-4 shadow-sm"><span class="input-group-text bg-white fw-bold">Quiero producir</span><input type="number" class="form-control text-center fs-4 fw-bold text-primary" style="max-width:120px" v-model.number="analyzeLots" min="1"><span class="input-group-text bg-white fw-bold">lotes</span><button class="btn btn-info text-white fw-bold px-4" @click="runAnalysis">CALCULAR</button></div>
+                    <div v-if="analysisResult">
+                        <div class="card bg-light border-0 mb-4 py-3">
+                            <small class="text-muted text-uppercase fw-bold">Capacidad Máxima (Stock Actual)</small>
+                            <h1 class="display-3 fw-bold text-primary mb-0">{{ analysisResult.max_lotes }} <span class="fs-5 text-muted">lotes</span></h1>
+                        </div>
+                        <div v-if="analysisResult.faltantes.length > 0" class="text-start">
+                            <h6 class="text-danger fw-bold border-bottom pb-2 mb-3">⚠️ Ingredientes Faltantes para {{analyzeLots}} lotes</h6>
+                            <table class="table table-sm table-striped"><thead><tr><th>Insumo</th><th>Requerido</th><th>Disponible</th><th>Falta</th></tr></thead><tbody><tr v-for="f in analysisResult.faltantes"><td>{{f.nombre}}</td><td>{{parseFloat(f.req)}}</td><td>{{parseFloat(f.stock)}}</td><td class="fw-bold text-danger">{{parseFloat(f.falta)}} {{f.unidad}}</td></tr></tbody></table>
+                        </div>
+                        <div v-else class="alert alert-success fw-bold"><i class="fas fa-check-circle me-2"></i> ¡Stock suficiente para producir {{analyzeLots}} lotes!</div>
                     </div>
-                    <div v-if="analysisResult.faltantes.length > 0" class="text-start">
-                        <h6 class="text-danger fw-bold border-bottom pb-2 mb-3">⚠️ Ingredientes Faltantes para {{analyzeLots}} lotes</h6>
-                        <table class="table table-sm table-striped"><thead><tr><th>Insumo</th><th>Requerido</th><th>Disponible</th><th>Falta</th></tr></thead><tbody><tr v-for="f in analysisResult.faltantes"><td>{{f.nombre}}</td><td>{{parseFloat(f.req)}}</td><td>{{parseFloat(f.stock)}}</td><td class="fw-bold text-danger">{{parseFloat(f.falta)}} {{f.unidad}}</td></tr></tbody></table>
-                    </div>
-                    <div v-else class="alert alert-success fw-bold"><i class="fas fa-check-circle me-2"></i> ¡Stock suficiente para producir {{analyzeLots}} lotes!</div>
                 </div>
             </div>
         </div>
     </div>
+
 </div>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
