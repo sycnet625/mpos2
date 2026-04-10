@@ -23,9 +23,81 @@ function ai_log($msg) {
     file_put_contents($logFile, "[$timestamp] $msg\n", FILE_APPEND);
 }
 
-// Socket persistente para evitar problemas de descubrimiento en /tmp
-$socket_path = "/var/www/tmux_ai_socket";
+// Socket persistente para tmux/daemon
+$socket_path = "/tmp/palweb_ai_tmux.sock";
 $socket_cmd = "-S $socket_path";
+$daemon_socket_path = '/tmp/palweb_ai_tmux_daemon.sock';
+
+function ai_runtime_base() {
+    $dir = __DIR__ . '/.palweb_ai_runtime';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    return $dir;
+}
+
+function ai_runtime_path($suffix = '') {
+    $base = ai_runtime_base();
+    $path = $suffix ? ($base . '/' . ltrim($suffix, '/')) : $base;
+    if (!is_dir($path)) {
+        @mkdir($path, 0777, true);
+    }
+    return $path;
+}
+
+function ai_agent_env_prefix() {
+    $home = ai_runtime_path('home');
+    $config = ai_runtime_path('home/.config');
+    $state = ai_runtime_path('home/.local/state');
+    $data = ai_runtime_path('home/.local/share');
+    $cache = ai_runtime_path('home/.cache');
+    $path = '/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin';
+
+    return "env HOME=" . escapeshellarg($home)
+        . " USER=palweb_ai LOGNAME=palweb_ai SHELL=/bin/bash PATH=" . escapeshellarg($path)
+        . " XDG_CONFIG_HOME=" . escapeshellarg($config)
+        . " XDG_STATE_HOME=" . escapeshellarg($state)
+        . " XDG_DATA_HOME=" . escapeshellarg($data)
+        . " XDG_CACHE_HOME=" . escapeshellarg($cache);
+}
+
+function ai_exec_local($command) {
+    return shell_exec(ai_agent_env_prefix() . " /bin/bash --noprofile --norc -c " . escapeshellarg($command) . " 2>&1");
+}
+
+function ai_exec_local_tmux($command) {
+    global $socket_cmd;
+    return ai_exec_local("/usr/bin/tmux $socket_cmd $command");
+}
+
+function ai_daemon_available() {
+    $list = daemon_call('list');
+    return (($list['status'] ?? 'error') === 'success');
+}
+
+function daemon_call($action, $data = []) {
+    global $daemon_socket_path;
+
+    $client = @socket_create(AF_UNIX, SOCK_STREAM, 0);
+    if (!$client) {
+        return ['status' => 'error', 'msg' => 'No se pudo crear socket hacia daemon'];
+    }
+
+    if (!@socket_connect($client, $daemon_socket_path)) {
+        socket_close($client);
+        return ['status' => 'error', 'msg' => 'Daemon tmux no conectado'];
+    }
+
+    $data['action'] = $action;
+    socket_write($client, json_encode($data) . "\n");
+    socket_set_nonblock($client);
+    usleep(250000);
+    $response = socket_read($client, 65535);
+    socket_close($client);
+
+    $decoded = json_decode((string)$response, true);
+    return is_array($decoded) ? $decoded : ['status' => 'error', 'msg' => 'Respuesta inválida del daemon', 'raw' => $response];
+}
 
 function ai_state_dir() {
     $dir = '/tmp/palweb_ai_state';
@@ -79,34 +151,16 @@ function ai_delete_state($chat_id, $agente) {
     }
 }
 
-// Asegurar que el socket de tmux existe y tiene permisos
 function ai_bootstrap_socket($socket_cmd, $socket_path) {
-    $socket_exists = file_exists($socket_path);
-    $server_running = false;
-
-    if ($socket_exists) {
-        // Verificar si el servidor realmente responde
-        $check = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd ls 2>&1");
-        if ($check !== null && !str_contains($check, 'error connecting') && !str_contains($check, 'no server running')) {
-            $server_running = true;
-        }
+    if (ai_daemon_available()) {
+        return;
     }
 
-    if (!$server_running) {
-        ai_log("Bootstrap: Servidor no responde o socket no existe. Reiniciando...");
-        if ($socket_exists) {
-            // No podemos usar rm directo con sudo sin permiso específico, 
-            // pero podemos intentar sobreescribirlo o crear la sesión
-            shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s bootstrap_init 'sleep 1' 2>&1");
-        } else {
-            shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s bootstrap_init 'sleep 1' 2>&1");
-        }
-        usleep(800000);
-    }
-
-    // Asegurar permisos siempre (esto sí tiene permiso en sudoers)
-    if (file_exists($socket_path)) {
-        shell_exec("sudo /usr/bin/chmod 0777 $socket_path");
+    $check = ai_exec_local_tmux('ls');
+    if ($check === null || str_contains($check, 'no server running') || str_contains($check, 'error connecting')) {
+        ai_log('Daemon tmux no disponible; levantando servidor tmux local');
+        ai_exec_local_tmux("new-session -d -s bootstrap_init 'sleep 1'");
+        usleep(500000);
     }
 }
 
@@ -115,26 +169,44 @@ ai_bootstrap_socket($socket_cmd, $socket_path);
 // --- FUNCIONES DIRECTAS DE TMUX ---
 
 function tmux_has_session($name) {
-    global $socket_cmd;
+    if (ai_daemon_available()) {
+        $res = daemon_call('has', ['session' => $name]);
+        return (bool)($res['exists'] ?? false);
+    }
+
     $target = escapeshellarg($name);
-    $res = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd has-session -t $target 2>&1");
-    return !(str_contains($res, 'can\'t find session') || str_contains($res, 'error connecting'));
+    $res = ai_exec_local_tmux("has-session -t $target");
+    return !(str_contains((string)$res, 'can\'t find session') || str_contains((string)$res, 'no server running') || str_contains((string)$res, 'error connecting'));
 }
 
 function tmux_new_session($name, $cmd, $workingDir = '/var/www') {
-    global $socket_cmd;
-    $finalCmd = "cd " . escapeshellarg($workingDir) . " && " . $cmd;
+    if (ai_daemon_available()) {
+        return daemon_call('run', [
+            'session' => $name,
+            'command' => $cmd,
+            'working_dir' => $workingDir
+        ]);
+    }
+
+    $finalCmd = "cd " . escapeshellarg($workingDir) . " && exec " . $cmd;
     $session = escapeshellarg($name);
-    return shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s $session " . escapeshellarg($finalCmd) . " 2>&1");
+    $output = ai_exec_local_tmux("new-session -d -s $session " . escapeshellarg($finalCmd));
+    return ['status' => 'success', 'output' => $output];
 }
 
 function tmux_send_keys($name, $keys) {
-    global $socket_cmd;
-    $target = escapeshellarg($name);
+    if (ai_daemon_available()) {
+        return daemon_call('send', [
+            'session' => $name,
+            'keys' => $keys
+        ]);
+    }
+
+    $target = escapeshellarg("{$name}:0");
     $literal = escapeshellarg($keys);
-    $out1 = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd send-keys -t $target -l -- $literal 2>&1");
-    $out2 = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd send-keys -t $target Enter 2>&1");
-    return trim((string)$out1 . "\n" . (string)$out2);
+    $out1 = ai_exec_local_tmux("send-keys -t {$target} -l -- {$literal}");
+    $out2 = ai_exec_local_tmux("send-keys -t {$target} Enter");
+    return ['status' => 'success', 'output' => trim((string)$out1 . "\n" . (string)$out2)];
 }
 
 function ansi_clean($text) {
@@ -147,11 +219,17 @@ function ansi_clean($text) {
 }
 
 function tmux_capture($name, $lines = 100) {
-    global $socket_cmd;
-    $target = escapeshellarg($name);
+    if (ai_daemon_available()) {
+        $res = daemon_call('capture', [
+            'session' => $name,
+            'lines' => $lines
+        ]);
+        return (string)($res['output'] ?? '');
+    }
+
+    $target = escapeshellarg("{$name}:0");
     $lines = max(50, (int)$lines);
-    $res = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd capture-pane -p -J -S -" . $lines . " -E - -t $target 2>&1");
-    return $res;
+    return (string)ai_exec_local_tmux("capture-pane -p -J -S -{$lines} -E - -t {$target}");
 }
 
 function tmux_capture_clean($name, $lines = 100) {
@@ -159,9 +237,12 @@ function tmux_capture_clean($name, $lines = 100) {
 }
 
 function tmux_kill($name) {
-    global $socket_cmd;
+    if (ai_daemon_available()) {
+        return daemon_call('kill', ['session' => $name]);
+    }
+
     $target = escapeshellarg($name);
-    return shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd kill-session -t $target 2>&1");
+    return ['status' => 'success', 'output' => ai_exec_local_tmux("kill-session -t {$target}")];
 }
 
 function ai_overlap_length($left, $right) {
@@ -230,7 +311,8 @@ function ai_build_agent_command($agente, $modeloSeleccionado = '') {
         case 'codex':
             return '/usr/bin/codex --no-alt-screen -a on-request -s workspace-write';
         case 'opencode':
-            return '/usr/local/bin/opencode';
+            return '/usr/local/bin/opencode'
+                . ($modeloSeleccionado !== '' ? ' -m ' . escapeshellarg($modeloSeleccionado) : '');
         case 'kilo':
             return '/usr/bin/kilo';
         case 'kilo-code':
@@ -331,16 +413,32 @@ switch ($action) {
         break;
 
     case 'list_opencode_models':
-        // Ejecutar opencode models y filtrar para obtener una lista limpia
-        $res = shell_exec("sudo -u dude1 /usr/local/bin/opencode models 2>&1");
-        $models = array_filter(explode("\n", trim($res)));
+        if (ai_daemon_available()) {
+            $res = daemon_call('opencode_models');
+            if (($res['status'] ?? 'error') !== 'success') {
+                echo json_encode(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar modelos']);
+                break;
+            }
+            $rawModels = (string)($res['output'] ?? '');
+        } else {
+            $rawModels = (string)ai_exec_local('/usr/local/bin/opencode models');
+        }
+        $models = array_filter(explode("\n", trim($rawModels)));
         echo json_encode(['status' => 'success', 'models' => array_values($models)]);
         break;
 
     case 'get_opencode_stats':
-        $res = shell_exec("sudo -u dude1 /usr/local/bin/opencode stats 2>&1");
-        // Limpieza básica de caracteres ANSI/bordes para el JSON
-        echo json_encode(['status' => 'success', 'raw' => ansi_clean($res)]);
+        if (ai_daemon_available()) {
+            $res = daemon_call('opencode_stats');
+            if (($res['status'] ?? 'error') !== 'success') {
+                echo json_encode(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar estadísticas']);
+                break;
+            }
+            $rawStats = (string)($res['output'] ?? '');
+        } else {
+            $rawStats = (string)ai_exec_local('/usr/local/bin/opencode stats');
+        }
+        echo json_encode(['status' => 'success', 'raw' => ansi_clean($rawStats)]);
         break;
 
     case 'save_project':
@@ -510,20 +608,17 @@ switch ($action) {
             $baseCmd = ai_build_agent_command($agente, $modeloSeleccionado);
 
             if (!tmux_has_session($sessionName)) {
-                tmux_new_session($sessionName, $baseCmd, $workingDir);
+                $runResult = tmux_new_session($sessionName, $baseCmd, $workingDir);
+                if (($runResult['status'] ?? 'error') !== 'success') {
+                    throw new RuntimeException($runResult['msg'] ?? 'No se pudo iniciar la sesión del agente');
+                }
                 usleep($agente === 'codex' ? 1800000 : 1000000);
             }
 
             $captureBefore = tmux_capture_clean($sessionName);
             ai_reset_state($chat_id, $agente, $captureBefore);
 
-            $keysToSend = $message;
-            if ($mode === 'chat' && $agente === 'opencode') {
-                $mParam = $modeloSeleccionado ? "-m " . $modeloSeleccionado . " " : "";
-                $keysToSend = "run -c -q {$mParam}{$message}";
-            }
-
-            tmux_send_keys($sessionName, $keysToSend);
+            tmux_send_keys($sessionName, $message);
             usleep(700000);
 
             $sync = ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
@@ -548,10 +643,16 @@ switch ($action) {
         
         $sessionName = "ai_chat_{$chat_id}_{$agente}";
         if (tmux_has_session($sessionName)) {
-            // tmux_send_keys por defecto añade un 'Enter', para teclas especiales
-            // usaremos shell_exec directo para mayor precisión
-            $target = escapeshellarg($sessionName);
-            shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd send-keys -t $target $key");
+            if (ai_daemon_available()) {
+                daemon_call('send', [
+                    'session' => $sessionName,
+                    'keys' => $key,
+                    'special' => true
+                ]);
+            } else {
+                $target = escapeshellarg("{$sessionName}:0");
+                ai_exec_local_tmux("send-keys -t {$target} {$key}");
+            }
             usleep(250000);
             ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
             echo json_encode(['status' => 'success']);
