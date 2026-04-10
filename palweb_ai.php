@@ -18,6 +18,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <link rel="manifest" href="manifest-ai.json">
     <title>AI Control Center</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
@@ -271,6 +272,33 @@ $vapid_public = $config['vapid_public_key'] ?? '';
         .kilo-icon { background: linear-gradient(135deg, #10a37f, #065f46); color: white; }
         .agent-info h6 { margin: 0; font-weight: 700; color: white; }
         .agent-info p { margin: 0; font-size: 0.8rem; color: #9ba3af; }
+        .overlay-terminal-bar {
+            background: #11161c;
+            border-top: 1px solid #30363d;
+        }
+        .overlay-terminal-input {
+            width: 100%;
+            background: #0d1117;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            border-radius: 8px;
+            padding: 10px 12px;
+            outline: none;
+            font-family: 'Courier New', monospace;
+        }
+        .overlay-key-btn {
+            min-width: 42px;
+            height: 36px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #c9d1d9;
+            border-radius: 8px;
+        }
+        .overlay-key-btn:hover { background: #30363d; color: #fff; }
+        .overlay-key-btn.wide { min-width: 62px; }
 
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
@@ -539,13 +567,39 @@ $vapid_public = $config['vapid_public_key'] ?? '';
     <!-- Overlay para Terminal o Logs -->
     <div v-if="overlay.show" class="position-fixed top-0 start-0 w-100 h-100 d-flex flex-column bg-black" style="z-index: 10000;">
         <div class="p-3 d-flex justify-content-between align-items-center border-bottom border-secondary">
-            <h6 class="m-0 text-white"><i class="fas fa-terminal me-2"></i> {{ overlay.title }}</h6>
+            <h6 class="m-0 text-white">
+                <i class="fas me-2" :class="overlay.mode === 'terminal' ? 'fa-terminal' : 'fa-file-alt'"></i>
+                {{ overlay.title }}
+            </h6>
             <div class="d-flex gap-2">
                 <button class="btn btn-sm btn-outline-light" @click="overlay.refresh()"><i class="fas fa-sync"></i></button>
-                <button class="btn btn-sm btn-danger" @click="overlay.show = false"><i class="fas fa-times"></i></button>
+                <button class="btn btn-sm btn-danger" @click="closeOverlay"><i class="fas fa-times"></i></button>
             </div>
         </div>
-        <pre class="flex-grow-1 m-0 p-3 overflow-auto text-success small" style="background: #000; font-family: 'Courier New', monospace;">{{ overlay.content }}</pre>
+        <pre ref="overlayTerminal" class="flex-grow-1 m-0 p-3 overflow-auto text-success small" style="background: #000; font-family: 'Courier New', monospace;">{{ overlay.content }}</pre>
+        <div v-if="overlay.mode === 'terminal'" class="overlay-terminal-bar p-3">
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <button class="overlay-key-btn wide" @click="sendOverlayKey('Escape')" title="Escape">Esc</button>
+                <button class="overlay-key-btn wide" @click="sendOverlayKey('Enter')" title="Enter">
+                    <i class="fas fa-level-down-alt"></i>
+                </button>
+                <button class="overlay-key-btn" @click="sendOverlayKey('Up')" title="Arriba"><i class="fas fa-arrow-up"></i></button>
+                <button class="overlay-key-btn" @click="sendOverlayKey('Down')" title="Abajo"><i class="fas fa-arrow-down"></i></button>
+                <button class="overlay-key-btn" @click="sendOverlayKey('Left')" title="Izquierda"><i class="fas fa-arrow-left"></i></button>
+                <button class="overlay-key-btn" @click="sendOverlayKey('Right')" title="Derecha"><i class="fas fa-arrow-right"></i></button>
+            </div>
+            <div class="d-flex gap-2">
+                <input
+                    class="overlay-terminal-input"
+                    v-model="overlay.input"
+                    placeholder="Enviar texto a la terminal..."
+                    @keydown.enter.prevent="sendOverlayInput"
+                >
+                <button class="btn btn-success px-3" :disabled="overlay.sending || !overlay.input.trim()" @click="sendOverlayInput">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Modal Invisible para Archivos -->
@@ -740,8 +794,14 @@ new Vue({
         editingProject: { id: null, nombre: '', ruta: '/var/www' },
         overlay: {
             show: false,
+            mode: 'logs',
             title: '',
             content: 'Cargando...',
+            input: '',
+            sending: false,
+            chatId: null,
+            agente: '',
+            autoRefreshHandle: null,
             refresh: () => {}
         }
     },
@@ -768,14 +828,72 @@ new Vue({
         }
     },
     methods: {
+        async fetchJsonSafe(url, options = {}) {
+            const res = await fetch(url, options);
+            const raw = await res.text();
+            let data = null;
+            if (raw && raw.trim() !== '') {
+                try {
+                    data = JSON.parse(raw);
+                } catch (e) {
+                    const err = new Error(`Respuesta inválida (${res.status})`);
+                    err.raw = raw;
+                    throw err;
+                }
+            }
+            if (!res.ok) {
+                const msg = (data && data.msg) ? data.msg : `HTTP ${res.status}`;
+                throw new Error(msg);
+            }
+            return data;
+        },
         log(msg) {
             const time = new Date().toLocaleTimeString();
             this.debugLogs.push({ time, msg });
             console.log(`[AI] ${msg}`);
         },
+        closeOverlay() {
+            if (this.overlay.autoRefreshHandle) {
+                clearInterval(this.overlay.autoRefreshHandle);
+                this.overlay.autoRefreshHandle = null;
+            }
+            this.overlay.show = false;
+            this.overlay.mode = 'logs';
+            this.overlay.input = '';
+            this.overlay.chatId = null;
+            this.overlay.agente = '';
+            this.overlay.sending = false;
+            this.overlay.refresh = () => {};
+        },
+        startOverlayAutoRefresh() {
+            if (this.overlay.autoRefreshHandle) {
+                clearInterval(this.overlay.autoRefreshHandle);
+            }
+            if (this.overlay.mode !== 'terminal') return;
+            this.overlay.autoRefreshHandle = setInterval(() => {
+                if (this.overlay.show && this.overlay.mode === 'terminal') {
+                    this.overlay.refresh();
+                }
+            }, 1000);
+        },
+        scrollOverlayToBottom(force = false) {
+            this.$nextTick(() => {
+                const el = this.$refs.overlayTerminal;
+                if (!el) return;
+                const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                if (force || nearBottom) {
+                    el.scrollTop = el.scrollHeight;
+                }
+            });
+        },
         async loadProjects() {
-            const res = await fetch('palweb_ai_api.php?action=list_projects');
-            this.projects = await res.json();
+            try {
+                const data = await this.fetchJsonSafe('palweb_ai_api.php?action=list_projects');
+                this.projects = Array.isArray(data) ? data : [];
+            } catch (e) {
+                this.projects = [];
+                this.log(`Error cargando proyectos: ${e.message}`);
+            }
             if (this.projects.length > 0 && !this.selectedProjectId) {
                 this.selectedProjectId = this.projects[0].id;
             }
@@ -804,8 +922,13 @@ new Vue({
         },
         async loadActiveSessions() {
             this.log("Recuperando sesiones de la base de datos...");
-            const res = await fetch('palweb_ai_api.php?action=list_chats');
-            const chats = await res.json();
+            let chats = [];
+            try {
+                const data = await this.fetchJsonSafe('palweb_ai_api.php?action=list_chats');
+                chats = Array.isArray(data) ? data : [];
+            } catch (e) {
+                this.log(`Error cargando sesiones: ${e.message}`);
+            }
             
             this.sessions = chats.map(c => ({
                 id: c.id,
@@ -922,8 +1045,14 @@ new Vue({
             const el = document.getElementById(elId);
             const wasAtBottom = el ? (el.scrollHeight - el.scrollTop - el.clientHeight < 100) : true;
 
-            const res = await fetch(`palweb_ai_api.php?action=get_messages&chat_id=${sessionId}`);
-            const msgs = await res.json();
+            let msgs = [];
+            try {
+                const data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_messages&chat_id=${sessionId}`);
+                msgs = Array.isArray(data) ? data : [];
+            } catch (e) {
+                this.log(`Error refrescando chat ${sessionId}: ${e.message}`);
+                return;
+            }
             
             // Si no hay mensajes nuevos y no es forzado, no hacemos nada pesado
             if (msgs.length === session.messages.length && !force) return;
@@ -970,26 +1099,83 @@ new Vue({
             setTimeout(() => this.refreshMessages(session.id, true), 1000);
         },
         async openTerminalView(session) {
+            this.closeOverlay();
+            this.overlay.mode = 'terminal';
             this.overlay.title = `Terminal: ${session.titulo}`;
             this.overlay.show = true;
             this.overlay.content = 'Cargando terminal...';
+            this.overlay.chatId = session.id;
+            this.overlay.agente = session.agente;
             this.overlay.refresh = async () => {
-                const res = await fetch(`palweb_ai_api.php?action=get_terminal_view&chat_id=${session.id}&agente=${session.agente}`);
-                const data = await res.json();
-                this.overlay.content = data.data || 'No se pudo capturar la terminal.';
+                const el = this.$refs.overlayTerminal;
+                const shouldStickBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight < 120);
+                try {
+                    const data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_terminal_view&chat_id=${session.id}&agente=${session.agente}`);
+                    this.overlay.content = data.data || 'Terminal sin salida.';
+                } catch (e) {
+                    this.overlay.content = `Error cargando terminal: ${e.message}`;
+                    this.log(`Error terminal ${session.id}/${session.agente}: ${e.message}`);
+                }
+                this.scrollOverlayToBottom(shouldStickBottom);
             };
             this.overlay.refresh();
+            this.startOverlayAutoRefresh();
         },
         async viewServerLogs() {
+            this.closeOverlay();
+            this.overlay.mode = 'logs';
             this.overlay.title = 'Logs del Servidor (AI Debug)';
             this.overlay.show = true;
             this.overlay.content = 'Cargando logs...';
             this.overlay.refresh = async () => {
-                const res = await fetch('palweb_ai_api.php?action=get_raw_logs');
-                const data = await res.json();
-                this.overlay.content = data.data || 'Sin logs registrados.';
+                try {
+                    const data = await this.fetchJsonSafe('palweb_ai_api.php?action=get_raw_logs');
+                    this.overlay.content = data.data || 'Sin logs registrados.';
+                } catch (e) {
+                    this.overlay.content = `Error leyendo logs: ${e.message}`;
+                }
             };
             this.overlay.refresh();
+        },
+        async sendOverlayInput() {
+            if (this.overlay.mode !== 'terminal' || this.overlay.sending || !this.overlay.input.trim()) return;
+            const text = this.overlay.input;
+            this.overlay.input = '';
+            this.overlay.sending = true;
+            try {
+                const data = await this.fetchJsonSafe('palweb_ai_api.php?action=send_terminal_input', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        chat_id: this.overlay.chatId,
+                        agente: this.overlay.agente,
+                        text: text
+                    })
+                });
+                if (data.status !== 'success') {
+                    alert(data.msg || 'No se pudo enviar texto a la terminal');
+                }
+            } catch (e) {
+                alert('Error de conexión con la terminal');
+            } finally {
+                this.overlay.sending = false;
+                setTimeout(() => this.overlay.refresh(), 200);
+            }
+        },
+        async sendOverlayKey(key) {
+            if (this.overlay.mode !== 'terminal') return;
+            try {
+                await this.fetchJsonSafe('palweb_ai_api.php?action=send_key', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        chat_id: this.overlay.chatId,
+                        agente: this.overlay.agente,
+                        key: key
+                    })
+                });
+            } catch (e) {
+                this.log(`Error enviando tecla especial: ${e.message}`);
+            }
+            setTimeout(() => this.overlay.refresh(), 150);
         },
         async sendToAgent(session) {
             if (session.loading || !session.input.trim()) return;

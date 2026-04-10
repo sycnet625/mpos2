@@ -9,8 +9,47 @@ require_once 'db.php';
 
 header('Content-Type: application/json');
 
+$GLOBALS['AI_API_RESPONSE_SENT'] = false;
+
+function ai_json_response($payload, $statusCode = 200) {
+    if (!headers_sent()) {
+        http_response_code((int)$statusCode);
+        header('Content-Type: application/json');
+    }
+    echo json_encode($payload);
+    $GLOBALS['AI_API_RESPONSE_SENT'] = true;
+}
+
+set_exception_handler(function ($e) {
+    $msg = 'Error interno';
+    if (is_object($e) && method_exists($e, 'getMessage')) {
+        $msg = $e->getMessage();
+    }
+    ai_log('UNCAUGHT: ' . $msg);
+    if (!$GLOBALS['AI_API_RESPONSE_SENT']) {
+        ai_json_response(['status' => 'error', 'msg' => $msg], 500);
+    }
+});
+
+register_shutdown_function(function () {
+    if ($GLOBALS['AI_API_RESPONSE_SENT']) {
+        return;
+    }
+    $fatal = error_get_last();
+    if (!$fatal) {
+        return;
+    }
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR];
+    if (!in_array($fatal['type'] ?? 0, $fatalTypes, true)) {
+        return;
+    }
+    $msg = ($fatal['message'] ?? 'Fatal error') . ' @ ' . ($fatal['file'] ?? 'unknown') . ':' . ($fatal['line'] ?? 0);
+    ai_log('FATAL: ' . $msg);
+    ai_json_response(['status' => 'error', 'msg' => 'Error fatal en API'], 500);
+});
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    echo json_encode(['status' => 'error', 'msg' => 'Sesión no válida.']);
+    ai_json_response(['status' => 'error', 'msg' => 'Sesión no válida.'], 401);
     exit;
 }
 
@@ -404,19 +443,19 @@ function ai_sync_terminal_to_messages(PDO $pdo, $chat_id, $agente) {
 switch ($action) {
     case 'list_chats':
         $stmt = $pdo->query("SELECT c.*, p.nombre as proyecto_nombre FROM ai_chats c LEFT JOIN ai_projects p ON c.project_id = p.id ORDER BY c.fecha DESC LIMIT 50");
-        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        ai_json_response($stmt->fetchAll(PDO::FETCH_ASSOC));
         break;
 
     case 'list_projects':
         $stmt = $pdo->query("SELECT * FROM ai_projects ORDER BY nombre ASC");
-        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
+        ai_json_response($stmt->fetchAll(PDO::FETCH_ASSOC));
         break;
 
     case 'list_opencode_models':
         if (ai_daemon_available()) {
             $res = daemon_call('opencode_models');
             if (($res['status'] ?? 'error') !== 'success') {
-                echo json_encode(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar modelos']);
+                ai_json_response(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar modelos'], 500);
                 break;
             }
             $rawModels = (string)($res['output'] ?? '');
@@ -424,21 +463,21 @@ switch ($action) {
             $rawModels = (string)ai_exec_local('/usr/local/bin/opencode models');
         }
         $models = array_filter(explode("\n", trim($rawModels)));
-        echo json_encode(['status' => 'success', 'models' => array_values($models)]);
+        ai_json_response(['status' => 'success', 'models' => array_values($models)]);
         break;
 
     case 'get_opencode_stats':
         if (ai_daemon_available()) {
             $res = daemon_call('opencode_stats');
             if (($res['status'] ?? 'error') !== 'success') {
-                echo json_encode(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar estadísticas']);
+                ai_json_response(['status' => 'error', 'msg' => $res['msg'] ?? 'No se pudo consultar estadísticas'], 500);
                 break;
             }
             $rawStats = (string)($res['output'] ?? '');
         } else {
             $rawStats = (string)ai_exec_local('/usr/local/bin/opencode stats');
         }
-        echo json_encode(['status' => 'success', 'raw' => ansi_clean($rawStats)]);
+        ai_json_response(['status' => 'success', 'raw' => ansi_clean($rawStats)]);
         break;
 
     case 'save_project':
@@ -453,20 +492,20 @@ switch ($action) {
             $st = $pdo->prepare("INSERT INTO ai_projects (nombre, ruta) VALUES (?, ?)");
             $st->execute([$nombre, $ruta]);
         }
-        echo json_encode(['status' => 'success']);
+        ai_json_response(['status' => 'success']);
         break;
 
     case 'delete_project':
         $id = (int)($_GET['id'] ?? 0);
         $pdo->prepare("DELETE FROM ai_projects WHERE id = ?")->execute([$id]);
-        echo json_encode(['status' => 'success']);
+        ai_json_response(['status' => 'success']);
         break;
 
     case 'get_raw_logs':
         if (file_exists('palweb_ai_debug.log')) {
-            echo json_encode(['status' => 'success', 'data' => shell_exec('tail -n 100 palweb_ai_debug.log')]);
+            ai_json_response(['status' => 'success', 'data' => shell_exec('tail -n 100 palweb_ai_debug.log')]);
         } else {
-            echo json_encode(['status' => 'error', 'msg' => 'Log no encontrado']);
+            ai_json_response(['status' => 'error', 'msg' => 'Log no encontrado'], 404);
         }
         break;
 
@@ -475,7 +514,7 @@ switch ($action) {
         $agente = $_GET['agente'] ?? 'claude';
         ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
         $sessionName = "ai_chat_{$chat_id}_{$agente}";
-        echo json_encode(['status' => 'success', 'data' => tmux_capture($sessionName)]);
+        ai_json_response(['status' => 'success', 'data' => tmux_capture($sessionName)]);
         break;
 
     case 'get_messages':
@@ -494,7 +533,7 @@ switch ($action) {
         foreach ($rows as &$r) {
             $r['contenido'] = ansi_clean($r['contenido']);
         }
-        echo json_encode($rows);
+        ai_json_response($rows);
         break;
 
     case 'new_chat':
@@ -505,7 +544,7 @@ switch ($action) {
         $project_id = (int)($input['project_id'] ?? 0);
         $stmt = $pdo->prepare("INSERT INTO ai_chats (titulo, agente, project_id, modelo) VALUES (?, ?, ?, ?)");
         $stmt->execute([$titulo, $agente, $project_id, $modelo]);
-        echo json_encode(['status' => 'success', 'id' => $pdo->lastInsertId()]);
+        ai_json_response(['status' => 'success', 'id' => $pdo->lastInsertId()]);
         break;
 
     case 'delete_chat':
@@ -525,13 +564,13 @@ switch ($action) {
         ai_delete_state($chat_id, $agente);
         $stmt = $pdo->prepare("DELETE FROM ai_chats WHERE id = ?");
         $stmt->execute([$chat_id]);
-        echo json_encode(['status' => 'success']);
+        ai_json_response(['status' => 'success']);
         break;
 
     case 'upload_file':
         $chat_id = (int)($_POST['chat_id'] ?? 0);
         if (!$chat_id || empty($_FILES['file'])) {
-            echo json_encode(['status' => 'error', 'msg' => 'Datos insuficientes']);
+            ai_json_response(['status' => 'error', 'msg' => 'Datos insuficientes'], 400);
             exit;
         }
         try {
@@ -542,9 +581,9 @@ switch ($action) {
             if (move_uploaded_file($file['tmp_name'], $targetPath)) {
                 $stmt = $pdo->prepare("INSERT INTO ai_messages (chat_id, rol, contenido) VALUES (?, 'user', ?)");
                 $stmt->execute([$chat_id, "**[SISTEMA] Archivo subido: " . basename($file['name']) . "**"]);
-                echo json_encode(['status' => 'success', 'msg' => 'Archivo subido']);
+                ai_json_response(['status' => 'success', 'msg' => 'Archivo subido']);
             } else { throw new Exception("Error al mover archivo"); }
-        } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
+        } catch (Exception $e) { ai_json_response(['status' => 'error', 'msg' => $e->getMessage()], 500); }
         break;
 
     case 'check_status':
@@ -563,7 +602,7 @@ switch ($action) {
             '/approval/i'
         ];
         foreach ($patterns as $p) { if (preg_match($p, $content)) { $awaiting = true; break; } }
-        echo json_encode(['status' => 'success', 'awaiting_approval' => $awaiting]);
+        ai_json_response(['status' => 'success', 'awaiting_approval' => $awaiting]);
         break;
 
     case 'approve_action':
@@ -578,7 +617,7 @@ switch ($action) {
         $stmt->execute([$chat_id, "**[SISTEMA] $txt**"]);
         usleep(300000);
         ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
-        echo json_encode(['status' => 'success']);
+        ai_json_response(['status' => 'success']);
         break;
 
     case 'send_message':
@@ -589,7 +628,7 @@ switch ($action) {
         $mode = $input['mode'] ?? 'terminal';
 
         if (empty($message) || !$chat_id) {
-            echo json_encode(['status' => 'error', 'msg' => 'Datos incompletos.']);
+            ai_json_response(['status' => 'error', 'msg' => 'Datos incompletos.'], 400);
             exit;
         }
 
@@ -624,14 +663,14 @@ switch ($action) {
             $sync = ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
             $respuesta_final = $sync['delta'] ?? '';
 
-            echo json_encode([
+            ai_json_response([
                 'status' => 'success',
                 'response' => $respuesta_final,
                 'mode' => $mode
             ]);
         } catch (Exception $e) {
             ai_log("ERROR: " . $e->getMessage());
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+            ai_json_response(['status' => 'error', 'msg' => $e->getMessage()], 500);
         }
         break;
 
@@ -655,13 +694,47 @@ switch ($action) {
             }
             usleep(250000);
             ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
-            echo json_encode(['status' => 'success']);
+            ai_json_response(['status' => 'success']);
         } else {
-            echo json_encode(['status' => 'error', 'msg' => 'Sesión no encontrada']);
+            ai_json_response(['status' => 'error', 'msg' => 'Sesión no encontrada'], 404);
         }
         break;
 
+    case 'send_terminal_input':
+        $input = json_decode(file_get_contents('php://input'), true);
+        $chat_id = (int)($input['chat_id'] ?? 0);
+        $agente = $input['agente'] ?? 'claude';
+        $text = (string)($input['text'] ?? '');
+
+        if ($chat_id <= 0 || $text === '') {
+            ai_json_response(['status' => 'error', 'msg' => 'Datos incompletos.'], 400);
+            exit;
+        }
+
+        $sessionName = "ai_chat_{$chat_id}_{$agente}";
+        if (!tmux_has_session($sessionName)) {
+            ai_json_response(['status' => 'error', 'msg' => 'Sesión no encontrada'], 404);
+            exit;
+        }
+
+        if (ai_daemon_available()) {
+            $res = daemon_call('send', [
+                'session' => $sessionName,
+                'keys' => $text
+            ]);
+        } else {
+            $res = tmux_send_keys($sessionName, $text);
+        }
+
+        usleep(250000);
+        ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
+        ai_json_response([
+            'status' => 'success',
+            'result' => $res
+        ]);
+        break;
+
     default:
-        echo json_encode(['status' => 'error', 'msg' => 'Acción no definida.']);
+        ai_json_response(['status' => 'error', 'msg' => 'Acción no definida.'], 400);
         break;
 }
