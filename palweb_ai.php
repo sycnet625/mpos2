@@ -803,19 +803,29 @@ new Vue({
             agente: '',
             autoRefreshHandle: null,
             refresh: () => {}
-        }
+        },
+        messagePollHandle: null,
+        messagePollMs: 1500,
+        messagePollErrorStreak: 0,
+        overlayPollMs: 1000,
+        overlayPollErrorStreak: 0
     },
     async mounted() {
         this.log("Iniciando Dashboard Multisesión...");
         await this.loadProjects();
         await this.loadActiveSessions();
         this.initPWA();
-        
-        setInterval(() => {
-            this.sessions.forEach(s => {
-                if (!s.loading) this.refreshMessages(s.id);
-            });
-        }, 1500);
+        this.startMessagesAutoRefresh();
+    },
+    beforeDestroy() {
+        if (this.messagePollHandle) {
+            clearInterval(this.messagePollHandle);
+            this.messagePollHandle = null;
+        }
+        if (this.overlay.autoRefreshHandle) {
+            clearInterval(this.overlay.autoRefreshHandle);
+            this.overlay.autoRefreshHandle = null;
+        }
     },
     watch: {
         layoutMode(newVal) {
@@ -852,6 +862,39 @@ new Vue({
             this.debugLogs.push({ time, msg });
             console.log(`[AI] ${msg}`);
         },
+        computePollMs(baseMs, errorStreak) {
+            if (errorStreak >= 8) return 5000;
+            if (errorStreak >= 3) return 3000;
+            return baseMs;
+        },
+        updateMessagePolling(success) {
+            this.messagePollErrorStreak = success ? 0 : (this.messagePollErrorStreak + 1);
+            const nextMs = this.computePollMs(1500, this.messagePollErrorStreak);
+            if (nextMs === this.messagePollMs) return;
+            this.messagePollMs = nextMs;
+            this.startMessagesAutoRefresh();
+            this.log(`Refresh chats ajustado a ${this.messagePollMs}ms`);
+        },
+        updateOverlayPolling(success) {
+            this.overlayPollErrorStreak = success ? 0 : (this.overlayPollErrorStreak + 1);
+            const nextMs = this.computePollMs(1000, this.overlayPollErrorStreak);
+            if (nextMs === this.overlayPollMs) return;
+            this.overlayPollMs = nextMs;
+            if (this.overlay.mode === 'terminal' && this.overlay.show) {
+                this.startOverlayAutoRefresh();
+            }
+            this.log(`Refresh terminal ajustado a ${this.overlayPollMs}ms`);
+        },
+        startMessagesAutoRefresh() {
+            if (this.messagePollHandle) {
+                clearInterval(this.messagePollHandle);
+            }
+            this.messagePollHandle = setInterval(() => {
+                this.sessions.forEach(s => {
+                    if (!s.loading) this.refreshMessages(s.id);
+                });
+            }, this.messagePollMs);
+        },
         closeOverlay() {
             if (this.overlay.autoRefreshHandle) {
                 clearInterval(this.overlay.autoRefreshHandle);
@@ -864,6 +907,8 @@ new Vue({
             this.overlay.agente = '';
             this.overlay.sending = false;
             this.overlay.refresh = () => {};
+            this.overlayPollErrorStreak = 0;
+            this.overlayPollMs = 1000;
         },
         startOverlayAutoRefresh() {
             if (this.overlay.autoRefreshHandle) {
@@ -874,7 +919,7 @@ new Vue({
                 if (this.overlay.show && this.overlay.mode === 'terminal') {
                     this.overlay.refresh();
                 }
-            }, 1000);
+            }, this.overlayPollMs);
         },
         scrollOverlayToBottom(force = false) {
             this.$nextTick(() => {
@@ -1038,7 +1083,7 @@ new Vue({
         },
         async refreshMessages(sessionId, force = false) {
             const session = this.sessions.find(s => s.id === sessionId);
-            if (!session) return;
+            if (!session) return false;
 
             // Detectar si el usuario está al final antes de actualizar
             const elId = this.layoutMode === 'sidebar' ? 'chat-box-focus-' + sessionId : 'chat-box-' + sessionId;
@@ -1051,11 +1096,13 @@ new Vue({
                 msgs = Array.isArray(data) ? data : [];
             } catch (e) {
                 this.log(`Error refrescando chat ${sessionId}: ${e.message}`);
-                return;
+                this.updateMessagePolling(false);
+                return false;
             }
+            this.updateMessagePolling(true);
             
             // Si no hay mensajes nuevos y no es forzado, no hacemos nada pesado
-            if (msgs.length === session.messages.length && !force) return;
+            if (msgs.length === session.messages.length && !force) return true;
 
             session.messages = msgs;
             
@@ -1081,6 +1128,7 @@ new Vue({
             } else {
                 session.awaitingApproval = false;
             }
+            return true;
         },
         async checkApprovalState(session) {
             try {
@@ -1112,9 +1160,11 @@ new Vue({
                 try {
                     const data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_terminal_view&chat_id=${session.id}&agente=${session.agente}`);
                     this.overlay.content = data.data || 'Terminal sin salida.';
+                    this.updateOverlayPolling(true);
                 } catch (e) {
                     this.overlay.content = `Error cargando terminal: ${e.message}`;
                     this.log(`Error terminal ${session.id}/${session.agente}: ${e.message}`);
+                    this.updateOverlayPolling(false);
                 }
                 this.scrollOverlayToBottom(shouldStickBottom);
             };
