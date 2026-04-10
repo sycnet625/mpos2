@@ -1403,8 +1403,9 @@ ob_end_flush();
             foreach ($shopBanners as $bi => $sb):
                 $sbImg   = trim((string)($sb['imagen'] ?? ''));
                 $sbHasImg = $sbImg !== '' && file_exists(__DIR__ . '/' . $sbImg);
+                $sbSize  = trim((string)($sb['bg_size'] ?? 'cover')) ?: 'cover';
                 $sbBg    = $sbHasImg
-                    ? 'background-image:url(\'' . htmlspecialchars($sbImg, ENT_QUOTES) . '?v=' . filemtime(__DIR__ . '/' . $sbImg) . '\');background-size:cover;background-position:center;'
+                    ? 'background-image:url(\'' . htmlspecialchars($sbImg, ENT_QUOTES) . '?v=' . filemtime(__DIR__ . '/' . $sbImg) . '\');background-size:' . htmlspecialchars($sbSize, ENT_QUOTES) . ';background-position:center;'
                     : '';
                 $sbClass = $sbHasImg ? '' : htmlspecialchars($sb['color_clase'] ?? 'gradient-' . ($bi + 1), ENT_QUOTES);
             ?>

@@ -103,10 +103,10 @@ $defaultConfig = [
         "kitchen_new_ticket" => true
     ],
     "banners" => [
-        ["titulo" => "🚀 Envíos a domicilio", "subtitulo" => "Calcula el costo a tu barrio", "imagen" => "", "color_clase" => "gradient-1"],
-        ["titulo" => "🍰 Dulces Frescos", "subtitulo" => "Hechos cada mañana", "imagen" => "", "color_clase" => "gradient-2"],
-        ["titulo" => "🛒 Ofertas Semanales", "subtitulo" => "Grandes descuentos", "imagen" => "", "color_clase" => "gradient-3"],
-        ["titulo" => "🍕 Comida Caliente", "subtitulo" => "Lista para llevar", "imagen" => "", "color_clase" => "gradient-4"]
+        ["titulo" => "🚀 Envíos a domicilio", "subtitulo" => "Calcula el costo a tu barrio", "imagen" => "", "color_clase" => "gradient-1", "bg_size" => "cover"],
+        ["titulo" => "🍰 Dulces Frescos",       "subtitulo" => "Hechos cada mañana",            "imagen" => "", "color_clase" => "gradient-2", "bg_size" => "cover"],
+        ["titulo" => "🛒 Ofertas Semanales",    "subtitulo" => "Grandes descuentos",             "imagen" => "", "color_clase" => "gradient-3", "bg_size" => "cover"],
+        ["titulo" => "🍕 Comida Caliente",      "subtitulo" => "Lista para llevar",              "imagen" => "", "color_clase" => "gradient-4", "bg_size" => "cover"]
     ],
     "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]]
 ];
@@ -650,6 +650,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newConfig['banners'][$i]['subtitulo'] = trim((string)($_POST['banner_subtitulo'][$i] ?? ($currentConfig['banners'][$i]['subtitulo'] ?? '')));
                 $newConfig['banners'][$i]['color_clase'] = $currentConfig['banners'][$i]['color_clase'] ?? 'gradient-' . ($i + 1);
                 $newConfig['banners'][$i]['imagen']    = $currentConfig['banners'][$i]['imagen'] ?? '';
+                $rawSize = trim((string)($_POST['banner_bg_size'][$i] ?? 'cover'));
+                $newConfig['banners'][$i]['bg_size'] = in_array($rawSize, ['cover', 'contain'], true)
+                    ? $rawSize
+                    : ((is_numeric($rawSize) && (int)$rawSize >= 10 && (int)$rawSize <= 500) ? ((int)$rawSize . '%') : 'cover');
                 if (!empty($_POST['banner_remove_' . $i])) {
                     $newConfig['banners'][$i]['imagen'] = '';
                 } elseif (isset($_FILES['banner_file_' . $i]) && (int)$_FILES['banner_file_' . $i]['error'] === UPLOAD_ERR_OK) {
@@ -2321,49 +2325,123 @@ unset($treeCompany);
                     <i class="fas fa-image me-2"></i>Carrusel de Publicidad (Shop)
                 </div>
                 <div class="card-body">
-                    <p class="text-muted small mb-4">Configura los 4 banners principales que ven tus clientes en la tienda online. Puedes subir una imagen o dejar el gradiente de color.</p>
-                    <div class="row g-3">
+                    <p class="text-muted small mb-4">Configura los 4 banners del carrusel. Puedes subir imagen, ajustar su tamaño y personalizar los textos.</p>
+                    <div class="row g-4">
                         <?php
                         $banners = $currentConfig['banners'] ?? [];
                         for ($i = 0; $i < 4; $i++):
-                            $b = $banners[$i] ?? ['titulo' => '', 'subtitulo' => '', 'imagen' => '', 'color_clase' => 'gradient-' . ($i + 1)];
-                            $bgStyle = !empty($b['imagen']) && file_exists(__DIR__ . '/' . $b['imagen'])
-                                ? "background-image: url('" . htmlspecialchars($b['imagen']) . "?v=" . filemtime(__DIR__ . '/' . $b['imagen']) . "');"
+                            $b       = $banners[$i] ?? ['titulo' => '', 'subtitulo' => '', 'imagen' => '', 'color_clase' => 'gradient-' . ($i + 1), 'bg_size' => 'cover'];
+                            $bImg    = trim((string)($b['imagen'] ?? ''));
+                            $bHasImg = $bImg !== '' && file_exists(__DIR__ . '/' . $bImg);
+                            $bSize   = htmlspecialchars((string)($b['bg_size'] ?? 'cover'), ENT_QUOTES);
+                            $bSizeNum = (is_numeric(rtrim($bSize, '%'))) ? (int)rtrim($bSize, '%') : 100;
+                            $bgStyle = $bHasImg
+                                ? "background-image:url('" . htmlspecialchars($bImg, ENT_QUOTES) . "?v=" . filemtime(__DIR__ . '/' . $bImg) . "');background-size:" . $bSize . ";background-position:center;"
                                 : '';
+                            $previewClass = $bHasImg ? '' : htmlspecialchars($b['color_clase'] ?? 'gradient-' . ($i + 1), ENT_QUOTES);
                         ?>
                         <div class="col-md-6">
                             <div class="banner-edit-card">
-                                <h6 class="fw-bold mb-3">Banner #<?php echo $i + 1; ?></h6>
-                                <div class="mb-2">
-                                    <label class="form-label small fw-semibold">Título</label>
-                                    <input type="text" name="banner_titulo[]" class="form-control form-control-sm" placeholder="Ej: 🚀 Envíos a domicilio" value="<?php echo htmlspecialchars($b['titulo']); ?>">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h6 class="fw-bold mb-0">Banner #<?php echo $i + 1; ?></h6>
+                                    <?php if ($bHasImg): ?>
+                                        <span class="badge bg-success"><i class="fas fa-image me-1"></i>Imagen activa</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary"><i class="fas fa-palette me-1"></i>Gradiente</span>
+                                    <?php endif; ?>
                                 </div>
-                                <div class="mb-2">
-                                    <label class="form-label small fw-semibold">Subtítulo</label>
-                                    <input type="text" name="banner_subtitulo[]" class="form-control form-control-sm" placeholder="Ej: Calcula el costo a tu barrio" value="<?php echo htmlspecialchars($b['subtitulo']); ?>">
-                                </div>
-                                <div class="mb-2">
-                                    <label class="form-label small fw-semibold">Imagen de fondo (JPG/PNG/WebP, máx 2MB)</label>
-                                    <input type="file" name="banner_file_<?php echo $i; ?>" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp">
-                                </div>
-                                <?php if (!empty($b['imagen']) && file_exists(__DIR__ . '/' . $b['imagen'])): ?>
-                                <div class="form-check mb-2">
-                                    <input class="form-check-input" type="checkbox" name="banner_remove_<?php echo $i; ?>" id="banner_remove_<?php echo $i; ?>" value="1">
-                                    <label class="form-check-label small text-danger fw-semibold" for="banner_remove_<?php echo $i; ?>">Eliminar imagen actual</label>
-                                </div>
-                                <?php endif; ?>
-                                <div class="banner-preview <?php echo htmlspecialchars($b['color_clase']); ?>" style="<?php echo $bgStyle; ?>">
-                                    <div class="text-center px-2">
-                                        <div style="font-size:.9rem;"><?php echo htmlspecialchars($b['titulo']); ?></div>
-                                        <div style="font-size:.65rem; font-weight:normal; opacity:.85;"><?php echo htmlspecialchars($b['subtitulo']); ?></div>
+
+                                <!-- Preview en vivo -->
+                                <div class="banner-preview <?php echo $previewClass; ?>"
+                                     id="banner_preview_<?php echo $i; ?>"
+                                     style="<?php echo $bgStyle; ?>">
+                                    <div class="text-center px-2" style="text-shadow:0 1px 4px rgba(0,0,0,.5)">
+                                        <div id="bprev_title_<?php echo $i; ?>" style="font-size:.9rem;font-weight:700;">
+                                            <?php echo htmlspecialchars($b['titulo']); ?>
+                                        </div>
+                                        <div id="bprev_sub_<?php echo $i; ?>" style="font-size:.65rem;opacity:.9;">
+                                            <?php echo htmlspecialchars($b['subtitulo']); ?>
+                                        </div>
                                     </div>
                                 </div>
+
+                                <!-- Imagen actual -->
+                                <?php if ($bHasImg): ?>
+                                <div class="d-flex align-items-center gap-3 mt-3 p-2 border rounded bg-light">
+                                    <img src="<?php echo htmlspecialchars($bImg, ENT_QUOTES); ?>?v=<?php echo filemtime(__DIR__ . '/' . $bImg); ?>"
+                                         style="height:56px;max-width:120px;object-fit:cover;border-radius:6px;border:1px solid #ddd;" alt="Banner actual">
+                                    <div class="flex-grow-1">
+                                        <div class="small fw-semibold text-truncate"><?php echo htmlspecialchars(basename($bImg)); ?></div>
+                                        <div class="form-check mt-1">
+                                            <input class="form-check-input" type="checkbox" name="banner_remove_<?php echo $i; ?>" id="banner_remove_<?php echo $i; ?>" value="1"
+                                                   onchange="bannerRemoveToggle(<?php echo $i; ?>, this.checked)">
+                                            <label class="form-check-label small text-danger fw-semibold" for="banner_remove_<?php echo $i; ?>">Eliminar imagen</label>
+                                        </div>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+
+                                <!-- Subir nueva imagen -->
+                                <div class="mt-3">
+                                    <label class="form-label small fw-semibold">
+                                        <?php echo $bHasImg ? 'Reemplazar imagen' : 'Subir imagen de fondo'; ?>
+                                        <span class="text-muted fw-normal">(JPG/PNG/WebP, máx 2MB)</span>
+                                    </label>
+                                    <input type="file" name="banner_file_<?php echo $i; ?>" class="form-control form-control-sm"
+                                           accept="image/jpeg,image/png,image/webp"
+                                           onchange="bannerFilePreview(<?php echo $i; ?>, this)">
+                                </div>
+
+                                <!-- Tamaño de imagen -->
+                                <?php if ($bHasImg): ?>
+                                <div class="mt-3">
+                                    <label class="form-label small fw-semibold d-flex justify-content-between align-items-center">
+                                        Tamaño de imagen
+                                        <span id="bsize_lbl_<?php echo $i; ?>" class="badge bg-primary"><?php echo $bSize; ?></span>
+                                    </label>
+                                    <input type="range" class="form-range" min="10" max="300" step="5"
+                                           value="<?php echo $bSizeNum; ?>"
+                                           id="bsize_range_<?php echo $i; ?>"
+                                           oninput="bannerSizeRange(<?php echo $i; ?>, this.value)">
+                                    <div class="d-flex gap-1 mt-1">
+                                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                                onclick="bannerSizeSet(<?php echo $i; ?>, 'cover')">Cover</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                                onclick="bannerSizeSet(<?php echo $i; ?>, 'contain')">Contain</button>
+                                        <span class="text-muted small ms-1 align-self-center">Cover = llenar · Contain = ajustar</span>
+                                    </div>
+                                </div>
+                                <?php else: ?>
+                                <div class="mt-2 small text-muted"><i class="fas fa-info-circle me-1"></i>Sube una imagen para activar el control de tamaño.</div>
+                                <?php endif; ?>
+                                <!-- Campo oculto con el valor final de bg_size -->
+                                <input type="hidden" name="banner_bg_size[]" id="bsize_<?php echo $i; ?>"
+                                       value="<?php echo $bSize; ?>">
+
+                                <!-- Textos -->
+                                <div class="mt-3 row g-2">
+                                    <div class="col-12">
+                                        <label class="form-label small fw-semibold">Título</label>
+                                        <input type="text" name="banner_titulo[]" class="form-control form-control-sm"
+                                               placeholder="Ej: 🚀 Envíos a domicilio"
+                                               value="<?php echo htmlspecialchars($b['titulo']); ?>"
+                                               oninput="document.getElementById('bprev_title_<?php echo $i; ?>').textContent=this.value">
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small fw-semibold">Subtítulo</label>
+                                        <input type="text" name="banner_subtitulo[]" class="form-control form-control-sm"
+                                               placeholder="Ej: Calcula el costo a tu barrio"
+                                               value="<?php echo htmlspecialchars($b['subtitulo']); ?>"
+                                               oninput="document.getElementById('bprev_sub_<?php echo $i; ?>').textContent=this.value">
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
                         <?php endfor; ?>
                     </div>
                     <div class="section-note mt-3">
-                        <i class="fas fa-info-circle me-1"></i> Los banners se muestran en el carrusel de <code>shop.php</code>. Si no hay imagen, se usa el gradiente de color predeterminado.
+                        <i class="fas fa-info-circle me-1"></i> Los banners se muestran en el carrusel de <code>shop.php</code>. Sin imagen activa se usa el gradiente de color.
                     </div>
                 </div>
             </div>
@@ -2709,6 +2787,47 @@ function onLogoFileChange(input) {
             updateTicketPreview();
         };
         reader.readAsDataURL(input.files[0]);
+    }
+}
+
+/* ── Banner size controls ───────────────────────────────────── */
+function bannerSizeRange(i, val) {
+    const v = val + '%';
+    document.getElementById('bsize_' + i).value = v;
+    document.getElementById('bsize_lbl_' + i).textContent = v;
+    const p = document.getElementById('banner_preview_' + i);
+    if (p) p.style.backgroundSize = v;
+}
+function bannerSizeSet(i, val) {
+    document.getElementById('bsize_' + i).value = val;
+    document.getElementById('bsize_lbl_' + i).textContent = val;
+    const p = document.getElementById('banner_preview_' + i);
+    if (p) p.style.backgroundSize = val;
+    // Sync slider: cover/contain → show 100 as default position
+    const range = document.getElementById('bsize_range_' + i);
+    if (range) range.value = 100;
+}
+function bannerFilePreview(i, input) {
+    if (!input.files || !input.files[0]) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const p = document.getElementById('banner_preview_' + i);
+        if (!p) return;
+        p.style.backgroundImage = "url('" + e.target.result + "')";
+        p.style.backgroundSize  = document.getElementById('bsize_' + i)?.value || 'cover';
+        p.style.backgroundPosition = 'center';
+        p.className = 'banner-preview'; // quita gradiente si había
+    };
+    reader.readAsDataURL(input.files[0]);
+}
+function bannerRemoveToggle(i, checked) {
+    const p = document.getElementById('banner_preview_' + i);
+    if (!p) return;
+    if (checked) {
+        p.style.backgroundImage = '';
+        // Restore gradient class from data attribute if available
+        const gradClass = 'gradient-' + (i + 1);
+        p.className = 'banner-preview ' + gradClass;
     }
 }
 
