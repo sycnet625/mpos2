@@ -31,6 +31,10 @@ function poscfg_table_has_column(PDO $pdo, string $table, string $column): bool
 
 $configFile = __DIR__ . '/pos.cfg';
 $defaultConfig = [
+    "marca_sistema_nombre" => "PalWeb POS Marinero",
+    "marca_sistema_logo" => "",
+    "marca_empresa_nombre" => "MI TIENDA",
+    "marca_empresa_logo" => "",
     "tienda_nombre" => "MI TIENDA",
     "direccion" => "Dirección",
     "telefono" => "",
@@ -98,6 +102,12 @@ $defaultConfig = [
         "web_order_new" => true,
         "kitchen_new_ticket" => true
     ],
+    "banners" => [
+        ["titulo" => "🚀 Envíos a domicilio", "subtitulo" => "Calcula el costo a tu barrio", "imagen" => "", "color_clase" => "gradient-1"],
+        ["titulo" => "🍰 Dulces Frescos", "subtitulo" => "Hechos cada mañana", "imagen" => "", "color_clase" => "gradient-2"],
+        ["titulo" => "🛒 Ofertas Semanales", "subtitulo" => "Grandes descuentos", "imagen" => "", "color_clase" => "gradient-3"],
+        ["titulo" => "🍕 Comida Caliente", "subtitulo" => "Lista para llevar", "imagen" => "", "color_clase" => "gradient-4"]
+    ],
     "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]]
 ];
 
@@ -148,6 +158,57 @@ function poscfg_validate_location(PDO $pdo, int $empresaId, int $sucursalId, int
     }
 }
 
+function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, array $currentConfig): string
+{
+    $configKey = $fieldName === 'marca_sistema_logo' ? 'marca_sistema_logo' : 'marca_empresa_logo';
+    $currentPath = trim((string)($currentConfig[$configKey] ?? ''));
+    $removeFlag = !empty($_POST[$fieldName . '_remove']);
+
+    $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    foreach (array_values($allowed) as $ext) {
+        $existing = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
+        if ($removeFlag && file_exists($existing)) {
+            @unlink($existing);
+        }
+    }
+    if ($removeFlag) {
+        return '';
+    }
+
+    if (isset($_FILES[$fieldName]) && (int)($_FILES[$fieldName]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+        $mime = mime_content_type($_FILES[$fieldName]['tmp_name']);
+        if (!isset($allowed[$mime]) || (int)$_FILES[$fieldName]['size'] > 2 * 1024 * 1024) {
+            throw new RuntimeException('Los logos deben ser JPG, PNG o WebP y no superar 2MB.');
+        }
+
+        foreach (array_values($allowed) as $ext) {
+            $existing = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
+            if (file_exists($existing)) {
+                @unlink($existing);
+            }
+        }
+
+        $ext = $allowed[$mime];
+        $dest = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
+        if (!@move_uploaded_file($_FILES[$fieldName]['tmp_name'], $dest)) {
+            throw new RuntimeException('No se pudo guardar uno de los logos. Verifique permisos en assets/img/.');
+        }
+
+        return 'assets/img/' . $baseName . '.' . $ext;
+    }
+
+    return $currentPath;
+}
+
+function poscfg_current_or_post(array $currentConfig, string $key, string $fallback = ''): string
+{
+    if (array_key_exists($key, $_POST)) {
+        return trim((string)$_POST[$key]);
+    }
+
+    return trim((string)($currentConfig[$key] ?? $fallback));
+}
+
 $msg = '';
 $msgType = 'success';
 $editUserId = (int)($_GET['edit_user'] ?? 0);
@@ -158,7 +219,7 @@ if ($editUserId > 0) {
 } elseif ((int)($_GET['edit_empresa'] ?? 0) > 0 || (int)($_GET['edit_sucursal'] ?? 0) > 0 || (int)($_GET['edit_almacen'] ?? 0) > 0) {
     $activeTab = 'estructura';
 } elseif (!empty($_GET['tab'])) {
-    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'];
+    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'banners', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'];
     $requestedTab = (string)$_GET['tab'];
     if (in_array($requestedTab, $allowedTabs, true)) {
         $activeTab = $requestedTab;
@@ -332,6 +393,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['tipo_cambio_usd'] = (float)($_POST['tipo_cambio_usd'] ?? 385);
             $newConfig['tipo_cambio_mlc'] = (float)($_POST['tipo_cambio_mlc'] ?? 310);
             $newConfig['moneda_default_pos'] = trim((string)($_POST['moneda_default_pos'] ?? 'CUP')) ?: 'CUP';
+            $newConfig['marca_sistema_nombre'] = poscfg_current_or_post($currentConfig, 'marca_sistema_nombre', 'PalWeb POS Marinero');
+            $newConfig['marca_empresa_nombre'] = poscfg_current_or_post($currentConfig, 'marca_empresa_nombre', (string)($currentConfig['tienda_nombre'] ?? 'MI TIENDA'));
+            if ($newConfig['marca_sistema_nombre'] === '') {
+                $newConfig['marca_sistema_nombre'] = 'PalWeb POS Marinero';
+            }
+            if ($newConfig['marca_empresa_nombre'] === '') {
+                $newConfig['marca_empresa_nombre'] = (string)($currentConfig['tienda_nombre'] ?? 'MI TIENDA');
+            }
             $newConfig['hero_color_1'] = trim((string)($_POST['hero_color_1'] ?? '#0f766e'));
             $newConfig['hero_color_2'] = trim((string)($_POST['hero_color_2'] ?? '#15803d'));
             $newConfig['hero_mostrar_usuario'] = isset($_POST['hero_mostrar_usuario']);
@@ -404,6 +473,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newConfig['ticket_logo'] = 'assets/img/ticket_logo.' . $ext;
             }
 
+            $newConfig['marca_sistema_logo'] = poscfg_process_brand_logo_upload('marca_sistema_logo', 'branding_system_logo', $currentConfig);
+            $newConfig['marca_empresa_logo'] = poscfg_process_brand_logo_upload('marca_empresa_logo', 'branding_company_logo', $currentConfig);
+
             if (isset($_POST['notification_type_keys']) && is_array($_POST['notification_type_keys'])) {
                 $newConfig['notification_type_settings'] = [];
                 $postedNotificationKeys = $_POST['notification_type_keys'] ?? [];
@@ -413,8 +485,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $newConfig['notification_type_settings'] = $currentConfig['notification_type_settings'] ?? $defaultConfig['notification_type_settings'];
             }
-            file_put_contents($configFile, json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-            $currentConfig = $newConfig;
+            $encodedConfig = json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            if ($encodedConfig === false) {
+                throw new RuntimeException('No se pudo serializar la configuración.');
+            }
+            if (file_put_contents($configFile, $encodedConfig) === false) {
+                throw new RuntimeException('No se pudo escribir pos.cfg.');
+            }
+            $savedConfig = json_decode((string)file_get_contents($configFile), true);
+            if (!is_array($savedConfig)) {
+                throw new RuntimeException('pos.cfg quedó ilegible después de guardar.');
+            }
+            $currentConfig = array_merge($defaultConfig, $savedConfig);
             $msg = 'Configuración web/shop guardada.';
         }
 
@@ -557,6 +639,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cashierId = (int)($_POST['cashier_id'] ?? 0);
             $pdo->prepare("DELETE FROM pos_cashiers WHERE id = ?")->execute([$cashierId]);
             $msg = 'Cajero eliminado.';
+        }
+
+        if ($formAction === 'save_banners') {
+            $activeTab = 'banners';
+            $newConfig = $currentConfig;
+            $allowedMimes = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+            for ($i = 0; $i < 4; $i++) {
+                $newConfig['banners'][$i]['titulo']    = trim((string)($_POST['banner_titulo'][$i] ?? ($currentConfig['banners'][$i]['titulo'] ?? '')));
+                $newConfig['banners'][$i]['subtitulo'] = trim((string)($_POST['banner_subtitulo'][$i] ?? ($currentConfig['banners'][$i]['subtitulo'] ?? '')));
+                $newConfig['banners'][$i]['color_clase'] = $currentConfig['banners'][$i]['color_clase'] ?? 'gradient-' . ($i + 1);
+                $newConfig['banners'][$i]['imagen']    = $currentConfig['banners'][$i]['imagen'] ?? '';
+                if (!empty($_POST['banner_remove_' . $i])) {
+                    $newConfig['banners'][$i]['imagen'] = '';
+                } elseif (isset($_FILES['banner_file_' . $i]) && (int)$_FILES['banner_file_' . $i]['error'] === UPLOAD_ERR_OK) {
+                    $mime = mime_content_type($_FILES['banner_file_' . $i]['tmp_name']);
+                    if (!isset($allowedMimes[$mime]) || (int)$_FILES['banner_file_' . $i]['size'] > 2 * 1024 * 1024) {
+                        throw new RuntimeException('Las imágenes de banner deben ser JPG, PNG o WebP y no superar 2MB.');
+                    }
+                    $ext  = $allowedMimes[$mime];
+                    $dest = __DIR__ . '/assets/img/banner_custom_' . $i . '.' . $ext;
+                    if (@move_uploaded_file($_FILES['banner_file_' . $i]['tmp_name'], $dest)) {
+                        $newConfig['banners'][$i]['imagen'] = 'assets/img/banner_custom_' . $i . '.' . $ext;
+                    }
+                }
+            }
+            $encodedConfig = json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            if ($encodedConfig === false) throw new RuntimeException('No se pudo serializar la configuración.');
+            if (file_put_contents($configFile, $encodedConfig) === false) throw new RuntimeException('No se pudo escribir pos.cfg.');
+            $currentConfig = array_merge($defaultConfig, json_decode((string)file_get_contents($configFile), true));
+            $msg = 'Banners guardados correctamente.';
         }
     } catch (Throwable $e) {
         $msg = $e->getMessage();
@@ -772,39 +884,175 @@ unset($treeCompany);
         .notification-switch .switch-copy { min-width:0; }
         .notification-switch .switch-title { display:block; font-weight:700; color:#0f172a; line-height:1.25; }
         .notification-switch .switch-key { display:block; margin-top:4px; font-size:.82rem; color:#64748b; word-break:break-word; }
+        .brand-preview { border:1px dashed #cbd5e1; border-radius:18px; background:linear-gradient(180deg,#f8fbff 0%,#ffffff 100%); padding:18px; height:100%; }
+        .brand-logo-preview { width:88px; height:88px; border-radius:20px; border:1px solid #dbe3ee; background:#fff; display:flex; align-items:center; justify-content:center; overflow:hidden; box-shadow:0 8px 20px rgba(15,23,42,.06); }
+        .brand-logo-preview img { width:100%; height:100%; object-fit:contain; }
+        .brand-logo-placeholder { color:#94a3b8; font-size:1.85rem; }
         @media (max-width: 768px) {
             body { padding:12px !important; }
             .page-shell { padding:14px; border-radius:18px; }
             .hero-panel { padding:18px; border-radius:18px; }
             .hero-kpi { min-width:unset; width:100%; }
         }
+
+        /* ── PREMIUM SIDEBAR ───────────────────────────── */
+        :root {
+            --sidebar-width: 260px;
+            --sidebar-collapsed-width: 72px;
+            --sidebar-bg: #0f172a;
+        }
+        body { overflow-x: hidden; }
+        #sidebar {
+            width: var(--sidebar-width);
+            height: 100vh;
+            position: fixed;
+            left: 0; top: 0;
+            background: var(--sidebar-bg);
+            color: #fff;
+            transition: width 0.3s cubic-bezier(.4,0,.2,1);
+            z-index: 1040;
+            box-shadow: 10px 0 30px rgba(0,0,0,.15);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        #sidebar.collapsed { width: var(--sidebar-collapsed-width); }
+        #sidebar.collapsed .nav-text,
+        #sidebar.collapsed .sidebar-brand-text { display: none !important; }
+        #sidebar.collapsed .sidebar-nav-link { justify-content: center; padding: .8rem 0; }
+        .sidebar-header {
+            padding: 1.2rem 1.4rem;
+            border-bottom: 1px solid rgba(255,255,255,.1);
+            flex-shrink: 0;
+        }
+        .sidebar-nav-scroll { overflow-y: auto; overflow-x: hidden; flex: 1; }
+        .sidebar-nav-link {
+            color: rgba(255,255,255,.7);
+            padding: .75rem 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: .85rem;
+            transition: all .2s;
+            border-left: 3px solid transparent;
+            cursor: pointer;
+            text-decoration: none;
+            white-space: nowrap;
+            font-size: .9rem;
+        }
+        .sidebar-nav-link:hover, .sidebar-nav-link.active {
+            color: #fff;
+            background: rgba(255,255,255,.07);
+            border-left-color: var(--cfg-primary);
+        }
+        .sidebar-nav-link i { font-size: 1.1rem; min-width: 20px; text-align: center; flex-shrink: 0; }
+        .sidebar-footer {
+            border-top: 1px solid rgba(255,255,255,.1);
+            padding: .75rem 1.4rem;
+            flex-shrink: 0;
+        }
+        #main-content {
+            margin-left: var(--sidebar-width);
+            transition: margin-left 0.3s cubic-bezier(.4,0,.2,1);
+            min-height: 100vh;
+            padding: 1.75rem 2rem;
+        }
+        #main-content.expanded { margin-left: var(--sidebar-collapsed-width); }
+        .cfg-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            gap: .75rem;
+        }
+        .btn-premium {
+            background: var(--cfg-primary);
+            color: white;
+            border-radius: .8rem;
+            padding: .55rem 1.4rem;
+            font-weight: 700;
+            border: none;
+            transition: all .2s;
+        }
+        .btn-premium:hover { background: #1e40af; transform: translateY(-1px); color: #fff; }
+
+        /* ── BANNERS ────────────────────────────────────── */
+        .banner-edit-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1rem;
+            background: #fdfdfd;
+            margin-bottom: 1rem;
+        }
+        .banner-preview {
+            height: 80px;
+            border-radius: .5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-weight: bold;
+            margin-top: 10px;
+            background-size: cover;
+            background-position: center;
+        }
+        .gradient-1 { background: linear-gradient(135deg,#667eea 0%,#764ba2 100%); }
+        .gradient-2 { background: linear-gradient(135deg,#ff9a9e 0%,#fecfef 100%); color: #7c3aed; }
+        .gradient-3 { background: linear-gradient(135deg,#84fab0 0%,#8fd3f4 100%); color: #065f46; }
+        .gradient-4 { background: linear-gradient(135deg,#fccb90 0%,#d57eeb 100%); }
+
+        @media (max-width: 991px) {
+            #sidebar { width: 0; }
+            #sidebar.mobile-open { width: var(--sidebar-width); }
+            #main-content { margin-left: 0 !important; padding: 1rem; }
+        }
     </style>
 </head>
-<body class="p-4">
-<div class="container-fluid" style="max-width:1380px">
-<div class="page-shell">
-    <div class="hero-panel">
-        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-start gap-4">
+<body>
+
+<!-- ╔═══════════════════════════════╗ -->
+<!-- ║   SIDEBAR PREMIUM             ║ -->
+<!-- ╚═══════════════════════════════╝ -->
+<nav id="sidebar">
+    <div class="sidebar-header d-flex align-items-center gap-2">
+        <i class="fas fa-layer-group text-primary fs-5"></i>
+        <span class="sidebar-brand-text fw-bold fs-6">POS Config</span>
+    </div>
+    <div class="sidebar-nav-scroll">
+        <a class="sidebar-nav-link" data-tab="shop"          onclick="showCfgTab('shop', this)"><i class="fas fa-store"></i>          <span class="nav-text">🏪 Negocio</span></a>
+        <a class="sidebar-nav-link" data-tab="ticket"        onclick="showCfgTab('ticket', this)"><i class="fas fa-receipt"></i>       <span class="nav-text">🧾 Ticket</span></a>
+        <a class="sidebar-nav-link" data-tab="pantalla"      onclick="showCfgTab('pantalla', this)"><i class="fas fa-tv"></i>          <span class="nav-text">🖥️ Pantalla</span></a>
+        <a class="sidebar-nav-link" data-tab="finanzas"      onclick="showCfgTab('finanzas', this)"><i class="fas fa-credit-card"></i> <span class="nav-text">💳 Pagos y Redes</span></a>
+        <a class="sidebar-nav-link" data-tab="banners"       onclick="showCfgTab('banners', this)"><i class="fas fa-image"></i>        <span class="nav-text">🖼️ Banners Shop</span></a>
+        <a class="sidebar-nav-link" data-tab="estructura"    onclick="showCfgTab('estructura', this)"><i class="fas fa-building"></i>  <span class="nav-text">🏢 Estructura</span></a>
+        <a class="sidebar-nav-link" data-tab="usuarios"      onclick="showCfgTab('usuarios', this)"><i class="fas fa-user"></i>        <span class="nav-text">👤 Usuarios ERP</span></a>
+        <a class="sidebar-nav-link" data-tab="cajeros"       onclick="showCfgTab('cajeros', this)"><i class="fas fa-cash-register"></i><span class="nav-text">🧑‍💼 Cajeros POS</span></a>
+        <a class="sidebar-nav-link" data-tab="notificaciones"onclick="showCfgTab('notificaciones', this)"><i class="fas fa-bell"></i>  <span class="nav-text">🔔 Notificaciones</span></a>
+        <a class="sidebar-nav-link" data-tab="estilo"        onclick="showCfgTab('estilo', this)"><i class="fas fa-palette"></i>       <span class="nav-text">🎨 Identidad</span></a>
+    </div>
+    <div class="sidebar-footer">
+        <a href="dashboard.php" class="sidebar-nav-link px-0"><i class="fas fa-arrow-left"></i><span class="nav-text">Volver al Dashboard</span></a>
+    </div>
+</nav>
+
+<!-- ╔═══════════════════════════════╗ -->
+<!-- ║   MAIN CONTENT                ║ -->
+<!-- ╚═══════════════════════════════╝ -->
+<main id="main-content">
+
+    <!-- Topbar -->
+    <div class="cfg-topbar">
+        <div class="d-flex align-items-center gap-3">
+            <button class="btn btn-sm btn-light border" onclick="toggleSidebar()" title="Colapsar menú"><i class="fas fa-bars"></i></button>
             <div>
-                <div class="small text-uppercase fw-bold opacity-75 mb-2">Centro de configuración</div>
-                <h3 class="mb-2"><i class="fas fa-layer-group me-2"></i>POS Config 2</h3>
-                <div class="opacity-75">`shop.php` sigue usando `pos.cfg`. El resto del ERP y `pos.php` usan contexto por login o por cajero.</div>
+                <h4 class="mb-0 fw-bold">Configuración del Sistema</h4>
+                <div class="small text-muted">shop.php usa pos.cfg · POS y ERP usan contexto por cajero/login</div>
             </div>
-            <div class="d-flex flex-wrap gap-3">
-                <div class="hero-kpi">
-                    <div class="small opacity-75">Empresas activas</div>
-                    <div class="fs-4 fw-bold"><?php echo count(array_filter($allEmpresas, fn($e) => !empty($e['activo']))); ?></div>
-                </div>
-                <div class="hero-kpi">
-                    <div class="small opacity-75">Usuarios ERP</div>
-                    <div class="fs-4 fw-bold"><?php echo count($userContexts); ?></div>
-                </div>
-                <div class="hero-kpi">
-                    <div class="small opacity-75">Cajeros POS</div>
-                    <div class="fs-4 fw-bold"><?php echo count($cashiers); ?></div>
-                </div>
-                <a href="dashboard.php" class="btn btn-light align-self-start"><i class="fas fa-arrow-left me-2"></i>Volver</a>
-            </div>
+        </div>
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+            <span class="badge bg-light text-dark border p-2"><i class="fas fa-building me-1"></i><?php echo count(array_filter($allEmpresas, fn($e) => !empty($e['activo']))); ?> empresas</span>
+            <span class="badge bg-light text-dark border p-2"><i class="fas fa-users me-1"></i><?php echo count($userContexts); ?> usuarios</span>
+            <span class="badge bg-light text-dark border p-2"><i class="fas fa-cash-register me-1"></i><?php echo count($cashiers); ?> cajeros</span>
         </div>
     </div>
 
@@ -812,21 +1060,11 @@ unset($treeCompany);
         <div class="alert alert-<?php echo $msgType; ?> shadow-sm"><?php echo htmlspecialchars($msg, ENT_QUOTES, 'UTF-8'); ?></div>
     <?php endif; ?>
 
-    <ul class="nav nav-tabs mb-3" id="cfgTabs">
-        <li class="nav-item"><button type="button" class="nav-link active" data-tab="shop" onclick="showCfgTab('shop', this)">🏪 Negocio</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="ticket" onclick="showCfgTab('ticket', this)">🧾 Ticket</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="pantalla" onclick="showCfgTab('pantalla', this)">🖥️ Pantalla</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="finanzas" onclick="showCfgTab('finanzas', this)">💳 Pagos y Redes</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="estructura" onclick="showCfgTab('estructura', this)">🏢 Estructura</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="usuarios" onclick="showCfgTab('usuarios', this)">👤 Usuarios ERP</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="cajeros" onclick="showCfgTab('cajeros', this)">🧑‍💼 Cajeros POS</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="notificaciones" onclick="showCfgTab('notificaciones', this)">🔔 Notificaciones</button></li>
-        <li class="nav-item"><button type="button" class="nav-link" data-tab="estilo" onclick="showCfgTab('estilo', this)">🎨 Hero & Estilos</button></li>
-    </ul>
-
     <div class="cfg-tab" data-tab-panel="shop">
         <form method="post">
             <input type="hidden" name="form_action" value="save_shop_config">
+            <input type="hidden" name="marca_sistema_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>">
+            <input type="hidden" name="marca_empresa_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>">
             <div class="card">
                 <div class="card-header fw-bold text-primary">🏪 Datos del negocio</div>
                 <div class="card-body row g-3">
@@ -911,6 +1149,8 @@ unset($treeCompany);
     <div class="cfg-tab d-none" data-tab-panel="finanzas">
         <form method="post">
             <input type="hidden" name="form_action" value="save_shop_config">
+            <input type="hidden" name="marca_sistema_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>">
+            <input type="hidden" name="marca_empresa_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>">
             <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
             <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
             <input type="hidden" name="telefono" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>">
@@ -1065,6 +1305,8 @@ unset($treeCompany);
     <div class="cfg-tab d-none" data-tab-panel="ticket">
         <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="form_action" value="save_shop_config">
+            <input type="hidden" name="marca_sistema_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>">
+            <input type="hidden" name="marca_empresa_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>">
             <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
             <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
             <input type="hidden" name="telefono" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>">
@@ -1206,6 +1448,8 @@ unset($treeCompany);
     <div class="cfg-tab d-none" data-tab-panel="pantalla">
         <form method="post">
             <input type="hidden" name="form_action" value="save_shop_config">
+            <input type="hidden" name="marca_sistema_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>">
+            <input type="hidden" name="marca_empresa_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>">
             <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
             <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
             <input type="hidden" name="telefono" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>">
@@ -1831,6 +2075,8 @@ unset($treeCompany);
             <div class="card-body">
                 <form method="post">
                     <input type="hidden" name="form_action" value="save_shop_config">
+                    <input type="hidden" name="marca_sistema_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>">
+                    <input type="hidden" name="marca_empresa_nombre" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>">
                     <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
                     <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
                     <input type="hidden" name="telefono" value="<?php echo htmlspecialchars($currentConfig['telefono']); ?>">
@@ -1896,7 +2142,7 @@ unset($treeCompany);
     </div>
 
     <div class="cfg-tab d-none" data-tab-panel="estilo">
-        <form method="post">
+        <form method="post" enctype="multipart/form-data">
             <input type="hidden" name="form_action" value="save_shop_config">
             <input type="hidden" name="tienda_nombre" value="<?php echo htmlspecialchars($currentConfig['tienda_nombre']); ?>">
             <input type="hidden" name="direccion" value="<?php echo htmlspecialchars($currentConfig['direccion']); ?>">
@@ -1956,7 +2202,87 @@ unset($treeCompany);
             <?php endforeach; ?>
 
             <div class="card">
-                <div class="card-header fw-bold text-primary">🎨 Personalización del Hero Banner</div>
+                <div class="card-header fw-bold text-primary">🎨 Identidad visual del sistema</div>
+                <div class="card-body row g-4">
+                    <div class="col-lg-6">
+                        <div class="brand-preview">
+                            <div class="d-flex align-items-center gap-3 mb-3">
+                                <div class="brand-logo-preview">
+                                    <?php if (!empty($currentConfig['marca_sistema_logo'])): ?>
+                                        <img src="<?php echo htmlspecialchars($currentConfig['marca_sistema_logo']); ?>" alt="Logo del sistema">
+                                    <?php else: ?>
+                                        <i class="fas fa-cubes brand-logo-placeholder"></i>
+                                    <?php endif; ?>
+                                </div>
+                                <div>
+                                    <div class="small text-uppercase text-muted fw-bold">Sistema</div>
+                                    <div class="fs-5 fw-bold"><?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?></div>
+                                    <div class="small-muted">Marca principal del ERP/POS.</div>
+                                </div>
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label">Nombre del sistema</label>
+                                    <input type="text" name="marca_sistema_nombre" class="form-control" value="<?php echo htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero'); ?>" placeholder="Ej: PalWeb POS Marinero">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Logo del sistema</label>
+                                    <input type="file" name="marca_sistema_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
+                                    <div class="form-text">Sube JPG, PNG o WebP. Máximo 2MB.</div>
+                                </div>
+                                <?php if (!empty($currentConfig['marca_sistema_logo'])): ?>
+                                    <div class="col-12">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="marca_sistema_logo_remove" id="marca_sistema_logo_remove" value="1">
+                                            <label class="form-check-label text-danger fw-semibold" for="marca_sistema_logo_remove">Eliminar logo actual del sistema</label>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-lg-6">
+                        <div class="brand-preview">
+                            <div class="d-flex align-items-center gap-3 mb-3">
+                                <div class="brand-logo-preview">
+                                    <?php if (!empty($currentConfig['marca_empresa_logo'])): ?>
+                                        <img src="<?php echo htmlspecialchars($currentConfig['marca_empresa_logo']); ?>" alt="Logo de la empresa">
+                                    <?php else: ?>
+                                        <i class="fas fa-store brand-logo-placeholder"></i>
+                                    <?php endif; ?>
+                                </div>
+                                <div>
+                                    <div class="small text-uppercase text-muted fw-bold">Empresa</div>
+                                    <div class="fs-5 fw-bold"><?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?></div>
+                                    <div class="small-muted">Marca comercial visible para tu negocio.</div>
+                                </div>
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-12">
+                                    <label class="form-label">Nombre de la empresa</label>
+                                    <input type="text" name="marca_empresa_nombre" class="form-control" value="<?php echo htmlspecialchars($currentConfig['marca_empresa_nombre'] ?? ($currentConfig['tienda_nombre'] ?? 'MI TIENDA')); ?>" placeholder="Ej: Marinero Restaurante">
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">Logo de la empresa</label>
+                                    <input type="file" name="marca_empresa_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
+                                    <div class="form-text">Úsalo para encabezados, splash o materiales de marca.</div>
+                                </div>
+                                <?php if (!empty($currentConfig['marca_empresa_logo'])): ?>
+                                    <div class="col-12">
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" name="marca_empresa_logo_remove" id="marca_empresa_logo_remove" value="1">
+                                            <label class="form-check-label text-danger fw-semibold" for="marca_empresa_logo_remove">Eliminar logo actual de la empresa</label>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header fw-bold text-primary">🌈 Hero y estilo base</div>
                 <div class="card-body row g-3">
                     <div class="col-md-4">
                         <label class="form-label">Color Primario (Gradiente Izq)</label>
@@ -1975,15 +2301,77 @@ unset($treeCompany);
                     </div>
                     <div class="col-12 mt-3">
                         <div class="alert alert-info">
-                            <i class="fas fa-info-circle me-1"></i> Estos colores afectan el "Hero Banner" de todos los módulos que utilizan el estilo <strong>Inventory Suite</strong> (Producción, Compras, KDS, etc.)
+                            <i class="fas fa-info-circle me-1"></i> Los nombres y logos quedan guardados en <strong>pos.cfg</strong>. Los colores siguen afectando el estilo <strong>Inventory Suite</strong> usado por Producción, Compras, KDS y módulos relacionados.
                         </div>
                     </div>
                 </div>
             </div>
-            <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar estilos hero</button>
+            <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar identidad corporativa</button>
         </form>
     </div>
-</div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- TAB: BANNERS SHOP                                           -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="cfg-tab d-none" data-tab-panel="banners">
+        <form method="post" enctype="multipart/form-data">
+            <input type="hidden" name="form_action" value="save_banners">
+            <div class="card">
+                <div class="card-header fw-bold text-primary">
+                    <i class="fas fa-image me-2"></i>Carrusel de Publicidad (Shop)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-4">Configura los 4 banners principales que ven tus clientes en la tienda online. Puedes subir una imagen o dejar el gradiente de color.</p>
+                    <div class="row g-3">
+                        <?php
+                        $banners = $currentConfig['banners'] ?? [];
+                        for ($i = 0; $i < 4; $i++):
+                            $b = $banners[$i] ?? ['titulo' => '', 'subtitulo' => '', 'imagen' => '', 'color_clase' => 'gradient-' . ($i + 1)];
+                            $bgStyle = !empty($b['imagen']) && file_exists(__DIR__ . '/' . $b['imagen'])
+                                ? "background-image: url('" . htmlspecialchars($b['imagen']) . "?v=" . filemtime(__DIR__ . '/' . $b['imagen']) . "');"
+                                : '';
+                        ?>
+                        <div class="col-md-6">
+                            <div class="banner-edit-card">
+                                <h6 class="fw-bold mb-3">Banner #<?php echo $i + 1; ?></h6>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-semibold">Título</label>
+                                    <input type="text" name="banner_titulo[]" class="form-control form-control-sm" placeholder="Ej: 🚀 Envíos a domicilio" value="<?php echo htmlspecialchars($b['titulo']); ?>">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-semibold">Subtítulo</label>
+                                    <input type="text" name="banner_subtitulo[]" class="form-control form-control-sm" placeholder="Ej: Calcula el costo a tu barrio" value="<?php echo htmlspecialchars($b['subtitulo']); ?>">
+                                </div>
+                                <div class="mb-2">
+                                    <label class="form-label small fw-semibold">Imagen de fondo (JPG/PNG/WebP, máx 2MB)</label>
+                                    <input type="file" name="banner_file_<?php echo $i; ?>" class="form-control form-control-sm" accept="image/jpeg,image/png,image/webp">
+                                </div>
+                                <?php if (!empty($b['imagen']) && file_exists(__DIR__ . '/' . $b['imagen'])): ?>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="checkbox" name="banner_remove_<?php echo $i; ?>" id="banner_remove_<?php echo $i; ?>" value="1">
+                                    <label class="form-check-label small text-danger fw-semibold" for="banner_remove_<?php echo $i; ?>">Eliminar imagen actual</label>
+                                </div>
+                                <?php endif; ?>
+                                <div class="banner-preview <?php echo htmlspecialchars($b['color_clase']); ?>" style="<?php echo $bgStyle; ?>">
+                                    <div class="text-center px-2">
+                                        <div style="font-size:.9rem;"><?php echo htmlspecialchars($b['titulo']); ?></div>
+                                        <div style="font-size:.65rem; font-weight:normal; opacity:.85;"><?php echo htmlspecialchars($b['subtitulo']); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <?php endfor; ?>
+                    </div>
+                    <div class="section-note mt-3">
+                        <i class="fas fa-info-circle me-1"></i> Los banners se muestran en el carrusel de <code>shop.php</code>. Si no hay imagen, se usa el gradiente de color predeterminado.
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-lg w-100 shadow"><i class="fas fa-save me-2"></i>Guardar Banners</button>
+        </form>
+    </div>
+
+</main>
 <script>
 const POSCFG_ACTIVE_TAB = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
@@ -2003,10 +2391,15 @@ function ensureActiveTabInputs(name) {
 function showCfgTab(name, btn) {
     document.querySelectorAll('.cfg-tab').forEach(el => el.classList.add('d-none'));
     document.querySelector('[data-tab-panel="' + name + '"]')?.classList.remove('d-none');
-    document.querySelectorAll('#cfgTabs .nav-link').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('#sidebar .sidebar-nav-link').forEach(el => el.classList.remove('active'));
     btn?.classList.add('active');
     ensureActiveTabInputs(name);
     try { localStorage.setItem('pos_config2_active_tab', name); } catch (e) {}
+}
+
+function toggleSidebar() {
+    document.getElementById('sidebar').classList.toggle('collapsed');
+    document.getElementById('main-content').classList.toggle('expanded');
 }
 
 function normalizeText(value) {
@@ -2286,7 +2679,7 @@ function updateTicketPreview() {
     if (msgFinal) {
         h += `<div style="text-align:center;font-weight:bold;font-size:10px;">${escTicket(msgFinal)}</div>`;
     }
-    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema PALWEB POS v3.0</div>';
+    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema <?= htmlspecialchars($currentConfig['marca_sistema_nombre'] ?? 'PalWeb POS Marinero') ?> v3.0</div>';
 
     if (showQr) {
         h += ticketSep();
@@ -2324,7 +2717,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try { return localStorage.getItem('pos_config2_active_tab') || ''; } catch (e) { return ''; }
     })();
     const initialTab = POSCFG_ACTIVE_TAB || rememberedTab || 'shop';
-    const initialBtn = document.querySelector(`#cfgTabs .nav-link[data-tab="${initialTab}"]`) || document.querySelector('#cfgTabs .nav-link[data-tab="shop"]');
+    const initialBtn = document.querySelector(`#sidebar .sidebar-nav-link[data-tab="${initialTab}"]`) || document.querySelector('#sidebar .sidebar-nav-link[data-tab="shop"]');
     showCfgTab(initialTab, initialBtn);
     document.querySelectorAll('#metodosPagoList .metodo-item').forEach(bindMetodoPagoItem);
     reindexMetodosPago();
