@@ -158,16 +158,23 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                 height: 100% !important;
             }
             .card-body-chat { padding-bottom: 30px; }
-            
             /* Adjust input for mobile */
             .card-footer-input { 
-                padding: 10px 12px;
-                padding-bottom: calc(15px + env(safe-area-inset-bottom, 0px)); 
-                margin-bottom: 2px;
+                padding: 8px 10px;
+                padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); 
+                background: var(--bg-card);
             }
-            .input-text { font-size: 16px !important; padding: 10px 15px; }
+            .input-text { font-size: 16px !important; padding: 8px 12px; }
             .mobile-tabs { height: 60px; }
-        }
+
+            /* Ajustar botones de control en móvil */
+            .card-footer-input .btn-group-sm > .btn, 
+            .card-footer-input .btn-sm {
+                font-size: 0.65rem;
+                padding: 2px 6px;
+            }
+            }
+
 
         /* Status Bar */
         .chat-status-bar {
@@ -371,6 +378,20 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                             </div>
                         </div>
                         <div class="card-footer-input">
+                            <!-- Teclas Especiales -->
+                            <div class="d-flex gap-1 mb-2 overflow-x-auto pb-1" style="scrollbar-width: none;">
+                                <button class="btn btn-sm btn-outline-danger py-0 px-2" @click="sendKey(session, 'C-c')" title="Ctrl+C">Ctrl+C</button>
+                                <button class="btn btn-sm btn-outline-warning py-0 px-2" @click="sendKey(session, 'Escape')">ESC</button>
+                                <button class="btn btn-sm btn-outline-info py-0 px-2" @click="refreshMessages(session.id, true)" title="Refrescar Terminal">
+                                    <i class="fas fa-sync" :class="{'fa-spin': session.loading}"></i>
+                                </button>
+                                <div class="btn-group btn-group-sm ms-2">
+                                    <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Up')"><i class="fas fa-arrow-up"></i></button>
+                                    <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Down')"><i class="fas fa-arrow-down"></i></button>
+                                    <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Left')"><i class="fas fa-arrow-left"></i></button>
+                                    <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Right')"><i class="fas fa-arrow-right"></i></button>
+                                </div>
+                            </div>
                             <div class="input-group-custom">
                                 <button class="action-btn" @click="startVoice(session.id)" :class="{'text-danger': recording}">
                                     <i class="fas fa-microphone"></i>
@@ -380,7 +401,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                             </div>
                         </div>
                         <div class="chat-status-bar">
-                            <span class="model-badge">{{ session.agente }}</span>
+                            <span class="model-badge">{{ session.agente }} <span v-if="session.sub_model" class="opacity-75 ms-1">| {{ session.sub_model }}</span></span>
                             <div class="d-flex align-items-center">
                                 <div class="usage-circle">
                                     <svg viewBox="0 0 24 24">
@@ -389,7 +410,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                                             :style="{'stroke-dasharray': 62.8, 'stroke-dashoffset': 62.8 * (1 - (session.usage_pct / 100))}"></circle>
                                     </svg>
                                 </div>
-                                <span class="usage-text">#{{ session.usage_count }} ({{ session.usage_pct }}%)</span>
+                                <span class="usage-text">{{ session.usage_count_display }} ({{ session.usage_pct }}%)</span>
                             </div>
                         </div>
                     </div>
@@ -447,6 +468,17 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                 </div>
 
                 <div class="card-footer-input">
+                    <!-- Teclas Especiales -->
+                    <div class="d-flex gap-1 mb-2 overflow-x-auto pb-1" style="scrollbar-width: none;">
+                        <button class="btn btn-sm btn-outline-danger py-0 px-2" @click="sendKey(session, 'C-c')" title="Ctrl+C">Ctrl+C</button>
+                        <button class="btn btn-sm btn-outline-warning py-0 px-2" @click="sendKey(session, 'Escape')">ESC</button>
+                        <div class="btn-group btn-group-sm ms-2">
+                            <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Up')"><i class="fas fa-arrow-up"></i></button>
+                            <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Down')"><i class="fas fa-arrow-down"></i></button>
+                            <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Left')"><i class="fas fa-arrow-left"></i></button>
+                            <button class="btn btn-outline-secondary px-2" @click="sendKey(session, 'Right')"><i class="fas fa-arrow-right"></i></button>
+                        </div>
+                    </div>
                     <div class="input-group-custom">
                         <button class="action-btn" @click="startVoice(session.id)" :class="{'text-danger': recording}">
                             <i class="fas fa-microphone"></i>
@@ -611,6 +643,13 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                         </div>
                     </div>
 
+                    <div class="mb-4" v-if="selectedForNew === 'opencode' && opencodeModels.length > 0">
+                        <label class="form-label text-muted small fw-bold">MODELO OPENCODE</label>
+                        <select class="form-select bg-dark text-white border-info rounded-pill px-3" v-model="selectedModel">
+                            <option v-for="m in opencodeModels" :key="m" :value="m">{{ m }}</option>
+                        </select>
+                    </div>
+
                     <div class="mt-4 pt-2">
                         <button class="btn btn-success w-100 py-3 fw-bold rounded-pill shadow-lg" 
                                 @click="confirmNewSession" 
@@ -687,6 +726,8 @@ new Vue({
         mobileActiveSessionId: null,
         layoutMode: localStorage.getItem('palweb_ai_layout') || 'sidebar',
         showMobileSidebar: false,
+        opencodeModels: [],
+        selectedModel: '',
         debugLogs: [],
         showDebug: false,
         recording: false,
@@ -714,7 +755,7 @@ new Vue({
             this.sessions.forEach(s => {
                 if (!s.loading) this.refreshMessages(s.id);
             });
-        }, 5000);
+        }, 1500);
     },
     watch: {
         layoutMode(newVal) {
@@ -776,7 +817,9 @@ new Vue({
                 loading: false,
                 awaitingApproval: false,
                 usage_count: 0,
-                usage_pct: 0
+                usage_pct: 0,
+                usage_count_display: '',
+                sub_model: ''
             }));
 
             if (this.sessions.length > 0 && !this.mobileActiveSessionId) {
@@ -787,21 +830,47 @@ new Vue({
                 this.refreshMessages(s.id);
             }
         },
+        async loadOpencodeModels() {
+            try {
+                const res = await fetch('palweb_ai_api.php?action=list_opencode_models');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.opencodeModels = data.models;
+                    if (this.opencodeModels.length > 0 && !this.selectedModel) {
+                        this.selectedModel = this.opencodeModels[0];
+                    }
+                }
+            } catch (e) { this.log("Error cargando modelos de OpenCode"); }
+        },
+        async getOpencodeStats() {
+            try {
+                const res = await fetch('palweb_ai_api.php?action=get_opencode_stats');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.log("Estadísticas actualizadas");
+                }
+            } catch (e) {}
+        },
         async createNewSession() {
             this.selectedForNew = 'claude';
+            this.loadOpencodeModels(); // Cargar modelos al querer crear sesión
             const modal = new bootstrap.Modal(document.getElementById('agentSelectorModal'));
             modal.show();
         },
         async confirmNewSession() {
             const agent = this.selectedForNew;
-            if (!agent || !this.selectedProjectId) return;
+            if (!agent || !this.selectedProjectId) {
+                alert("Seleccione agente y proyecto");
+                return;
+            }
             
             const res = await fetch('palweb_ai_api.php?action=new_chat', {
                 method: 'POST',
                 body: JSON.stringify({ 
                     agente: agent, 
                     titulo: 'Sesión ' + agent,
-                    project_id: this.selectedProjectId
+                    project_id: this.selectedProjectId,
+                    modelo: (agent === 'opencode') ? this.selectedModel : null
                 })
             });
             const data = await res.json();
@@ -817,7 +886,9 @@ new Vue({
                     loading: false,
                     awaitingApproval: false,
                     usage_count: 0,
-                    usage_pct: 0
+                    usage_pct: 0,
+                    usage_count_display: '',
+                    sub_model: (agent === 'opencode') ? this.selectedModel : ''
                 });
                 this.mobileActiveSessionId = data.id;
                 this.log(`Nueva sesión creada: ${data.id}`);
@@ -825,6 +896,21 @@ new Vue({
                 const modalEl = document.getElementById('agentSelectorModal');
                 const modal = bootstrap.Modal.getInstance(modalEl);
                 if (modal) modal.hide();
+            }
+        },
+        extractMetadata(session, text) {
+            if (!text) return;
+            // Extraer porcentaje de uso: ej "6%"
+            const pctMatch = text.match(/(\d+)\s*%/);
+            if (pctMatch) session.usage_pct = parseInt(pctMatch[1]);
+            // Extraer tokens/uso: ej "12.3K" o "12345"
+            const countMatch = text.match(/(\d+\.?\d*[KMG]?)\s*\(/);
+            if (countMatch) session.usage_count_display = countMatch[1];
+            // Extraer Sub-modelo: ej "Big Pickle"
+            const modelMatch = text.match(/Build\s*·?\s*([^·\n\r|]+)/i);
+            if (modelMatch) {
+                let m = modelMatch[1].trim();
+                if (m.length < 30) session.sub_model = m;
             }
         },
         async refreshMessages(sessionId, force = false) {
@@ -843,8 +929,18 @@ new Vue({
             if (msgs.length === session.messages.length && !force) return;
 
             session.messages = msgs;
-            session.usage_count = msgs.length;
-            session.usage_pct = Math.min(100, Math.round((msgs.length / 50) * 100));
+            
+            // Analizar el último mensaje para extraer metadatos reales
+            const lastAssistantMsg = [...msgs].reverse().find(m => m.rol === 'assistant');
+            if (lastAssistantMsg) {
+                this.extractMetadata(session, lastAssistantMsg.contenido);
+            }
+
+            // Fallback si no hay datos reales
+            if (!session.usage_count_display) {
+                session.usage_count_display = '#' + msgs.length;
+                session.usage_pct = Math.min(100, Math.round((msgs.length / 50) * 100));
+            }
             
             // Solo scrollear si estaba al final o si se fuerza (ej: al enviar mensaje)
             if (force || wasAtBottom) {
@@ -928,9 +1024,23 @@ new Vue({
                 session.loading = false;
             }
         },
+        async sendKey(session, key) {
+            this.log(`Enviando tecla ${key} a sesión ${session.id}...`);
+            await fetch('palweb_ai_api.php?action=send_key', {
+                method: 'POST',
+                body: JSON.stringify({ 
+                    chat_id: session.id, 
+                    agente: session.agente,
+                    key: key
+                })
+            });
+            setTimeout(() => this.refreshMessages(session.id, true), 500);
+        },
         async closeSession(id) {
             if (!confirm("¿Cerrar sesión? El proceso en tmux se detendrá.")) return;
-            await fetch(`palweb_ai_api.php?action=delete_chat&chat_id=${id}`);
+            const session = this.sessions.find(s => s.id === id);
+            const agente = session ? encodeURIComponent(session.agente) : 'claude';
+            await fetch(`palweb_ai_api.php?action=delete_chat&chat_id=${id}&agente=${agente}`);
             this.sessions = this.sessions.filter(s => s.id !== id);
         },
         renderMarkdown(text) {
@@ -939,10 +1049,14 @@ new Vue({
             return typeof marked !== 'undefined' ? marked.parse(cleanText) : cleanText;
         },
         stripAnsi(text) {
-            // Elimina secuencias de escape ANSI comunes y artefactos como 0[
-            return text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '')
-                       .replace(/0\[m/g, '') 
-                       .replace(/0\[/g, '');
+            if (!text) return '';
+            // 1. Elimina secuencias de escape ANSI
+            let clean = text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+            // 2. Eliminar artefactos específicos de tmux/ncurses
+            clean = clean.replace(/0\[m/g, '').replace(/0\[/g, '');
+            // 3. Limpiar caracteres de dibujo de cajas que deforman el texto
+            clean = clean.replace(/[┃╽╹▀▀▀▀█▣⬝]/g, '');
+            return clean.trim();
         },
         scrollToBottom(id) {
             this.$nextTick(() => {
