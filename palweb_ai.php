@@ -19,7 +19,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <link rel="manifest" href="manifest-ai.json">
+    <link rel="manifest" href="manifest-ai.php">
     <title>AI Control Center</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
@@ -334,6 +334,9 @@ $vapid_public = $config['vapid_public_key'] ?? '';
             </div>
         </div>
         <div class="d-flex gap-3">
+            <button class="action-btn text-danger" @click="clearActiveChat" v-if="sessions.length > 0" title="Borrar historial del chat">
+                <i class="fas fa-trash-alt"></i>
+            </button>
             <button class="action-btn" @click="viewServerLogs" title="Ver Logs del Servidor">
                 <i class="fas fa-file-alt"></i>
             </button>
@@ -683,15 +686,15 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                             </div>
                         </div>
 
-                        <div class="agent-option" :class="{active: selectedForNew === 'kilo-code'}" @click="selectedForNew = 'kilo-code'">
-                            <div class="agent-icon kilo-icon" style="background: linear-gradient(135deg, #059669, #064e3b);">
-                                <i class="fas fa-microchip"></i>
+                        <div class="agent-option" :class="{active: selectedForNew === 'gemini'}" @click="selectedForNew = 'gemini'">
+                            <div class="agent-icon" style="background: linear-gradient(135deg, #1a73e8, #4285f4); color: white;">
+                                <i class="fas fa-star"></i>
                             </div>
                             <div class="agent-info">
-                                <h6>Kilo Code</h6>
-                                <p>Ingeniería de software avanzada con Kilo.</p>
+                                <h6>Gemini</h6>
+                                <p>Google Gemini AI Agent.</p>
                             </div>
-                            <div class="ms-auto" v-if="selectedForNew === 'kilo-code'">
+                            <div class="ms-auto" v-if="selectedForNew === 'gemini'">
                                 <i class="fas fa-check-circle text-success fa-lg"></i>
                             </div>
                         </div>
@@ -701,6 +704,13 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                         <label class="form-label text-muted small fw-bold">MODELO OPENCODE</label>
                         <select class="form-select bg-dark text-white border-info rounded-pill px-3" v-model="selectedModel">
                             <option v-for="m in opencodeModels" :key="m" :value="m">{{ m }}</option>
+                        </select>
+                    </div>
+
+                    <div class="mb-4" v-if="selectedForNew === 'kilo' && kiloModels.length > 0">
+                        <label class="form-label text-muted small fw-bold">MODELO KILO (FAVORITOS FREE)</label>
+                        <select class="form-select bg-dark text-white border-info rounded-pill px-3" v-model="selectedModel">
+                            <option v-for="m in kiloModels" :key="m" :value="m">{{ m }}</option>
                         </select>
                     </div>
 
@@ -781,6 +791,7 @@ new Vue({
         layoutMode: localStorage.getItem('palweb_ai_layout') || 'sidebar',
         showMobileSidebar: false,
         opencodeModels: [],
+        kiloModels: [],
         selectedModel: '',
         debugLogs: [],
         showDebug: false,
@@ -910,6 +921,24 @@ new Vue({
             this.overlayPollErrorStreak = 0;
             this.overlayPollMs = 1000;
         },
+        async clearActiveChat() {
+            const chatId = (this.layoutMode === 'sidebar') ? this.mobileActiveSessionId : this.activeSessionId;
+            if (!chatId) {
+                alert("Seleccione una sesión activa primero.");
+                return;
+            }
+            if (!confirm("¿Borrar historial del chat actual?")) return;
+            const s = this.sessions.find(x => x.id === chatId);
+            if (!s) return;
+            try {
+                const res = await fetch(`palweb_ai_api.php?action=clear_chat&chat_id=${chatId}&agente=${s.agente}`);
+                const data = await res.json();
+                if (data.status === 'success') {
+                    s.messages = [];
+                    this.log(`Chat ${chatId} limpiado.`);
+                }
+            } catch (e) { alert("Error al limpiar chat"); }
+        },
         startOverlayAutoRefresh() {
             if (this.overlay.autoRefreshHandle) {
                 clearInterval(this.overlay.autoRefreshHandle);
@@ -1019,9 +1048,23 @@ new Vue({
                 }
             } catch (e) {}
         },
+        async loadKiloModels() {
+            try {
+                const res = await fetch('palweb_ai_api.php?action=list_kilo_models');
+                const data = await res.json();
+                if (data.status === 'success') {
+                    this.kiloModels = data.models;
+                    if (this.kiloModels.length > 0 && !this.selectedModel) {
+                        this.selectedModel = this.kiloModels[0];
+                    }
+                }
+            } catch (e) { this.log("Error cargando modelos de Kilo"); }
+        },
         async createNewSession() {
             this.selectedForNew = 'claude';
-            this.loadOpencodeModels(); // Cargar modelos al querer crear sesión
+            this.selectedModel = '';
+            this.loadOpencodeModels();
+            this.loadKiloModels();
             const modal = new bootstrap.Modal(document.getElementById('agentSelectorModal'));
             modal.show();
         },
@@ -1038,7 +1081,7 @@ new Vue({
                     agente: agent, 
                     titulo: 'Sesión ' + agent,
                     project_id: this.selectedProjectId,
-                    modelo: (agent === 'opencode') ? this.selectedModel : null
+                    modelo: (agent === 'opencode' || agent === 'kilo') ? this.selectedModel : null
                 })
             });
             const data = await res.json();
@@ -1056,7 +1099,7 @@ new Vue({
                     usage_count: 0,
                     usage_pct: 0,
                     usage_count_display: '',
-                    sub_model: (agent === 'opencode') ? this.selectedModel : ''
+                    sub_model: (agent === 'opencode' || agent === 'kilo') ? this.selectedModel : ''
                 });
                 this.mobileActiveSessionId = data.id;
                 this.log(`Nueva sesión creada: ${data.id}`);
@@ -1290,9 +1333,28 @@ new Vue({
             let clean = text.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
             // 2. Eliminar artefactos específicos de tmux/ncurses
             clean = clean.replace(/0\[m/g, '').replace(/0\[/g, '');
-            // 3. Limpiar caracteres de dibujo de cajas que deforman el texto
-            clean = clean.replace(/[┃╽╹▀▀▀▀█▣⬝]/g, '');
-            return clean.trim();
+            
+            // 3. Filtrado de líneas de ruido visual (List negra de la terminal)
+            const lines = clean.split('\n');
+            const filtered = lines.filter(line => {
+                const l = line.trim();
+                if (l === '') return false;
+                // Bloques y decoraciones sólidas
+                if (/[▄█▀░▒▓█]{3,}/u.test(l)) return false;
+                // Spinners y "Thinking"
+                if (/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*Thinking/u.test(l)) return false;
+                // Atajos y ayudas: esc to cancel, ? for shortcuts, Ctrl+
+                if (/(esc to cancel|\? for shortcuts|Ctrl\+[A-Z0-9])/i.test(l)) return false;
+                // Prompts de entrada y headers de configuración
+                if (/Type your message|@path\/to\/file/i.test(l)) return false;
+                if (/workspace.*sandbox|model.*Auto|Gemini.*latest|no sandbox/i.test(l)) return false;
+                if (/\d+ GEMINI\.md file/i.test(l)) return false;
+                // Bordes de cuadros y líneas de separación
+                if (/^[ \-=_*#\.\/|\\│─┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬]+$/u.test(l)) return false;
+                return true;
+            });
+            
+            return filtered.join('\n').trim();
         },
         scrollToBottom(id) {
             this.$nextTick(() => {

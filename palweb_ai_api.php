@@ -5,11 +5,56 @@
 
 ini_set('display_errors', 0);
 session_start();
-require_once 'db.php';
+// require_once 'db.php'; // Removido: Uso de ficheros locales
 
 header('Content-Type: application/json');
 
 $GLOBALS['AI_API_RESPONSE_SENT'] = false;
+
+// --- GESTIÓN DE DATOS EN FICHEROS LOCALES ---
+
+function ai_data_dir() {
+    $dir = __DIR__ . '/ai_data';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    return $dir;
+}
+
+function ai_get_projects() {
+    $file = ai_data_dir() . '/projects.json';
+    if (!is_file($file)) return [];
+    return json_decode(file_get_contents($file), true) ?: [];
+}
+
+function ai_save_projects($projects) {
+    $file = ai_data_dir() . '/projects.json';
+    file_put_contents($file, json_encode($projects, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function ai_get_chats() {
+    $file = ai_data_dir() . '/chats.json';
+    if (!is_file($file)) return [];
+    return json_decode(file_get_contents($file), true) ?: [];
+}
+
+function ai_save_chats($chats) {
+    $file = ai_data_dir() . '/chats.json';
+    file_put_contents($file, json_encode($chats, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+function ai_get_messages($chat_id) {
+    $file = ai_data_dir() . "/messages_{$chat_id}.json";
+    if (!is_file($file)) return [];
+    return json_decode(file_get_contents($file), true) ?: [];
+}
+
+function ai_save_messages($chat_id, $messages) {
+    $file = ai_data_dir() . "/messages_{$chat_id}.json";
+    file_put_contents($file, json_encode($messages, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+}
+
+// --------------------------------------------
 
 function ai_json_response($payload, $statusCode = 200) {
     if (!headers_sent()) {
@@ -72,6 +117,7 @@ function ai_runtime_base() {
     if (!is_dir($dir)) {
         @mkdir($dir, 0777, true);
     }
+    @chmod($dir, 0777);
     return $dir;
 }
 
@@ -81,6 +127,7 @@ function ai_runtime_path($suffix = '') {
     if (!is_dir($path)) {
         @mkdir($path, 0777, true);
     }
+    @chmod($path, 0777);
     return $path;
 }
 
@@ -104,9 +151,47 @@ function ai_exec_local($command) {
     return shell_exec(ai_agent_env_prefix() . " /bin/bash --noprofile --norc -c " . escapeshellarg($command) . " 2>&1");
 }
 
+function ai_tmux_output_is_server_down($output) {
+    $o = strtolower((string)$output);
+    return str_contains($o, 'no server running')
+        || str_contains($o, 'error connecting')
+        || str_contains($o, 'failed to connect');
+}
+
+function ai_ensure_local_tmux_server() {
+    global $socket_cmd, $socket_path;
+
+    // Arranque y configuración base del servidor tmux en socket dedicado
+    ai_exec_local("/usr/bin/tmux $socket_cmd start-server");
+    ai_exec_local("/usr/bin/tmux $socket_cmd set-option -g exit-empty off");
+
+    // Mantener una sesión viva para evitar caída del server entre requests
+    $keepalive = '__palweb_ai_keepalive';
+    $check = ai_exec_local("/usr/bin/tmux $socket_cmd has-session -t " . escapeshellarg($keepalive));
+    if (ai_tmux_output_is_server_down($check) || str_contains((string)$check, "can't find session")) {
+        ai_exec_local("/usr/bin/tmux $socket_cmd new-session -d -s " . escapeshellarg($keepalive) . " " . escapeshellarg("while true; do sleep 3600; done"));
+    }
+
+    // Si el socket quedó huérfano, recrearlo
+    $probe = ai_exec_local("/usr/bin/tmux $socket_cmd ls");
+    if (ai_tmux_output_is_server_down($probe) && is_file($socket_path)) {
+        @unlink($socket_path);
+        ai_exec_local("/usr/bin/tmux $socket_cmd start-server");
+        ai_exec_local("/usr/bin/tmux $socket_cmd set-option -g exit-empty off");
+        ai_exec_local("/usr/bin/tmux $socket_cmd new-session -d -s " . escapeshellarg($keepalive) . " " . escapeshellarg("while true; do sleep 3600; done"));
+    }
+}
+
 function ai_exec_local_tmux($command) {
     global $socket_cmd;
-    return ai_exec_local("/usr/bin/tmux $socket_cmd $command");
+    ai_ensure_local_tmux_server();
+    $out = ai_exec_local("/usr/bin/tmux $socket_cmd $command");
+    if (ai_tmux_output_is_server_down($out)) {
+        ai_log("tmux caído, reintentando comando: $command");
+        ai_ensure_local_tmux_server();
+        $out = ai_exec_local("/usr/bin/tmux $socket_cmd $command");
+    }
+    return $out;
 }
 
 function ai_daemon_available() {
@@ -194,13 +279,8 @@ function ai_bootstrap_socket($socket_cmd, $socket_path) {
     if (ai_daemon_available()) {
         return;
     }
-
-    $check = ai_exec_local_tmux('ls');
-    if ($check === null || str_contains($check, 'no server running') || str_contains($check, 'error connecting')) {
-        ai_log('Daemon tmux no disponible; levantando servidor tmux local');
-        ai_exec_local_tmux("new-session -d -s bootstrap_init 'sleep 1'");
-        usleep(500000);
-    }
+    ai_log('Daemon tmux no disponible; inicializando tmux local persistente');
+    ai_ensure_local_tmux_server();
 }
 
 ai_bootstrap_socket($socket_cmd, $socket_path);
@@ -250,11 +330,39 @@ function tmux_send_keys($name, $keys) {
 
 function ansi_clean($text) {
     if (!$text) return '';
-    // Eliminar secuencias ANSI
+    // 1. Eliminar secuencias de escape ANSI
     $text = preg_replace('/[\x1b\x9b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/', '', $text);
-    // Eliminar artefactos específicos como 0[ o 0[m que a veces deja tmux capture-pane
+    
+    // 2. Artefactos específicos de tmux/ncurses
     $text = str_replace(['0[m', '0['], '', $text);
-    return trim($text);
+
+    $lines = explode("\n", $text);
+    $filtered = [];
+    
+    foreach ($lines as $line) {
+        $l = trim($line);
+        if ($l === '') continue;
+
+        // --- LISTA NEGRA DE RUIDO VISUAL ---
+        // Bloques y decoraciones sólidas: ▄ █ ▀
+        if (preg_match('/[▄█▀░▒▓█]{3,}/u', $l)) continue;
+        // Spinners y estados de pensamiento: ⠙ Thinking... (9s)
+        if (preg_match('/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*Thinking/u', $l)) continue;
+        // Atajos y ayudas de teclado: esc to cancel, ? for shortcuts, Ctrl+Y
+        if (preg_match('/(esc to cancel|\? for shortcuts|Ctrl\+[A-Z0-9])/i', $l)) continue;
+        // Prompts de entrada de agente: Type your message or @path
+        if (preg_match('/Type your message|@path\/to\/file/i', $l)) continue;
+        // Información de contexto/configuración del modelo/sandbox
+        if (preg_match('/workspace.*sandbox|model.*Auto|Gemini.*latest|no sandbox/i', $l)) continue;
+        // Archivos detectados o info de sesión irrelevante
+        if (preg_match('/\d+ GEMINI\.md file/i', $l)) continue;
+        // Bordes de cuadros y líneas de separación de terminal
+        if (preg_match('/^[ \-=_*#\.\/|\\│─┌┐└┘├┤┬┴┼═║╒╓╔╕╖╗╘╙╚╛╜╝╞╟╠╡╢╣╤╥╦╧╨╩╪╫╬]+$/u', $l)) continue;
+
+        $filtered[] = $line;
+    }
+    
+    return trim(implode("\n", $filtered));
 }
 
 function tmux_capture($name, $lines = 100) {
@@ -268,7 +376,12 @@ function tmux_capture($name, $lines = 100) {
 
     $target = escapeshellarg("{$name}:0");
     $lines = max(50, (int)$lines);
-    return (string)ai_exec_local_tmux("capture-pane -p -J -S -{$lines} -E - -t {$target}");
+    $out = (string)ai_exec_local_tmux("capture-pane -p -J -S -{$lines} -E - -t {$target}");
+    $low = strtolower($out);
+    if (str_contains($low, "can't find session") || ai_tmux_output_is_server_down($out)) {
+        return '';
+    }
+    return $out;
 }
 
 function tmux_capture_clean($name, $lines = 100) {
@@ -343,26 +456,141 @@ function ai_merge_chunks($existing, $delta) {
     return $existing . "\n" . $delta;
 }
 
-function ai_build_agent_command($agente, $modeloSeleccionado = '') {
+function ai_strlen_safe($text) {
+    if (function_exists('mb_strlen')) {
+        return mb_strlen((string)$text, 'UTF-8');
+    }
+    return strlen((string)$text);
+}
+
+function ai_substr_safe($text, $start, $len = null) {
+    $text = (string)$text;
+    if (function_exists('mb_substr')) {
+        return $len === null
+            ? mb_substr($text, (int)$start, null, 'UTF-8')
+            : mb_substr($text, (int)$start, (int)$len, 'UTF-8');
+    }
+    return $len === null
+        ? substr($text, (int)$start)
+        : substr($text, (int)$start, (int)$len);
+}
+
+function ai_message_contenido_limit($pdo = null) {
+    return 1000000; // Límite virtual amplio para ficheros locales
+}
+
+function ai_fit_message_content($pdo, $text) {
+    $text = (string)$text;
+    $limit = ai_message_contenido_limit();
+    if (ai_strlen_safe($text) <= $limit) {
+        return $text;
+    }
+
+    $suffix = "… [truncado]";
+    $suffixLen = ai_strlen_safe($suffix);
+    $cut = max(0, $limit - $suffixLen);
+    $trimmed = ai_substr_safe($text, 0, $cut);
+    return $trimmed . $suffix;
+}
+
+function ai_build_agent_command($agente, $modeloSeleccionado = '', $promptInicial = '') {
     $modeloSeleccionado = trim((string)$modeloSeleccionado);
+    $promptInicial = trim((string)$promptInicial);
 
     switch ($agente) {
         case 'codex':
             return '/usr/bin/codex --no-alt-screen -a on-request -s workspace-write';
         case 'opencode':
-            return '/usr/local/bin/opencode'
+            return '/bin/opencode'
                 . ($modeloSeleccionado !== '' ? ' -m ' . escapeshellarg($modeloSeleccionado) : '');
         case 'kilo':
-            return '/usr/bin/kilo';
-        case 'kilo-code':
-            return '/usr/bin/kilocode';
+            // Si el modelo de kilo empieza por "kilo/", limpiar el prefijo
+            if (str_starts_with($modeloSeleccionado, 'kilo/')) {
+                $modeloSeleccionado = substr($modeloSeleccionado, 5);
+            }
+            return '/usr/bin/kilo'
+                . ($modeloSeleccionado !== '' ? ' -m ' . escapeshellarg($modeloSeleccionado) : '');
+        case 'gemini':
+            $cmd = '/usr/bin/gemini -y -r latest';
+            if ($modeloSeleccionado !== '') {
+                $cmd .= ' -m ' . escapeshellarg($modeloSeleccionado);
+            }
+            if ($promptInicial !== '') {
+                $cmd .= ' -i ' . escapeshellarg($promptInicial);
+            }
+            return $cmd;
         case 'claude':
         default:
             return '/usr/local/bin/claude';
     }
 }
 
-function ai_sync_terminal_to_messages(PDO $pdo, $chat_id, $agente) {
+function ai_load_chat_runtime($pdo, $chat_id) {
+    $chat_id = (int)$chat_id;
+    if ($chat_id <= 0) return null;
+
+    $chats = ai_get_chats();
+    foreach ($chats as $c) {
+        if ((int)$c['id'] === $chat_id) {
+            $projects = ai_get_projects();
+            $ruta = '/var/www';
+            foreach ($projects as $p) {
+                if ($p['id'] == $c['project_id']) {
+                    $ruta = $p['ruta'];
+                    break;
+                }
+            }
+            return [
+                'id' => $c['id'],
+                'agente' => $c['agente'],
+                'modelo' => $c['modelo'],
+                'ruta' => $ruta
+            ];
+        }
+    }
+    return null;
+}
+
+function ai_ensure_chat_session($pdo, $chat_id, $agente, $mensajeInicial = '') {
+    $chat_id = (int)$chat_id;
+    $agente = trim((string)$agente);
+    $mensajeInicial = trim((string)$mensajeInicial);
+    if ($chat_id <= 0) {
+        return ['status' => 'error', 'msg' => 'chat_id inválido', 'http' => 400];
+    }
+
+    $chat = ai_load_chat_runtime(null, $chat_id);
+    if (!$chat) {
+        return ['status' => 'error', 'msg' => 'Chat no encontrado', 'http' => 404];
+    }
+
+    if ($agente === '') {
+        $agente = (string)($chat['agente'] ?? 'claude');
+    }
+    $workingDir = (string)($chat['ruta'] ?? '/var/www');
+    $modeloSeleccionado = (string)($chat['modelo'] ?? '');
+    $sessionName = "ai_chat_{$chat_id}_{$agente}";
+
+    if (!tmux_has_session($sessionName)) {
+        // Al crear la sesión por primera vez, pasamos el mensaje inicial si es Gemini para usar -i
+        $baseCmd = ai_build_agent_command($agente, $modeloSeleccionado, ($agente === 'gemini' ? $mensajeInicial : ''));
+        $runResult = tmux_new_session($sessionName, $baseCmd, $workingDir);
+        if (($runResult['status'] ?? 'error') !== 'success') {
+            return ['status' => 'error', 'msg' => $runResult['msg'] ?? 'No se pudo iniciar sesión tmux', 'http' => 500];
+        }
+        usleep($agente === 'codex' ? 1800000 : 1200000);
+    }
+
+    return [
+        'status' => 'success',
+        'session' => $sessionName,
+        'agente' => $agente,
+        'working_dir' => $workingDir,
+        'modelo' => $modeloSeleccionado
+    ];
+}
+
+function ai_sync_terminal_to_messages($pdo, $chat_id, $agente) {
     $chat_id = (int)$chat_id;
     $agente = (string)$agente;
     $sessionName = "ai_chat_{$chat_id}_{$agente}";
@@ -387,10 +615,10 @@ function ai_sync_terminal_to_messages(PDO $pdo, $chat_id, $agente) {
     }
 
     $state = ai_load_state($chat_id, $agente);
+    $messages = ai_get_messages($chat_id);
+
     if (!$stateExists) {
-        $countStmt = $pdo->prepare("SELECT COUNT(*) FROM ai_messages WHERE chat_id = ?");
-        $countStmt->execute([$chat_id]);
-        if ((int)$countStmt->fetchColumn() > 0) {
+        if (count($messages) > 0) {
             ai_reset_state($chat_id, $agente, $capture);
             return [
                 'status' => 'initialized',
@@ -405,25 +633,36 @@ function ai_sync_terminal_to_messages(PDO $pdo, $chat_id, $agente) {
 
     if ($delta !== '') {
         $pendingId = (int)($state['pending_assistant_message_id'] ?? 0);
+        $foundIdx = -1;
         if ($pendingId > 0) {
-            $stmt = $pdo->prepare("SELECT id, contenido FROM ai_messages WHERE id = ? AND chat_id = ? AND rol = 'assistant' LIMIT 1");
-            $stmt->execute([$pendingId, $chat_id]);
-            $existingMsg = $stmt->fetch(PDO::FETCH_ASSOC);
-        } else {
-            $existingMsg = false;
+            foreach ($messages as $idx => $m) {
+                if ((int)$m['id'] === $pendingId && $m['rol'] === 'assistant') {
+                    $foundIdx = $idx;
+                    break;
+                }
+            }
         }
 
-        if ($existingMsg) {
-            $merged = ai_merge_chunks($existingMsg['contenido'] ?? '', $delta);
-            $upd = $pdo->prepare("UPDATE ai_messages SET contenido = ? WHERE id = ?");
-            $upd->execute([$merged, $existingMsg['id']]);
-            $pendingId = (int)$existingMsg['id'];
+        if ($foundIdx !== -1) {
+            $merged = ai_merge_chunks($messages[$foundIdx]['contenido'] ?? '', $delta);
+            $merged = ai_fit_message_content(null, $merged);
+            $messages[$foundIdx]['contenido'] = $merged;
+            $pendingId = (int)$messages[$foundIdx]['id'];
         } else {
-            $ins = $pdo->prepare("INSERT INTO ai_messages (chat_id, rol, contenido) VALUES (?, 'assistant', ?)");
-            $ins->execute([$chat_id, $delta]);
-            $pendingId = (int)$pdo->lastInsertId();
+            $delta = ai_fit_message_content(null, $delta);
+            $newId = 1;
+            foreach ($messages as $m) { if ($m['id'] >= $newId) $newId = $m['id'] + 1; }
+            $messages[] = [
+                'id' => $newId,
+                'chat_id' => $chat_id,
+                'rol' => 'assistant',
+                'contenido' => $delta,
+                'fecha' => date('Y-m-d H:i:s')
+            ];
+            $pendingId = $newId;
         }
 
+        ai_save_messages($chat_id, $messages);
         $state['pending_assistant_message_id'] = $pendingId;
     }
 
@@ -442,13 +681,25 @@ function ai_sync_terminal_to_messages(PDO $pdo, $chat_id, $agente) {
 
 switch ($action) {
     case 'list_chats':
-        $stmt = $pdo->query("SELECT c.*, p.nombre as proyecto_nombre FROM ai_chats c LEFT JOIN ai_projects p ON c.project_id = p.id ORDER BY c.fecha DESC LIMIT 50");
-        ai_json_response($stmt->fetchAll(PDO::FETCH_ASSOC));
+        $chats = ai_get_chats();
+        $projects = ai_get_projects();
+        foreach ($chats as &$c) {
+            $c['proyecto_nombre'] = '';
+            foreach ($projects as $p) {
+                if ($p['id'] == $c['project_id']) {
+                    $c['proyecto_nombre'] = $p['nombre'];
+                    break;
+                }
+            }
+        }
+        usort($chats, function($a, $b) { return strcmp($b['fecha'], $a['fecha']); });
+        ai_json_response($chats);
         break;
 
     case 'list_projects':
-        $stmt = $pdo->query("SELECT * FROM ai_projects ORDER BY nombre ASC");
-        ai_json_response($stmt->fetchAll(PDO::FETCH_ASSOC));
+        $projects = ai_get_projects();
+        usort($projects, function($a, $b) { return strcmp($a['nombre'], $b['nombre']); });
+        ai_json_response($projects);
         break;
 
     case 'list_opencode_models':
@@ -460,10 +711,24 @@ switch ($action) {
             }
             $rawModels = (string)($res['output'] ?? '');
         } else {
-            $rawModels = (string)ai_exec_local('/usr/local/bin/opencode models');
+            $rawModels = (string)ai_exec_local('/bin/opencode models');
         }
         $models = array_filter(explode("\n", trim($rawModels)));
         ai_json_response(['status' => 'success', 'models' => array_values($models)]);
+        break;
+
+    case 'list_kilo_models':
+        $rawModels = (string)ai_exec_local('/usr/bin/kilo models');
+        $allModels = array_filter(explode("\n", trim($rawModels)));
+        // Filtrar modelos que contienen 'free' o ':free'
+        $freeModels = array_filter($allModels, function($m) {
+            return stripos($m, 'free') !== false;
+        });
+        // Si no hay ninguno con 'free', devolver los primeros 10 como fallback
+        if (empty($freeModels)) {
+            $freeModels = array_slice($allModels, 0, 10);
+        }
+        ai_json_response(['status' => 'success', 'models' => array_values($freeModels)]);
         break;
 
     case 'get_opencode_stats':
@@ -475,7 +740,7 @@ switch ($action) {
             }
             $rawStats = (string)($res['output'] ?? '');
         } else {
-            $rawStats = (string)ai_exec_local('/usr/local/bin/opencode stats');
+            $rawStats = (string)ai_exec_local('/bin/opencode stats');
         }
         ai_json_response(['status' => 'success', 'raw' => ansi_clean($rawStats)]);
         break;
@@ -485,20 +750,42 @@ switch ($action) {
         $nombre = trim($input['nombre'] ?? '');
         $ruta = trim($input['ruta'] ?? '/var/www');
         $id = (int)($input['id'] ?? 0);
+        $projects = ai_get_projects();
         if ($id > 0) {
-            $st = $pdo->prepare("UPDATE ai_projects SET nombre = ?, ruta = ? WHERE id = ?");
-            $st->execute([$nombre, $ruta, $id]);
+            foreach ($projects as &$p) {
+                if ((int)$p['id'] === $id) {
+                    $p['nombre'] = $nombre;
+                    $p['ruta'] = $ruta;
+                    break;
+                }
+            }
         } else {
-            $st = $pdo->prepare("INSERT INTO ai_projects (nombre, ruta) VALUES (?, ?)");
-            $st->execute([$nombre, $ruta]);
+            $newId = 1;
+            foreach ($projects as $p) { if ((int)$p['id'] >= $newId) $newId = (int)$p['id'] + 1; }
+            $projects[] = ['id' => $newId, 'nombre' => $nombre, 'ruta' => $ruta];
         }
+        ai_save_projects($projects);
         ai_json_response(['status' => 'success']);
         break;
 
     case 'delete_project':
         $id = (int)($_GET['id'] ?? 0);
-        $pdo->prepare("DELETE FROM ai_projects WHERE id = ?")->execute([$id]);
+        $projects = ai_get_projects();
+        $projects = array_filter($projects, function($p) use ($id) { return (int)$p['id'] !== $id; });
+        ai_save_projects(array_values($projects));
         ai_json_response(['status' => 'success']);
+        break;
+
+    case 'clear_chat':
+        $chat_id = (int)($_GET['chat_id'] ?? 0);
+        $agente = $_GET['agente'] ?? 'claude';
+        if ($chat_id > 0) {
+            ai_save_messages($chat_id, []);
+            ai_reset_state($chat_id, $agente, '');
+            ai_json_response(['status' => 'success']);
+        } else {
+            ai_json_response(['status' => 'error', 'msg' => 'ID de chat inválido'], 400);
+        }
         break;
 
     case 'get_raw_logs':
@@ -512,24 +799,31 @@ switch ($action) {
     case 'get_terminal_view':
         $chat_id = (int)($_GET['chat_id'] ?? 0);
         $agente = $_GET['agente'] ?? 'claude';
-        ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
-        $sessionName = "ai_chat_{$chat_id}_{$agente}";
+        $ensure = ai_ensure_chat_session(null, $chat_id, $agente);
+        if (($ensure['status'] ?? 'error') !== 'success') {
+            ai_json_response(['status' => 'error', 'msg' => $ensure['msg'] ?? 'No se pudo abrir terminal'], (int)($ensure['http'] ?? 500));
+            break;
+        }
+        $agente = $ensure['agente'];
+        $sessionName = $ensure['session'];
+        ai_sync_terminal_to_messages(null, $chat_id, $agente);
         ai_json_response(['status' => 'success', 'data' => tmux_capture($sessionName)]);
         break;
 
     case 'get_messages':
         $chat_id = (int)($_GET['chat_id'] ?? 0);
         if ($chat_id > 0) {
-            $stChat = $pdo->prepare("SELECT agente FROM ai_chats WHERE id = ? LIMIT 1");
-            $stChat->execute([$chat_id]);
-            $chatInfo = $stChat->fetch(PDO::FETCH_ASSOC);
-            if ($chatInfo && !empty($chatInfo['agente'])) {
-                ai_sync_terminal_to_messages($pdo, $chat_id, $chatInfo['agente']);
+            $chats = ai_get_chats();
+            $agente = 'claude';
+            foreach ($chats as $c) {
+                if ((int)$c['id'] === $chat_id) {
+                    $agente = $c['agente'];
+                    break;
+                }
             }
+            ai_sync_terminal_to_messages(null, $chat_id, $agente);
         }
-        $stmt = $pdo->prepare("SELECT * FROM ai_messages WHERE chat_id = ? ORDER BY fecha ASC");
-        $stmt->execute([$chat_id]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $rows = ai_get_messages($chat_id);
         foreach ($rows as &$r) {
             $r['contenido'] = ansi_clean($r['contenido']);
         }
@@ -542,28 +836,44 @@ switch ($action) {
         $titulo = $input['titulo'] ?? 'Nueva conversación';
         $modelo = $input['modelo'] ?? null;
         $project_id = (int)($input['project_id'] ?? 0);
-        $stmt = $pdo->prepare("INSERT INTO ai_chats (titulo, agente, project_id, modelo) VALUES (?, ?, ?, ?)");
-        $stmt->execute([$titulo, $agente, $project_id, $modelo]);
-        ai_json_response(['status' => 'success', 'id' => $pdo->lastInsertId()]);
+        $chats = ai_get_chats();
+        $newId = 1;
+        foreach ($chats as $c) { if ((int)$c['id'] >= $newId) $newId = (int)$c['id'] + 1; }
+        $newChat = [
+            'id' => $newId,
+            'titulo' => $titulo,
+            'agente' => $agente,
+            'project_id' => $project_id,
+            'modelo' => $modelo,
+            'fecha' => date('Y-m-d H:i:s')
+        ];
+        $chats[] = $newChat;
+        ai_save_chats($chats);
+        ai_json_response(['status' => 'success', 'id' => $newId]);
         break;
 
     case 'delete_chat':
         $chat_id = (int)($_GET['chat_id'] ?? 0);
         $agente = $_GET['agente'] ?? '';
+        $chats = ai_get_chats();
         if ($chat_id > 0 && $agente === '') {
-            $stChat = $pdo->prepare("SELECT agente FROM ai_chats WHERE id = ? LIMIT 1");
-            $stChat->execute([$chat_id]);
-            $chatInfo = $stChat->fetch(PDO::FETCH_ASSOC);
-            $agente = $chatInfo['agente'] ?? 'claude';
+            foreach ($chats as $c) {
+                if ((int)$c['id'] === $chat_id) {
+                    $agente = $c['agente'];
+                    break;
+                }
+            }
         }
-        if ($agente === '') {
-            $agente = 'claude';
-        }
+        if ($agente === '') $agente = 'claude';
+
         $sessionName = "ai_chat_{$chat_id}_{$agente}";
         tmux_kill($sessionName);
         ai_delete_state($chat_id, $agente);
-        $stmt = $pdo->prepare("DELETE FROM ai_chats WHERE id = ?");
-        $stmt->execute([$chat_id]);
+        
+        $chats = array_filter($chats, function($c) use ($chat_id) { return (int)$c['id'] !== $chat_id; });
+        ai_save_chats(array_values($chats));
+        @unlink(ai_data_dir() . "/messages_{$chat_id}.json");
+
         ai_json_response(['status' => 'success']);
         break;
 
@@ -579,8 +889,21 @@ switch ($action) {
             if (!is_dir($targetDir)) mkdir($targetDir, 0777, true);
             $targetPath = $targetDir . basename($file['name']);
             if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                $stmt = $pdo->prepare("INSERT INTO ai_messages (chat_id, rol, contenido) VALUES (?, 'user', ?)");
-                $stmt->execute([$chat_id, "**[SISTEMA] Archivo subido: " . basename($file['name']) . "**"]);
+                $msgText = "**[SISTEMA] Archivo subido: " . basename($file['name']) . "**";
+                $msgText = ai_fit_message_content(null, $msgText);
+                
+                $messages = ai_get_messages($chat_id);
+                $newId = 1;
+                foreach ($messages as $m) { if ($m['id'] >= $newId) $newId = $m['id'] + 1; }
+                $messages[] = [
+                    'id' => $newId,
+                    'chat_id' => $chat_id,
+                    'rol' => 'user',
+                    'contenido' => $msgText,
+                    'fecha' => date('Y-m-d H:i:s')
+                ];
+                ai_save_messages($chat_id, $messages);
+                
                 ai_json_response(['status' => 'success', 'msg' => 'Archivo subido']);
             } else { throw new Exception("Error al mover archivo"); }
         } catch (Exception $e) { ai_json_response(['status' => 'error', 'msg' => $e->getMessage()], 500); }
@@ -589,7 +912,12 @@ switch ($action) {
     case 'check_status':
         $chat_id = (int)($_GET['chat_id'] ?? 0);
         $agente = $_GET['agente'] ?? 'claude';
-        $sessionName = "ai_chat_{$chat_id}_{$agente}";
+        $ensure = ai_ensure_chat_session(null, $chat_id, $agente);
+        if (($ensure['status'] ?? 'error') !== 'success') {
+            ai_json_response(['status' => 'success', 'awaiting_approval' => false]);
+            break;
+        }
+        $sessionName = $ensure['session'];
         $content = tmux_capture($sessionName);
         $awaiting = false;
         $patterns = [
@@ -613,54 +941,71 @@ switch ($action) {
         $sessionName = "ai_chat_{$chat_id}_{$agente}";
         tmux_send_keys($sessionName, $response);
         $txt = ($response === 'y') ? "Aprobado remotamente." : "Denegado remotamente.";
-        $stmt = $pdo->prepare("INSERT INTO ai_messages (chat_id, rol, contenido) VALUES (?, 'user', ?)");
-        $stmt->execute([$chat_id, "**[SISTEMA] $txt**"]);
+        $txt = ai_fit_message_content(null, "**[SISTEMA] $txt**");
+        
+        $messages = ai_get_messages($chat_id);
+        $newId = 1;
+        foreach ($messages as $m) { if ($m['id'] >= $newId) $newId = $m['id'] + 1; }
+        $messages[] = [
+            'id' => $newId,
+            'chat_id' => $chat_id,
+            'rol' => 'user',
+            'contenido' => $txt,
+            'fecha' => date('Y-m-d H:i:s')
+        ];
+        ai_save_messages($chat_id, $messages);
+        
         usleep(300000);
-        ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
+        ai_sync_terminal_to_messages(null, $chat_id, $agente);
         ai_json_response(['status' => 'success']);
         break;
 
     case 'send_message':
         $input = json_decode(file_get_contents('php://input'), true);
         $chat_id = (int)($input['chat_id'] ?? 0);
-        $message = trim($input['message'] ?? '');
+        $messageText = trim($input['message'] ?? '');
         $agente = $input['agente'] ?? 'claude';
         $mode = $input['mode'] ?? 'terminal';
 
-        if (empty($message) || !$chat_id) {
+        if (empty($messageText) || !$chat_id) {
             ai_json_response(['status' => 'error', 'msg' => 'Datos incompletos.'], 400);
             exit;
         }
 
         try {
             ai_log("--- MSG (Chat: $chat_id, Agente: $agente, Modo: $mode) ---");
-            $stmt = $pdo->prepare("INSERT INTO ai_messages (chat_id, rol, contenido) VALUES (?, 'user', ?)");
-            $stmt->execute([$chat_id, $message]);
+            $messageText = ai_fit_message_content(null, $messageText);
+            
+            $messages = ai_get_messages($chat_id);
+            $newId = 1;
+            foreach ($messages as $m) { if ($m['id'] >= $newId) $newId = $m['id'] + 1; }
+            $messages[] = [
+                'id' => $newId,
+                'chat_id' => $chat_id,
+                'rol' => 'user',
+                'contenido' => $messageText,
+                'fecha' => date('Y-m-d H:i:s')
+            ];
+            ai_save_messages($chat_id, $messages);
 
-            $stChat = $pdo->prepare("SELECT c.modelo, p.ruta FROM ai_chats c LEFT JOIN ai_projects p ON c.project_id = p.id WHERE c.id = ?");
-            $stChat->execute([$chat_id]);
-            $chatData = $stChat->fetch(PDO::FETCH_ASSOC);
-            $workingDir = $chatData['ruta'] ?? '/var/www';
-            $modeloSeleccionado = $chatData['modelo'] ?? '';
+            $sessionExisted = tmux_has_session("ai_chat_{$chat_id}_{$agente}");
 
-            $sessionName = "ai_chat_{$chat_id}_{$agente}";
-            $baseCmd = ai_build_agent_command($agente, $modeloSeleccionado);
-
-            if (!tmux_has_session($sessionName)) {
-                $runResult = tmux_new_session($sessionName, $baseCmd, $workingDir);
-                if (($runResult['status'] ?? 'error') !== 'success') {
-                    throw new RuntimeException($runResult['msg'] ?? 'No se pudo iniciar la sesión del agente');
-                }
-                usleep($agente === 'codex' ? 1800000 : 1000000);
+            $ensure = ai_ensure_chat_session(null, $chat_id, $agente, $messageText);
+            if (($ensure['status'] ?? 'error') !== 'success') {
+                throw new RuntimeException($ensure['msg'] ?? 'No se pudo iniciar la sesión del agente');
             }
+            $agente = $ensure['agente'];
+            $sessionName = $ensure['session'];
 
             $captureBefore = tmux_capture_clean($sessionName);
             ai_reset_state($chat_id, $agente, $captureBefore);
 
-            tmux_send_keys($sessionName, $message);
+            if ($agente !== 'gemini' || $sessionExisted) {
+                tmux_send_keys($sessionName, $messageText);
+            }
             usleep(700000);
 
-            $sync = ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
+            $sync = ai_sync_terminal_to_messages(null, $chat_id, $agente);
             $respuesta_final = $sync['delta'] ?? '';
 
             ai_json_response([
@@ -680,24 +1025,26 @@ switch ($action) {
         $agente = $input['agente'] ?? 'claude';
         $key = $input['key'] ?? 'Escape';
         
-        $sessionName = "ai_chat_{$chat_id}_{$agente}";
-        if (tmux_has_session($sessionName)) {
-            if (ai_daemon_available()) {
-                daemon_call('send', [
-                    'session' => $sessionName,
-                    'keys' => $key,
-                    'special' => true
-                ]);
-            } else {
-                $target = escapeshellarg("{$sessionName}:0");
-                ai_exec_local_tmux("send-keys -t {$target} {$key}");
-            }
-            usleep(250000);
-            ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
-            ai_json_response(['status' => 'success']);
-        } else {
-            ai_json_response(['status' => 'error', 'msg' => 'Sesión no encontrada'], 404);
+        $ensure = ai_ensure_chat_session(null, $chat_id, $agente);
+        if (($ensure['status'] ?? 'error') !== 'success') {
+            ai_json_response(['status' => 'error', 'msg' => $ensure['msg'] ?? 'Sesión no encontrada'], (int)($ensure['http'] ?? 404));
+            break;
         }
+        $agente = $ensure['agente'];
+        $sessionName = $ensure['session'];
+        if (ai_daemon_available()) {
+            daemon_call('send', [
+                'session' => $sessionName,
+                'keys' => $key,
+                'special' => true
+            ]);
+        } else {
+            $target = escapeshellarg("{$sessionName}:0");
+            ai_exec_local_tmux("send-keys -t {$target} {$key}");
+        }
+        usleep(250000);
+        ai_sync_terminal_to_messages(null, $chat_id, $agente);
+        ai_json_response(['status' => 'success']);
         break;
 
     case 'send_terminal_input':
@@ -711,11 +1058,13 @@ switch ($action) {
             exit;
         }
 
-        $sessionName = "ai_chat_{$chat_id}_{$agente}";
-        if (!tmux_has_session($sessionName)) {
-            ai_json_response(['status' => 'error', 'msg' => 'Sesión no encontrada'], 404);
+        $ensure = ai_ensure_chat_session(null, $chat_id, $agente);
+        if (($ensure['status'] ?? 'error') !== 'success') {
+            ai_json_response(['status' => 'error', 'msg' => $ensure['msg'] ?? 'Sesión no encontrada'], (int)($ensure['http'] ?? 404));
             exit;
         }
+        $agente = $ensure['agente'];
+        $sessionName = $ensure['session'];
 
         if (ai_daemon_available()) {
             $res = daemon_call('send', [
@@ -727,7 +1076,7 @@ switch ($action) {
         }
 
         usleep(250000);
-        ai_sync_terminal_to_messages($pdo, $chat_id, $agente);
+        ai_sync_terminal_to_messages(null, $chat_id, $agente);
         ai_json_response([
             'status' => 'success',
             'result' => $res
