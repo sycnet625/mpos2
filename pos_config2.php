@@ -650,10 +650,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $newConfig['banners'][$i]['subtitulo'] = trim((string)($_POST['banner_subtitulo'][$i] ?? ($currentConfig['banners'][$i]['subtitulo'] ?? '')));
                 $newConfig['banners'][$i]['color_clase'] = $currentConfig['banners'][$i]['color_clase'] ?? 'gradient-' . ($i + 1);
                 $newConfig['banners'][$i]['imagen']    = $currentConfig['banners'][$i]['imagen'] ?? '';
-                $rawSize = trim((string)($_POST['banner_bg_size'][$i] ?? 'cover'));
+                $rawSize    = trim((string)($_POST['banner_bg_size'][$i] ?? 'cover'));
+                $numericPart = rtrim($rawSize, '%');
                 $newConfig['banners'][$i]['bg_size'] = in_array($rawSize, ['cover', 'contain'], true)
                     ? $rawSize
-                    : ((is_numeric($rawSize) && (int)$rawSize >= 10 && (int)$rawSize <= 500) ? ((int)$rawSize . '%') : 'cover');
+                    : ((is_numeric($numericPart) && (int)$numericPart >= 10 && (int)$numericPart <= 500) ? ((int)$numericPart . '%') : 'cover');
                 if (!empty($_POST['banner_remove_' . $i])) {
                     $newConfig['banners'][$i]['imagen'] = '';
                 } elseif (isset($_FILES['banner_file_' . $i]) && (int)$_FILES['banner_file_' . $i]['error'] === UPLOAD_ERR_OK) {
