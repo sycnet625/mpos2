@@ -2049,7 +2049,7 @@ window.invConfirmar = async function() {
             // Actualizar stock local inmediato para feedback visual instantáneo.
             if (d.stocks_updated) {
                 d.stocks_updated.forEach(s => {
-                    const p = productsDB.find(x => x.codigo == s.sku);
+                    const p = productsDB.find(x => x.codigo === s.sku);
                     if (p) p.stock = s.nuevo_stock;
                 });
             }

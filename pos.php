@@ -12,7 +12,7 @@ header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
 
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -141,13 +141,13 @@ if (isset($_GET['load_products'])) {
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
                      FROM stock_almacen s
-                     WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
+                     WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
                     FROM productos p
                     WHERE $where
                     ORDER BY p.nombre";
 
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtProd->execute($params);
+        $stmtProd->execute(array_merge([$almacenID], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
         // Procesar para incluir colores e imágenes
@@ -194,13 +194,17 @@ if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     ini_set('display_errors', 0);
-    $input   = json_decode(file_get_contents('php://input'), true) ?: [];
+    $rawBody = file_get_contents('php://input');
+    $input   = json_decode($rawBody, true);
+    if (json_last_error() !== JSON_ERROR_NONE) { $input = []; }
+    if (!is_array($input)) { $input = []; }
     $accion  = $input['accion']  ?? '';
     $motivo  = trim($input['motivo']  ?? '');
     $usuario = trim($input['usuario'] ?? 'POS-Admin');
     $items   = $input['items']   ?? [];
     $fechaRaw = trim($input['fecha'] ?? '');
-    $fecha   = ($fechaRaw && strlen($fechaRaw) >= 10) ? (substr($fechaRaw,0,10).' '.date('H:i:s')) : date('Y-m-d H:i:s');
+    $fechaParsed = $fechaRaw ? DateTime::createFromFormat('Y-m-d', substr($fechaRaw, 0, 10)) : false;
+    $fecha   = $fechaParsed ? $fechaParsed->format('Y-m-d') . ' ' . date('H:i:s') : date('Y-m-d H:i:s');
 
     $ctxConfig = array_merge([
         "id_almacen" => 1,
@@ -376,7 +380,8 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } catch (Exception $e) {
         if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
-        echo json_encode(['status'=>'error','msg'=>$e->getMessage()]);
+        error_log('inventario_api error: ' . $e->getMessage());
+        echo json_encode(['status'=>'error','msg'=>'Error al procesar inventario. Intente nuevamente.']);
     }
     exit;
 }
@@ -407,6 +412,7 @@ try { $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_2 VARCHAR(64) NU
 
 // Carga de Datos
 $prods = [];
+$catsData = [];
 $clientsData = [];
 $mensajeros = []; // Array para mensajeros
 
@@ -434,13 +440,13 @@ try {
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
                  FROM stock_almacen s
-                 WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
+                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
                 FROM productos p
                 WHERE $where
                 ORDER BY p.nombre";
-    
+
     $stmtProd = $pdo->prepare($sqlProd);
-    $stmtProd->execute($params);
+    $stmtProd->execute(array_merge([$almacenID], $params));
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
     // CARGA DE CLIENTES (NUEVO - YA ORDENADO)
@@ -1429,6 +1435,10 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 <audio id="alertSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
 
 <script>
+    function escapeHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    }
+
     let lastSelfOrderId = 0;
     
     async function checkNewSelfOrders() {
@@ -1482,14 +1492,18 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         }
 
         data.orders.forEach(o => {
+            const safeId     = parseInt(o.id, 10);
+            const safeNombre = escapeHtml(o.cliente_nombre);
+            const safeHora   = escapeHtml(o.fecha.split(' ')[1] ?? '');
+            const safeTotal  = parseFloat(o.total).toFixed(2);
             tbody.innerHTML += `
                 <tr>
-                    <td class="ps-3 fw-bold">#${o.id}</td>
-                    <td class="fw-bold">${o.cliente_nombre}</td>
-                    <td>${o.fecha.split(' ')[1]}</td>
-                    <td class="text-success fw-bold">$${parseFloat(o.total).toFixed(2)}</td>
+                    <td class="ps-3 fw-bold">#${safeId}</td>
+                    <td class="fw-bold">${safeNombre}</td>
+                    <td>${safeHora}</td>
+                    <td class="text-success fw-bold">$${safeTotal}</td>
                     <td class="text-end pe-3">
-                        <button class="btn btn-sm btn-primary rounded-pill" onclick="importSelfOrder(${o.id})">
+                        <button class="btn btn-sm btn-primary rounded-pill" onclick="importSelfOrder(${safeId})">
                             <i class="fas fa-file-import me-1"></i> Cargar al Carrito
                         </button>
                     </td>
@@ -1523,7 +1537,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         if(data.status === 'success') {
             data.items.forEach(it => {
                 // Buscar producto real en el catálogo local del POS
-                const product = productsDB.find(p => p.codigo == it.codigo);
+                const product = productsDB.find(p => p.codigo === it.codigo);
                 if(product) {
                     // Llamar a la función nativa de pos.js para añadir al carrito
                     // Se puede llamar múltiples veces si la cantidad es > 1
