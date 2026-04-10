@@ -173,7 +173,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
         .chat-status-bar {
             padding: 6px 15px;
             background: rgba(0,0,0,0.3);
-            border-bottom: 1px solid var(--border);
+            border-top: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -348,19 +348,6 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                                 <button class="action-btn btn-sm" @click="closeSession(session.id)" title="Cerrar"><i class="fas fa-times"></i></button>
                             </div>
                         </div>
-                        <div class="chat-status-bar">
-                            <span class="model-badge">{{ session.agente }}</span>
-                            <div class="d-flex align-items-center">
-                                <div class="usage-circle">
-                                    <svg viewBox="0 0 24 24">
-                                        <circle class="bg" cx="12" cy="12" r="10"></circle>
-                                        <circle class="progress" cx="12" cy="12" r="10" 
-                                            :style="{'stroke-dasharray': 62.8, 'stroke-dashoffset': 62.8 * (1 - (session.usage_pct / 100))}"></circle>
-                                    </svg>
-                                </div>
-                                <span class="usage-text">#{{ session.usage_count }} ({{ session.usage_pct }}%)</span>
-                            </div>
-                        </div>
                         <div class="card-body-chat" :id="'chat-box-focus-' + session.id">
                             <div v-if="session.messages.length === 0" class="text-center mt-5 opacity-25">
                                 <i class="fas fa-terminal fa-3x mb-3"></i>
@@ -388,8 +375,21 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                                 <button class="action-btn" @click="startVoice(session.id)" :class="{'text-danger': recording}">
                                     <i class="fas fa-microphone"></i>
                                 </button>
-                                <textarea class="input-text" rows="1" v-model="session.input" placeholder="Comando..." @keydown.enter.prevent="sendToAgent(session)"></textarea>
+                                <textarea class="input-text" rows="2" v-model="session.input" placeholder="Comando..." @keydown.enter.prevent="sendToAgent(session)"></textarea>
                                 <button class="action-btn send" :disabled="session.loading || !session.input.trim()" @click="sendToAgent(session)"><i class="fas fa-arrow-up"></i></button>
+                            </div>
+                        </div>
+                        <div class="chat-status-bar">
+                            <span class="model-badge">{{ session.agente }}</span>
+                            <div class="d-flex align-items-center">
+                                <div class="usage-circle">
+                                    <svg viewBox="0 0 24 24">
+                                        <circle class="bg" cx="12" cy="12" r="10"></circle>
+                                        <circle class="progress" cx="12" cy="12" r="10" 
+                                            :style="{'stroke-dasharray': 62.8, 'stroke-dashoffset': 62.8 * (1 - (session.usage_pct / 100))}"></circle>
+                                    </svg>
+                                </div>
+                                <span class="usage-text">#{{ session.usage_count }} ({{ session.usage_pct }}%)</span>
                             </div>
                         </div>
                     </div>
@@ -418,20 +418,6 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                         <button class="action-btn btn-sm" @click="openTerminalView(session)" title="Ver Terminal Real"><i class="fas fa-terminal"></i></button>
                         <button class="action-btn btn-sm" @click="attachFile(session.id)" title="Subir Archivo"><i class="fas fa-paperclip"></i></button>
                         <button class="action-btn btn-sm" @click="closeSession(session.id)" title="Cerrar"><i class="fas fa-times"></i></button>
-                    </div>
-                </div>
-
-                <div class="chat-status-bar">
-                    <span class="model-badge">{{ session.agente }}</span>
-                    <div class="d-flex align-items-center">
-                        <div class="usage-circle">
-                            <svg viewBox="0 0 24 24">
-                                <circle class="bg" cx="12" cy="12" r="10"></circle>
-                                <circle class="progress" cx="12" cy="12" r="10" 
-                                    :style="{'stroke-dasharray': 62.8, 'stroke-dashoffset': 62.8 * (1 - (session.usage_pct / 100))}"></circle>
-                            </svg>
-                        </div>
-                        <span class="usage-text">#{{ session.usage_count }} ({{ session.usage_pct }}%)</span>
                     </div>
                 </div>
 
@@ -467,7 +453,7 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                         </button>
                         <textarea 
                             class="input-text" 
-                            rows="1" 
+                            rows="2" 
                             v-model="session.input" 
                             placeholder="Comando..."
                             @keydown.enter.prevent="sendToAgent(session)"
@@ -475,6 +461,20 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                         <button class="action-btn send" :disabled="session.loading || !session.input.trim()" @click="sendToAgent(session)">
                             <i class="fas fa-arrow-up"></i>
                         </button>
+                    </div>
+                </div>
+
+                <div class="chat-status-bar">
+                    <span class="model-badge">{{ session.agente }}</span>
+                    <div class="d-flex align-items-center">
+                        <div class="usage-circle">
+                            <svg viewBox="0 0 24 24">
+                                <circle class="bg" cx="12" cy="12" r="10"></circle>
+                                <circle class="progress" cx="12" cy="12" r="10" 
+                                    :style="{'stroke-dasharray': 62.8, 'stroke-dashoffset': 62.8 * (1 - (session.usage_pct / 100))}"></circle>
+                            </svg>
+                        </div>
+                        <span class="usage-text">#{{ session.usage_count }} ({{ session.usage_pct }}%)</span>
                     </div>
                 </div>
             </div>

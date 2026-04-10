@@ -29,11 +29,30 @@ $socket_cmd = "-S $socket_path";
 
 // Asegurar que el socket de tmux existe y tiene permisos
 function ai_bootstrap_socket($socket_cmd, $socket_path) {
-    if (!file_exists($socket_path)) {
-        ai_log("Bootstrap: Socket no existe. Creando...");
-        shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s bootstrap_init 'sleep 1' 2>&1");
+    $socket_exists = file_exists($socket_path);
+    $server_running = false;
+
+    if ($socket_exists) {
+        // Verificar si el servidor realmente responde
+        $check = shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd ls 2>&1");
+        if ($check !== null && !str_contains($check, 'error connecting') && !str_contains($check, 'no server running')) {
+            $server_running = true;
+        }
+    }
+
+    if (!$server_running) {
+        ai_log("Bootstrap: Servidor no responde o socket no existe. Reiniciando...");
+        if ($socket_exists) {
+            // No podemos usar rm directo con sudo sin permiso específico, 
+            // pero podemos intentar sobreescribirlo o crear la sesión
+            shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s bootstrap_init 'sleep 1' 2>&1");
+        } else {
+            shell_exec("sudo -u dude1 /usr/bin/tmux $socket_cmd new-session -d -s bootstrap_init 'sleep 1' 2>&1");
+        }
         usleep(800000);
     }
+
+    // Asegurar permisos siempre (esto sí tiene permiso en sudoers)
     if (file_exists($socket_path)) {
         shell_exec("sudo /usr/bin/chmod 0777 $socket_path");
     }
