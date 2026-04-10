@@ -383,6 +383,8 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Config
 $config = array_merge([
+    "marca_sistema_nombre" => "PalWeb POS Marinero",
+    "marca_empresa_nombre" => "MI TIENDA",
     "tienda_nombre" => "MI TIENDA",
     "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]],
     "id_empresa" => 1,
@@ -392,6 +394,10 @@ $config = array_merge([
     "mostrar_servicios" => true,
     "categorias_ocultas" => []
 ], $config ?? []);
+$systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
+$systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
+$companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
+$companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 $dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
 
 // Asegurar columna favorito en productos
@@ -484,7 +490,7 @@ try {
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>POS | <?php echo htmlspecialchars($config['tienda_nombre']); ?></title>
+    <title><?php echo htmlspecialchars($systemBrandName); ?> | <?php echo htmlspecialchars($companyBrandName); ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/all.min.css" rel="stylesheet">
     <style>
@@ -501,6 +507,14 @@ try {
         .cart-item.selected { background: #e8f0fe; border-left: 4px solid #0d6efd; }
         .cart-note { font-size: 0.75rem; color: #d63384; font-style: italic; display: block; }
         .discount-tag { font-size: 0.7rem; background: #dc3545; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 5px; }
+        .pin-brand-logo {
+            width: 76px; height: 76px; object-fit: contain; border-radius: 18px; padding: 6px;
+            background: rgba(255,255,255,0.95); border: 1px solid #dbe3ee; box-shadow: 0 12px 28px rgba(15,23,42,.12);
+            margin: 0 auto 12px;
+        }
+        .cart-empty-logo {
+            width: 120px; margin-bottom: 15px; opacity: 0.85; object-fit: contain;
+        }
         .btn-ctrl {
             height: 48px; border-radius: 10px; font-weight: 700; font-size: 0.95rem;
             display: flex; align-items: center; justify-content: center; cursor: pointer;
@@ -868,7 +882,11 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
 <div id="pinOverlay">
     <div class="pin-box">
-        <h3 class="mb-2">Acceso POS</h3>
+        <?php if ($systemBrandLogo !== ''): ?>
+            <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" alt="<?php echo htmlspecialchars($systemBrandName); ?>" class="pin-brand-logo">
+        <?php endif; ?>
+        <h3 class="mb-1"><?php echo htmlspecialchars($systemBrandName); ?></h3>
+        <div class="small text-muted mb-2"><?php echo htmlspecialchars($companyBrandName); ?></div>
         <div class="fs-1 mb-2" id="pinDisplay">••••</div>
         <div id="pinAttemptsDots" class="mb-2 text-muted small"></div>
         <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 small" style="visibility:hidden; height:0; overflow:hidden; padding:0; margin:0; border:none;"></div>
@@ -903,6 +921,9 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <!-- Fila 2: Sucursal/Almacén + Botones de acción -->
             <div class="d-flex justify-content-between align-items-center">
                 <div class="d-flex align-items-center gap-1">
+                    <span class="badge bg-light text-dark" style="font-size:0.68rem; padding:3px 6px;" title="Marca">
+                        <i class="fas fa-layer-group"></i> <?php echo htmlspecialchars($companyBrandName); ?>
+                    </span>
                     <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Sucursal">
                         <i class="fas fa-building"></i> <span id="ctxSucursalBadge"><?php echo intval($config['id_sucursal'] ?? 1); ?></span>
                     </span>
@@ -938,7 +959,11 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
         <div class="cart-list" id="cartContainer">
             <div class="text-center text-muted h-100 d-flex flex-column align-items-center justify-content-center">
-                <img src="00LOGO OFICIAL.jpg" style="width: 120px; margin-bottom: 15px; opacity: 0.8;" alt="PalWeb">
+                <?php if ($companyBrandLogo !== ''): ?>
+                    <img src="<?php echo htmlspecialchars($companyBrandLogo); ?>" class="cart-empty-logo" alt="<?php echo htmlspecialchars($companyBrandName); ?>">
+                <?php elseif ($systemBrandLogo !== ''): ?>
+                    <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" class="cart-empty-logo" alt="<?php echo htmlspecialchars($systemBrandName); ?>">
+                <?php endif; ?>
                 <i class="fas fa-shopping-basket fa-3x mb-2 opacity-25"></i><p class="small">Carrito Vacío</p>
             </div>
         </div>
