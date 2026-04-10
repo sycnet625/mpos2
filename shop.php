@@ -59,6 +59,9 @@ $metodosShop   = array_values(array_filter(
 ));
 $tipoCambioUSD = floatval($config['tipo_cambio_usd'] ?? 385);
 $tipoCambioMLC = floatval($config['tipo_cambio_mlc'] ?? 310);
+$systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
+$companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
+$companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 
 function shop_image_meta(string $code): array {
     $safe = trim($code);
@@ -156,7 +159,7 @@ try {
 try { $pdo->exec("ALTER TABLE productos ADD COLUMN precio_oferta DECIMAL(12,2) DEFAULT NULL"); } catch (Exception $e) {}
 
 // --- SEO & META TAGS DINÁMICOS ---
-$storeName = $config['tienda_nombre'] ?? 'Marinero POS';
+$storeName = $companyBrandName;
 $storeAddr = $config['direccion'] ?? 'La Habana, Cuba';
 $storeTel  = $config['telefono'] ?? '';
 $fbUrl     = $config['facebook_url'] ?? '';
@@ -172,7 +175,9 @@ $siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $baseDir . '/sho
 
 $metaTitle = $storeName . " | Tienda Online en La Habana – Productos Frescos y Entrega a Domicilio";
 $metaDesc  = "Bienvenido a " . $storeName . ", tu tienda online en La Habana. Compra productos de calidad con entrega a domicilio en toda La Habana. Pedido fácil, rápido y seguro. ¡Haz tu pedido ahora!";
-$metaImg   = $scheme . '://' . $host . $baseDir . '/icon-shop-512.png';
+$metaImg   = $companyBrandLogo !== ''
+    ? $scheme . '://' . $host . $baseDir . '/' . ltrim($companyBrandLogo, '/')
+    : $scheme . '://' . $host . $baseDir . '/icon-shop-512.png';
 
 
 // =========================================================
@@ -766,6 +771,15 @@ ob_end_flush();
             gap: 0.5rem;
             text-decoration: none;
         }
+        .shop-brand-logo {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            object-fit: contain;
+            background: rgba(255,255,255,0.95);
+            padding: 4px;
+            box-shadow: 0 10px 20px rgba(15,23,42,.18);
+        }
         
         .badge-sucursal {
             background: rgba(255,255,255,0.2);
@@ -872,11 +886,13 @@ ob_end_flush();
             font-size: 1.25rem;
             font-weight: 800;
             margin-bottom: 0.25rem;
+            text-shadow: 0 1px 4px rgba(0,0,0,.45);
         }
-        
+
         .promo-slide p {
             font-size: 0.75rem;
             font-weight: 500;
+            text-shadow: 0 1px 3px rgba(0,0,0,.4);
         }
         
         .gradient-1 { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
@@ -1309,9 +1325,13 @@ ob_end_flush();
     <div class="container">
         <div class="d-flex align-items-center justify-content-between w-100 flex-wrap gap-3">
             <a href="shop.php" class="navbar-brand-premium">
-                <i class="fas fa-store"></i>
-                <span>PalWeb Shop</span>
-                <span class="badge-sucursal"><?= htmlspecialchars($config['tienda_nombre']) ?> (Suc <?= $SUC_ID ?>)</span>
+                <?php if ($companyBrandLogo !== ''): ?>
+                    <img src="<?php echo htmlspecialchars($companyBrandLogo); ?>" alt="<?php echo htmlspecialchars($companyBrandName); ?>" class="shop-brand-logo">
+                <?php else: ?>
+                    <i class="fas fa-store"></i>
+                <?php endif; ?>
+                <span><?php echo htmlspecialchars($companyBrandName); ?></span>
+                <span class="badge-sucursal">Tienda online · Suc <?= $SUC_ID ?></span>
             </a>
 
             <div class="d-flex align-items-center gap-2">
@@ -1373,30 +1393,28 @@ ob_end_flush();
 <div class="container">
     <div id="promoCarousel" class="carousel slide promo-carousel" data-bs-ride="carousel">
         <div class="carousel-inner">
-            <div class="carousel-item active">
-                <div class="promo-slide gradient-1">
-                    <h2>🚀 Envíos a La Habana</h2>
-                    <p>Calcula el costo a tu barrio</p>
+            <?php
+            $shopBanners = $config['banners'] ?? [
+                ['titulo' => '🚀 Envíos a La Habana',  'subtitulo' => 'Calcula el costo a tu barrio', 'imagen' => '', 'color_clase' => 'gradient-1'],
+                ['titulo' => '🍰 Dulces Frescos',       'subtitulo' => 'Hechos cada mañana',            'imagen' => '', 'color_clase' => 'gradient-2'],
+                ['titulo' => '🛒 Ofertas Semanales',    'subtitulo' => 'Grandes descuentos',             'imagen' => '', 'color_clase' => 'gradient-3'],
+                ['titulo' => '🍕 Comida Caliente',      'subtitulo' => 'Lista para llevar',              'imagen' => '', 'color_clase' => 'gradient-4'],
+            ];
+            foreach ($shopBanners as $bi => $sb):
+                $sbImg   = trim((string)($sb['imagen'] ?? ''));
+                $sbHasImg = $sbImg !== '' && file_exists(__DIR__ . '/' . $sbImg);
+                $sbBg    = $sbHasImg
+                    ? 'background-image:url(\'' . htmlspecialchars($sbImg, ENT_QUOTES) . '?v=' . filemtime(__DIR__ . '/' . $sbImg) . '\');background-size:cover;background-position:center;'
+                    : '';
+                $sbClass = $sbHasImg ? '' : htmlspecialchars($sb['color_clase'] ?? 'gradient-' . ($bi + 1), ENT_QUOTES);
+            ?>
+            <div class="carousel-item <?php echo $bi === 0 ? 'active' : ''; ?>">
+                <div class="promo-slide <?php echo $sbClass; ?>" style="<?php echo $sbBg; ?>">
+                    <h2><?php echo htmlspecialchars((string)($sb['titulo'] ?? ''), ENT_QUOTES); ?></h2>
+                    <p><?php echo htmlspecialchars((string)($sb['subtitulo'] ?? ''), ENT_QUOTES); ?></p>
                 </div>
             </div>
-            <div class="carousel-item">
-                <div class="promo-slide gradient-2">
-                    <h2>🍰 Dulces Frescos</h2>
-                    <p>Hechos cada mañana</p>
-                </div>
-            </div>
-            <div class="carousel-item">
-                <div class="promo-slide gradient-3">
-                    <h2>🛒 Ofertas Semanales</h2>
-                    <p>Grandes descuentos</p>
-                </div>
-            </div>
-            <div class="carousel-item">
-                <div class="promo-slide gradient-4">
-                    <h2>🍕 Comida Caliente</h2>
-                    <p>Lista para llevar</p>
-                </div>
-            </div>
+            <?php endforeach; ?>
         </div>
         <button class="carousel-control-prev" type="button" data-bs-target="#promoCarousel" data-bs-slide="prev" aria-label="Diapositiva anterior">
             <span class="carousel-control-prev-icon" aria-hidden="true"></span>
@@ -3915,7 +3933,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <button class="btn btn-sm btn-outline-light lang-btn me-1" data-lang="es" onclick="setLang('es')">🇨🇺 ES</button>
             <button class="btn btn-sm btn-outline-light lang-btn" data-lang="en" onclick="setLang('en')">🇺🇸 EN</button>
         </div>
-        <small style="opacity:.65;font-size:.72rem;">Sistema PALWEB POS v3.0</small>
+        <small style="opacity:.65;font-size:.72rem;"><?php echo htmlspecialchars($systemBrandName); ?> v3.0</small>
       </div>
 
     </div>
