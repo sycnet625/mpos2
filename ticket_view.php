@@ -216,6 +216,9 @@ $canalMap = [
             <a href="comprobante_ventas.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #17a2b8; border-radius:5px; background:#17a2b8; color:#fff; font-family:monospace; text-decoration:none; display:inline-block; font-weight:700;">
                 📄 Comprobante Premium
             </a>
+            <button onclick="openWhatsAppModal(<?= $idVenta ?>)" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #25d366; border-radius:5px; background:#25d366; color:#fff; font-family:monospace; font-weight:700;">
+                💬 Enviar por WhatsApp
+            </button>
             <button onclick="window.close()" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #dee2e6; border-radius:5px; background:#fff; font-family:monospace;">
                 ✕ Cerrar
             </button>
@@ -491,6 +494,154 @@ function printWithFormat(fmt) {
 
     document.head.appendChild(s);
     window.print();
+}
+
+// ===== WHATSAPP MODAL =====
+function openWhatsAppModal(idVenta) {
+    const modal = document.createElement('div');
+    modal.id = 'whatsappModal';
+    modal.style.cssText = `
+        position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.6); display: flex; align-items: center;
+        justify-content: center; z-index: 99999; padding: 20px;
+    `;
+
+    const content = document.createElement('div');
+    content.style.cssText = `
+        background: white; border-radius: 12px; padding: 25px;
+        max-width: 450px; width: 100%; box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        max-height: 90vh; overflow-y: auto;
+    `;
+
+    content.innerHTML = `
+        <h4 style="margin-top: 0; color: #333;">
+            <i class="fab fa-whatsapp" style="color: #25d366; margin-right: 10px;"></i>
+            Enviar por WhatsApp
+        </h4>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                Tipo de Documento:
+            </label>
+            <select id="tipoDocumento" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                <option value="comprobante">📄 Comprobante Premium</option>
+                <option value="ticket">🎫 Ticket de Venta</option>
+                <option value="factura">📋 Factura</option>
+            </select>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                Enviar a:
+            </label>
+            <select id="contactoWhatsApp" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
+                <option value="">Cargando contactos...</option>
+            </select>
+            <small style="color: #666; margin-top: 5px; display: block;">Se cargarán los contactos guardados en el cliente</small>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                Mensaje (Opcional):
+            </label>
+            <textarea id="mensajeWhatsApp" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-family: inherit; font-size: 14px; resize: vertical; min-height: 80px;" placeholder="Ej: Aquí está tu comprobante. Gracias por tu compra."></textarea>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <button onclick="enviarPorWhatsApp(${idVenta})" style="flex: 1; padding: 12px; background: #25d366; color: white; border: none; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 14px;">
+                ✓ Enviar
+            </button>
+            <button onclick="cerrarWhatsAppModal()" style="flex: 1; padding: 12px; background: #e9ecef; color: #333; border: none; border-radius: 5px; font-weight: 600; cursor: pointer; font-size: 14px;">
+                Cancelar
+            </button>
+        </div>
+
+        <div id="whatsappStatus" style="margin-top: 15px; padding: 12px; border-radius: 5px; display: none; text-align: center; font-size: 14px;"></div>
+    `;
+
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+
+    // Cargar contactos
+    cargarContactosWhatsApp();
+}
+
+function cerrarWhatsAppModal() {
+    const modal = document.getElementById('whatsappModal');
+    if (modal) modal.remove();
+}
+
+function cargarContactosWhatsApp() {
+    fetch('ticket_whatsapp_send.php?action=get_contacts')
+        .then(r => r.json())
+        .then(data => {
+            if (data.status === 'success') {
+                const select = document.getElementById('contactoWhatsApp');
+                select.innerHTML = '<option value="">Selecciona un contacto...</option>';
+
+                (data.contactos || []).forEach(c => {
+                    const option = document.createElement('option');
+                    option.value = c.whatsapp;
+                    option.textContent = `${c.nombre} (${c.whatsapp})`;
+                    select.appendChild(option);
+                });
+            }
+        })
+        .catch(e => {
+            const select = document.getElementById('contactoWhatsApp');
+            select.innerHTML = '<option value="">Error cargando contactos</option>';
+            console.error('Error:', e);
+        });
+}
+
+function enviarPorWhatsApp(idVenta) {
+    const tipoDoc = document.getElementById('tipoDocumento').value;
+    const whatsapp = document.getElementById('contactoWhatsApp').value;
+    const mensaje = document.getElementById('mensajeWhatsApp').value;
+    const status = document.getElementById('whatsappStatus');
+
+    if (!whatsapp) {
+        status.style.display = 'block';
+        status.style.background = '#fee';
+        status.style.color = '#c33';
+        status.textContent = '❌ Selecciona un contacto';
+        return;
+    }
+
+    status.style.display = 'block';
+    status.style.background = '#e3f2fd';
+    status.style.color = '#1976d2';
+    status.textContent = '⏳ Enviando...';
+
+    const formData = new FormData();
+    formData.append('id_venta', idVenta);
+    formData.append('tipo_doc', tipoDoc);
+    formData.append('whatsapp', whatsapp);
+    formData.append('mensaje', mensaje);
+
+    fetch('ticket_whatsapp_send.php?action=send', {
+        method: 'POST',
+        body: formData
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'success') {
+            status.style.background = '#e8f5e9';
+            status.style.color = '#2e7d32';
+            status.textContent = '✓ ' + data.msg;
+            setTimeout(() => cerrarWhatsAppModal(), 2000);
+        } else {
+            status.style.background = '#fee';
+            status.style.color = '#c33';
+            status.textContent = '❌ Error: ' + data.msg;
+        }
+    })
+    .catch(e => {
+        status.style.background = '#fee';
+        status.style.color = '#c33';
+        status.textContent = '❌ Error: ' + e.message;
+        console.error('Error:', e);
+    });
 }
 </script>
 </body>
