@@ -213,6 +213,9 @@ $canalMap = [
             <a href="ticket_to_invoice.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6f42c1; border-radius:5px; background:#6f42c1; color:#fff; font-family:monospace; text-decoration:none; display:inline-block;">
                 📋 Ver como Factura
             </a>
+            <a href="comprobante_ventas.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #17a2b8; border-radius:5px; background:#17a2b8; color:#fff; font-family:monospace; text-decoration:none; display:inline-block; font-weight:700;">
+                📄 Comprobante Premium
+            </a>
             <button onclick="window.close()" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #dee2e6; border-radius:5px; background:#fff; font-family:monospace;">
                 ✕ Cerrar
             </button>
@@ -393,7 +396,7 @@ $canalMap = [
 
     <div class="text-center mt-3 border-top pt-2">
         <p class="fw-bold" style="margin:0;"><?php echo htmlspecialchars($config['mensaje_final']); ?></p>
-        <small>Sistema PALWEB POS v3.0</small>
+        <small>Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</small>
     </div>
 
     <?php if ($config['ticket_mostrar_qr'] ?? true): ?>
