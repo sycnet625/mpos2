@@ -260,8 +260,51 @@ window.confirmPayment = async function() {
     try {
         const r = await fetch('pos_save.php', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
         const res = await r.json();
-        if(res.status === 'success') { Synth.cash(); if(document.getElementById('printTicket').checked) window.open('ticket_view.php?id='+res.id, 'Ticket', 'width=380,height=600'); else showToast('Venta #' + res.id + ' Registrada'); finishSale(); } else { alert('Error: ' + res.msg); }
+        if(res.status === 'success') {
+            Synth.cash();
+            showPostSaleOptions(res.id);
+            finishSale();
+        } else {
+            alert('Error: ' + res.msg);
+        }
     } catch(e) { saveOffline(payload); }
+};
+
+// Mostrar opciones después de registrar venta
+window.showPostSaleOptions = function(idVenta) {
+    const html = `
+        <div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;">
+            <div style="background:white;border-radius:8px;padding:25px;max-width:400px;box-shadow:0 5px 30px rgba(0,0,0,0.3);">
+                <h4 style="margin-top:0;color:#333;"><i class="fas fa-check-circle" style="color:#28a745;"></i> Venta #${idVenta} Registrada</h4>
+                <p style="color:#666;margin-bottom:25px;">¿Qué deseas hacer ahora?</p>
+                <div style="display:flex;flex-direction:column;gap:10px;">
+                    <button onclick="window.open('comprobante_ventas.php?id=${idVenta}', '_blank', 'width=1000,height=800');closeSaleModal();" style="padding:12px;background:#0dcaf0;color:white;border:none;border-radius:5px;font-weight:600;cursor:pointer;font-size:14px;">
+                        <i class="fas fa-receipt"></i> Ver Comprobante
+                    </button>
+                    <button onclick="window.open('ticket_view.php?id=${idVenta}', '_blank', 'width=380,height=600');closeSaleModal();" style="padding:12px;background:#6c757d;color:white;border:none;border-radius:5px;font-weight:600;cursor:pointer;font-size:14px;">
+                        <i class="fas fa-print"></i> Imprimir Ticket
+                    </button>
+                    <button onclick="window.open('comprobante_ventas.php?id=${idVenta}&format=pdf', '_blank');closeSaleModal();" style="padding:12px;background:#fd7e14;color:white;border:none;border-radius:5px;font-weight:600;cursor:pointer;font-size:14px;">
+                        <i class="fas fa-file-pdf"></i> Descargar PDF
+                    </button>
+                    <button onclick="closeSaleModal();" style="padding:12px;background:#e9ecef;color:#333;border:none;border-radius:5px;font-weight:600;cursor:pointer;font-size:14px;">
+                        <i class="fas fa-times"></i> Cerrar
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    const container = document.createElement('div');
+    container.id = 'post-sale-modal';
+    container.innerHTML = html;
+    document.body.appendChild(container);
+};
+
+window.closeSaleModal = function() {
+    const modal = document.getElementById('post-sale-modal');
+    if(modal) modal.remove();
+    showToast('Venta completada', 'success');
 };
 
 // CIERRE DE CAJA
