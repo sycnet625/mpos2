@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="200" height="200">
+  <!-- Fondo decorativo (estrella redondeada) -->
+  <path d="M200,20 L240,60 L290,50 L320,90 L330,140 L370,160 L330,180 L370,200 L330,220 L370,240 L330,260 L320,310 L290,350 L240,340 L200,380 L160,340 L110,350 L80,310 L70,260 L30,240 L70,220 L30,200 L70,180 L30,160 L70,140 L80,90 L110,50 L160,60 Z" fill="#F5D5E8" stroke="#C97BB0" stroke-width="2"/>
+
+  <!-- Fondo interior crema -->
+  <circle cx="200" cy="200" r="160" fill="#FFFEF0"/>
+
+  <!-- Decoración de puntitos -->
+  <g fill="#D4A5C7" opacity="0.4">
+    <circle cx="120" cy="100" r="8"/>
+    <circle cx="280" cy="120" r="8"/>
+    <circle cx="300" cy="200" r="8"/>
+    <circle cx="280" cy="280" r="8"/>
+    <circle cx="120" cy="280" r="8"/>
+    <circle cx="100" cy="200" r="8"/>
+    <circle cx="140" cy="70" r="6"/>
+    <circle cx="260" cy="70" r="6"/>
+    <circle cx="320" cy="140" r="6"/>
+    <circle cx="320" cy="260" r="6"/>
+    <circle cx="260" cy="330" r="6"/>
+    <circle cx="140" cy="330" r="6"/>
+    <circle cx="80" cy="260" r="6"/>
+    <circle cx="80" cy="140" r="6"/>
+  </g>
+
+  <!-- Gorro de chef -->
+  <g id="chef-hat">
+    <!-- Gorro principal -->
+    <path d="M 140 100 Q 140 70 200 70 Q 260 70 260 100 L 265 110 L 135 110 Z" fill="#E74C8C" stroke="#C97BB0" stroke-width="2"/>
+    <!-- Onda del gorro -->
+    <path d="M 135 110 Q 200 120 265 110" stroke="#C97BB0" stroke-width="2" fill="none"/>
+    <!-- Línea decorativa -->
+    <rect x="140" y="108" width="120" height="3" fill="#FFF" opacity="0.6"/>
+  </g>
+
+  <!-- Letra R decorativa (estilo cursiva) -->
+  <text x="200" y="200" font-family="Georgia, serif" font-size="120" font-weight="bold" text-anchor="middle" dominant-baseline="middle" fill="#2C2C2C" opacity="0.9">R</text>
+
+  <!-- Nombre "Renacer" -->
+  <text x="200" y="250" font-family="Georgia, serif" font-size="42" font-weight="normal" text-anchor="middle" fill="#2C2C2C">Renacer</text>
+
+  <!-- Subtítulo "con antojito dulce" -->
+  <text x="200" y="290" font-family="Georgia, serif" font-size="16" font-style="italic" text-anchor="middle" fill="#666666">con antojito dulce</text>
+
+  <!-- Pequeño cupcake decorativo al lado de la R -->
+  <g id="cupcake" transform="translate(260, 160)">
+    <!-- Base del cupcake (papel) -->
+    <path d="M -8 8 L -10 0 Q -10 -5 0 -8 Q 10 -5 10 0 L 8 8 Z" fill="#E8A5C1" stroke="#C97BB0" stroke-width="1"/>
+    <!-- Líneas del papel -->
+    <line x1="-6" y1="2" x2="-6" y2="8" stroke="#C97BB0" stroke-width="0.5" opacity="0.5"/>
+    <line x1="-2" y1="2" x2="-2" y2="8" stroke="#C97BB0" stroke-width="0.5" opacity="0.5"/>
+    <line x1="2" y1="2" x2="2" y2="8" stroke="#C97BB0" stroke-width="0.5" opacity="0.5"/>
+    <line x1="6" y1="2" x2="6" y2="8" stroke="#C97BB0" stroke-width="0.5" opacity="0.5"/>
+    <!-- Crema del cupcake -->
+    <path d="M -8 8 Q -10 2 -5 -2 Q 0 -8 5 -2 Q 10 2 8 8" fill="#F5A3D0" stroke="#E74C8C" stroke-width="1"/>
+    <!-- Cereza -->
+    <circle cx="0" cy="-8" r="2" fill="#E74C8C"/>
+  </g>
+
+  <!-- Banda decorativa inferior -->
+  <path d="M 80 320 Q 200 340 320 320" fill="#C97BB0" opacity="0.3"/>
+
+  <!-- Texto "Pastelería" en la banda -->
+  <text x="200" y="340" font-family="Georgia, serif" font-size="20" font-style="italic" text-anchor="middle" fill="#FFF" opacity="0.9" font-weight="bold">Pastelería</text>
+</svg>
