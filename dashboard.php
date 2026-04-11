@@ -28,6 +28,9 @@ require_once 'inventory_suite_layout.php';
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
+$systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
+$systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
+$companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 
 function dashboard_product_scope_sql(string $alias, int $sucursalId, int $almacenId): string {
     $sucursalId = (int)$sucursalId;
@@ -112,14 +115,14 @@ $margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
 // B. Ventas (Periodo)
 $paramsDate = [$fechaInicio, $fechaFin];
 
-$sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange";
+$sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
 $ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
 
 $sqlGanancia = "SELECT SUM((d.precio - p.costo) * d.cantidad)
                 FROM ventas_detalle d
                 JOIN productos p ON d.id_producto = p.codigo
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange";
+                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
 $gananciaPeriodo = getScalar($pdo, $sqlGanancia, $paramsDate);
 
 // --- C. MÉTRICAS WEB (AMPLIADO) ---
@@ -215,7 +218,7 @@ $logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-l
 $logErrors = shell_exec("tail -n 50 $errorLogPath | grep 'error' | tail -n 5");
 
 
-$sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange";
+$sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
 $totalTransacciones = getScalar($pdo, $sqlTrans, $paramsDate);
 $ticketPromedio = ($totalTransacciones > 0) ? $ventasPeriodo / $totalTransacciones : 0;
 
@@ -225,7 +228,7 @@ $countPendientes = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE 
 // D. Datos para Gráficas
 $sqlPagos = "SELECT COALESCE(metodo_pago, 'Efectivo') as metodo, SUM(total) as total 
              FROM ventas_cabecera v 
-             WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange 
+             WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
              GROUP BY metodo_pago ORDER BY total DESC";
 $pagosData = getRows($pdo, $sqlPagos, $paramsDate);
 
@@ -233,7 +236,7 @@ $topProductos = getRows($pdo, "SELECT p.nombre, SUM(d.cantidad) as vendidos, SUM
                                FROM ventas_detalle d
                                JOIN productos p ON d.id_producto = p.codigo
                                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                               WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange
+                               WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
                                GROUP BY p.codigo ORDER BY vendidos DESC LIMIT 5", $paramsDate);
 
 // ============================================================================
@@ -245,7 +248,7 @@ $sqlTopProfit = "SELECT p.nombre, SUM(d.cantidad * (d.precio - p.costo)) as tota
                  FROM ventas_detalle d
                  JOIN productos p ON d.id_producto = p.codigo
                  JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
                  GROUP BY p.codigo
                  ORDER BY total_ganancia DESC LIMIT 5";
 $topProfitProds = getRows($pdo, $sqlTopProfit, $paramsDate);
@@ -285,7 +288,7 @@ $sqlCatSales = "SELECT p.categoria, SUM(d.cantidad * d.precio) as total_venta
                 FROM ventas_detalle d
                 JOIN productos p ON d.id_producto = p.codigo
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange
+                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
                 GROUP BY p.categoria
                 ORDER BY total_venta DESC";
 $catSalesData = getRows($pdo, $sqlCatSales, $paramsDate);
@@ -295,7 +298,7 @@ $sqlCatProfit = "SELECT p.categoria, SUM(d.cantidad * (d.precio - p.costo)) as t
                  FROM ventas_detalle d
                  JOIN productos p ON d.id_producto = p.codigo
                  JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
                  GROUP BY p.categoria
                  ORDER BY total_ganancia DESC";
 $catProfitData = getRows($pdo, $sqlCatProfit, $paramsDate);
@@ -509,7 +512,7 @@ function auditResumen(string $accion, array $d): string {
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Admin | PalWeb POS</title>
+    <title>Dashboard Admin | <?php echo htmlspecialchars($systemBrandName); ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
@@ -655,6 +658,7 @@ function auditResumen(string $accion, array $d): string {
 
         @media (max-width: 767px) {
             .dashboard-main-nav .navbar-brand { font-size: .95rem; }
+            .dashboard-brand-logo { width: 30px; height: 30px; }
             .dashboard-shell .inventory-hero { padding: 1.05rem !important; }
             .dashboard-shell .kpi-chip { font-size: .78rem; padding: .3rem .6rem; }
             .dashboard-shell .card { border-radius: 16px !important; }
@@ -672,7 +676,14 @@ function auditResumen(string $accion, array $d): string {
 
 <nav class="navbar navbar-expand-lg navbar-dark sticky-top shadow-sm dashboard-main-nav">
     <div class="container-fluid">
-        <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i>PALWEB POS</a>
+        <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="#">
+            <?php if ($systemBrandLogo !== ''): ?>
+                <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" alt="<?php echo htmlspecialchars($systemBrandName); ?>" class="dashboard-brand-logo" style="width:34px;height:34px;border-radius:10px;object-fit:contain;background:rgba(255,255,255,.96);padding:3px;">
+            <?php else: ?>
+                <i class="fas fa-tachometer-alt me-1"></i>
+            <?php endif; ?>
+            <span><?php echo htmlspecialchars($systemBrandName); ?></span>
+        </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -693,9 +704,9 @@ function auditResumen(string $accion, array $d): string {
             <div>
                 <div class="section-title text-white-50 mb-2">Analitica / Operaciones</div>
                 <h1 class="h2 fw-bold mb-2">
-                    <i class="fas fa-chart-line me-2"></i>PALWEB POS — Bienvenido <?php echo htmlspecialchars($_SESSION['admin_user_name'] ?? $_SESSION['user_name'] ?? 'Admin'); ?>
+                    <i class="fas fa-chart-line me-2"></i><?php echo htmlspecialchars($systemBrandName); ?> — Bienvenido <?php echo htmlspecialchars($_SESSION['admin_user_name'] ?? $_SESSION['user_name'] ?? 'Admin'); ?>
                 </h1>
-                <p class="mb-3 text-white-50">Vista integral de ventas, inventario, reservas, ecommerce y auditoria operativa.</p>
+                <p class="mb-3 text-white-50">Vista integral de ventas, inventario, reservas, ecommerce y auditoria operativa para <?php echo htmlspecialchars($companyBrandName); ?>.</p>
                 <div class="d-flex flex-wrap gap-2">
                     <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i><?= $scope === 'global' ? 'Alcance global' : 'Sucursal actual' ?></span>
                     <span class="kpi-chip"><i class="fas fa-calendar-alt me-1"></i><?= htmlspecialchars($fechaInicio) ?> a <?= htmlspecialchars($fechaFin) ?></span>

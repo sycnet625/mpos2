@@ -19,12 +19,17 @@ $vapid_public = $config['vapid_public_key'] ?? '';
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
-    <link rel="manifest" href="manifest-ai.php">
+    <link rel="manifest" href="manifest-ai.json">
     <title>AI Control Center</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <script src="assets/js/vue.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="assets/css/xterm.css">
+    <script src="assets/js/xterm.js"></script>
+    <script src="assets/js/xterm-addon-fit.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/css/iziToast.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/izitoast/1.4.0/js/iziToast.min.js"></script>
     <style>
         :root {
             --bg-deep: #0b0e11;
@@ -432,7 +437,12 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                             </div>
                         </div>
                         <div class="chat-status-bar">
-                            <span class="model-badge">{{ session.agente }} <span v-if="session.sub_model" class="opacity-75 ms-1">| {{ session.sub_model }}</span></span>
+                            <div class="d-flex align-items-center gap-3">
+                                <span class="model-badge">{{ session.agente }} <span v-if="session.sub_model" class="opacity-75 ms-1">| {{ session.sub_model }}</span></span>
+                                <span v-if="session.statusLine" class="text-warning fw-bold" style="font-family: monospace; font-size: 0.7rem;">
+                                    {{ session.statusLine }}
+                                </span>
+                            </div>
                             <div class="d-flex align-items-center">
                                 <div class="usage-circle">
                                     <svg viewBox="0 0 24 24">
@@ -528,7 +538,12 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                 </div>
 
                 <div class="chat-status-bar">
-                    <span class="model-badge">{{ session.agente }}</span>
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="model-badge">{{ session.agente }}</span>
+                        <span v-if="session.statusLine" class="text-warning fw-bold" style="font-family: monospace; font-size: 0.7rem;">
+                            {{ session.statusLine }}
+                        </span>
+                    </div>
                     <div class="d-flex align-items-center">
                         <div class="usage-circle">
                             <svg viewBox="0 0 24 24">
@@ -574,12 +589,30 @@ $vapid_public = $config['vapid_public_key'] ?? '';
                 <i class="fas me-2" :class="overlay.mode === 'terminal' ? 'fa-terminal' : 'fa-file-alt'"></i>
                 {{ overlay.title }}
             </h6>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center">
+                <!-- Toggle color/mono -->
+                <button v-if="overlay.mode === 'terminal'"
+                        class="btn btn-sm"
+                        :class="overlay.colorMode ? 'btn-success' : 'btn-outline-secondary'"
+                        @click="toggleTerminalColorMode"
+                        :title="overlay.colorMode ? 'Modo color (click para monocromático)' : 'Modo monocromático (click para color)'">
+                    <i class="fas" :class="overlay.colorMode ? 'fa-palette' : 'fa-font'"></i>
+                    <span class="ms-1 d-none d-sm-inline">{{ overlay.colorMode ? 'Color' : 'Mono' }}</span>
+                </button>
                 <button class="btn btn-sm btn-outline-light" @click="overlay.refresh()"><i class="fas fa-sync"></i></button>
                 <button class="btn btn-sm btn-danger" @click="closeOverlay"><i class="fas fa-times"></i></button>
             </div>
         </div>
-        <pre ref="overlayTerminal" class="flex-grow-1 m-0 p-3 overflow-auto text-success small" style="background: #000; font-family: 'Courier New', monospace;">{{ overlay.content }}</pre>
+        <!-- Modo color: xterm.js renderiza ANSI correctamente -->
+        <div v-show="overlay.mode === 'terminal' && overlay.colorMode"
+             ref="xtermOverlayContainer"
+             style="flex:1; min-height:0; background:#1a1a1a; position:relative;"></div>
+        <!-- Modo monocromático: texto plano sin códigos ANSI -->
+        <pre v-show="!(overlay.mode === 'terminal' && overlay.colorMode)"
+             ref="overlayTerminal"
+             class="flex-grow-1 m-0 p-3 overflow-auto small"
+             style="background:#000; font-family:'Courier New',monospace; color:#ccc; white-space:pre-wrap; word-break:break-all;"
+             >{{ stripAnsi(overlay.content) }}</pre>
         <div v-if="overlay.mode === 'terminal'" class="overlay-terminal-bar p-3">
             <div class="d-flex flex-wrap gap-2 mb-3">
                 <button class="overlay-key-btn wide" @click="sendOverlayKey('Escape')" title="Escape">Esc</button>
@@ -813,13 +846,16 @@ new Vue({
             chatId: null,
             agente: '',
             autoRefreshHandle: null,
+            colorMode: localStorage.getItem('palweb_ai_term_color') !== 'false',
             refresh: () => {}
         },
         messagePollHandle: null,
         messagePollMs: 1500,
         messagePollErrorStreak: 0,
         overlayPollMs: 1000,
-        overlayPollErrorStreak: 0
+        overlayPollErrorStreak: 0,
+        xtermOverlayInstance: null,
+        xtermOverlayFit: null
     },
     async mounted() {
         this.log("Iniciando Dashboard Multisesión...");
@@ -846,27 +882,63 @@ new Vue({
             if (this.layoutMode === 'sidebar') {
                 this.$nextTick(() => this.scrollToBottom(this.mobileActiveSessionId));
             }
+        },
+        'overlay.show'(newVal) {
+            if (!newVal) {
+                this.destroyOverlayXterm();
+            } else if (this.overlay.mode === 'terminal' && this.overlay.colorMode) {
+                this.$nextTick(() => this.initOverlayXterm());
+            }
+        },
+        'overlay.content'(newVal) {
+            if (this.overlay.mode === 'terminal' && this.overlay.colorMode && this.xtermOverlayInstance) {
+                this.xtermOverlayInstance.clear();
+                this.xtermOverlayInstance.write(newVal);
+                this.xtermOverlayInstance.scrollToBottom();
+            }
         }
     },
     methods: {
+        toast(type, msg, title = '') {
+            if (typeof iziToast !== 'undefined') {
+                iziToast[type]({
+                    title: title || (type === 'error' ? 'Error' : 'Aviso'),
+                    message: msg,
+                    position: 'topRight',
+                    transitionIn: 'flipInX',
+                    theme: 'dark',
+                    backgroundColor: type === 'error' ? '#721c24' : '#10a37f',
+                    messageColor: '#fff',
+                    titleColor: '#fff',
+                    progressBarColor: '#fff'
+                });
+            } else {
+                alert(msg);
+            }
+        },
         async fetchJsonSafe(url, options = {}) {
-            const res = await fetch(url, options);
-            const raw = await res.text();
-            let data = null;
-            if (raw && raw.trim() !== '') {
-                try {
-                    data = JSON.parse(raw);
-                } catch (e) {
-                    const err = new Error(`Respuesta inválida (${res.status})`);
-                    err.raw = raw;
-                    throw err;
+            try {
+                const res = await fetch(url, options);
+                const raw = await res.text();
+                let data = null;
+                if (raw && raw.trim() !== '') {
+                    try {
+                        data = JSON.parse(raw);
+                    } catch (e) {
+                        const err = new Error(`Respuesta inválida (${res.status})`);
+                        err.raw = raw;
+                        throw err;
+                    }
                 }
+                if (!res.ok) {
+                    const msg = (data && data.msg) ? data.msg : `HTTP ${res.status}`;
+                    throw new Error(msg);
+                }
+                return data;
+            } catch (e) {
+                this.toast('error', e.message);
+                throw e;
             }
-            if (!res.ok) {
-                const msg = (data && data.msg) ? data.msg : `HTTP ${res.status}`;
-                throw new Error(msg);
-            }
-            return data;
         },
         log(msg) {
             const time = new Date().toLocaleTimeString();
@@ -902,7 +974,7 @@ new Vue({
             }
             this.messagePollHandle = setInterval(() => {
                 this.sessions.forEach(s => {
-                    if (!s.loading) this.refreshMessages(s.id);
+                    this.refreshMessages(s.id);
                 });
             }, this.messagePollMs);
         },
@@ -911,6 +983,7 @@ new Vue({
                 clearInterval(this.overlay.autoRefreshHandle);
                 this.overlay.autoRefreshHandle = null;
             }
+            this.destroyOverlayXterm();
             this.overlay.show = false;
             this.overlay.mode = 'logs';
             this.overlay.input = '';
@@ -1013,6 +1086,7 @@ new Vue({
                 input: '',
                 loading: false,
                 awaitingApproval: false,
+                statusLine: '',
                 usage_count: 0,
                 usage_pct: 0,
                 usage_count_display: '',
@@ -1133,10 +1207,9 @@ new Vue({
             const el = document.getElementById(elId);
             const wasAtBottom = el ? (el.scrollHeight - el.scrollTop - el.clientHeight < 100) : true;
 
-            let msgs = [];
+            let data = null;
             try {
-                const data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_messages&chat_id=${sessionId}`);
-                msgs = Array.isArray(data) ? data : [];
+                data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_messages&chat_id=${sessionId}`);
             } catch (e) {
                 this.log(`Error refrescando chat ${sessionId}: ${e.message}`);
                 this.updateMessagePolling(false);
@@ -1144,6 +1217,11 @@ new Vue({
             }
             this.updateMessagePolling(true);
             
+            const msgs = Array.isArray(data) ? data : (data.messages || []);
+            if (data.status_line !== undefined) {
+                session.statusLine = data.status_line;
+            }
+
             // Si no hay mensajes nuevos y no es forzado, no hacemos nada pesado
             if (msgs.length === session.messages.length && !force) return true;
 
@@ -1198,19 +1276,44 @@ new Vue({
             this.overlay.chatId = session.id;
             this.overlay.agente = session.agente;
             this.overlay.refresh = async () => {
-                const el = this.$refs.overlayTerminal;
-                const shouldStickBottom = !el || (el.scrollHeight - el.scrollTop - el.clientHeight < 120);
                 try {
                     const data = await this.fetchJsonSafe(`palweb_ai_api.php?action=get_terminal_view&chat_id=${session.id}&agente=${session.agente}`);
-                    this.overlay.content = data.data || 'Terminal sin salida.';
+
+                    let decoded = 'Terminal sin salida.';
+                    if (data.data) {
+                        try {
+                            // Decodificación base64 robusta para soportar caracteres especiales y ANSI
+                            const binaryString = window.atob(data.data);
+                            const bytes = new Uint8Array(binaryString.length);
+                            for (let i = 0; i < binaryString.length; i++) {
+                                bytes[i] = binaryString.charCodeAt(i);
+                            }
+                            decoded = new TextDecoder().decode(bytes);
+                        } catch (e) {
+                            decoded = window.atob(data.data);
+                        }
+                    }
+
+                    this.overlay.content = decoded;
                     this.updateOverlayPolling(true);
                 } catch (e) {
                     this.overlay.content = `Error cargando terminal: ${e.message}`;
                     this.log(`Error terminal ${session.id}/${session.agente}: ${e.message}`);
                     this.updateOverlayPolling(false);
                 }
-                this.scrollOverlayToBottom(shouldStickBottom);
+                // En modo color xterm.js se actualiza via watcher; en mono, scrollear el pre
+                if (!this.overlay.colorMode) {
+                    const el = this.$refs.overlayTerminal;
+                    if (el) {
+                        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+                        if (nearBottom) el.scrollTop = el.scrollHeight;
+                    }
+                }
             };
+            // Init xterm después de que Vue renderice el contenedor
+            if (this.overlay.colorMode) {
+                this.$nextTick(() => this.initOverlayXterm());
+            }
             this.overlay.refresh();
             this.startOverlayAutoRefresh();
         },
@@ -1322,11 +1425,69 @@ new Vue({
             await fetch(`palweb_ai_api.php?action=delete_chat&chat_id=${id}&agente=${agente}`);
             this.sessions = this.sessions.filter(s => s.id !== id);
         },
+        toggleTerminalColorMode() {
+            this.overlay.colorMode = !this.overlay.colorMode;
+            localStorage.setItem('palweb_ai_term_color', this.overlay.colorMode);
+            if (this.overlay.colorMode) {
+                this.$nextTick(() => {
+                    this.initOverlayXterm();
+                });
+            } else {
+                this.destroyOverlayXterm();
+            }
+        },
+        initOverlayXterm() {
+            this.destroyOverlayXterm();
+            const container = this.$refs.xtermOverlayContainer;
+            if (!container || typeof Terminal === 'undefined') return;
+            const term = new Terminal({
+                convertEol: true,
+                scrollback: 5000,
+                theme: {
+                    background: '#1a1a1a',
+                    foreground: '#cccccc',
+                    cursor: '#cccccc'
+                },
+                fontFamily: "'Courier New', monospace",
+                fontSize: 13,
+                disableStdin: true,
+                cursorBlink: false
+            });
+            const fit = new FitAddon.FitAddon();
+            term.loadAddon(fit);
+            term.open(container);
+            fit.fit();
+            this.xtermOverlayInstance = term;
+            this.xtermOverlayFit = fit;
+            if (this.overlay.content) {
+                term.write(this.overlay.content);
+                term.scrollToBottom();
+            }
+            // Resize observer to re-fit on container size change
+            if (window.ResizeObserver) {
+                this._xtermResizeObserver = new ResizeObserver(() => {
+                    try { fit.fit(); } catch(e) {}
+                });
+                this._xtermResizeObserver.observe(container);
+            }
+        },
+        destroyOverlayXterm() {
+            if (this._xtermResizeObserver) {
+                this._xtermResizeObserver.disconnect();
+                this._xtermResizeObserver = null;
+            }
+            if (this.xtermOverlayInstance) {
+                try { this.xtermOverlayInstance.dispose(); } catch(e) {}
+                this.xtermOverlayInstance = null;
+                this.xtermOverlayFit = null;
+            }
+        },
         renderMarkdown(text) {
             if (!text) return '';
             const cleanText = this.stripAnsi(text);
             return typeof marked !== 'undefined' ? marked.parse(cleanText) : cleanText;
         },
+
         stripAnsi(text) {
             if (!text) return '';
             // 1. Elimina secuencias de escape ANSI

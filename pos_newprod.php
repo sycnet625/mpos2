@@ -1,7 +1,9 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_newprod.php
 // DESCRIPCIÓN: Modal universal para creación rápida de productos (Backend + UI)
-// VERSIÓN: V2.1 (CONDICIONAL FULL PAGE O MODAL)
+// VERSIÓN: V2.2 (FIX USER CONTEXT)
+
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 // Detectar si se está llamando directamente o incluido
 $is_direct_access = (basename($_SERVER['SCRIPT_FILENAME']) === 'pos_newprod.php');
@@ -188,7 +190,7 @@ if ($is_direct_access) {
     <html lang="es">
     <head>
         <meta charset="UTF-8">
-        <title>Nuevo Producto - PalWeb POS</title>
+        <title>Nuevo Producto - <?= htmlspecialchars(config_loader_system_name()) ?></title>
         <link href="assets/css/bootstrap.min.css" rel="stylesheet">
         <link rel="stylesheet" href="assets/css/all.min.css">
         <script src="assets/js/bootstrap.bundle.min.js"></script>

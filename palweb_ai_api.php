@@ -376,7 +376,9 @@ function tmux_capture($name, $lines = 100) {
 
     $target = escapeshellarg("{$name}:0");
     $lines = max(50, (int)$lines);
-    $out = (string)ai_exec_local_tmux("capture-pane -p -J -S -{$lines} -E - -t {$target}");
+    // Añadimos -e para capturar secuencias de escape de color. 
+    // Quitamos -J para evitar que se corrompan secuencias que envuelven líneas.
+    $out = (string)ai_exec_local_tmux("capture-pane -e -p -S -{$lines} -E - -t {$target}");
     $low = strtolower($out);
     if (str_contains($low, "can't find session") || ai_tmux_output_is_server_down($out)) {
         return '';
@@ -598,20 +600,20 @@ function ai_sync_terminal_to_messages($pdo, $chat_id, $agente) {
     $stateExists = is_file($stateFile);
 
     if ($chat_id <= 0 || !tmux_has_session($sessionName)) {
-        return [
-            'status' => 'idle',
-            'delta' => '',
-            'capture' => ''
-        ];
+        return ['status' => 'idle', 'delta' => '', 'capture' => '', 'status_line' => ''];
     }
 
-    $capture = trim((string)tmux_capture_clean($sessionName));
+    $captureRaw = (string)tmux_capture($sessionName);
+    $statusLine = '';
+    
+    // Extraer status_line del RAW antes de limpiar
+    if (preg_match('/([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*?esc to cancel.*?)\)/u', $captureRaw, $m)) {
+        $statusLine = $m[1] . ')';
+    }
+
+    $capture = trim((string)ansi_clean($captureRaw));
     if ($capture === '') {
-        return [
-            'status' => 'idle',
-            'delta' => '',
-            'capture' => ''
-        ];
+        return ['status' => 'idle', 'delta' => '', 'capture' => '', 'status_line' => $statusLine];
     }
 
     $state = ai_load_state($chat_id, $agente);
@@ -620,11 +622,7 @@ function ai_sync_terminal_to_messages($pdo, $chat_id, $agente) {
     if (!$stateExists) {
         if (count($messages) > 0) {
             ai_reset_state($chat_id, $agente, $capture);
-            return [
-                'status' => 'initialized',
-                'delta' => '',
-                'capture' => $capture
-            ];
+            return ['status' => 'initialized', 'delta' => '', 'capture' => $capture, 'status_line' => $statusLine];
         }
     }
 
@@ -673,6 +671,7 @@ function ai_sync_terminal_to_messages($pdo, $chat_id, $agente) {
         'status' => $delta !== '' ? 'updated' : 'unchanged',
         'delta' => $delta,
         'capture' => $capture,
+        'status_line' => $statusLine,
         'pending_assistant_message_id' => (int)($state['pending_assistant_message_id'] ?? 0)
     ];
 }
@@ -804,17 +803,17 @@ switch ($action) {
             ai_json_response(['status' => 'error', 'msg' => $ensure['msg'] ?? 'No se pudo abrir terminal'], (int)($ensure['http'] ?? 500));
             break;
         }
-        $agente = $ensure['agente'];
         $sessionName = $ensure['session'];
-        ai_sync_terminal_to_messages(null, $chat_id, $agente);
-        ai_json_response(['status' => 'success', 'data' => tmux_capture($sessionName)]);
+        $rawContent = tmux_capture($sessionName);
+        // Enviamos en base64 para evitar que se pierdan caracteres de control ANSI en el transporte JSON
+        ai_json_response(['status' => 'success', 'data' => base64_encode($rawContent)]);
         break;
 
     case 'get_messages':
         $chat_id = (int)($_GET['chat_id'] ?? 0);
+        $agente = 'claude';
         if ($chat_id > 0) {
             $chats = ai_get_chats();
-            $agente = 'claude';
             foreach ($chats as $c) {
                 if ((int)$c['id'] === $chat_id) {
                     $agente = $c['agente'];
@@ -827,7 +826,21 @@ switch ($action) {
         foreach ($rows as &$r) {
             $r['contenido'] = ansi_clean($r['contenido']);
         }
-        ai_json_response($rows);
+        
+        // También intentar capturar el status_line aquí
+        $sessionName = "ai_chat_{$chat_id}_{$agente}";
+        $statusLine = '';
+        if (tmux_has_session($sessionName)) {
+            $capture = tmux_capture_clean($sessionName);
+            if (preg_match('/([⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏].*?esc to cancel.*?)\)/u', $capture, $m)) {
+                $statusLine = $m[1] . ')';
+            }
+        }
+
+        ai_json_response([
+            'messages' => $rows,
+            'status_line' => $statusLine
+        ]);
         break;
 
     case 'new_chat':
@@ -1003,14 +1016,16 @@ switch ($action) {
             if ($agente !== 'gemini' || $sessionExisted) {
                 tmux_send_keys($sessionName, $messageText);
             }
-            usleep(700000);
+            usleep(100000);
 
             $sync = ai_sync_terminal_to_messages(null, $chat_id, $agente);
             $respuesta_final = $sync['delta'] ?? '';
+            $status_line = $sync['status_line'] ?? '';
 
             ai_json_response([
                 'status' => 'success',
                 'response' => $respuesta_final,
+                'status_line' => $status_line,
                 'mode' => $mode
             ]);
         } catch (Exception $e) {

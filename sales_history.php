@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             exit;
         }
 
-        $stmtTotales = $pdo->prepare("SELECT metodo_pago, SUM(total) as total FROM ventas_cabecera WHERE id_sesion_caja = ? GROUP BY metodo_pago");
+        $stmtTotales = $pdo->prepare("SELECT metodo_pago, SUM(total) as total FROM ventas_cabecera WHERE id_sesion_caja = ? AND total > 0 GROUP BY metodo_pago");
         $stmtTotales->execute([$sessionId]);
         $pagos = $stmtTotales->fetchAll(PDO::FETCH_KEY_PAIR);
 
@@ -95,7 +95,7 @@ try {
                     JOIN productos p ON d.id_producto = p.codigo 
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                     LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                    WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas";
+                    WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0";
     
     $stmtF = $pdo->prepare($sqlFinanzas);
     $stmtF->execute([$start, $end]);
@@ -111,7 +111,7 @@ try {
     $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total 
                  FROM ventas_cabecera v
                  LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                 WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas
+                 WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0
                  GROUP BY v.metodo_pago";
     $stmtP = $pdo->prepare($sqlPagos);
     $stmtP->execute([$start, $end]);
@@ -175,7 +175,7 @@ try {
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-        WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas
+        WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0
         GROUP BY dia
     ");
     $stmtChart->execute([$start, $end]);
@@ -248,13 +248,13 @@ $sqlRes = "SELECT SUM(d.cantidad * (d.precio - p.costo)) as ganancia, SUM(d.cant
            JOIN productos p ON d.id_producto = p.codigo 
            JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
            LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-           WHERE v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas";
+           WHERE v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0";
 $stmtRes = $pdo->prepare($sqlRes);
 $stmtRes->execute([$start, $end]);
 $kpiReserva = $stmtRes->fetch(PDO::FETCH_ASSOC);
 
 // PROMEDIOS DIARIOS (NUEVO CALCULO)
-$stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas GROUP BY dia HAVING venta_dia >= 1");
+$stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 GROUP BY dia HAVING venta_dia >= 1");
 $stmtActive->execute([$start, $end]);
 $activeDays = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
 
@@ -499,7 +499,8 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
     <?php foreach ($sesiones as $s): 
         $sid = $s['id']; 
         $sessionTickets = isset($grouped[$sid]) ? $grouped[$sid] : [];
-        $totalSession = array_sum(array_column($sessionTickets, 'total'));
+        $totalSession = 0;
+        foreach($sessionTickets as $st) { if($st['total'] > 0) $totalSession += $st['total']; }
         $isOpen = ($s['estado'] == 'ABIERTA');
         $isContabilizado = ($s['es_contabilizado'] > 0);
         $fechaContableStr = date('d/m/Y', strtotime($s['fecha_contable']));
