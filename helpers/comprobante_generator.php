@@ -18,6 +18,8 @@ class ComprobanteGenerator {
      * Generar HTML del comprobante
      */
     public function generarHTML($idVenta) {
+        $baseDir = dirname(__DIR__); // /var/www
+
         // Obtener datos de la venta
         $stmtVenta = $this->pdo->prepare("
             SELECT v.*,
@@ -72,6 +74,8 @@ class ComprobanteGenerator {
         // HTML del comprobante
         $metodo = $venta['metodo_pago'] ?? 'Efectivo';
         $hora = date('H:i:s', strtotime($venta['fecha']));
+
+        $logoPath = $baseDir . '/assets/img/logo_comprobante.svg';
 
         $html = "<!DOCTYPE html>
 <html lang=\"es\">
@@ -308,7 +312,7 @@ class ComprobanteGenerator {
 
         <div class=\"encabezado\">
             <div class=\"logo-section\">
-                <img src=\"assets/img/logo_comprobante.svg\" alt=\"Logo $nombreEmpresa\">
+                <img src=\"$logoPath\" alt=\"Logo $nombreEmpresa\">
             </div>
             <div class=\"empresa-section\">
                 <h1>COMPROBANTE</h1>
@@ -396,14 +400,43 @@ class ComprobanteGenerator {
         $tmpHtml = "/tmp/comprobante_$idVenta.html";
         file_put_contents($tmpHtml, $html);
 
-        // Convertir a PDF con Chromium
-        $cmd = "chromium-browser --headless --disable-gpu --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>/dev/null";
-        exec($cmd, $output, $returnCode);
-
-        if ($returnCode !== 0) {
-            // Fallback: usar wkhtmltopdf si está disponible
-            $cmd = "wkhtmltopdf '$tmpHtml' '$rutaSalida' 2>/dev/null";
+        // Opción 1: Usar wkhtmltopdf (más confiable)
+        if (file_exists('/usr/bin/wkhtmltopdf')) {
+            // Añadimos --load-error-handling ignore para que no falle si no encuentra el logo por rutas relativas
+            // Forzamos HOME=/tmp para que wkhtmltopdf tenga permisos de escritura para cache/temporales
+            $cmd = "export HOME=/tmp && /usr/bin/wkhtmltopdf --enable-local-file-access --load-error-handling ignore --quiet '$tmpHtml' '$rutaSalida' 2>&1";
             exec($cmd, $output, $returnCode);
+
+            // Aceptar código 0 (éxito) o 1 (advertencias/recursos no encontrados) siempre que el PDF exista
+            if (($returnCode === 0 || $returnCode === 1) && file_exists($rutaSalida) && filesize($rutaSalida) > 1000) {
+                unlink($tmpHtml);
+                return $rutaSalida;
+            }
+        }
+
+        // Opción 2: Intentar con Chromium desde /usr/bin
+        if (file_exists('/usr/bin/chromium-browser')) {
+            $cmd = "/usr/bin/chromium-browser --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>&1";
+            exec($cmd, $output, $returnCode);
+
+            if ($returnCode === 0 && file_exists($rutaSalida)) {
+                unlink($tmpHtml);
+                return $rutaSalida;
+            }
+        }
+
+        // Opción 3: Intentar con snap chromium
+        if (file_exists('/snap/bin/chromium')) {
+            $tmpDir = "/tmp/chromium_" . uniqid();
+            @mkdir($tmpDir, 0777, true);
+            $cmd = "/snap/bin/chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir='$tmpDir' --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>&1";
+            exec($cmd, $output, $returnCode);
+            @exec("rm -rf '$tmpDir'");
+
+            if ($returnCode === 0 && file_exists($rutaSalida)) {
+                unlink($tmpHtml);
+                return $rutaSalida;
+            }
         }
 
         // Limpiar archivo temporal

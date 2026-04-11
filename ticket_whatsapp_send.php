@@ -141,23 +141,47 @@ if ($action === 'send') {
 
 function convertirHTMLaPDF($urlRelativa, $nombreSalida) {
     $rutaTmp = "/tmp/" . $nombreSalida;
-    // Usar Chromium para convertir HTML a PDF
-    $cmd = "chromium-browser --headless --disable-gpu --print-to-pdf='$rutaTmp' 'file://$_SERVER[DOCUMENT_ROOT]/$urlRelativa' 2>/dev/null";
-    exec($cmd, $output, $returnCode);
 
-    if ($returnCode === 0 && file_exists($rutaTmp)) {
-        return $rutaTmp;
+    // Opción 1: Intentar acceder vía HTTP localhost
+    $urlCompleta = "http://localhost/" . ltrim($urlRelativa, '/');
+    $html = @file_get_contents($urlCompleta);
+
+    // Opción 2: Si falla HTTP, generar desde ComprobanteGenerator para tickets
+    if (!$html && preg_match('/id=(\d+)/', $urlRelativa, $matches)) {
+        try {
+            global $pdo, $config;
+            require_once __DIR__ . '/helpers/comprobante_generator.php';
+            $generator = new ComprobanteGenerator($pdo, $config);
+            $idVenta = intval($matches[1]);
+            return $generator->generarPDF($idVenta);
+        } catch (Exception $e) {
+            // Continúa intentando
+        }
     }
 
-    // Fallback: intentar con wkhtmltopdf
-    $cmd = "wkhtmltopdf '$_SERVER[DOCUMENT_ROOT]/$urlRelativa' '$rutaTmp' 2>/dev/null";
-    exec($cmd, $output, $returnCode);
-
-    if (file_exists($rutaTmp)) {
-        return $rutaTmp;
+    if (!$html) {
+        throw new Exception('No se pudo obtener el HTML de ' . $urlRelativa);
     }
 
-    throw new Exception('No se pudo convertir el HTML a PDF');
+    // Guardar HTML temporal
+    $tmpHtml = "/tmp/html_" . uniqid() . ".html";
+    file_put_contents($tmpHtml, $html);
+
+    // Usar wkhtmltopdf para convertir el HTML
+    if (file_exists('/usr/bin/wkhtmltopdf')) {
+        $cmd = "export HOME=/tmp && /usr/bin/wkhtmltopdf --enable-local-file-access --load-error-handling ignore --quiet '$tmpHtml' '$rutaTmp' 2>&1";
+        exec($cmd, $output, $returnCode);
+
+        @unlink($tmpHtml);
+
+        // Aceptar el PDF si existe y tiene contenido, aunque haya errores de recursos externos (código 1)
+        if (file_exists($rutaTmp) && filesize($rutaTmp) > 1000) {
+            return $rutaTmp;
+        }
+    }
+
+    @unlink($tmpHtml);
+    throw new Exception('No se pudo convertir el HTML a PDF con wkhtmltopdf');
 }
 
 function logEnvioWhatsApp($pdo, $idVenta, $telefonoWhatsApp, $tipoDoc) {
