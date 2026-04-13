@@ -523,6 +523,17 @@ $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['t
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 $dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
 
+// Banners por sucursal — fondo del carrito y selector de login
+$sucursalesBanners = [];
+try {
+    $stmtSB = $pdo->query("SELECT id, imagen_banner FROM sucursales WHERE imagen_banner IS NOT NULL AND imagen_banner != ''");
+    foreach ($stmtSB->fetchAll(PDO::FETCH_ASSOC) as $rowSB) {
+        if (file_exists(__DIR__ . '/' . $rowSB['imagen_banner'])) {
+            $sucursalesBanners[(int)$rowSB['id']] = $rowSB['imagen_banner'];
+        }
+    }
+} catch (Throwable $e) {}
+
 // Almacenes agrupados por sucursal — para el selector de login multi-almacén
 $almacenesPorSucursal = [];
 try {
@@ -1185,22 +1196,25 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <i class="fas fa-boxes me-1"></i> MODO INVENTARIO — Agrega los productos con sus cantidades y usa los botones de abajo
         </div>
 
-        <div class="cart-list" id="cartContainer">
-            <div class="text-center text-muted h-100 d-flex flex-column align-items-center justify-content-center">
+        <?php
+        // Fondo del carrito: banner de la sucursal activa (si existe), o logo corporativo
+        $cartBannerUrl = '';
+        $sucActiva = (int)($config['id_sucursal'] ?? 1);
+        if (!empty($sucursalesBanners[$sucActiva])) {
+            $cartBannerUrl = '/' . ltrim($sucursalesBanners[$sucActiva], '/');
+        }
+        $cartBgStyle = $cartBannerUrl
+            ? "background-image: linear-gradient(rgba(255,255,255,0.84),rgba(255,255,255,0.84)), url('" . htmlspecialchars($cartBannerUrl) . "'); background-size: cover; background-position: center;"
+            : '';
+        ?>
+        <div class="cart-list" id="cartContainer" style="<?php echo $cartBgStyle; ?>">
+            <div class="text-center text-muted h-100 d-flex flex-column align-items-center justify-content-center" id="cartEmptyState">
                 <?php
-                // Buscar banner de la sucursal activa en BD
-                $cartLogo = '';
-                try {
-                    $stmtBnr = $pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
-                    $stmtBnr->execute([intval($config['id_sucursal'] ?? 1)]);
-                    $bnrRow = $stmtBnr->fetchColumn();
-                    if ($bnrRow && file_exists(__DIR__ . '/' . $bnrRow)) $cartLogo = $bnrRow;
-                } catch (Exception $e) {}
-                // Fallback al logo corporativo
-                if ($cartLogo === '') $cartLogo = $config['marca_empresa_logo'] ?? $config['marca_sistema_logo'] ?? '';
-                if ($cartLogo !== ''):
+                // Logo en estado vacío: banner sucursal → logo empresa → logo sistema
+                $cartLogo = $sucursalesBanners[$sucActiva] ?? ($config['marca_empresa_logo'] ?? $config['marca_sistema_logo'] ?? '');
+                if ($cartLogo !== '' && file_exists(__DIR__ . '/' . $cartLogo)):
                 ?>
-                    <img src="<?php echo htmlspecialchars($cartLogo); ?>?v=<?php echo filemtime(__DIR__ . '/' . $cartLogo) ?: 1; ?>" class="cart-empty-logo" style="width:180px; max-height:80px; border-radius:8px; margin-bottom:10px; object-fit:contain;" alt="Logo">
+                    <img src="/<?php echo htmlspecialchars(ltrim($cartLogo, '/')); ?>?v=<?php echo filemtime(__DIR__ . '/' . $cartLogo) ?: 1; ?>" class="cart-empty-logo" style="width:180px; max-height:90px; border-radius:8px; margin-bottom:10px; object-fit:contain; opacity:0.55;" alt="Logo">
                 <?php endif; ?>
                 <i class="fas fa-shopping-basket fa-3x mb-2 opacity-25"></i><p class="small">Carrito Vacío</p>
             </div>
@@ -1475,6 +1489,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     // Almacenes disponibles por sucursal (id_sucursal → [{id, nombre}])
     // Usado para el selector multi-almacén en la pantalla de login con PIN
     const ALMACENES_BY_SUCURSAL = <?php echo json_encode($almacenesPorSucursal); ?>;
+    // Banners de sucursal (id_sucursal → URL relativa) — fondo dinámico del carrito
+    const SUCURSALES_BANNERS = <?php echo json_encode($sucursalesBanners); ?>;
 
     // --- LÓGICA DE CLIENTES ---
     
@@ -1628,6 +1644,24 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         setTimeout(maybeShowBanner, 600); // pequeño delay para que el overlay ya esté visible
     });
 })();
+
+// ─── Fondo dinámico del carrito según sucursal ───────────────────────────────
+window.updateCartBackground = function (sucursalId) {
+    const cart = document.getElementById('cartContainer');
+    if (!cart) return;
+    const bannerPath = (typeof SUCURSALES_BANNERS !== 'undefined') ? SUCURSALES_BANNERS[sucursalId] : null;
+    if (bannerPath) {
+        const url = '/' + bannerPath.replace(/^\//, '');
+        cart.style.backgroundImage = "linear-gradient(rgba(255,255,255,0.84),rgba(255,255,255,0.84)), url('" + url + "')";
+        cart.style.backgroundSize    = 'cover';
+        cart.style.backgroundPosition = 'center';
+        // Actualizar también la imagen del estado vacío
+        const emptyImg = document.querySelector('#cartEmptyState img.cart-empty-logo');
+        if (emptyImg) { emptyImg.src = url + '?v=' + Date.now(); }
+    } else {
+        cart.style.backgroundImage = '';
+    }
+};
 
 // ─── Selector de almacén multi-almacén ────────────────────────────────────────
 (function () {

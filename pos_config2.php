@@ -1614,7 +1614,7 @@ unset($treeCompany);
                 <div class="card">
                     <div class="card-header fw-bold text-success">🏬 Sucursal</div>
                     <div class="card-body">
-                        <form method="post" class="row g-3">
+                        <form method="post" enctype="multipart/form-data" class="row g-3">
                             <input type="hidden" name="form_action" value="save_sucursal">
                             <input type="hidden" name="sucursal_id" value="<?php echo (int)$editSucursalData['id']; ?>">
                             <div class="col-12">

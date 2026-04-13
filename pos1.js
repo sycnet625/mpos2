@@ -647,6 +647,12 @@ async function verifyPin() {
             // Actualizar contexto con el almacén elegido
             if (almId && loginContext) loginContext.id_almacen = almId;
 
+            // Actualizar fondo del carrito con el banner de la sucursal
+            const sucId = loginContext ? loginContext.id_sucursal : null;
+            if (sucId && typeof window.updateCartBackground === 'function') {
+                window.updateCartBackground(sucId);
+            }
+
             // Releer productos pasando el almacén como parámetro URL para garantizar
             // que se usa el correcto incluso si el POST set_almacen no llegó al servidor.
             if (navigator.onLine) {

@@ -65,6 +65,25 @@ $web       = $config['website']          ?? '';
 $cuenta    = $config['cuenta_bancaria']  ?? '';
 $banco     = $config['banco']            ?? '';
 $email     = $config['email']            ?? '';
+
+// Logo: 1. Banner de sucursal de la venta, 2. Logo empresa en config
+$logoUrl = '';
+if (!empty($venta['id_sucursal'])) {
+    try {
+        $stmtLogo = $pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+        $stmtLogo->execute([$venta['id_sucursal']]);
+        $logoRel = $stmtLogo->fetchColumn();
+        if ($logoRel && file_exists(__DIR__ . '/' . $logoRel)) {
+            $logoUrl = '/' . ltrim($logoRel, '/');
+        }
+    } catch (Throwable $e) {}
+}
+if (empty($logoUrl)) {
+    $logoRel2 = $config['marca_empresa_logo'] ?? $config['ticket_logo'] ?? '';
+    if ($logoRel2 && file_exists(__DIR__ . '/' . $logoRel2)) {
+        $logoUrl = '/' . ltrim($logoRel2, '/');
+    }
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -151,6 +170,10 @@ $email     = $config['email']            ?? '';
         <tbody>
             <tr>
                 <td width="60%" valign="top">
+                    <?php if ($logoUrl): ?>
+                    <img src="<?= htmlspecialchars($logoUrl) ?>?v=<?= filemtime(__DIR__ . '/' . ltrim($logoUrl, '/')) ?: 1 ?>"
+                         style="max-width:180px; max-height:70px; display:block; margin-bottom:6px; object-fit:contain;" alt="Logo">
+                    <?php endif; ?>
                     <div class="company-name"><?= htmlspecialchars($empresa) ?></div>
                     <?php if ($direccion): ?>
                     <div><?= htmlspecialchars($direccion) ?></div>
@@ -320,7 +343,7 @@ $email     = $config['email']            ?? '';
         <?php if ($email): ?> · Contacto: <b><?= htmlspecialchars($email) ?></b><?php endif; ?>
     </div>
     <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">
-        Generado por PalWeb POS v3.0 · Documento no válido como factura oficial
+        Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · Documento no válido como factura oficial
     </div>
 
 </div>
