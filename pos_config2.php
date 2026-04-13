@@ -73,6 +73,7 @@ $defaultConfig = [
     "ticket_mostrar_canal" => true,
     "ticket_mostrar_cajero" => true,
     "ticket_mostrar_qr" => true,
+    "ticket_qr_url_base" => "",
     "ticket_mostrar_items_count" => true,
     "tipo_cambio_usd" => 385,
     "tipo_cambio_mlc" => 310,
@@ -421,6 +422,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['ticket_mostrar_canal'] = isset($_POST['ticket_mostrar_canal']);
             $newConfig['ticket_mostrar_cajero'] = isset($_POST['ticket_mostrar_cajero']);
             $newConfig['ticket_mostrar_qr'] = isset($_POST['ticket_mostrar_qr']);
+            $newConfig['ticket_qr_url_base'] = rtrim(trim((string)($_POST['ticket_qr_url_base'] ?? '')), '/');
             $newConfig['ticket_mostrar_items_count'] = isset($_POST['ticket_mostrar_items_count']);
             $newConfig['tipo_cambio_usd'] = (float)($_POST['tipo_cambio_usd'] ?? 385);
             $newConfig['tipo_cambio_mlc'] = (float)($_POST['tipo_cambio_mlc'] ?? 310);
@@ -1407,8 +1409,9 @@ unset($treeCompany);
                 ['ticket_mostrar_canal', 'chkMostrarCanal', 'fas fa-tag', 'Canal de origen', !empty($currentConfig['ticket_mostrar_canal'])],
                 ['ticket_mostrar_uuid', 'chkMostrarUuid', 'fas fa-fingerprint', 'UUID de venta', !empty($currentConfig['ticket_mostrar_uuid'])],
                 ['ticket_mostrar_items_count', 'chkMostrarItemsCount', 'fas fa-list-ol', 'Total de ítems', !empty($currentConfig['ticket_mostrar_items_count'])],
-                ['ticket_mostrar_qr', 'chkMostrarQr', 'fas fa-qrcode', 'Código QR', !empty($currentConfig['ticket_mostrar_qr'])],
             ];
+            $ticketQrEnabled = !empty($currentConfig['ticket_mostrar_qr']);
+            $ticketQrUrlBase = htmlspecialchars($currentConfig['ticket_qr_url_base'] ?? '');
             ?>
             <div class="card">
                 <div class="card-header fw-bold text-primary">🧾 Diseño del ticket</div>
@@ -1462,6 +1465,51 @@ unset($treeCompany);
                                             </div>
                                         </div>
                                     <?php endforeach; ?>
+
+                                    <!-- Código QR — sección destacada -->
+                                    <div class="col-12 mt-2">
+                                        <div class="border rounded p-3 <?php echo $ticketQrEnabled ? 'border-success bg-success bg-opacity-10' : 'bg-light'; ?>">
+                                            <div class="d-flex align-items-start gap-3">
+                                                <div class="form-check form-switch mb-0 pt-1">
+                                                    <input class="form-check-input" type="checkbox" role="switch"
+                                                           name="ticket_mostrar_qr" id="chkMostrarQr"
+                                                           <?php echo $ticketQrEnabled ? 'checked' : ''; ?>
+                                                           onchange="updateTicketPreview(); document.getElementById('qrUrlBlock').style.display=this.checked?'block':'none';">
+                                                </div>
+                                                <div class="flex-grow-1">
+                                                    <label class="form-check-label fw-bold" for="chkMostrarQr">
+                                                        <i class="fas fa-qrcode me-1 text-success"></i> Código QR al final del ticket
+                                                    </label>
+                                                    <div class="small text-muted mt-1">
+                                                        Imprime un QR que el cliente escanea para ver el estado de su orden en línea. La URL apunta a
+                                                        <code>ticket_view.php?id=…&amp;source=qr</code> en tu dominio.
+                                                    </div>
+                                                    <div id="qrUrlBlock" class="mt-2" style="display:<?php echo $ticketQrEnabled ? 'block' : 'none'; ?>;">
+                                                        <label class="form-label small fw-semibold mb-1">URL base del ticket (opcional)</label>
+                                                        <input type="text" name="ticket_qr_url_base"
+                                                               class="form-control form-control-sm"
+                                                               placeholder="https://www.palweb.net  (vacío = auto)"
+                                                               value="<?php echo $ticketQrUrlBase; ?>"
+                                                               oninput="updateTicketPreview()">
+                                                        <div class="form-text">
+                                                            Deja vacío para que se use automáticamente el dominio del servidor.
+                                                            Rellena solo si el acceso del cliente es por un dominio diferente.
+                                                        </div>
+                                                        <?php
+                                                        $autoBase = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off' ? 'https' : 'http')
+                                                                  . '://' . ($_SERVER['HTTP_HOST'] ?? 'tu-dominio.com');
+                                                        $previewBase = !empty($currentConfig['ticket_qr_url_base'])
+                                                                     ? $currentConfig['ticket_qr_url_base']
+                                                                     : $autoBase;
+                                                        ?>
+                                                        <div class="mt-1 small text-muted">
+                                                            URL generada: <code><?php echo htmlspecialchars($previewBase); ?>/ticket_view.php?id=<em>###</em>&amp;source=qr</code>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1526,6 +1574,7 @@ unset($treeCompany);
             <?php if (!empty($currentConfig['ticket_mostrar_canal'])): ?><input type="hidden" name="ticket_mostrar_canal" value="1"><?php endif; ?>
             <?php if (!empty($currentConfig['ticket_mostrar_cajero'])): ?><input type="hidden" name="ticket_mostrar_cajero" value="1"><?php endif; ?>
             <?php if (!empty($currentConfig['ticket_mostrar_qr'])): ?><input type="hidden" name="ticket_mostrar_qr" value="1"><?php endif; ?>
+            <input type="hidden" name="ticket_qr_url_base" value="<?php echo htmlspecialchars($currentConfig['ticket_qr_url_base'] ?? ''); ?>">
             <?php if (!empty($currentConfig['ticket_mostrar_items_count'])): ?><input type="hidden" name="ticket_mostrar_items_count" value="1"><?php endif; ?>
             <input type="hidden" name="tipo_cambio_usd" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_usd']); ?>">
             <input type="hidden" name="tipo_cambio_mlc" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_mlc']); ?>">
@@ -2180,6 +2229,7 @@ unset($treeCompany);
                     <?php if (!empty($currentConfig['ticket_mostrar_canal'])): ?><input type="hidden" name="ticket_mostrar_canal" value="1"><?php endif; ?>
                     <?php if (!empty($currentConfig['ticket_mostrar_cajero'])): ?><input type="hidden" name="ticket_mostrar_cajero" value="1"><?php endif; ?>
                     <?php if (!empty($currentConfig['ticket_mostrar_qr'])): ?><input type="hidden" name="ticket_mostrar_qr" value="1"><?php endif; ?>
+                    <input type="hidden" name="ticket_qr_url_base" value="<?php echo htmlspecialchars($currentConfig['ticket_qr_url_base'] ?? ''); ?>">
                     <?php if (!empty($currentConfig['ticket_mostrar_items_count'])): ?><input type="hidden" name="ticket_mostrar_items_count" value="1"><?php endif; ?>
                     <input type="hidden" name="tipo_cambio_usd" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_usd']); ?>">
                     <input type="hidden" name="tipo_cambio_mlc" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_mlc']); ?>">
@@ -2247,6 +2297,7 @@ unset($treeCompany);
             <?php if (!empty($currentConfig['ticket_mostrar_canal'])): ?><input type="hidden" name="ticket_mostrar_canal" value="1"><?php endif; ?>
             <?php if (!empty($currentConfig['ticket_mostrar_cajero'])): ?><input type="hidden" name="ticket_mostrar_cajero" value="1"><?php endif; ?>
             <?php if (!empty($currentConfig['ticket_mostrar_qr'])): ?><input type="hidden" name="ticket_mostrar_qr" value="1"><?php endif; ?>
+            <input type="hidden" name="ticket_qr_url_base" value="<?php echo htmlspecialchars($currentConfig['ticket_qr_url_base'] ?? ''); ?>">
             <?php if (!empty($currentConfig['ticket_mostrar_items_count'])): ?><input type="hidden" name="ticket_mostrar_items_count" value="1"><?php endif; ?>
             <input type="hidden" name="tipo_cambio_usd" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_usd']); ?>">
             <input type="hidden" name="tipo_cambio_mlc" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_mlc']); ?>">

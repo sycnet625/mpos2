@@ -456,9 +456,13 @@ $canalMap = [
         </div>
         <script>
             var ticketUrl = '<?php
-                $scheme   = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                $basePath = strtok($_SERVER['REQUEST_URI'], '?');
-                echo $scheme . '://' . $_SERVER['HTTP_HOST'] . $basePath . '?id=' . $idVenta . '&source=qr';
+                $qrBase = rtrim(trim((string)($config['ticket_qr_url_base'] ?? '')), '/');
+                if ($qrBase === '') {
+                    $scheme   = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                    $qrBase   = $scheme . '://' . $_SERVER['HTTP_HOST'];
+                }
+                $scriptPath = strtok($_SERVER['REQUEST_URI'] ?? '/ticket_view.php', '?');
+                echo $qrBase . $scriptPath . '?id=' . $idVenta . '&source=qr';
             ?>';
             new QRCode(document.getElementById('qrcode'), {
                 text: ticketUrl,
