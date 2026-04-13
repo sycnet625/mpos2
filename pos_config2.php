@@ -303,32 +303,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
                 $type = $_FILES['sucursal_banner']['type'];
                 if (!isset($allowed[$type])) throw new Exception("Formato de imagen no permitido para el banner.");
-                
+
                 $ext = $allowed[$type];
                 $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.' . $ext;
                 $target = __DIR__ . '/assets/img/' . $newBannerName;
-                
+
                 if (move_uploaded_file($_FILES['sucursal_banner']['tmp_name'], $target)) {
                     $bannerPath = 'assets/img/' . $newBannerName;
                 }
             }
 
+            // Opciones de presentación del hero banner
+            $validSizes = ['cover', 'contain', 'auto'];
+            $bannerBgSize = in_array($_POST['banner_bg_size'] ?? '', $validSizes, true)
+                ? $_POST['banner_bg_size']
+                : 'cover';
+            $bannerScale = max(10, min(200, (int)($_POST['banner_scale'] ?? 100)));
+
             if ($sucursalId > 0) {
                 if ($hasSucursalActivo) {
-                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ?, activo = ?, imagen_banner = ? WHERE id = ?");
-                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath, $sucursalId]);
+                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa=?, nombre=?, activo=?, imagen_banner=?, banner_bg_size=?, banner_scale=? WHERE id=?");
+                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath, $bannerBgSize, $bannerScale, $sucursalId]);
                 } else {
-                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ?, imagen_banner = ? WHERE id = ?");
-                    $stmt->execute([$empresaId, $nombre, $bannerPath, $sucursalId]);
+                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa=?, nombre=?, imagen_banner=?, banner_bg_size=?, banner_scale=? WHERE id=?");
+                    $stmt->execute([$empresaId, $nombre, $bannerPath, $bannerBgSize, $bannerScale, $sucursalId]);
                 }
                 $msg = 'Sucursal actualizada.';
             } else {
                 if ($hasSucursalActivo) {
-                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, activo, imagen_banner) VALUES (?, ?, ?, ?)");
-                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath]);
+                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, activo, imagen_banner, banner_bg_size, banner_scale) VALUES (?,?,?,?,?,?)");
+                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath, $bannerBgSize, $bannerScale]);
                 } else {
-                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, imagen_banner) VALUES (?, ?, ?)");
-                    $stmt->execute([$empresaId, $nombre, $bannerPath]);
+                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, imagen_banner, banner_bg_size, banner_scale) VALUES (?,?,?,?,?)");
+                    $stmt->execute([$empresaId, $nombre, $bannerPath, $bannerBgSize, $bannerScale]);
                 }
                 $msg = 'Sucursal creada.';
             }
@@ -734,7 +741,15 @@ $empresas = $pdo->query("SELECT id, nombre FROM empresas WHERE COALESCE(activo,1
 $sucursales = $pdo->query("SELECT id, id_empresa, nombre FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $almacenes = $pdo->query("SELECT id, id_sucursal, nombre FROM almacenes WHERE COALESCE(activo,1) = 1 ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $allEmpresas = $pdo->query("SELECT id, nombre, " . ($hasEmpresaActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM empresas ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
-$allSucursales = $pdo->query("SELECT id, id_empresa, nombre, imagen_banner, " . ($hasSucursalActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+// Migración automática: añadir columnas de presentación del hero banner si no existen
+if (!poscfg_table_has_column($pdo, 'sucursales', 'banner_bg_size')) {
+    try { $pdo->exec("ALTER TABLE sucursales ADD COLUMN banner_bg_size VARCHAR(20) NOT NULL DEFAULT 'cover'"); } catch (Throwable $e) {}
+}
+if (!poscfg_table_has_column($pdo, 'sucursales', 'banner_scale')) {
+    try { $pdo->exec("ALTER TABLE sucursales ADD COLUMN banner_scale TINYINT UNSIGNED NOT NULL DEFAULT 100"); } catch (Throwable $e) {}
+}
+
+$allSucursales = $pdo->query("SELECT id, id_empresa, nombre, imagen_banner, banner_bg_size, banner_scale, " . ($hasSucursalActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $allAlmacenes = $pdo->query("SELECT id, id_sucursal, nombre, " . ($hasAlmacenActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM almacenes ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $users = $pdo->query("SELECT id, nombre, email, pin, rol, id_sucursal, activo FROM users ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $userContexts = $pdo->query("
@@ -824,7 +839,7 @@ foreach ($allEmpresas as $empresaRow) {
     }
 }
 
-$editSucursalData = ['id' => 0, 'id_empresa' => '', 'nombre' => '', 'imagen_banner' => '', 'activo' => 1];
+$editSucursalData = ['id' => 0, 'id_empresa' => '', 'nombre' => '', 'imagen_banner' => '', 'banner_bg_size' => 'cover', 'banner_scale' => 100, 'activo' => 1];
 foreach ($allSucursales as $sucursalRow) {
     if ((int)$sucursalRow['id'] === $editSucursalId) {
         $editSucursalData = [
@@ -832,6 +847,8 @@ foreach ($allSucursales as $sucursalRow) {
             'id_empresa' => (string)$sucursalRow['id_empresa'],
             'nombre' => (string)$sucursalRow['nombre'],
             'imagen_banner' => (string)($sucursalRow['imagen_banner'] ?? ''),
+            'banner_bg_size' => (string)($sucursalRow['banner_bg_size'] ?? 'cover'),
+            'banner_scale' => (int)($sucursalRow['banner_scale'] ?? 100),
             'activo' => (int)$sucursalRow['activo']
         ];
         break;
@@ -1682,13 +1699,57 @@ unset($treeCompany);
                             <div class="col-12">
                                 <label class="form-label">Banner Hero (POS)</label>
                                 <?php if (!empty($editSucursalData['imagen_banner'])): ?>
-                                    <div class="mb-2">
-                                        <img src="<?php echo htmlspecialchars($editSucursalData['imagen_banner']); ?>" class="img-thumbnail" style="max-height: 80px;">
-                                        <div class="form-check small mt-1">
-                                            <input class="form-check-input" type="checkbox" name="sucursal_banner_remove" id="sucursal_banner_remove" value="1">
-                                            <label class="form-check-label text-danger" for="sucursal_banner_remove">Eliminar banner</label>
+                                    <?php
+                                    $bnrBgSize  = $editSucursalData['banner_bg_size'] ?? 'cover';
+                                    $bnrScale   = (int)($editSucursalData['banner_scale'] ?? 100);
+                                    ?>
+                                    <div class="d-flex gap-3 mb-2 align-items-start flex-wrap">
+                                        <!-- Imagen actual + eliminar -->
+                                        <div class="flex-shrink-0">
+                                            <img src="<?php echo htmlspecialchars($editSucursalData['imagen_banner']); ?>"
+                                                 class="img-thumbnail" style="max-height:80px; max-width:180px;">
+                                            <div class="form-check small mt-1">
+                                                <input class="form-check-input" type="checkbox" name="sucursal_banner_remove" id="sucursal_banner_remove" value="1">
+                                                <label class="form-check-label text-danger" for="sucursal_banner_remove">Eliminar banner</label>
+                                            </div>
+                                        </div>
+                                        <!-- Controles de presentación del hero -->
+                                        <div class="flex-grow-1" style="min-width:200px;">
+                                            <div class="p-2 border rounded bg-light">
+                                                <div class="fw-semibold small text-secondary mb-2">
+                                                    <i class="fas fa-sliders-h me-1"></i>Presentación en el Hero
+                                                </div>
+                                                <div class="mb-2">
+                                                    <label class="form-label small mb-1">Ajuste de imagen</label>
+                                                    <select class="form-select form-select-sm" name="banner_bg_size">
+                                                        <option value="cover"   <?php echo $bnrBgSize === 'cover'   ? 'selected' : ''; ?>>Estirada (cubre todo)</option>
+                                                        <option value="contain" <?php echo $bnrBgSize === 'contain' ? 'selected' : ''; ?>>Ajustar (sin recortar)</option>
+                                                        <option value="auto"    <?php echo $bnrBgSize === 'auto'    ? 'selected' : ''; ?>>Tamaño real (sin escalar)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="form-label small mb-1">
+                                                        Escala: <span id="bannerScaleLabel"><?php echo $bnrScale; ?>%</span>
+                                                    </label>
+                                                    <input type="range" class="form-range" name="banner_scale"
+                                                           id="bannerScaleRange"
+                                                           min="10" max="200" step="5"
+                                                           value="<?php echo $bnrScale; ?>"
+                                                           oninput="document.getElementById('bannerScaleLabel').textContent=this.value+'%'">
+                                                    <div class="d-flex justify-content-between" style="font-size:0.7rem; color:#999; margin-top:2px;">
+                                                        <span>10%</span><span>100%</span><span>200%</span>
+                                                    </div>
+                                                    <div class="form-text" style="font-size:0.7rem;">
+                                                        Con "Estirada", la escala agranda o achica la imagen antes de recortarla. Con las otras opciones controla el tamaño directamente.
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
+                                <?php else: ?>
+                                    <!-- Sin imagen: campos ocultos con valores por defecto -->
+                                    <input type="hidden" name="banner_bg_size" value="cover">
+                                    <input type="hidden" name="banner_scale" value="100">
                                 <?php endif; ?>
                                 <input type="file" name="sucursal_banner" class="form-control form-control-sm" accept="image/*">
                                 <div class="form-text small">Imagen panorámica para el fondo del banner superior en el POS.</div>

@@ -7,16 +7,18 @@
 global $config, $currentConfig, $pdo;
 $_t = $config ?? $currentConfig ?? [];
 
-// Obtener banner de la sucursal activa desde DB (no desde pos.cfg)
-if (empty($_t['sucursal_banner']) && !empty($_t['id_sucursal'])) {
+// Obtener banner y opciones de presentación de la sucursal activa desde DB
+if ((empty($_t['sucursal_banner']) || empty($_t['banner_bg_size'])) && !empty($_t['id_sucursal'])) {
     try {
         $_pdo = $pdo ?? null;
         if ($_pdo) {
-            $_stmtBnr = $_pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+            $_stmtBnr = $_pdo->prepare("SELECT imagen_banner, banner_bg_size, banner_scale FROM sucursales WHERE id = ? LIMIT 1");
             $_stmtBnr->execute([intval($_t['id_sucursal'])]);
-            $_bnrRow = $_stmtBnr->fetchColumn();
-            if ($_bnrRow && file_exists(__DIR__ . '/' . $_bnrRow)) {
-                $_t['sucursal_banner'] = $_bnrRow;
+            $_bnrRow = $_stmtBnr->fetch(PDO::FETCH_ASSOC);
+            if ($_bnrRow && !empty($_bnrRow['imagen_banner']) && file_exists(__DIR__ . '/' . $_bnrRow['imagen_banner'])) {
+                $_t['sucursal_banner']  = $_bnrRow['imagen_banner'];
+                $_t['banner_bg_size']   = $_bnrRow['banner_bg_size']  ?? 'cover';
+                $_t['banner_scale']     = (int)($_bnrRow['banner_scale'] ?? 100);
             }
         }
     } catch (Exception $_e) { /* silenciar errores de DB */ }
@@ -87,12 +89,27 @@ section.inventory-hero {
 }
 
 <?php if (!empty($_t['sucursal_banner'])): ?>
+<?php
+    $_bgMode  = $_t['banner_bg_size'] ?? 'cover';
+    $_bgScale = (int)($_t['banner_scale'] ?? 100);
+    // Calcular el valor CSS de background-size
+    if ($_bgMode === 'cover') {
+        // Escala 100% = cover normal; otros valores = "zoom" via percentage
+        $_bgSizeCss = ($_bgScale === 100) ? 'cover' : ($_bgScale . '% auto');
+    } elseif ($_bgMode === 'contain') {
+        $_bgSizeCss = $_bgScale . '%';
+    } else {
+        // auto = tamaño real, escala modifica con porcentaje
+        $_bgSizeCss = ($_bgScale === 100) ? 'auto' : ($_bgScale . '%');
+    }
+?>
 .inventory-hero, section.inventory-hero {
-    background-image: 
-        linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)), 
+    background-image:
+        linear-gradient(rgba(0,0,0,0.3), rgba(0,0,0,0.3)),
         url(<?= htmlspecialchars($_t['sucursal_banner']) ?>) !important;
-    background-size: cover !important;
+    background-size: <?= $_bgSizeCss ?> !important;
     background-position: center !important;
+    background-repeat: no-repeat !important;
 }
 <?php endif; ?>
 
