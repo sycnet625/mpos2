@@ -32,6 +32,11 @@ $mes = isset($_GET['mes']) ? intval($_GET['mes']) : intval(date('m'));
 $anio = isset($_GET['anio']) ? intval($_GET['anio']) : intval(date('Y'));
 $sucursal_contexto = isset($_GET['sucursal']) ? intval($_GET['sucursal']) : $SUC_ID;
 
+// OBTENER ALMACENES DE LA SUCURSAL ACTUAL
+$stmtAlm = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id_sucursal = ? AND COALESCE(activo,1) = 1");
+$stmtAlm->execute([$sucursal_contexto]);
+$almacenes_sucursal = $stmtAlm->fetchAll(PDO::FETCH_ASSOC);
+
 $numDias = cal_days_in_month(CAL_GREGORIAN, $mes, $anio);
 $dias = [];
 for ($i = 1; $i <= $numDias; $i++) {
@@ -89,22 +94,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $fecha = $input['fecha'];
         $data = [];
         try {
-            // Consultar Ventas Informativas por cada sucursal (1 a 6)
-            for ($s = 1; $s <= 6; $s++) {
-                $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA')");
-                $stmtV->execute([$fecha, $s]);
-                $data['ventas_suc_'.$s] = floatval($stmtV->fetchColumn() ?: 0);
-            }
+            // 1. Ventas solo de la sucursal actual
+            $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA')");
+            $stmtV->execute([$fecha, $sucursal_contexto]);
+            $data['ventas_suc_'.$sucursal_contexto] = floatval($stmtV->fetchColumn() ?: 0);
 
-            // Consultar Inventarios de las 6 Sucursales
-            for ($i = 1; $i <= 6; $i++) {
+            // 2. Inventarios por cada almacén de la sucursal
+            foreach ($almacenes_sucursal as $alm) {
+                $aId = $alm['id'];
                 $sqlK = "SELECT SUM(k.saldo_actual * COALESCE(NULLIF(k.costo_unitario, 0), p.costo, 0)) 
                          FROM kardex k INNER JOIN productos p ON k.id_producto = p.codigo
-                         INNER JOIN (SELECT id_producto, id_almacen, MAX(id) as max_id FROM kardex WHERE fecha <= ? AND id_sucursal = ? GROUP BY id_producto, id_almacen) latest ON k.id = latest.max_id
-                         WHERE k.id_sucursal = ?";
+                         INNER JOIN (
+                             SELECT id_producto, id_almacen, MAX(id) as max_id 
+                             FROM kardex 
+                             WHERE fecha <= ? AND id_almacen = ? 
+                             GROUP BY id_producto
+                         ) latest ON k.id = latest.max_id
+                         WHERE k.id_almacen = ?";
                 $stmtK = $pdo->prepare($sqlK);
-                $stmtK->execute([$fecha . ' 23:59:59', $i, $i]);
-                $data['inv_'.$i] = floatval($stmtK->fetchColumn() ?: 0);
+                $stmtK->execute([$fecha . ' 23:59:59', $aId, $aId]);
+                $data['inv_alm_'.$aId] = floatval($stmtK->fetchColumn() ?: 0);
             }
             echo json_encode(['status' => 'success', 'data' => $data]);
         } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
@@ -141,7 +150,17 @@ function getDiaSemana($fecha) {
         table { border-collapse: separate; border-spacing: 0; width: 100%; }
         th, td { border: 1px solid #dee2e6; padding: 4px 8px; min-width: 100px; text-align: right; }
         th:first-child, td:first-child { position: sticky; left: 0; background: #fff; z-index: 10; min-width: 250px; text-align: left; font-weight: 600; border-right: 2px solid #ddd; }
-        thead th { position: sticky; top: 0; background: #eee; z-index: 5; text-align: center; }
+        
+        /* Sticky header fix */
+        thead th { 
+            position: sticky; 
+            top: 0; 
+            background: #eee; 
+            z-index: 20; /* Higher than first-child z-index to stay on top */
+            text-align: center; 
+            box-shadow: 0 2px 2px -1px rgba(0,0,0,0.4);
+        }
+        
         .cell-input { width: 100%; border: none; background: transparent; text-align: right; outline: none; font-family: monospace; }
         .cell-input:focus { background: #fff; box-shadow: inset 0 0 0 2px #3498db; }
         .bg-inv { background-color: var(--bg-inv); }
@@ -227,64 +246,62 @@ function getDiaSemana($fecha) {
             </thead>
             <tbody>
                 <!-- GRUPO VENTAS (INFORMATIVO) -->
-                <tr class="group-header" onclick="toggleGroup('ventas')">
-                    <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> <i class="fas fa-info-circle me-1"></i> VENTAS POR SUCURSAL (INFORMATIVO)</td>
+                <tr class="group-header collapsed" onclick="toggleGroup('ventas')">
+                    <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> <i class="fas fa-info-circle me-1"></i> VENTAS SUCURSAL ACTUAL (INFORMATIVO)</td>
                 </tr>
-                <?php for($s=1; $s<=6; $s++): ?>
-                <tr class="row-info group-ventas">
-                    <td>Ventas Sucursal #<?php echo $s; ?></td>
+                <tr class="row-info group-ventas hidden-row">
+                    <td>Ventas <?php echo htmlspecialchars($config['tienda_nombre'] ?? 'Sucursal'); ?></td>
                     <?php foreach($dias as $n=>$i): ?>
-                        <td><input type="number" step="0.01" readonly class="cell-input col-<?php echo $n; ?>" id="ventas_suc_<?php echo $s; ?>_<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="ventas_suc_<?php echo $s; ?>" value="<?php echo getVal($savedData, $i['fecha'], "ventas_suc_$s"); ?>"></td>
+                        <td><input type="number" step="0.01" readonly class="cell-input col-<?php echo $n; ?>" id="ventas_suc_<?php echo $sucursal_contexto; ?>_<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="ventas_suc_<?php echo $sucursal_contexto; ?>" value="<?php echo getVal($savedData, $i['fecha'], "ventas_suc_$sucursal_contexto"); ?>"></td>
                     <?php endforeach; ?>
                 </tr>
-                <?php endfor; ?>
-                <tr class="row-subtotal group-ventas">
-                    <td>SUMA TOTAL VENTAS</td>
+                <tr class="row-subtotal group-ventas hidden-row">
+                    <td>TOTAL VENTAS</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_ventas_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
 
                 <!-- GRUPO INVENTARIOS -->
-                <tr class="group-header" onclick="toggleGroup('inventarios')">
-                    <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> 📦 INVENTARIOS SUCURSALES</td>
+                <tr class="group-header collapsed" onclick="toggleGroup('inventarios')">
+                    <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> 📦 INVENTARIOS POR ALMACÉN (SUCURSAL ACTUAL)</td>
                 </tr>
-                <?php for($s=1; $s<=6; $s++): ?>
-                <tr class="bg-inv group-inventarios">
-                    <td>Inventario Sucursal #<?php echo $s; ?></td>
+                <?php foreach($almacenes_sucursal as $alm): ?>
+                <tr class="bg-inv group-inventarios hidden-row">
+                    <td>Inv. Almacén: <?php echo htmlspecialchars($alm['nombre']); ?></td>
                     <?php foreach($dias as $n=>$i): ?>
-                        <td><input type="number" step="0.01" class="cell-input inv-val col-<?php echo $n; ?>" id="inv_<?php echo $s; ?>_<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="inv_<?php echo $s; ?>" value="<?php echo getVal($savedData, $i['fecha'], "inv_$s"); ?>"></td>
+                        <td><input type="number" step="0.01" class="cell-input inv-val col-<?php echo $n; ?>" id="inv_alm_<?php echo $alm['id']; ?>_<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="inv_alm_<?php echo $alm['id']; ?>" value="<?php echo getVal($savedData, $i['fecha'], "inv_alm_{$alm['id']}"); ?>"></td>
                     <?php endforeach; ?>
                 </tr>
-                <?php endfor; ?>
-                <tr class="row-subtotal group-inventarios">
+                <?php endforeach; ?>
+                <tr class="row-subtotal group-inventarios hidden-row">
                     <td>SUMA TOTAL INVENTARIOS</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_inv_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
 
                 <!-- GRUPO INGRESOS -->
-                <tr class="group-header" onclick="toggleGroup('ingresos')">
+                <tr class="group-header collapsed" onclick="toggleGroup('ingresos')">
                     <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> 💰 DISPONIBILIDAD (INGRESOS REALES)</td>
                 </tr>
-                <tr class="bg-ing group-ingresos">
-                    <td><span style="color: #2e7d32;"><i class="fas fa-money-bill-wave me-1"></i>Recaudación Marinero</span></td>
+                <tr class="bg-ing group-ingresos hidden-row">
+                    <td><span style="color: #2e7d32;"><i class="fas fa-money-bill-wave me-1"></i>Recaudación Principal</span></td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input ing-val ing-efectivo col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="recaudacion_marinero" value="<?php echo getVal($savedData, $i['fecha'], 'recaudacion_marinero'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="bg-ing group-ingresos">
-                    <td><span style="color: #2e7d32;"><i class="fas fa-money-bill-wave me-1"></i>Recaudación Magnolia</span></td>
+                <tr class="bg-ing group-ingresos hidden-row">
+                    <td><span style="color: #2e7d32;"><i class="fas fa-money-bill-wave me-1"></i>Recaudación Secundaria</span></td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input ing-val ing-efectivo col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="recaudacion_magnolia" value="<?php echo getVal($savedData, $i['fecha'], 'recaudacion_magnolia'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="bg-ing group-ingresos">
+                <tr class="bg-ing group-ingresos hidden-row">
                     <td><span style="color: #1565c0;"><i class="fas fa-exchange-alt me-1"></i>Ingresos en Transferencias</span></td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input ing-val ing-banco col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="ingresos_transferencias" value="<?php echo getVal($savedData, $i['fecha'], 'ingresos_transferencias'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="bg-ing group-ingresos">
+                <tr class="bg-ing group-ingresos hidden-row">
                     <td><span style="color: #1565c0;"><i class="fas fa-university me-1"></i>Saldo en Bancos</span></td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input ing-val ing-banco col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="banco" value="<?php echo getVal($savedData, $i['fecha'], 'banco'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="bg-ing group-ingresos">
+                <tr class="bg-ing group-ingresos hidden-row">
                     <td><span style="color: #2e7d32;"><i class="fas fa-cash-register me-1"></i>Saldo en Caja</span></td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input ing-val ing-efectivo col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="caja" value="<?php echo getVal($savedData, $i['fecha'], 'caja'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="bg-ing group-ingresos">
+                <tr class="bg-ing group-ingresos hidden-row">
                     <td>
                         <span style="color: #2e7d32;"><i class="fas fa-money-bill-wave me-1"></i>Otros Ingresos</span>
                         <small class="text-muted d-block" style="font-size: 0.65rem;">Detalle de entradas extras</small>
@@ -315,30 +332,30 @@ function getDiaSemana($fecha) {
                         </td>
                     <?php endforeach; ?>
                 </tr>
-                <tr class="row-notes group-ingresos">
+                <tr class="row-notes group-ingresos hidden-row">
                     <td><i class="fas fa-edit me-1"></i> Notas Ingresos</td>
                     <?php foreach($dias as $n=>$i): ?>
                         <td><input type="text" class="cell-input col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="notas_ingresos" value="<?php echo getVal($savedData, $i['fecha'], 'notas_ingresos'); ?>" placeholder="..."></td>
                     <?php endforeach; ?>
                 </tr>
-                <tr class="row-subtotal group-ingresos" style="color: #2e7d32;">
+                <tr class="row-subtotal group-ingresos hidden-row" style="color: #2e7d32;">
                     <td><i class="fas fa-money-bill-wave me-1"></i>SUBTOTAL EFECTIVO</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_efectivo_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
-                <tr class="row-subtotal group-ingresos" style="color: #1565c0;">
+                <tr class="row-subtotal group-ingresos hidden-row" style="color: #1565c0;">
                     <td><i class="fas fa-university me-1"></i>SUBTOTAL BANCO</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_banco_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
-                <tr class="row-subtotal group-ingresos" style="color: #2e7d32;">
+                <tr class="row-subtotal group-ingresos hidden-row" style="color: #2e7d32;">
                     <td>TOTAL DISPONIBLE</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_ing_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
 
                 <!-- GRUPO GASTOS -->
-                <tr class="group-header" onclick="toggleGroup('gastos')">
+                <tr class="group-header collapsed" onclick="toggleGroup('gastos')">
                     <td colspan="<?php echo $numDias+1; ?>"><i class="fas fa-chevron-down"></i> 💸 GASTOS Y EGRESOS</td>
                 </tr>
-                <tr class="bg-gst group-gastos">
+                <tr class="bg-gst group-gastos hidden-row">
                     <td>
                         Costos Mercancía (Compras)
                         <small class="text-muted d-block" style="font-size: 0.65rem;">Haz clic en el valor para editar/borrar</small>
@@ -369,7 +386,7 @@ function getDiaSemana($fecha) {
                         </td>
                     <?php endforeach; ?>
                 </tr>
-                <tr class="bg-gst group-gastos">
+                <tr class="bg-gst group-gastos hidden-row">
                     <td>
                         Salarios
                         <small class="text-muted d-block" style="font-size: 0.65rem;">Haz clic en el valor para editar/borrar</small>
@@ -400,17 +417,17 @@ function getDiaSemana($fecha) {
                         </td>
                     <?php endforeach; ?>
                 </tr>
-                <tr class="bg-gst group-gastos">
+                <tr class="bg-gst group-gastos hidden-row">
                     <td>Gastos Operativos / Otros</td>
                     <?php foreach($dias as $n=>$i): ?><td><input type="number" step="0.01" class="cell-input gst-val col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="gastos" value="<?php echo getVal($savedData, $i['fecha'], 'gastos'); ?>"></td><?php endforeach; ?>
                 </tr>
-                <tr class="row-notes group-gastos">
+                <tr class="row-notes group-gastos hidden-row">
                     <td><i class="fas fa-edit me-1"></i> Notas Gastos</td>
                     <?php foreach($dias as $n=>$i): ?>
                         <td><input type="text" class="cell-input col-<?php echo $n; ?>" data-fecha="<?php echo $i['fecha']; ?>" data-key="notas" value="<?php echo getVal($savedData, $i['fecha'], 'notas'); ?>" placeholder="..."></td>
                     <?php endforeach; ?>
                 </tr>
-                <tr class="row-subtotal group-gastos" style="color: #c62828;">
+                <tr class="row-subtotal group-gastos hidden-row" style="color: #c62828;">
                     <td>TOTAL GASTOS</td>
                     <?php foreach($dias as $n=>$i): ?><td id="sub_gst_<?php echo $n; ?>">0.00</td><?php endforeach; ?>
                 </tr>
@@ -471,6 +488,9 @@ function getDiaSemana($fecha) {
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
     const numDias = <?php echo $numDias; ?>;
+    const mes = <?php echo $mes; ?>;
+    const anio = <?php echo $anio; ?>;
+    const sucursal_contexto = <?php echo $sucursal_contexto; ?>;
     let chart;
     const costModal = new bootstrap.Modal(document.getElementById('costModal'));
 
@@ -499,12 +519,11 @@ function getDiaSemana($fecha) {
 
     function recalcColumn(d) {
         let vts = 0, inv = 0, ing = 0, gst = 0, ingEfectivo = 0, ingBanco = 0;
-        // Ventas
-        for(let s=1; s<=6; s++) {
-            const elV = document.getElementById(`ventas_suc_${s}_${d}`);
-            if(elV) vts += parseFloat(elV.value)||0;
-        }
-        // Inventarios
+        // Ventas (Sucursal actual)
+        const elV = document.getElementById(`ventas_suc_${sucursal_contexto}_${d}`);
+        if(elV) vts = parseFloat(elV.value)||0;
+
+        // Inventarios (Suma de almacenes)
         document.querySelectorAll(`.inv-val.col-${d}`).forEach(i => inv += parseFloat(i.value)||0);
         // Ingresos Efectivo
         document.querySelectorAll(`.ing-efectivo.col-${d}`).forEach(i => ingEfectivo += parseFloat(i.value)||0);
@@ -538,6 +557,29 @@ function getDiaSemana($fecha) {
 
         const totalFin = document.getElementById(`total_fin_${d}`);
         if(totalFin) totalFin.value = (inv + ing - gst).toFixed(2);
+    }
+
+    function exportToExcel() {
+        const table = document.getElementById('cashFlowTable');
+        const rows = Array.from(table.rows);
+        let csvContent = "data:text/csv;charset=utf-8,";
+        
+        rows.forEach(row => {
+            const rowData = Array.from(row.cells).map(cell => {
+                const input = cell.querySelector('input');
+                let text = input ? input.value : cell.innerText;
+                return '"' + (text || '').toString().replace(/"/g, '""') + '"';
+            });
+            csvContent += rowData.join(",") + "\r\n";
+        });
+
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `flujo_caja_${numDias}_${new Date().getTime()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 
     function addCostEntry(day) {
@@ -720,13 +762,13 @@ function getDiaSemana($fecha) {
     }
 
     async function syncAll() {
-        if(!confirm("Sincronizar ventas e inventarios de todas las sucursales...")) return;
+        if(!confirm("Sincronizar ventas e inventarios de la sucursal actual...")) return;
 
         const overlay = document.createElement('div');
         overlay.style = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);z-index:9999;display:flex;flex-direction:column;justify-content:center;align-items:center;color:white;backdrop-filter:blur(5px);";
         overlay.innerHTML = `
             <div class="spinner-border text-warning mb-4" style="width: 3rem; height: 3rem;"></div>
-            <h3 class="fw-bold mb-2">Sincronizando Datos Consolidados</h3>
+            <h3 class="fw-bold mb-2">Sincronizando Datos</h3>
             <p id="sync-progress" class="fs-4 fw-light">Día 0 de ${numDias}</p>
             <div class="progress w-25 mt-3" style="height: 10px;">
                 <div id="sync-bar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 0%"></div>
@@ -747,20 +789,25 @@ function getDiaSemana($fecha) {
                 const json = await res.json();
                 if(json.status==='success') {
                     const d = json.data;
-                    for(let s=1; s<=6; s++) {
-                        const elV = document.getElementById(`ventas_suc_${s}_${i}`);
-                        if(elV) { elV.value = d['ventas_suc_'+s]; saveToDB(elV); }
-                        const elI = document.getElementById(`inv_${s}_${i}`);
-                        if(elI) { elI.value = d['inv_'+s]; saveToDB(elI); }
-                    }
+                    
+                    // Ventas sucursal actual
+                    const elV = document.getElementById(`ventas_suc_${sucursal_contexto}_${i}`);
+                    if(elV) { elV.value = d['ventas_suc_'+sucursal_contexto]; saveToDB(elV); }
+                    
+                    // Inventarios por almacén
+                    <?php foreach($almacenes_sucursal as $alm): ?>
+                        const elI_<?php echo $alm['id']; ?> = document.getElementById(`inv_alm_<?php echo $alm['id']; ?>_${i}`);
+                        if(elI_<?php echo $alm['id']; ?>) { elI_<?php echo $alm['id']; ?>.value = d['inv_alm_<?php echo $alm['id']; ?>']; saveToDB(elI_<?php echo $alm['id']; ?>); }
+                    <?php endforeach; ?>
+
                     recalcColumn(i);
                 }
-            } catch(e) { console.error("Error en día " + i); }
+            } catch(e) { console.error("Error en día " + i, e); }
         }
         
         document.body.removeChild(overlay);
         updateChart();
-        alert("✅ Sincronización mensual completada.");
+        alert("✅ Sincronización completada.");
     }
 
     function initChart() {

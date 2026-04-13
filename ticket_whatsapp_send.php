@@ -4,9 +4,19 @@
  * DESCRIPCIÓN: Genera PDF y envía por WhatsApp a través del bot
  */
 
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+set_time_limit(60);
+
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'helpers/comprobante_generator.php';
+
+// Dependencias del Bot de WhatsApp
+if (!defined('POSBOT_API_ROOT')) define('POSBOT_API_ROOT', __DIR__);
+require_once POSBOT_API_ROOT . '/posbot_api/bootstrap.php';
+require_once POSBOT_API_ROOT . '/posbot_api/repository.php';
+require_once POSBOT_API_ROOT . '/posbot_api/helpers/runtime.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -83,18 +93,14 @@ if ($action === 'send') {
         $generator = new ComprobanteGenerator($pdo, $config);
 
         if ($tipoDoc === 'comprobante') {
-            // Usar comprobante_ventas.php
-            $rutaPDF = $generator->generarPDF($idVenta);
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'comprobante');
             $nombreDoc = "comprobante_$idVenta.pdf";
         } elseif ($tipoDoc === 'factura') {
-            // Generar como factura (usando ticket_to_invoice)
-            // Por ahora, usar el comprobante como alternativa
-            $rutaPDF = $generator->generarPDF($idVenta);
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'factura');
             $nombreDoc = "factura_$idVenta.pdf";
         } else {
-            // ticket_view.php - convertir a PDF
-            $urlTicket = "ticket_view.php?id=$idVenta";
-            $rutaPDF = convertirHTMLaPDF($urlTicket, "ticket_$idVenta.pdf");
+            // Formato ticket térmico
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'ticket');
             $nombreDoc = "ticket_$idVenta.pdf";
         }
 
@@ -107,8 +113,6 @@ if ($action === 'send') {
         $pdfBase64 = base64_encode($pdfContent);
 
         // Encolar trabajo en WhatsApp bridge
-        require_once 'posbot_api/helpers/runtime.php';
-
         $job = [
             'target_id' => $waId,
             'type' => 'document',
@@ -135,53 +139,6 @@ if ($action === 'send') {
         echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
         exit;
     }
-}
-
-// ===== FUNCIONES AUXILIARES =====
-
-function convertirHTMLaPDF($urlRelativa, $nombreSalida) {
-    $rutaTmp = "/tmp/" . $nombreSalida;
-
-    // Opción 1: Intentar acceder vía HTTP localhost
-    $urlCompleta = "http://localhost/" . ltrim($urlRelativa, '/');
-    $html = @file_get_contents($urlCompleta);
-
-    // Opción 2: Si falla HTTP, generar desde ComprobanteGenerator para tickets
-    if (!$html && preg_match('/id=(\d+)/', $urlRelativa, $matches)) {
-        try {
-            global $pdo, $config;
-            require_once __DIR__ . '/helpers/comprobante_generator.php';
-            $generator = new ComprobanteGenerator($pdo, $config);
-            $idVenta = intval($matches[1]);
-            return $generator->generarPDF($idVenta);
-        } catch (Exception $e) {
-            // Continúa intentando
-        }
-    }
-
-    if (!$html) {
-        throw new Exception('No se pudo obtener el HTML de ' . $urlRelativa);
-    }
-
-    // Guardar HTML temporal
-    $tmpHtml = "/tmp/html_" . uniqid() . ".html";
-    file_put_contents($tmpHtml, $html);
-
-    // Usar wkhtmltopdf para convertir el HTML
-    if (file_exists('/usr/bin/wkhtmltopdf')) {
-        $cmd = "export HOME=/tmp && /usr/bin/wkhtmltopdf --enable-local-file-access --load-error-handling ignore --quiet '$tmpHtml' '$rutaTmp' 2>&1";
-        exec($cmd, $output, $returnCode);
-
-        @unlink($tmpHtml);
-
-        // Aceptar el PDF si existe y tiene contenido, aunque haya errores de recursos externos (código 1)
-        if (file_exists($rutaTmp) && filesize($rutaTmp) > 1000) {
-            return $rutaTmp;
-        }
-    }
-
-    @unlink($tmpHtml);
-    throw new Exception('No se pudo convertir el HTML a PDF con wkhtmltopdf');
 }
 
 function logEnvioWhatsApp($pdo, $idVenta, $telefonoWhatsApp, $tipoDoc) {

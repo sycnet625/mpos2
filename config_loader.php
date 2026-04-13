@@ -67,15 +67,47 @@ if (!function_exists('config_loader_apply_user_context')) {
             if ($alm > 0) {
                 $config['id_almacen'] = $alm;
             }
+
+            // CARGAR INFO DINÁMICA DE SUCURSAL (BANNER)
+            if ($suc > 0) {
+                $stmtS = $GLOBALS['pdo']->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+                $stmtS->execute([$suc]);
+                $sBanner = $stmtS->fetchColumn();
+                if ($sBanner) {
+                    $config['sucursal_banner'] = $sBanner;
+                }
+            }
         } catch (Throwable $e) {
             // Mantener fallback a pos.cfg si la tabla no existe o falla el query.
         }
     }
 }
 
+if (!function_exists('config_loader_system_name')) {
+    function config_loader_system_name(string $fallback = 'PalWeb POS Marinero'): string
+    {
+        global $config;
+        $value = trim((string)($config['marca_sistema_nombre'] ?? ''));
+        return $value !== '' ? $value : $fallback;
+    }
+}
+
+if (!function_exists('config_loader_company_name')) {
+    function config_loader_company_name(string $fallback = 'MI TIENDA'): string
+    {
+        global $config;
+        $value = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? '')));
+        return $value !== '' ? $value : $fallback;
+    }
+}
+
 if (!isset($config)) {
     $configFile = __DIR__ . '/pos.cfg';
     $config = [
+        "marca_sistema_nombre" => "PalWeb POS Marinero",
+        "marca_sistema_logo" => "",
+        "marca_empresa_nombre" => "MI TIENDA",
+        "marca_empresa_logo" => "",
         "tienda_nombre" => "MI TIENDA",
         "direccion" => "",
         "telefono" => "",
@@ -125,6 +157,15 @@ if (!isset($config)) {
     // Prioridad:
     // 1) Contexto guardado en sesión (PIN/cajero u otros flujos)
     // 2) Contexto dinámico por usuario ERP logueado
-    config_loader_apply_session_context($config);
-    config_loader_apply_user_context($config);
+    $currentScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
+    $isShop = in_array($currentScript, [
+        'shop.php', 'shop2.php', 'shop_premium.php', 
+        'pos_config_premium.php',
+        'manifest-shop.php', 'manifest-pos.php'
+    ], true);
+
+    if (!$isShop) {
+        config_loader_apply_session_context($config);
+        config_loader_apply_user_context($config);
+    }
 }

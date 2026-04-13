@@ -7,6 +7,11 @@ if (file_exists(__DIR__ . '/tools_unit_converter.php')) {
     include_once __DIR__ . '/tools_unit_converter.php';
 }
 
+global $config, $currentConfig;
+$_c = $config ?? $currentConfig ?? [];
+$menuSystemName = trim((string)($_c['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
+$menuSystemLogo = trim((string)($_c['marca_sistema_logo'] ?? ''));
+
 // --- DEFINICIÓN DE ENLACES ---
 $menuCategories = [
     // --- NUEVO: CHAT DE SOPORTE ---
@@ -56,7 +61,7 @@ $menuCategories = [
         ["icon" => "fa-file-invoice", "name" => "Facturas", "url" => "invoices.php"],
         ["icon" => "fa-money-bill-wave", "name" => "Contabilidad", "url" => "pos_accounting.php"],
         ["icon" => "fa-coins", "name" => "Libro Diario", "url" => "accounting_journal.php"],
-
+        ["icon" => "fa-landmark", "name" => "Tributos ONAT", "url" => "onat_taxes.php"],
     ],
     "📊 Reportes" => [
         ["icon" => "fa-file-invoice-dollar", "name" => "Cierre de Negocio", "url" => "business_closure_report.php"],
@@ -95,6 +100,7 @@ $menuCategories = [
 ];
 ?>
 
+<?php require_once __DIR__ . '/theme.php'; ?>
 <style>
     /* Estilos del Menú Flotante */
     @media print { #palweb-float-nav { display: none !important; } }
@@ -231,16 +237,21 @@ $menuCategories = [
     
     .btn-close-custom { background: none; border: none; font-size: 1.2rem; cursor: pointer; line-height: 1; color: inherit; opacity: 0.7; }
     .btn-close-custom:hover { opacity: 1; }
+    .pw-brand-logo {
+        width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--border-color, #e2e8f0);
+        object-fit: contain; background: #fff; padding: 4px; box-shadow: 0 8px 18px rgba(15,23,42,.08);
+    }
 </style>
 
 <div id="palweb-float-nav">
     <div class="pw-menu-content" id="pwMenuContent">
         <div style="text-align:center; padding-bottom:5px; border-bottom:1px solid var(--border-color); margin-bottom:5px;">
-            <strong style="color:var(--primary-color);">PalWeb POS</strong> <small class="text-muted">v3.0</small>
+            <?php if ($menuSystemLogo !== ''): ?>
+                <div class="mb-2"><img src="<?php echo htmlspecialchars($menuSystemLogo); ?>" alt="<?php echo htmlspecialchars($menuSystemName); ?>" class="pw-brand-logo"></div>
+            <?php endif; ?>
+            <strong style="color:var(--primary-color);"><?php echo htmlspecialchars($menuSystemName); ?></strong> <small class="text-muted">v3.0</small>
             
             <?php 
-            global $config, $currentConfig;
-            $_c = $config ?? $currentConfig;
             if (!empty($_c['hero_mostrar_usuario']) && !empty($_SESSION['admin_user_name'])): ?>
                 <div style="font-size: 0.75rem; margin-top: 5px; color: #475569; background: #f1f5f9; padding: 4px; border-radius: 8px;">
                     <i class="fas fa-user-circle"></i> <?php echo htmlspecialchars($_SESSION['admin_user_name']); ?>
@@ -771,17 +782,20 @@ window.sendAdminMsg = async function() {
             <div class="modal-body p-3">
                 <div id="changePassAlert" class="alert d-none py-2 small"></div>
                 <form id="formChangePass">
+                    <!-- Campo oculto para accesibilidad / gestores de contraseñas -->
+                    <input type="text" name="username" value="<?php echo htmlspecialchars($_SESSION['admin_user'] ?? 'admin'); ?>" style="display:none;" autocomplete="username">
+                    
                     <div class="mb-3">
                         <label class="small fw-bold text-muted">Contraseña Actual</label>
-                        <input type="password" id="cp_current" class="form-control form-control-sm" required>
+                        <input type="password" id="cp_current" class="form-control form-control-sm" required autocomplete="current-password">
                     </div>
                     <div class="mb-3">
                         <label class="small fw-bold text-muted">Nueva Contraseña</label>
-                        <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="4">
+                        <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="4" autocomplete="new-password">
                     </div>
                     <div class="mb-0">
                         <label class="small fw-bold text-muted">Confirmar Nueva</label>
-                        <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="4">
+                        <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="4" autocomplete="new-password">
                     </div>
                 </form>
             </div>

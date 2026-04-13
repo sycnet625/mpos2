@@ -269,18 +269,11 @@ async function apiFetch(url, options = {}) {
     try {
       const parsed = new URL(url);
       const loopbackHttpBase = LOOPBACK_API_BASE.replace(/\/+$/, '');
-      const loopbackTlsBase = LOOPBACK_API_BASE.replace(/^http:\/\//i, 'https://').replace(/\/+$/, '');
       const samePath = `${parsed.pathname}${parsed.search}`;
       const directLoopbackUrl = `${loopbackHttpBase}${samePath}`;
-      const directLoopbackTlsUrl = `${loopbackTlsBase}${samePath}`;
-      const originalTlsUrl = `${parsed.protocol === 'https:' ? 'https://' : 'https://'}${parsed.host}${samePath}`;
       if (directLoopbackUrl !== url) attempts.push({ mode: 'fetch', url: directLoopbackUrl });
-      if (directLoopbackTlsUrl !== url && directLoopbackTlsUrl !== directLoopbackUrl) {
-        attempts.push({ mode: 'https-request', url: directLoopbackTlsUrl });
-      }
-      if (originalTlsUrl !== url && originalTlsUrl !== directLoopbackTlsUrl) {
-        attempts.push({ mode: 'https-request', url: originalTlsUrl });
-      }
+      // NO intentar HTTPS a localhost - el certificado no será válido para 127.0.0.1
+      // Usar solo HTTP para localhost incluso si POS_BOT_HOST está definido
     } catch (_) {}
   }
   let lastErr = null;
@@ -769,12 +762,20 @@ async function processOutboundQueueTick() {
       const type = String(job.type || 'text').toLowerCase();
       if (type === 'image') {
         await sendMediaUrl(targetId, String(job.url || '').trim(), String(job.caption || job.text || '').trim(), 'bot_reply');
+      } else if (type === 'document') {
+        const media = new MessageMedia(
+          String(job.mimetype || 'application/pdf'),
+          String(job.file_base64 || ''),
+          String(job.filename || 'documento.pdf')
+        );
+        await client.sendMessage(targetId, media, { caption: String(job.caption || '').trim() });
       } else if (type === 'buttons') {
         await sendButtonsMessage(targetId, String(job.text || '').trim(), Array.isArray(job.buttons) ? job.buttons : [], String(job.title || '').trim(), String(job.footer || '').trim());
       } else {
         const text = String(job.text || '').trim();
         if (text) await client.sendMessage(targetId, text);
       }
+      console.log(`[bridge] outbound to=${targetId} type=${type} status=sent`);
       job.status = 'sent';
       job.sent_at = new Date().toISOString();
       changed = true;

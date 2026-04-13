@@ -33,6 +33,7 @@ $configFile = __DIR__ . '/pos.cfg';
 $defaultConfig = [
     "marca_sistema_nombre" => "PalWeb POS Marinero",
     "marca_sistema_logo" => "",
+    "marca_pos_login_logo" => "",
     "marca_empresa_nombre" => "MI TIENDA",
     "marca_empresa_logo" => "",
     "tienda_nombre" => "MI TIENDA",
@@ -79,6 +80,7 @@ $defaultConfig = [
     "hero_color_1" => "#0f766e",
     "hero_color_2" => "#15803d",
     "hero_mostrar_usuario" => true,
+    "hero_mostrar_logo" => true,
     "vapid_public_key" => "",
     "vapid_private_key" => "",
     "metodos_pago" => [
@@ -277,25 +279,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $empresaId = (int)($_POST['sucursal_id_empresa'] ?? 0);
             $nombre = trim((string)($_POST['sucursal_nombre'] ?? ''));
             $activo = isset($_POST['sucursal_activo']) ? 1 : 0;
+            $bannerRemove = !empty($_POST['sucursal_banner_remove']);
+
             if ($empresaId <= 0 || $nombre === '') {
                 throw new RuntimeException('La sucursal requiere empresa y nombre.');
             }
+
+            // Procesar Banner
+            $bannerPath = null;
+            if ($sucursalId > 0) {
+                $stmt = $pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ?");
+                $stmt->execute([$sucursalId]);
+                $bannerPath = $stmt->fetchColumn();
+            }
+
+            if ($bannerRemove && $bannerPath) {
+                if (file_exists(__DIR__ . '/' . $bannerPath)) @unlink(__DIR__ . '/' . $bannerPath);
+                $bannerPath = null;
+            }
+
+            if (isset($_FILES['sucursal_banner']) && $_FILES['sucursal_banner']['error'] === UPLOAD_ERR_OK) {
+                $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+                $type = $_FILES['sucursal_banner']['type'];
+                if (!isset($allowed[$type])) throw new Exception("Formato de imagen no permitido para el banner.");
+                
+                $ext = $allowed[$type];
+                $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.' . $ext;
+                $target = __DIR__ . '/assets/img/' . $newBannerName;
+                
+                if (move_uploaded_file($_FILES['sucursal_banner']['tmp_name'], $target)) {
+                    $bannerPath = 'assets/img/' . $newBannerName;
+                }
+            }
+
             if ($sucursalId > 0) {
                 if ($hasSucursalActivo) {
-                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ?, activo = ? WHERE id = ?");
-                    $stmt->execute([$empresaId, $nombre, $activo, $sucursalId]);
+                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ?, activo = ?, imagen_banner = ? WHERE id = ?");
+                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath, $sucursalId]);
                 } else {
-                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ? WHERE id = ?");
-                    $stmt->execute([$empresaId, $nombre, $sucursalId]);
+                    $stmt = $pdo->prepare("UPDATE sucursales SET id_empresa = ?, nombre = ?, imagen_banner = ? WHERE id = ?");
+                    $stmt->execute([$empresaId, $nombre, $bannerPath, $sucursalId]);
                 }
                 $msg = 'Sucursal actualizada.';
             } else {
                 if ($hasSucursalActivo) {
-                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, activo) VALUES (?, ?, ?)");
-                    $stmt->execute([$empresaId, $nombre, $activo]);
+                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, activo, imagen_banner) VALUES (?, ?, ?, ?)");
+                    $stmt->execute([$empresaId, $nombre, $activo, $bannerPath]);
                 } else {
-                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre) VALUES (?, ?)");
-                    $stmt->execute([$empresaId, $nombre]);
+                    $stmt = $pdo->prepare("INSERT INTO sucursales (id_empresa, nombre, imagen_banner) VALUES (?, ?, ?)");
+                    $stmt->execute([$empresaId, $nombre, $bannerPath]);
                 }
                 $msg = 'Sucursal creada.';
             }
@@ -404,6 +436,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['hero_color_1'] = trim((string)($_POST['hero_color_1'] ?? '#0f766e'));
             $newConfig['hero_color_2'] = trim((string)($_POST['hero_color_2'] ?? '#15803d'));
             $newConfig['hero_mostrar_usuario'] = isset($_POST['hero_mostrar_usuario']);
+            $newConfig['hero_mostrar_logo']    = isset($_POST['hero_mostrar_logo']);
             $newConfig['categorias_ocultas'] = $_POST['categorias_ocultas'] ?? [];
             $newConfig['vapid_public_key'] = trim((string)($_POST['vapid_public_key'] ?? ($currentConfig['vapid_public_key'] ?? '')));
             $replacePrivate = isset($_POST['replace_vapid_private']);
@@ -475,6 +508,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $newConfig['marca_sistema_logo'] = poscfg_process_brand_logo_upload('marca_sistema_logo', 'branding_system_logo', $currentConfig);
             $newConfig['marca_empresa_logo'] = poscfg_process_brand_logo_upload('marca_empresa_logo', 'branding_company_logo', $currentConfig);
+            $newConfig['marca_pos_login_logo'] = poscfg_process_brand_logo_upload('marca_pos_login_logo', 'branding_pos_login', $currentConfig);
 
             if (isset($_POST['notification_type_keys']) && is_array($_POST['notification_type_keys'])) {
                 $newConfig['notification_type_settings'] = [];
@@ -698,7 +732,7 @@ $empresas = $pdo->query("SELECT id, nombre FROM empresas WHERE COALESCE(activo,1
 $sucursales = $pdo->query("SELECT id, id_empresa, nombre FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $almacenes = $pdo->query("SELECT id, id_sucursal, nombre FROM almacenes WHERE COALESCE(activo,1) = 1 ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $allEmpresas = $pdo->query("SELECT id, nombre, " . ($hasEmpresaActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM empresas ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
-$allSucursales = $pdo->query("SELECT id, id_empresa, nombre, " . ($hasSucursalActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+$allSucursales = $pdo->query("SELECT id, id_empresa, nombre, imagen_banner, " . ($hasSucursalActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $allAlmacenes = $pdo->query("SELECT id, id_sucursal, nombre, " . ($hasAlmacenActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM almacenes ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $users = $pdo->query("SELECT id, nombre, email, pin, rol, id_sucursal, activo FROM users ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $userContexts = $pdo->query("
@@ -716,6 +750,7 @@ $userContexts = $pdo->query("
         puc.activo AS context_activo,
         e.nombre AS empresa_nombre,
         s.nombre AS sucursal_nombre,
+        s.imagen_banner AS sucursal_banner,
         a.nombre AS almacen_nombre
     FROM users u
     LEFT JOIN pos_user_contexts puc ON puc.user_id = u.id
@@ -736,6 +771,7 @@ $cashiers = $pdo->query("
         c.activo,
         e.nombre AS empresa_nombre,
         s.nombre AS sucursal_nombre,
+        s.imagen_banner AS sucursal_banner,
         a.nombre AS almacen_nombre
     FROM pos_cashiers c
     LEFT JOIN empresas e ON e.id = c.id_empresa
@@ -786,13 +822,14 @@ foreach ($allEmpresas as $empresaRow) {
     }
 }
 
-$editSucursalData = ['id' => 0, 'id_empresa' => '', 'nombre' => '', 'activo' => 1];
+$editSucursalData = ['id' => 0, 'id_empresa' => '', 'nombre' => '', 'imagen_banner' => '', 'activo' => 1];
 foreach ($allSucursales as $sucursalRow) {
     if ((int)$sucursalRow['id'] === $editSucursalId) {
         $editSucursalData = [
             'id' => (int)$sucursalRow['id'],
             'id_empresa' => (string)$sucursalRow['id_empresa'],
             'nombre' => (string)$sucursalRow['nombre'],
+            'imagen_banner' => (string)($sucursalRow['imagen_banner'] ?? ''),
             'activo' => (int)$sucursalRow['activo']
         ];
         break;
@@ -1593,8 +1630,21 @@ unset($treeCompany);
                                 <label class="form-label">Nombre de sucursal</label>
                                 <input type="text" class="form-control" name="sucursal_nombre" required value="<?php echo htmlspecialchars($editSucursalData['nombre']); ?>">
                             </div>
-                            <div class="col-12 form-check ms-2">
-                                <input class="form-check-input" type="checkbox" id="sucursal_activo" name="sucursal_activo" <?php echo !empty($editSucursalData['activo']) ? 'checked' : ''; ?>>
+                            <div class="col-12">
+                                <label class="form-label">Banner Hero (POS)</label>
+                                <?php if (!empty($editSucursalData['imagen_banner'])): ?>
+                                    <div class="mb-2">
+                                        <img src="<?php echo htmlspecialchars($editSucursalData['imagen_banner']); ?>" class="img-thumbnail" style="max-height: 80px;">
+                                        <div class="form-check small mt-1">
+                                            <input class="form-check-input" type="checkbox" name="sucursal_banner_remove" id="sucursal_banner_remove" value="1">
+                                            <label class="form-check-label text-danger" for="sucursal_banner_remove">Eliminar banner</label>
+                                        </div>
+                                    </div>
+                                <?php endif; ?>
+                                <input type="file" name="sucursal_banner" class="form-control form-control-sm" accept="image/*">
+                                <div class="form-text small">Imagen panorámica para el fondo del banner superior en el POS.</div>
+                            </div>
+                            <div class="col-12 form-check ms-2">                                <input class="form-check-input" type="checkbox" id="sucursal_activo" name="sucursal_activo" <?php echo !empty($editSucursalData['activo']) ? 'checked' : ''; ?>>
                                 <label class="form-check-label" for="sucursal_activo">Sucursal activa</label>
                             </div>
                             <div class="col-12 d-flex gap-2">
@@ -1669,6 +1719,18 @@ unset($treeCompany);
                                                 <div class="d-flex flex-column flex-lg-row justify-content-between gap-3">
                                                     <div>
                                                         <div class="tree-pill mb-2" style="background:#ecfdf5;color:#047857;border-color:#bbf7d0;"><i class="fas fa-store"></i> Sucursal</div>
+                                                        <div class="mb-2">
+                                                            <?php 
+                                                            ?>
+                                                            <?php if (!empty($sucursal['imagen_banner']) && file_exists(__DIR__ . '/' . $sucursal['imagen_banner'])): ?>
+                                                                <img src="<?php echo htmlspecialchars($sucursal['imagen_banner']); ?>?v=<?php echo time(); ?>"
+                                                                     style="height:45px; border-radius:6px; box-shadow:0 2px 4px rgba(0,0,0,0.1); background:#fff;" alt="Banner">
+                                                            <?php else: ?>
+                                                                <div style="height:45px;width:130px;border-radius:6px;background:#f1f5f9;border:1px dashed #cbd5e1;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:0.72rem;">
+                                                                    <i class="fas fa-image me-1"></i> Sin banner
+                                                                </div>
+                                                            <?php endif; ?>
+                                                        </div>
                                                         <div class="fw-bold"><?php echo htmlspecialchars($sucursal['nombre']); ?></div>
                                                         <div class="small-muted">ID <?php echo (int)$sucursal['id']; ?> · <?php echo !empty($sucursal['activo']) ? 'Activa' : 'Inactiva'; ?></div>
                                                     </div>
@@ -2298,10 +2360,14 @@ unset($treeCompany);
                         <input type="color" name="hero_color_2" class="form-control form-control-color w-100" value="<?php echo htmlspecialchars($currentConfig['hero_color_2'] ?? '#15803d'); ?>">
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label d-block">Usuario en Banner y Menú</label>
+                        <label class="form-label d-block">Opciones del Banner</label>
                         <div class="form-check form-switch mt-2">
                             <input class="form-check-input" type="checkbox" name="hero_mostrar_usuario" id="hero_mostrar_usuario" <?php echo !empty($currentConfig['hero_mostrar_usuario']) ? 'checked' : ''; ?>>
                             <label class="form-check-label" for="hero_mostrar_usuario">Mostrar nombre de usuario</label>
+                        </div>
+                        <div class="form-check form-switch mt-2">
+                            <input class="form-check-input" type="checkbox" name="hero_mostrar_logo" id="hero_mostrar_logo" <?php echo ($currentConfig['hero_mostrar_logo'] ?? true) ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="hero_mostrar_logo">Mostrar logo en esquina (desktop)</label>
                         </div>
                     </div>
                     <div class="col-12 mt-3">
@@ -2311,6 +2377,34 @@ unset($treeCompany);
                     </div>
                 </div>
             </div>
+
+            <div class="card mt-4">
+                <div class="card-header fw-bold text-primary">🖥️ Logo del Login POS</div>
+                <div class="card-body row g-4 align-items-center">
+                    <div class="col-md-3 text-center">
+                        <?php $posLoginLogo = $currentConfig['marca_pos_login_logo'] ?? ''; ?>
+                        <?php if (!empty($posLoginLogo) && file_exists(__DIR__ . '/' . $posLoginLogo)): ?>
+                            <img src="<?php echo htmlspecialchars($posLoginLogo); ?>" alt="Logo Login POS" class="img-fluid rounded shadow-sm" style="max-height: 80px;">
+                        <?php else: ?>
+                            <div class="bg-light rounded d-flex align-items-center justify-content-center" style="height: 80px;">
+                                <i class="fas fa-image text-muted fa-2x"></i>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label">Imagen personalizada para la pantalla de PIN</label>
+                        <input type="file" name="marca_pos_login_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
+                        <div class="form-text">Sube una imagen rectangular (banner). Se mostrará arriba del teclado numérico.</div>
+                        <?php if (!empty($posLoginLogo)): ?>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" name="marca_pos_login_logo_remove" id="marca_pos_login_logo_remove" value="1">
+                                <label class="form-check-label text-danger fw-semibold" for="marca_pos_login_logo_remove">Eliminar logo actual</label>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar identidad corporativa</button>
         </form>
     </div>

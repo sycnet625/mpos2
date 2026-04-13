@@ -15,6 +15,14 @@ try {
     $venta = $stmtHead->fetch(PDO::FETCH_ASSOC);
     if (!$venta) die("No existe.");
 
+    // Obtener banner dinámico de la sucursal de la venta
+    $branchBanner = '';
+    if (!empty($venta['id_sucursal'])) {
+        $stmtS = $pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+        $stmtS->execute([$venta['id_sucursal']]);
+        $branchBanner = $stmtS->fetchColumn();
+    }
+
     $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto, COALESCE(p.nombre, 'Art: ' || d.id_producto) as nombre_producto FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?";
     $stmtDet = $pdo->prepare($sqlDet); $stmtDet->execute([$idVenta]);
     $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
@@ -227,7 +235,8 @@ $canalMap = [
 
     <div class="text-center">
         <?php
-        $tLogoPath = $config['ticket_logo'] ?? '';
+        // Prioridad: 1. Banner de sucursal, 2. Marca empresa, 3. Logo ticket
+        $tLogoPath = $branchBanner ?: ($config['marca_empresa_logo'] ?? $config['ticket_logo'] ?? '');
         if (!empty($tLogoPath) && file_exists(__DIR__ . '/' . $tLogoPath)):
         ?>
         <img src="<?php echo htmlspecialchars($tLogoPath) ?>?v=<?php echo filemtime(__DIR__ . '/' . $tLogoPath) ?>"
