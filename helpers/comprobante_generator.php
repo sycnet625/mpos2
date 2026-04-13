@@ -15,7 +15,7 @@ class ComprobanteGenerator {
     }
 
     /**
-     * Generar HTML del comprobante
+     * Generar HTML del comprobante (Voucher Premium)
      */
     public function generarHTML($idVenta) {
         $baseDir = dirname(__DIR__); // /var/www
@@ -44,20 +44,20 @@ class ComprobanteGenerator {
         $detalles = $stmtDetalles->fetchAll(PDO::FETCH_ASSOC);
 
         // Datos de la empresa
-        $nombreEmpresa = $this->config['pos_shop_name'] ?? 'Pastelería Renacer';
+        $nombreEmpresa = $this->config['tienda_nombre'] ?? 'Pastelería Renacer';
         $fecha = date('d/m/Y', strtotime($venta['fecha']));
         $noFactura = $venta['uuid'] ?? 'N/A';
         $cliente = $venta['cliente_nombre'] ?? 'Mostrador';
-        $total = number_format($venta['total'], 2, ',', '.');
+        $total = number_format($venta['total'], 2, '.', ',');
 
         // Generar tabla de detalles
         $detallesHTML = '';
         $contador = 1;
         foreach ($detalles as $det) {
             if (floatval($det['cantidad']) < 0) continue; // Skip devoluciones
-            $subtotal = number_format(floatval($det['cantidad']) * floatval($det['precio']), 2, ',', '.');
-            $cantidad = number_format($det['cantidad'], 2, ',', '.');
-            $precio = number_format($det['precio'], 2, ',', '.');
+            $subtotal = number_format(floatval($det['cantidad']) * floatval($det['precio']), 2, '.', ',');
+            $cantidad = number_format($det['cantidad'], 2, '.', ',');
+            $precio = number_format($det['precio'], 2, '.', ',');
 
             $detallesHTML .= "
             <tr>
@@ -71,11 +71,37 @@ class ComprobanteGenerator {
             $contador++;
         }
 
-        // HTML del comprobante
         $metodo = $venta['metodo_pago'] ?? 'Efectivo';
         $hora = date('H:i:s', strtotime($venta['fecha']));
 
-        $logoPath = $baseDir . '/assets/img/logo_comprobante.svg';
+        // 1. Buscar logo de sucursal en BD usando id_sucursal de la venta
+        $logoUrl = '';
+        if (!empty($venta['id_sucursal'])) {
+            try {
+                $stmtLogo = $this->pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+                $stmtLogo->execute([$venta['id_sucursal']]);
+                $logoRow = $stmtLogo->fetch(PDO::FETCH_ASSOC);
+                if ($logoRow && !empty($logoRow['imagen_banner'])) {
+                    $rel = ltrim($logoRow['imagen_banner'], '/');
+                    if (file_exists($baseDir . '/' . $rel)) {
+                        $logoUrl = '/' . $rel;
+                    }
+                }
+            } catch (Throwable $e) { /* tabla no existe aún */ }
+        }
+        // 2. Fallback a config (pos.cfg)
+        if (empty($logoUrl)) {
+            $logoRelPath = $this->config['sucursal_banner'] ?? $this->config['marca_empresa_logo'] ?? $this->config['ticket_logo'] ?? '';
+            if (!empty($logoRelPath) && file_exists($baseDir . '/' . ltrim($logoRelPath, '/'))) {
+                $logoUrl = '/' . ltrim($logoRelPath, '/');
+            }
+        }
+        // 3. Fallback a logo del sistema
+        if (empty($logoUrl) && file_exists($baseDir . '/assets/img/logo_comprobante.svg')) {
+            $logoUrl = '/assets/img/logo_comprobante.svg';
+        }
+
+        $logoTag = $logoUrl ? "<img src=\"" . htmlspecialchars($logoUrl) . "\" alt=\"Logo\">" : '';
 
         $html = "<!DOCTYPE html>
 <html lang=\"es\">
@@ -87,366 +113,300 @@ class ComprobanteGenerator {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f5f5f5;
+            background: #f4f6f9;
             color: #333;
         }
-        body {
-            padding: 20px;
-        }
-        .container {
-            max-width: 850px;
-            margin: 0 auto;
-            background: white;
-            padding: 50px 40px;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.1);
-            page-break-after: avoid;
-        }
-        .acciones {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-bottom: 30px;
-        }
-        .acciones button {
-            padding: 12px 24px;
-            background: #333;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: background 0.3s;
-        }
-        .acciones button:hover {
-            background: #555;
-        }
-
-        .encabezado {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 40px;
-            padding-bottom: 30px;
-            border-bottom: 3px solid #333;
-        }
-
-        .logo-section {
-            flex: 0 0 150px;
-            text-align: center;
-        }
-        .logo-section img {
-            width: 100%;
-            max-width: 140px;
-            height: auto;
-        }
-
-        .empresa-section {
-            flex: 1;
-            text-align: center;
-            margin-left: 30px;
-        }
-        .empresa-section h1 {
-            font-size: 32px;
-            color: #333;
-            margin-bottom: 5px;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-        }
-        .empresa-section .subtitulo {
-            font-size: 13px;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            font-weight: 500;
-        }
-
-        .info-section {
-            flex: 0 0 200px;
-            text-align: right;
-            background: #f9f9f9;
-            padding: 15px;
-            border-radius: 5px;
-        }
-        .info-section .item {
-            margin-bottom: 12px;
-            font-size: 13px;
-        }
-        .info-section .label {
-            color: #999;
-            text-transform: uppercase;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-        .info-section .valor {
-            color: #333;
-            font-size: 15px;
-            font-weight: 600;
-            margin-top: 3px;
-        }
-
-        .cliente-seccion {
-            margin-bottom: 30px;
-            padding: 15px 20px;
-            background: #fafafa;
-            border-left: 4px solid #333;
-            border-radius: 3px;
-        }
-        .cliente-seccion h3 {
-            font-size: 11px;
-            color: #999;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-            margin-bottom: 8px;
-        }
-        .cliente-seccion p {
-            font-size: 15px;
-            color: #333;
-            margin-bottom: 4px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-        thead {
-            background: #333;
-            color: white;
-        }
-        thead th {
-            padding: 14px 12px;
-            text-align: left;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            border: none;
-        }
-        tbody tr {
-            border-bottom: 1px solid #e0e0e0;
-        }
-        tbody tr:last-child {
-            border-bottom: 2px solid #333;
-        }
-        tbody td {
-            padding: 14px 12px;
-            font-size: 13px;
-        }
-        tbody td:nth-child(3),
-        tbody td:nth-child(4),
-        tbody td:nth-child(5) {
-            text-align: right;
-        }
-
-        .totales {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 30px;
-        }
-        .totales-box {
-            width: 280px;
-        }
-        .total-fila {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            font-size: 13px;
-            border-bottom: 1px solid #ddd;
-        }
-        .total-fila.grande {
-            background: #f5f5f5;
-            padding: 12px;
-            margin: 0 -12px;
-            font-size: 16px;
-            font-weight: 700;
-            color: #333;
-            border-top: 2px solid #333;
-            border-bottom: 2px solid #333;
-        }
-
-        .pie {
-            text-align: center;
-            color: #999;
-            font-size: 12px;
-            border-top: 1px solid #ddd;
-            padding-top: 20px;
-            margin-top: 20px;
-        }
-        .pie p {
-            margin-bottom: 5px;
-            line-height: 1.5;
-        }
-
+        body { padding: 20px; }
+        .barra-acciones { max-width: 850px; margin: 0 auto 12px; display: flex; gap: 10px; }
+        .barra-acciones button { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+        .btn-imprimir { background: #2c3e50; color: #fff; }
+        .btn-cerrar   { background: #e0e0e0; color: #333; }
+        .container { max-width: 850px; margin: 0 auto; padding: 30px; border: 1px solid #ddd; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+        .encabezado { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
+        .logo-section { flex: 0 0 150px; }
+        .logo-section img { max-width: 140px; height: auto; }
+        .empresa-section { flex: 1; text-align: center; }
+        .empresa-section h1 { font-size: 28px; margin-bottom: 5px; }
+        .info-section { flex: 0 0 200px; text-align: right; font-size: 13px; }
+        .cliente-seccion { margin-bottom: 20px; padding: 15px; background: #f9f9f9; border-left: 4px solid #333; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th { background: #333; color: #fff; padding: 10px; text-align: left; font-size: 12px; }
+        td { padding: 10px; border-bottom: 1px solid #eee; font-size: 13px; }
+        .totales { display: flex; justify-content: flex-end; }
+        .totales-box { width: 250px; }
+        .total-fila { display: flex; justify-content: space-between; padding: 5px 0; }
+        .total-fila.grande { font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 10px; margin-top: 10px; }
+        .pie { text-align: center; margin-top: 30px; font-size: 12px; color: #888; }
         @media print {
-            body {
-                background: white;
-                padding: 0;
-            }
-            .container {
-                box-shadow: none;
-                max-width: 100%;
-                margin: 0;
-                padding: 40px;
-            }
-            .acciones {
-                display: none;
-            }
-            @page {
-                size: A4;
-                margin: 0;
-            }
+            body { background: #fff; padding: 0; }
+            .barra-acciones { display: none !important; }
+            .container { border: none; box-shadow: none; padding: 0; }
         }
     </style>
 </head>
 <body>
+    <div class=\"barra-acciones\">
+        <button class=\"btn-imprimir\" onclick=\"window.print()\">&#128438; Imprimir</button>
+        <button class=\"btn-cerrar\" onclick=\"window.close()\">&#10006; Cerrar</button>
+    </div>
     <div class=\"container\">
-        <div class=\"acciones\">
-            <button onclick=\"window.print()\" title=\"Imprimir comprobante\">🖨️ Imprimir</button>
-            <button onclick=\"location.href='?id=$idVenta&format=pdf'\" title=\"Descargar en PDF\">📥 Descargar PDF</button>
-            <button onclick=\"location.href='pos.php'\" title=\"Volver al POS\">🏠 Volver al POS</button>
-        </div>
-
         <div class=\"encabezado\">
-            <div class=\"logo-section\">
-                <img src=\"$logoPath\" alt=\"Logo $nombreEmpresa\">
-            </div>
+            <div class=\"logo-section\">$logoTag</div>
             <div class=\"empresa-section\">
                 <h1>COMPROBANTE</h1>
-                <p class=\"subtitulo\">de Venta</p>
+                <p>DE VENTA</p>
             </div>
             <div class=\"info-section\">
-                <div class=\"item\">
-                    <div class=\"label\">Comprobante</div>
-                    <div class=\"valor\">$noFactura</div>
-                </div>
-                <div class=\"item\">
-                    <div class=\"label\">Fecha</div>
-                    <div class=\"valor\">$fecha</div>
-                </div>
-                <div class=\"item\">
-                    <div class=\"label\">Hora</div>
-                    <div class=\"valor\">$hora</div>
-                </div>
+                <div><strong>Nº:</strong> $noFactura</div>
+                <div><strong>Fecha:</strong> $fecha</div>
+                <div><strong>Hora:</strong> $hora</div>
             </div>
         </div>
-
         <div class=\"cliente-seccion\">
-            <h3>Cliente</h3>
-            <p><strong>$cliente</strong></p>
-            <p style=\"font-size: 13px; color: #666;\">$nombreEmpresa</p>
+            <p><strong>Cliente:</strong> $cliente</p>
+            <p><strong>Empresa:</strong> $nombreEmpresa</p>
         </div>
-
         <table>
             <thead>
                 <tr>
-                    <th style=\"width: 50px;\">No.</th>
+                    <th>#</th>
                     <th>Descripción</th>
-                    <th style=\"width: 100px;\">Cantidad</th>
-                    <th style=\"width: 90px;\">Precio Unit.</th>
-                    <th style=\"width: 90px;\">Total</th>
+                    <th style=\"text-align:right\">Cant.</th>
+                    <th style=\"text-align:right\">Precio</th>
+                    <th style=\"text-align:right\">Total</th>
                 </tr>
             </thead>
-            <tbody>
-                $detallesHTML
-            </tbody>
+            <tbody>$detallesHTML</tbody>
         </table>
-
         <div class=\"totales\">
             <div class=\"totales-box\">
                 <div class=\"total-fila grande\">
                     <span>TOTAL</span>
                     <span>\$$total</span>
                 </div>
-                <div class=\"total-fila\" style=\"margin-top: 8px; font-size: 12px;\">
-                    <span>Método: $metodo</span>
+                <div class=\"total-fila\">
+                    <span>Método:</span>
+                    <span>$metodo</span>
                 </div>
             </div>
         </div>
-
         <div class=\"pie\">
-            <p><strong>✓ Gracias por su compra</strong></p>
-            <p>Este comprobante es válido como constancia de pago</p>
-            <p>Generado: " . date('d/m/Y H:i:s') . "</p>
+            <p><strong>Gracias por su compra</strong></p>
+            <p>Generado el " . date('d/m/Y H:i:s') . "</p>
         </div>
     </div>
-
-    <script>
-        // Descarga usando html2pdf (si está disponible en el proyecto)
-        async function descargarPDF() {
-            alert('Usa el botón \"Descargar PDF\" o imprime a PDF desde tu navegador (Ctrl+P)');
-        }
-    </script>
 </body>
 </html>";
-
         return $html;
     }
 
     /**
-     * Convertir HTML a PDF usando Chromium
+     * Generar HTML del Ticket (Formato Térmico)
      */
-    public function generarPDF($idVenta, $rutaSalida = null) {
-        $html = $this->generarHTML($idVenta);
+    public function generarTicketHTML($idVenta) {
+        $baseDir = dirname(__DIR__);
+        $stmtVenta = $this->pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
+        $stmtVenta->execute([$idVenta]);
+        $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
+        if (!$venta) throw new Exception("Venta no encontrada");
+
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?");
+        $stmtDet->execute([$idVenta]);
+        $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
+
+        $logoUrl2 = '';
+        if (!empty($venta['id_sucursal'])) {
+            try {
+                $stmtLogo2 = $this->pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+                $stmtLogo2->execute([$venta['id_sucursal']]);
+                $logoRow2 = $stmtLogo2->fetch(PDO::FETCH_ASSOC);
+                if ($logoRow2 && !empty($logoRow2['imagen_banner'])) {
+                    $rel2 = ltrim($logoRow2['imagen_banner'], '/');
+                    if (file_exists($baseDir . '/' . $rel2)) $logoUrl2 = '/' . $rel2;
+                }
+            } catch (Throwable $e) {}
+        }
+        if (empty($logoUrl2)) {
+            $logoRelPath = $this->config['sucursal_banner'] ?? $this->config['marca_empresa_logo'] ?? $this->config['ticket_logo'] ?? '';
+            if (!empty($logoRelPath) && file_exists($baseDir . '/' . ltrim($logoRelPath, '/'))) {
+                $logoUrl2 = '/' . ltrim($logoRelPath, '/');
+            }
+        }
+        $logoTag = $logoUrl2 ? "<img src=\"" . htmlspecialchars($logoUrl2) . "\" style=\"max-width:200px; max-height:80px; margin-bottom:10px;\">" : '';
+
+        $itemsHTML = "";
+        foreach ($items as $it) {
+            $n = htmlspecialchars($it['nombre'] ?? $it['nombre_producto']);
+            $c = number_format($it['cantidad'], 2);
+            $p = number_format($it['precio'], 2);
+            $t = number_format($it['cantidad'] * $it['precio'], 2);
+            $itemsHTML .= "<tr><td>$c</td><td>$n</td><td align='right'>\$$t</td></tr>";
+        }
+
+        $html = "<html><head><style>
+            body { font-family: 'Courier New', monospace; width: 300px; font-size: 12px; margin: 0; padding: 10px; }
+            .center { text-align: center; }
+            .right { text-align: right; }
+            .bold { font-weight: bold; }
+            .border-top { border-top: 1px dashed #000; padding-top: 5px; margin-top: 5px; }
+            table { width: 100%; border-collapse: collapse; }
+        </style></head><body>
+            <div class='center'>
+                $logoTag
+                <h2 style='margin:0'>".htmlspecialchars($this->config['tienda_nombre'])."</h2>
+                <small>".htmlspecialchars($this->config['direccion'])."</small><br>
+                <small>Tel: ".htmlspecialchars($this->config['telefono'])."</small>
+            </div>
+            <div class='border-top'>
+                <table>
+                    <tr><td>Ticket:</td><td class='right'>#".str_pad($idVenta, 6, '0', STR_PAD_LEFT)."</td></tr>
+                    <tr><td>Fecha:</td><td class='right'>".date('d/m/Y H:i', strtotime($venta['fecha']))."</td></tr>
+                    <tr><td>Pago:</td><td class='right'>".htmlspecialchars($venta['metodo_pago'])."</td></tr>
+                </table>
+            </div>
+            <table class='border-top'>
+                <thead><tr><th align='left'>Cant</th><th align='left'>Desc</th><th align='right'>Total</th></tr></thead>
+                <tbody>$itemsHTML</tbody>
+            </table>
+            <div class='border-top right' style='font-size:16px;'>
+                <span class='bold'>TOTAL: \$".number_format($venta['total'], 2)."</span>
+            </div>
+            <div class='center border-top' style='margin-top:10px'>
+                <p>".htmlspecialchars($this->config['mensaje_final'])."</p>
+            </div>
+        </body></html>";
+        return $html;
+    }
+
+    /**
+     * Generar HTML de Factura (Formato A4 Profesional)
+     */
+    public function generarFacturaHTML($idVenta) {
+        $baseDir = dirname(__DIR__);
+        $stmtVenta = $this->pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
+        $stmtVenta->execute([$idVenta]);
+        $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
+        
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, p.unidad_medida FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?");
+        $stmtDet->execute([$idVenta]);
+        $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
+
+        $logoUrl3 = '';
+        if (!empty($venta['id_sucursal'])) {
+            try {
+                $stmtLogo3 = $this->pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+                $stmtLogo3->execute([$venta['id_sucursal']]);
+                $logoRow3 = $stmtLogo3->fetch(PDO::FETCH_ASSOC);
+                if ($logoRow3 && !empty($logoRow3['imagen_banner'])) {
+                    $rel3 = ltrim($logoRow3['imagen_banner'], '/');
+                    if (file_exists($baseDir . '/' . $rel3)) $logoUrl3 = '/' . $rel3;
+                }
+            } catch (Throwable $e) {}
+        }
+        if (empty($logoUrl3)) {
+            $logoRelPath = $this->config['sucursal_banner'] ?? $this->config['marca_empresa_logo'] ?? $this->config['ticket_logo'] ?? '';
+            if (!empty($logoRelPath) && file_exists($baseDir . '/' . ltrim($logoRelPath, '/'))) {
+                $logoUrl3 = '/' . ltrim($logoRelPath, '/');
+            }
+        }
+
+        $numFactura = date('Ymd', strtotime($venta['fecha'])) . str_pad($idVenta, 3, '0', STR_PAD_LEFT);
+        
+        $rowsHTML = "";
+        foreach ($items as $it) {
+            $st = number_format($it['cantidad'] * $it['precio'], 2);
+            $rowsHTML .= "<tr>
+                <td style='border:1px solid #aaa;padding:5px;text-align:center;'>".number_format($it['cantidad'], 2)."</td>
+                <td style='border:1px solid #aaa;padding:5px;'>".htmlspecialchars($it['unidad_medida'] ?? 'UND')."</td>
+                <td style='border:1px solid #aaa;padding:5px;'>".htmlspecialchars($it['nombre'] ?? $it['nombre_producto'])."</td>
+                <td style='border:1px solid #aaa;padding:5px;text-align:right;'>$".number_format($it['precio'], 2)."</td>
+                <td style='border:1px solid #aaa;padding:5px;text-align:right;'>$$st</td>
+            </tr>";
+        }
+
+        $html = "<html><head><style>
+            body { font-family: sans-serif; padding: 40px; color: #333; }
+            .header { display: flex; justify-content: space-between; margin-bottom: 40px; }
+            .company-info h1 { color: #2F75B5; margin: 0; }
+            .invoice-title { text-align: right; color: #2F75B5; }
+            .blue-bar { background: #2F75B5; color: #fff; padding: 8px; text-align: center; font-weight: bold; margin-bottom: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th { background: #2F75B5; color: #fff; padding: 8px; border: 1px solid #2F75B5; }
+        </style></head><body>
+            <div class='header'>
+                <div class='company-info'>
+                    ".($logoUrl3 ? "<img src='".htmlspecialchars($logoUrl3)."' style='max-width:180px;'>" : "")."
+                    <h1>".htmlspecialchars($this->config['tienda_nombre'])."</h1>
+                    <p>".htmlspecialchars($this->config['direccion'])."</p>
+                </div>
+                <div class='invoice-title'>
+                    <h1 style='font-size:40px;margin:0;'>FACTURA</h1>
+                    <p><b>Nº: $numFactura</b></p>
+                </div>
+            </div>
+            <div class='blue-bar'>DATOS DEL CLIENTE</div>
+            <p><b>Cliente:</b> ".htmlspecialchars($venta['cliente_nombre'])."</p>
+            <p><b>Fecha:</b> ".date('d/m/Y', strtotime($venta['fecha']))."</p>
+            <table>
+                <thead><tr><th>CANT</th><th>UM</th><th>DESCRIPCIÓN</th><th>PRECIO</th><th>TOTAL</th></tr></thead>
+                <tbody>$rowsHTML</tbody>
+            </table>
+            <div style='margin-top:20px; text-align:right;'>
+                <div style='display:inline-block; width:200px; background:#D9E1F2; padding:10px; border:1px solid #2F75B5;'>
+                    <b>TOTAL CUP: $".number_format($venta['total'], 2)."</b>
+                </div>
+            </div>
+        </body></html>";
+        return $html;
+    }
+
+    /**
+     * Convertir a PDF
+     */
+    public function generarPDF($idVenta, $rutaSalida = null, $tipo = 'comprobante') {
+        if ($tipo === 'ticket') {
+            $html = $this->generarTicketHTML($idVenta);
+        } elseif ($tipo === 'factura') {
+            $html = $this->generarFacturaHTML($idVenta);
+        } else {
+            $html = $this->generarHTML($idVenta);
+        }
 
         if (!$rutaSalida) {
-            $rutaSalida = "/tmp/comprobante_$idVenta.pdf";
+            $rutaSalida = "/tmp/doc_{$tipo}_$idVenta.pdf";
         }
 
-        // Guardar HTML temporalmente
-        $tmpHtml = "/tmp/comprobante_$idVenta.html";
+        $tmpHtml = "/tmp/doc_{$idVenta}_".uniqid().".html";
         file_put_contents($tmpHtml, $html);
 
-        // Opción 1: Usar wkhtmltopdf (más confiable)
         if (file_exists('/usr/bin/wkhtmltopdf')) {
-            // Añadimos --load-error-handling ignore para que no falle si no encuentra el logo por rutas relativas
-            // Forzamos HOME=/tmp para que wkhtmltopdf tenga permisos de escritura para cache/temporales
-            $cmd = "export HOME=/tmp && /usr/bin/wkhtmltopdf --enable-local-file-access --load-error-handling ignore --quiet '$tmpHtml' '$rutaSalida' 2>&1";
+            $args = "--enable-local-file-access --load-error-handling ignore --quiet";
+            // Para el formato ticket, ajustamos el tamaño del PDF
+            if ($tipo === 'ticket') {
+                $args .= " --page-width 80mm --page-height 250mm --margin-top 2mm --margin-bottom 2mm --margin-left 2mm --margin-right 2mm";
+            }
+            
+            $cmd = "export HOME=/tmp && /usr/bin/wkhtmltopdf $args '$tmpHtml' '$rutaSalida' 2>&1";
             exec($cmd, $output, $returnCode);
 
-            // Aceptar código 0 (éxito) o 1 (advertencias/recursos no encontrados) siempre que el PDF exista
-            if (($returnCode === 0 || $returnCode === 1) && file_exists($rutaSalida) && filesize($rutaSalida) > 1000) {
+            if (($returnCode === 0 || $returnCode === 1) && file_exists($rutaSalida) && filesize($rutaSalida) > 500) {
                 unlink($tmpHtml);
                 return $rutaSalida;
             }
         }
 
-        // Opción 2: Intentar con Chromium desde /usr/bin
+        // Fallback a Chromium si falla wk
         if (file_exists('/usr/bin/chromium-browser')) {
-            $cmd = "/usr/bin/chromium-browser --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>&1";
+            $cmd = "/usr/bin/chromium-browser --headless --no-sandbox --disable-gpu --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>&1";
             exec($cmd, $output, $returnCode);
-
             if ($returnCode === 0 && file_exists($rutaSalida)) {
                 unlink($tmpHtml);
                 return $rutaSalida;
             }
         }
 
-        // Opción 3: Intentar con snap chromium
-        if (file_exists('/snap/bin/chromium')) {
-            $tmpDir = "/tmp/chromium_" . uniqid();
-            @mkdir($tmpDir, 0777, true);
-            $cmd = "/snap/bin/chromium --headless --no-sandbox --disable-gpu --disable-dev-shm-usage --user-data-dir='$tmpDir' --print-to-pdf='$rutaSalida' 'file://$tmpHtml' 2>&1";
-            exec($cmd, $output, $returnCode);
-            @exec("rm -rf '$tmpDir'");
-
-            if ($returnCode === 0 && file_exists($rutaSalida)) {
-                unlink($tmpHtml);
-                return $rutaSalida;
-            }
-        }
-
-        // Limpiar archivo temporal
-        unlink($tmpHtml);
-
-        if ($returnCode === 0 && file_exists($rutaSalida)) {
-            return $rutaSalida;
-        }
-
-        throw new Exception("No se pudo generar el PDF. Verifica que tengas herramientas de conversión instaladas.");
+        @unlink($tmpHtml);
+        throw new Exception("Error al generar PDF ($tipo)");
     }
 }
 ?>

@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.2 - Assets locales + offline real
+// Versión 8.3 - Cache individual + ping offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v82';
+const CACHE_NAME = 'palweb-pos-v83';
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
@@ -32,21 +32,26 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.2 (Online First)...');
+    console.log('[SW-POS] Instalando Service Worker v8.3...');
 
     event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then((cache) => {
-                console.log('[SW-POS] Cacheando recursos para offline...');
-                return cache.addAll(OFFLINE_ASSETS).catch(() => {});  // no falla si un asset falta
-            })
-            .then(() => {
-                console.log('[SW-POS] Instalación completada');
-                return self.skipWaiting();
-            })
-            .catch((error) => {
-                console.error('[SW-POS] Error en instalación:', error);
-            })
+        caches.open(CACHE_NAME).then(async (cache) => {
+            // Cachear cada asset individualmente: un 404 aislado no arruina toda la instalación
+            const results = await Promise.allSettled(
+                OFFLINE_ASSETS.map(url =>
+                    cache.add(url).catch(err => {
+                        console.warn('[SW-POS] No se pudo cachear:', url, err.message);
+                    })
+                )
+            );
+            const ok  = results.filter(r => r.status === 'fulfilled').length;
+            const bad = results.filter(r => r.status === 'rejected').length;
+            console.log(`[SW-POS] Cache: ${ok} OK, ${bad} fallidos de ${OFFLINE_ASSETS.length}`);
+            return self.skipWaiting();
+        }).catch(err => {
+            console.error('[SW-POS] Error abriendo caché:', err);
+            return self.skipWaiting(); // continuar igual para no bloquear
+        })
     );
 });
 
@@ -54,7 +59,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.2...');
+    console.log('[SW-POS] Activando Service Worker v8.3...');
     
     event.waitUntil(
         caches.keys()
@@ -100,6 +105,31 @@ self.addEventListener('fetch', (event) => {
             fetch(event.request, { credentials: 'same-origin' })
                 .then(r => r)
                 .catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+        );
+        return;
+    }
+
+    // ?ping=1 — NUNCA servir desde caché: debe indicar estado real de red
+    // Si está offline → JSON con offline:true para que el monitor detecte la caída
+    if (swUrl.search.includes('ping')) {
+        event.respondWith(
+            fetch(event.request, { credentials: 'same-origin', cache: 'no-store' })
+                .catch(() => new Response(
+                    JSON.stringify({ pong: false, offline: true }),
+                    { status: 200, headers: { 'Content-Type': 'application/json' } }
+                ))
+        );
+        return;
+    }
+
+    // load_cashiers — nunca cachear: contiene PINs sensibles
+    if (swUrl.search.includes('load_cashiers')) {
+        event.respondWith(
+            fetch(event.request, { credentials: 'same-origin', cache: 'no-store' })
+                .catch(() => new Response(
+                    JSON.stringify({ status: 'offline', offline: true }),
+                    { status: 200, headers: { 'Content-Type': 'application/json' } }
+                ))
         );
         return;
     }
@@ -215,11 +245,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v82-online-first' });
+        event.ports[0].postMessage({ version: 'v83-online-first' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.2 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.3 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

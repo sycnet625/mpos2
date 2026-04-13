@@ -14,7 +14,7 @@ session_start();
 // Verificar permisos de admin
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     // Permitir acceso sin login si viene del POS con PIN
-    if (!isset($_SESSION['cashier'])) {
+    if (!isset($_SESSION['cajero'])) {
         header('Location: login.php');
         exit;
     }

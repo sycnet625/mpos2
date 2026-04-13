@@ -81,6 +81,11 @@ function pos_get_dynamic_cashiers(PDO $pdo, array $config): array
 // ---------------------------------------------------------
 if (isset($_GET['api_client']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
+    // Requiere sesión activa: cajero autenticado o admin
+    if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
+        echo json_encode(['status' => 'error', 'message' => 'No autenticado']);
+        exit;
+    }
     $input = json_decode(file_get_contents('php://input'), true);
     
     try {
@@ -122,7 +127,34 @@ if (isset($_GET['load_products'])) {
         "mostrar_servicios" => true,
         "categorias_ocultas" => []
     ], $config ?? []);
-    
+
+    // Si hay una sesión de cajero activa, su almacén tiene prioridad sobre pos.cfg
+    if (!empty($_SESSION['id_almacen'])) {
+        $ctxConfig['id_almacen'] = (int)$_SESSION['id_almacen'];
+    }
+    if (!empty($_SESSION['id_sucursal'])) {
+        $ctxConfig['id_sucursal'] = (int)$_SESSION['id_sucursal'];
+    }
+    // Override explícito desde el selector de almacén: solo si hay sesión activa y el almacén
+    // pertenece a la sucursal del cajero (validado también en set_almacen, doble check aquí).
+    if (!empty($_GET['alm']) && !empty($_SESSION['cajero'])) {
+        $almOverride = (int)$_GET['alm'];
+        if ($almOverride > 0) {
+            $sucSes = (int)($ctxConfig['id_sucursal'] ?? 0);
+            $valid  = false;
+            if ($sucSes > 0) {
+                try {
+                    $stmtV = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_sucursal = ? AND activo = 1 LIMIT 1");
+                    $stmtV->execute([$almOverride, $sucSes]);
+                    $valid = (bool)$stmtV->fetchColumn();
+                } catch (Throwable $e) { $valid = true; /* tabla ausente, confiar */ }
+            } else {
+                $valid = true; // sin sucursal en sesión, aceptar
+            }
+            if ($valid) $ctxConfig['id_almacen'] = $almOverride;
+        }
+    }
+
     try {
         $cond = ["p.activo = 1"];
         if (empty($ctxConfig['mostrar_materias_primas'])) $cond[] = "p.es_materia_prima = 0";
@@ -131,7 +163,7 @@ if (isset($_GET['load_products'])) {
             $placeholders = implode(',', array_fill(0, count($ctxConfig['categorias_ocultas']), '?'));
             $cond[] = "p.categoria NOT IN ($placeholders)";
         }
-        
+
         $where = implode(" AND ", $cond);
         $almacenID = (int)$ctxConfig['id_almacen'];
         $params = $ctxConfig['categorias_ocultas'] ?? [];
@@ -153,7 +185,9 @@ if (isset($_GET['load_products'])) {
         // Procesar para incluir colores e imágenes
         foreach ($prods as &$p) {
             [$p['has_image'], $p['img_version']] = pos_image_meta((string)$p['codigo']);
-            $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
+            // crc32 puede devolver valor negativo; & 0xFFFFFFFF lo convierte a sin signo
+            // Usamos los bytes 1-3 (del 0x__RRGGBB) para evitar colores demasiado oscuros
+            $p['color'] = '#' . substr(sprintf('%08x', crc32($p['nombre']) & 0xFFFFFFFF), 2, 6);
             $p['stock'] = floatval($p['stock']);
         }
         unset($p);
@@ -167,10 +201,49 @@ if (isset($_GET['load_products'])) {
     }
 }
 
+// ENDPOINT: Actualizar almacén de sesión (selección tras login multi-almacén)
+if (isset($_GET['set_almacen']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No autenticado']); exit;
+    }
+    $inp = json_decode(file_get_contents('php://input'), true);
+    $almId = (int)($inp['id_almacen'] ?? 0);
+    if ($almId <= 0) {
+        echo json_encode(['status' => 'error', 'msg' => 'ID de almacén inválido']); exit;
+    }
+    // Validar que el almacén pertenece a la sucursal del cajero en sesión
+    $sucId = (int)($_SESSION['id_sucursal'] ?? 0);
+    if ($sucId > 0) {
+        try {
+            $stmtChk = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_sucursal = ? AND activo = 1 LIMIT 1");
+            $stmtChk->execute([$almId, $sucId]);
+            if (!$stmtChk->fetchColumn()) {
+                echo json_encode(['status' => 'error', 'msg' => 'Almacén no pertenece a tu sucursal']); exit;
+            }
+        } catch (Throwable $e) { /* si no existe la tabla, permitir sin validar */ }
+    }
+    $_SESSION['id_almacen'] = $almId;
+    echo json_encode(['status' => 'success', 'id_almacen' => $almId]);
+    exit;
+}
+
 // ENDPOINT: Ping para medir velocidad
 if (isset($_GET['ping'])) {
     header('Content-Type: application/json');
     echo json_encode(['pong' => true, 'timestamp' => time()]);
+    exit;
+}
+
+// ENDPOINT: Cajeros completos (con PIN) para poblar IndexedDB offline
+// Solo accesible con sesión activa (cajero ya autenticado o admin)
+if (isset($_GET['load_cashiers'])) {
+    header('Content-Type: application/json');
+    if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
+        echo json_encode(['status' => 'error', 'msg' => 'No autenticado']);
+        exit;
+    }
+    echo json_encode(['status' => 'success', 'cashiers' => pos_get_dynamic_cashiers($pdo, $config)]);
     exit;
 }
 
@@ -211,11 +284,16 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         "id_sucursal" => 1,
         "id_empresa" => 1
     ], $config ?? []);
+
+    // El cajero logueado tiene prioridad sobre pos.cfg — igual que en load_products
+    if (!empty($_SESSION['id_almacen']))  $ctxConfig['id_almacen']  = (int)$_SESSION['id_almacen'];
+    if (!empty($_SESSION['id_sucursal'])) $ctxConfig['id_sucursal'] = (int)$_SESSION['id_sucursal'];
+    if (!empty($_SESSION['id_empresa']))  $ctxConfig['id_empresa']  = (int)$_SESSION['id_empresa'];
+
     $ALM = (int)$ctxConfig['id_almacen'];
     $SUC = (int)$ctxConfig['id_sucursal'];
     $EMP = (int)$ctxConfig['id_empresa'];
 
-    require_once 'db.php';
     require_once 'kardex_engine.php';
 
     // Actualización de códigos de barras desde el POS (Modo Inventario)
@@ -302,7 +380,11 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($accion === 'transferencia') {
             $destino = trim($input['destino'] ?? '');
-            if (!$destino) { echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']); exit; }
+            if (!$destino) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']);
+                exit;
+            }
             $pdo->exec("CREATE TABLE IF NOT EXISTS transferencias_cabecera (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 destino_nombre VARCHAR(100) NULL,
@@ -313,6 +395,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 id_empresa INT DEFAULT 1,
                 id_sucursal_origen INT DEFAULT 1,
                 id_almacen_origen INT DEFAULT 1,
+                id_almacen_destino INT DEFAULT NULL,
                 fecha DATETIME DEFAULT CURRENT_TIMESTAMP
             ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             $pdo->exec("CREATE TABLE IF NOT EXISTS transferencias_detalle (
@@ -323,15 +406,43 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 costo_unitario DECIMAL(12,2) NOT NULL,
                 subtotal DECIMAL(12,2) NOT NULL
             ) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+            // Buscar almacén destino en la misma BD (por nombre de sucursal o almacén)
+            $destAlmID = null;
+            $destSucID = null;
+            try {
+                $stmtDA = $pdo->prepare(
+                    "SELECT a.id as alm_id, a.id_sucursal as suc_id
+                     FROM almacenes a
+                     LEFT JOIN sucursales s ON a.id_sucursal = s.id
+                     WHERE a.nombre LIKE ? OR s.nombre LIKE ?
+                     LIMIT 1"
+                );
+                $stmtDA->execute(["%$destino%", "%$destino%"]);
+                $rowDA = $stmtDA->fetch(PDO::FETCH_ASSOC);
+                if ($rowDA) {
+                    $destAlmID = (int)$rowDA['alm_id'];
+                    $destSucID = (int)$rowDA['suc_id'];
+                }
+            } catch (Exception $e) { /* tabla puede no existir aún */ }
+
+            $estadoTransf = $destAlmID ? 'COMPLETADO' : 'PENDIENTE';
             $totalItems = count($items);
-            $pdo->prepare("INSERT INTO transferencias_cabecera (destino_nombre,total_items,usuario,motivo,estado,id_empresa,id_sucursal_origen,id_almacen_origen,fecha) VALUES(?,?,?,?,?,?,?,?,?)")->execute([$destino,$totalItems,$usuario,$motivo,'PENDIENTE',$EMP,$SUC,$ALM,$fecha]);
+            $pdo->prepare(
+                "INSERT INTO transferencias_cabecera
+                 (destino_nombre,total_items,usuario,motivo,estado,id_empresa,id_sucursal_origen,id_almacen_origen,id_almacen_destino,fecha)
+                 VALUES(?,?,?,?,?,?,?,?,?,?)"
+            )->execute([$destino,$totalItems,$usuario,$motivo,$estadoTransf,$EMP,$SUC,$ALM,$destAlmID,$fecha]);
             $idTransferencia = $pdo->lastInsertId();
         }
 
         foreach ($items as $item) {
             $sku = trim($item['sku'] ?? '');
             $qty = floatval($item['cantidad'] ?? 0);
-            if (!$sku || $qty <= 0) continue;
+            // Para conteo se permite qty=0 (el usuario contó cero unidades)
+            if (!$sku) continue;
+            if ($accion !== 'conteo' && $qty <= 0) continue;
+            if ($accion === 'conteo' && $qty < 0) continue;
 
             $pq = $pdo->prepare("SELECT codigo, nombre, costo FROM productos WHERE codigo=? AND id_empresa=?");
             $pq->execute([$sku, $EMP]);
@@ -356,14 +467,20 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif ($accion === 'conteo') {
                 $sq = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
                 $sq->execute([$sku,$ALM]);
-                $stockAnt = floatval($sq->fetchColumn()?:0);
+                $stockAnt = floatval($sq->fetchColumn() ?: 0);
                 $delta = $qty - $stockAnt;
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: $stockAnt→$qty",$costo,$usuario,$fecha);
-                $results[] = $prod['nombre'].": ".($delta>=0?"+$delta":"$delta");
+                // Registrar incluso cuando delta=0 (confirma el stock real)
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: {$stockAnt}→{$qty}",$costo,$usuario,$fecha);
+                $results[] = $prod['nombre'].": ".($delta >= 0 ? "+$delta" : "$delta");
 
             } elseif ($accion === 'transferencia') {
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSFER→$destino POS: $motivo",$costo,$usuario,$fecha);
+                // Débito en almacén origen
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSF_SALIDA→{$destino} POS: $motivo",$costo,$usuario,$fecha);
                 $pdo->prepare("INSERT INTO transferencias_detalle (id_transferencia,id_producto,cantidad,costo_unitario,subtotal) VALUES(?,?,?,?,?)")->execute([$idTransferencia,$sku,abs($qty),$costo,abs($qty)*$costo]);
+                // Crédito en almacén destino si existe en la misma BD
+                if ($destAlmID) {
+                    $ke->registrarMovimiento($sku,$destAlmID,$destSucID,'ENTRADA',abs($qty),"TRANSF_ENTRADA desde Alm#{$ALM} POS: $motivo",$costo,$usuario,$fecha);
+                }
                 $results[] = "-".abs($qty)." ".$prod['nombre']." → $destino";
             }
 
@@ -401,14 +518,43 @@ $config = array_merge([
 ], $config ?? []);
 $systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
 $systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
+$posLoginBrandLogo = trim((string)($config['marca_pos_login_logo'] ?? ''));
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 $dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
 
-// Asegurar columna favorito en productos
-try { $pdo->exec("ALTER TABLE productos ADD COLUMN favorito TINYINT(1) NOT NULL DEFAULT 0"); } catch (Exception $e) {}
-try { $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo"); } catch (Exception $e) {}
-try { $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1"); } catch (Exception $e) {}
+// Almacenes agrupados por sucursal — para el selector de login multi-almacén
+$almacenesPorSucursal = [];
+try {
+    $stmtAlm = $pdo->query(
+        "SELECT id, nombre, id_sucursal FROM almacenes WHERE activo = 1 ORDER BY id_sucursal, nombre ASC"
+    );
+    foreach ($stmtAlm->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $suc = (int)$row['id_sucursal'];
+        $almacenesPorSucursal[$suc][] = ['id' => (int)$row['id'], 'nombre' => (string)$row['nombre']];
+    }
+} catch (Throwable $e) { /* tabla puede no existir */ }
+
+// Migración de columnas — se ejecuta una única vez y crea un flag file para no repetirla
+$_posMigFlag = __DIR__ . '/.pos_schema_v2';
+if (!file_exists($_posMigFlag)) {
+    try {
+        // ADD COLUMN IF NOT EXISTS requiere MySQL 8.0+ o MariaDB 10.3+
+        // Para compatibilidad total usamos SHOW COLUMNS como guarda
+        $existingCols = [];
+        foreach ($pdo->query("SHOW COLUMNS FROM productos") as $col) {
+            $existingCols[$col['Field']] = true;
+        }
+        if (!isset($existingCols['favorito']))
+            $pdo->exec("ALTER TABLE productos ADD COLUMN favorito TINYINT(1) NOT NULL DEFAULT 0");
+        if (!isset($existingCols['codigo_barra_1']))
+            $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo");
+        if (!isset($existingCols['codigo_barra_2']))
+            $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1");
+        file_put_contents($_posMigFlag, date('Y-m-d H:i:s'));
+    } catch (Exception $e) { /* silenciar — la próxima carga lo reintentará */ }
+}
+unset($_posMigFlag);
 
 // Carga de Datos
 $prods = [];
@@ -467,7 +613,7 @@ try {
 // Procesamiento visual
 foreach ($prods as &$p) {
     [$p['has_image'], $p['img_version']] = pos_image_meta((string)$p['codigo']);
-    $p['color'] = '#' . substr(dechex(crc32($p['nombre'])), 0, 6);
+    $p['color'] = '#' . substr(sprintf('%08x', crc32($p['nombre']) & 0xFFFFFFFF), 2, 6);
     $p['stock'] = floatval($p['stock']);
 } unset($p);
 
@@ -475,8 +621,8 @@ foreach ($prods as &$p) {
 $mostSoldCodes = [];
 try {
     $stmtMs = $pdo->query(
-        "SELECT codigo_producto FROM ventas_detalle
-         GROUP BY codigo_producto ORDER BY SUM(cantidad) DESC LIMIT 10"
+        "SELECT id_producto FROM ventas_detalle
+         GROUP BY id_producto ORDER BY SUM(cantidad) DESC LIMIT 10"
     );
     $mostSoldCodes = $stmtMs->fetchAll(PDO::FETCH_COLUMN);
 } catch (Exception $e) { $mostSoldCodes = []; }
@@ -499,6 +645,7 @@ try {
     <title><?php echo htmlspecialchars($systemBrandName); ?> | <?php echo htmlspecialchars($companyBrandName); ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link href="assets/css/all.min.css" rel="stylesheet">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <style>
         html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; background-color: #e9ecef; font-family: 'Segoe UI', sans-serif; touch-action: manipulation; user-select: none; }
         .pos-container { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
@@ -514,7 +661,7 @@ try {
         .cart-note { font-size: 0.75rem; color: #d63384; font-style: italic; display: block; }
         .discount-tag { font-size: 0.7rem; background: #dc3545; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 5px; }
         .pin-brand-logo {
-            width: 76px; height: 76px; object-fit: contain; border-radius: 18px; padding: 6px;
+            width: 203px; height: 76px; object-fit: cover; border-radius: 18px; padding: 6px;
             background: rgba(255,255,255,0.95); border: 1px solid #dbe3ee; box-shadow: 0 12px 28px rgba(15,23,42,.12);
             margin: 0 auto 12px;
         }
@@ -845,7 +992,44 @@ try {
 
         /* Estilos adicionales para modal de pago grande */
         .total-display-large { font-size: 3rem; font-weight: 800; color: #198754; text-shadow: 1px 1px 0px #fff; }
-        .bg-primary-custom { background-color: #2c3e50 !important; }
+        .bg-primary-custom { background: var(--hero-gradient, #2c3e50) !important; }
+
+        /* ── Banner de instalación PWA ── */
+        #pwaBanner {
+            display: none; /* JS lo muestra si no está instalado */
+            margin-bottom: 14px;
+            background: linear-gradient(135deg, #1a1f2e 0%, #2c3e50 100%);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            padding: 10px 12px;
+            text-align: left;
+            color: #fff;
+        }
+        #pwaBanner .pwa-title {
+            font-size: 0.78rem; font-weight: 700; margin-bottom: 3px;
+            display: flex; align-items: center; gap: 6px;
+        }
+        #pwaBanner .pwa-sub {
+            font-size: 0.7rem; color: rgba(255,255,255,0.65); margin-bottom: 8px; line-height: 1.35;
+        }
+        #pwaBanner .pwa-ios-steps {
+            font-size: 0.68rem; color: rgba(255,255,255,0.7);
+            padding: 6px 8px; background: rgba(255,255,255,0.07);
+            border-radius: 7px; margin-bottom: 8px; line-height: 1.6;
+        }
+        #btnInstallPwa {
+            width: 100%; padding: 7px 0; font-size: 0.8rem; font-weight: 700;
+            border-radius: 8px; border: none; cursor: pointer;
+            background: linear-gradient(135deg, #0d6efd, #0a54d4);
+            color: #fff; transition: filter 0.15s;
+        }
+        #btnInstallPwa:hover { filter: brightness(1.12); }
+        #btnInstallPwa:active { filter: brightness(0.9); }
+        #btnDismissPwa {
+            margin-top: 5px; width: 100%; padding: 3px 0; font-size: 0.7rem;
+            background: none; border: none; color: rgba(255,255,255,0.4);
+            cursor: pointer; text-decoration: underline;
+        }
     </style>
 
 <link rel="manifest" href="manifest-pos.php">
@@ -888,8 +1072,31 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
 <div id="pinOverlay">
     <div class="pin-box">
-        <?php if ($systemBrandLogo !== ''): ?>
-            <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" alt="<?php echo htmlspecialchars($systemBrandName); ?>" class="pin-brand-logo">
+
+        <!-- Banner de instalación PWA — JS lo muestra solo si no está instalado -->
+        <div id="pwaBanner">
+            <div class="pwa-title">
+                <i class="fas fa-download" style="font-size:0.9rem;color:#4d96ff;"></i>
+                Instalar aplicación
+            </div>
+            <div class="pwa-sub" id="pwaSubText">
+                Instala el POS en este dispositivo para usarlo sin internet y acceder más rápido.
+            </div>
+            <!-- Instrucciones manuales iOS (se muestran solo en Safari/iOS) -->
+            <div class="pwa-ios-steps" id="pwaIosSteps" style="display:none;">
+                1. Toca <strong>Compartir</strong> <i class="fas fa-share-from-square"></i><br>
+                2. Selecciona <strong>"Agregar a pantalla de inicio"</strong><br>
+                3. Pulsa <strong>Agregar</strong>
+            </div>
+            <button id="btnInstallPwa" onclick="triggerPwaInstall()">
+                <i class="fas fa-download me-1"></i> Instalar ahora
+            </button>
+            <button id="btnDismissPwa" onclick="dismissPwaBanner()">Ahora no</button>
+        </div>
+
+        <?php $loginLogo = !empty($posLoginBrandLogo) ? $posLoginBrandLogo : $systemBrandLogo; ?>
+        <?php if ($loginLogo !== ''): ?>
+            <img src="<?php echo htmlspecialchars($loginLogo); ?>" alt="<?php echo htmlspecialchars($systemBrandName); ?>" class="pin-brand-logo">
         <?php endif; ?>
         <h3 class="mb-1"><?php echo htmlspecialchars($systemBrandName); ?></h3>
         <div class="small text-muted mb-2"><?php echo htmlspecialchars($companyBrandName); ?></div>
@@ -901,6 +1108,18 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <button class="pin-btn" onclick="typePin(4)">4</button><button class="pin-btn" onclick="typePin(5)">5</button><button class="pin-btn" onclick="typePin(6)">6</button>
             <button class="pin-btn" onclick="typePin(7)">7</button><button class="pin-btn" onclick="typePin(8)">8</button><button class="pin-btn" onclick="typePin(9)">9</button>
             <button class="pin-btn c-red" onclick="typePin('C')">C</button><button class="pin-btn" onclick="typePin(0)">0</button><button class="pin-btn c-green" onclick="verifyPin()">OK</button>
+        </div>
+
+        <!-- Selector de almacén — aparece tras PIN exitoso si la sucursal tiene múltiples almacenes -->
+        <div id="almacenPicker" style="display:none; margin-top:18px; text-align:left;">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="fas fa-warehouse text-primary"></i>
+                <span class="fw-semibold" style="font-size:0.88rem;">Selecciona el almacén de trabajo:</span>
+            </div>
+            <select id="almacenSelect" class="form-select form-select-sm mb-3"></select>
+            <button class="btn btn-primary btn-sm w-100" onclick="confirmAlmacenSelection()">
+                <i class="fas fa-check me-1"></i> Confirmar almacén
+            </button>
         </div>
     </div>
 </div>
@@ -918,6 +1137,9 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 <div class="d-flex align-items-center gap-1">
                     <button id="btnSync" onclick="syncOfflineQueue()" class="btn btn-sm btn-warning text-dark px-2 d-none" title="Sincronizar cola offline">
                         <i class="fas fa-sync"></i>
+                    </button>
+                    <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2 inv-btn border-primary shadow-sm" title="Caja" style="font-size: 1.1rem; padding: 2px 8px !important;">
+                        <i class="fas fa-cash-register"></i>
                     </button>
                     <span id="netStatus" class="badge bg-success px-2" style="font-size:0.7rem;">
                         <i class="fas fa-wifi"></i>
@@ -945,13 +1167,13 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <i class="fas fa-mobile-alt"></i>
                         <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none" id="selfOrderBadge" style="font-size:0.6rem;">0</span>
                     </button>
-                    <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Caja">
-                        <i class="fas fa-cash-register"></i>
+                    <button onclick="showHistorialModal()" class="btn btn-sm btn-light text-success px-2 inv-btn" title="Historial de Ventas">
+                        <i class="fas fa-history"></i>
                     </button>
                     <button onclick="showParkedOrders()" class="btn btn-sm btn-light text-warning px-2 inv-btn" title="Pausados">
                         <i class="fas fa-pause"></i>
                     </button>
-                    <a href="reportes_caja.php" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Reportes">
+                    <a href="reportes_caja.php" target="_blank" rel="noopener" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Reportes">
                         <i class="fas fa-chart-line"></i>
                     </a>
                 </div>
@@ -965,10 +1187,20 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
         <div class="cart-list" id="cartContainer">
             <div class="text-center text-muted h-100 d-flex flex-column align-items-center justify-content-center">
-                <?php if ($companyBrandLogo !== ''): ?>
-                    <img src="<?php echo htmlspecialchars($companyBrandLogo); ?>" class="cart-empty-logo" alt="<?php echo htmlspecialchars($companyBrandName); ?>">
-                <?php elseif ($systemBrandLogo !== ''): ?>
-                    <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" class="cart-empty-logo" alt="<?php echo htmlspecialchars($systemBrandName); ?>">
+                <?php
+                // Buscar banner de la sucursal activa en BD
+                $cartLogo = '';
+                try {
+                    $stmtBnr = $pdo->prepare("SELECT imagen_banner FROM sucursales WHERE id = ? LIMIT 1");
+                    $stmtBnr->execute([intval($config['id_sucursal'] ?? 1)]);
+                    $bnrRow = $stmtBnr->fetchColumn();
+                    if ($bnrRow && file_exists(__DIR__ . '/' . $bnrRow)) $cartLogo = $bnrRow;
+                } catch (Exception $e) {}
+                // Fallback al logo corporativo
+                if ($cartLogo === '') $cartLogo = $config['marca_empresa_logo'] ?? $config['marca_sistema_logo'] ?? '';
+                if ($cartLogo !== ''):
+                ?>
+                    <img src="<?php echo htmlspecialchars($cartLogo); ?>?v=<?php echo filemtime(__DIR__ . '/' . $cartLogo) ?: 1; ?>" class="cart-empty-logo" style="width:180px; max-height:80px; border-radius:8px; margin-bottom:10px; object-fit:contain;" alt="Logo">
                 <?php endif; ?>
                 <i class="fas fa-shopping-basket fa-3x mb-2 opacity-25"></i><p class="small">Carrito Vacío</p>
             </div>
@@ -1230,9 +1462,19 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     let currentSaleTotal = 0;
     let currentPaymentMode = 'cash';
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
-    const CAJEROS_CONFIG = <?php echo json_encode($dynamicCashiers ?? []); ?>;
+    // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
+    const CAJEROS_CONFIG = <?php
+        echo json_encode(array_map(static function(array $c): array {
+            unset($c['pin']);
+            return $c;
+        }, $dynamicCashiers ?? []));
+    ?>;
     const MOST_SOLD_CODES = <?php echo json_encode($mostSoldCodes); ?>;
     let CLIENTS_DATA = <?php echo json_encode($clientsData); ?>; // Lista inicial
+    const MESSENGERS_DATA = <?php echo json_encode($mensajeros ?? []); ?>;
+    // Almacenes disponibles por sucursal (id_sucursal → [{id, nombre}])
+    // Usado para el selector multi-almacén en la pantalla de login con PIN
+    const ALMACENES_BY_SUCURSAL = <?php echo json_encode($almacenesPorSucursal); ?>;
 
     // --- LÓGICA DE CLIENTES ---
     
@@ -1288,14 +1530,16 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             if(res.status === 'success') {
                 CLIENTS_DATA.push(res.client);
                 const list = document.getElementById('cliName');
-                const opt = document.createElement('option');
-                opt.value = res.client.nombre;
-                opt.text = res.client.nombre;
-                opt.setAttribute('data-tel', res.client.telefono);
-                opt.setAttribute('data-dir', res.client.direccion);
-                list.add(opt);
-                list.value = res.client.nombre;
-                fillClientData(list);
+                if (list) {
+                    const opt = document.createElement('option');
+                    opt.value = res.client.nombre;
+                    opt.text = res.client.nombre;
+                    opt.setAttribute('data-tel', res.client.telefono);
+                    opt.setAttribute('data-dir', res.client.direccion);
+                    list.add(opt);
+                    list.value = res.client.nombre;
+                    fillClientData(list);
+                }
                 bootstrap.Modal.getInstance(document.getElementById('newClientModal')).hide();
                 showToast('Cliente guardado');
             } else {
@@ -1308,6 +1552,152 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
 <script src="pos1.js"></script>
 <script src="pos-offline-system.js"></script>
+
+<script>
+// ── PWA Install Banner ────────────────────────────────────────────────────────
+(function () {
+    let _deferredPrompt = null; // guarda el evento beforeinstallprompt
+
+    // Detectar si YA está instalado como PWA
+    function isPwaInstalled() {
+        return window.matchMedia('(display-mode: standalone)').matches
+            || window.matchMedia('(display-mode: fullscreen)').matches
+            || navigator.standalone === true; // iOS Safari
+    }
+
+    // Detectar iOS/iPadOS (no tienen beforeinstallprompt)
+    function isIos() {
+        return /iphone|ipad|ipod/i.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    }
+
+    // Mostrar el banner si aplica
+    function maybeShowBanner() {
+        if (isPwaInstalled()) return; // ya instalado, no mostrar nada
+        if (sessionStorage.getItem('pwa_banner_dismissed')) return; // el usuario lo cerró esta sesión
+
+        const banner   = document.getElementById('pwaBanner');
+        const iosSteps = document.getElementById('pwaIosSteps');
+        const installBtn = document.getElementById('btnInstallPwa');
+        if (!banner) return;
+
+        if (isIos() && !navigator.standalone) {
+            // iOS: mostrar instrucciones manuales
+            iosSteps.style.display = 'block';
+            installBtn.style.display = 'none'; // no hay API de install en iOS
+            banner.style.display = 'block';
+        } else if (_deferredPrompt) {
+            // Chrome/Android/Edge: botón de instalación disponible
+            banner.style.display = 'block';
+        }
+        // Si no hay deferredPrompt y no es iOS → browser no soporta o ya instalado → no mostrar
+    }
+
+    // Capturar el evento nativo de instalación (Chrome, Edge, Android)
+    window.addEventListener('beforeinstallprompt', function (e) {
+        e.preventDefault();           // evitar el mini-infobar automático del browser
+        _deferredPrompt = e;
+        maybeShowBanner();            // el evento llegó → mostrar banner
+    });
+
+    // Si ya está instalado → ocultar banner por si acaso
+    window.addEventListener('appinstalled', function () {
+        document.getElementById('pwaBanner').style.display = 'none';
+        _deferredPrompt = null;
+    });
+
+    // Botón "Instalar ahora"
+    window.triggerPwaInstall = async function () {
+        if (!_deferredPrompt) return;
+        _deferredPrompt.prompt();
+        const { outcome } = await _deferredPrompt.userChoice;
+        _deferredPrompt = null;
+        if (outcome === 'accepted') {
+            document.getElementById('pwaBanner').style.display = 'none';
+        }
+    };
+
+    // Botón "Ahora no"
+    window.dismissPwaBanner = function () {
+        document.getElementById('pwaBanner').style.display = 'none';
+        sessionStorage.setItem('pwa_banner_dismissed', '1');
+    };
+
+    // Comprobar al cargar (para iOS, que no dispara beforeinstallprompt)
+    document.addEventListener('DOMContentLoaded', function () {
+        setTimeout(maybeShowBanner, 600); // pequeño delay para que el overlay ya esté visible
+    });
+})();
+
+// ─── Selector de almacén multi-almacén ────────────────────────────────────────
+(function () {
+    let _pickerCallback = null;
+    let _pickerContext  = null;
+
+    // Llamado desde verifyPin() en pos1.js cuando la sucursal tiene >1 almacén.
+    // almacenes: [{id, nombre}]
+    // loginContext: objeto con id_almacen actual (el del cajero por defecto)
+    // onConfirm: fn(overrideAlmId, overrideAlmNombre) — continúa el flujo de login
+    window.showAlmacenPicker = function (almacenes, loginContext, onConfirm) {
+        const picker = document.getElementById('almacenPicker');
+        const sel    = document.getElementById('almacenSelect');
+        if (!picker || !sel || almacenes.length === 0) { onConfirm(loginContext.id_almacen, ''); return; }
+
+        // Ocultar teclado PIN para que el picker tenga todo el espacio
+        const grid = document.getElementById('pinGrid');
+        if (grid) grid.style.display = 'none';
+
+        sel.innerHTML = '';
+        almacenes.forEach(function (a) {
+            const opt = document.createElement('option');
+            opt.value = a.id;
+            opt.textContent = a.nombre;
+            if (a.id === loginContext.id_almacen) opt.selected = true;
+            sel.appendChild(opt);
+        });
+
+        _pickerCallback = onConfirm;
+        _pickerContext  = loginContext;
+        picker.style.display = 'block';
+    };
+
+    window.confirmAlmacenSelection = async function () {
+        const sel    = document.getElementById('almacenSelect');
+        const picker = document.getElementById('almacenPicker');
+        const grid   = document.getElementById('pinGrid');
+        if (!sel) return;
+
+        const almId     = parseInt(sel.value, 10);
+        const almNombre = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].textContent : String(almId);
+
+        // Actualizar badges
+        const almBadge = document.getElementById('ctxAlmacenBadge');
+        if (almBadge) almBadge.innerText = almNombre;
+
+        // Persistir en sesión PHP si hay conexión
+        if (navigator.onLine) {
+            try {
+                await fetch('pos.php?set_almacen=1', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id_almacen: almId }),
+                    signal: AbortSignal.timeout(5000)
+                });
+            } catch (e) { /* sin conexión — el contexto JS ya fue actualizado */ }
+        }
+
+        // Restaurar teclado y ocultar picker
+        if (picker) picker.style.display = 'none';
+        if (grid)   grid.style.display   = '';
+
+        const cb = _pickerCallback;
+        _pickerCallback = null;
+        _pickerContext  = null;
+        if (cb) cb(almId, almNombre);
+    };
+})();
+// ─────────────────────────────────────────────────────────────────────────────
+</script>
 
 <div id="progressOverlay">
     <div class="progress-card">
@@ -1396,6 +1786,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 </div>
 
 <?php include_once 'modal_payment.php'; ?>
+<?php include_once 'modal_edit_sale.php'; ?>
 <!-- MODAL AUTOPEDIDOS -->
 <div class="modal fade" id="selfOrdersModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered">
@@ -1539,11 +1930,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 // Buscar producto real en el catálogo local del POS
                 const product = productsDB.find(p => p.codigo === it.codigo);
                 if(product) {
-                    // Llamar a la función nativa de pos.js para añadir al carrito
-                    // Se puede llamar múltiples veces si la cantidad es > 1
-                    for(let i = 0; i < parseFloat(it.cantidad); i++) {
-                        window.addToCart(product);
-                    }
+                    // Pasar la cantidad real (puede ser decimal, ej: 2.5 kg)
+                    window.addToCart(product, parseFloat(it.cantidad) || 1);
                 } else {
                     console.error("Producto no encontrado en el catálogo POS:", it.codigo);
                 }

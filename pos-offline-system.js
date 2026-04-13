@@ -220,17 +220,21 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         async checkConnection() {
             try {
                 const start = performance.now();
-                const res = await fetch('pos.php?ping=1', { 
-                    method: 'GET', 
-                    cache: 'no-store', 
-                    signal: AbortSignal.timeout(5000) 
+                const res = await fetch('pos.php?ping=1', {
+                    method: 'GET',
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(5000)
                 });
-                if (res.ok) {
-                    this.latency = Math.round(performance.now() - start);
-                    this.isOnline = true;
-                } else { 
-                    throw new Error('No OK'); 
+                if (!res.ok) throw new Error('No OK');
+                // El SW devuelve {offline:true} cuando no hay red real
+                // (evita falso positivo por la caché de pos.php)
+                const ct = res.headers.get('Content-Type') || '';
+                if (ct.includes('application/json')) {
+                    const data = await res.clone().json().catch(() => ({}));
+                    if (data.offline === true) throw new Error('Offline SW');
                 }
+                this.latency = Math.round(performance.now() - start);
+                this.isOnline = true;
             } catch (e) {
                 this.isOnline = false;
                 this.latency = 9999;

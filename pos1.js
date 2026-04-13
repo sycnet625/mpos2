@@ -48,15 +48,19 @@ const Synth = {
 // ==========================================
 // NOTIFICACIONES (Toasts)
 // ==========================================
+function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 function showToast(msg, type = 'success') {
     const container = document.getElementById('toastContainer');
     if (!container) return;
     let color = 'text-bg-success', icon = '<i class="fas fa-check-circle"></i>';
     if (type === 'error' || type === 'danger') { color = 'text-bg-danger'; icon = '<i class="fas fa-exclamation-circle"></i>'; }
     else if (type === 'warning') { color = 'text-bg-warning'; icon = '<i class="fas fa-cloud-upload-alt"></i>'; }
-    
+
     const div = document.createElement('div');
-    div.innerHTML = '<div class="toast align-items-center ' + color + ' border-0 mb-2 shadow" role="alert"><div class="d-flex"><div class="toast-body fw-bold fs-6">' + icon + ' ' + msg + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>';
+    div.innerHTML = '<div class="toast align-items-center ' + color + ' border-0 mb-2 shadow" role="alert"><div class="d-flex"><div class="toast-body fw-bold fs-6">' + icon + ' ' + escHtml(msg) + '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>';
     const toastEl = div.firstElementChild;
     container.appendChild(toastEl);
     new bootstrap.Toast(toastEl, { delay: 3000 }).show();
@@ -102,7 +106,19 @@ document.addEventListener('DOMContentLoaded', () => {
     
     setTimeout(() => {
         if (typeof window.initPOSOffline === 'function') {
-            window.initPOSOffline();
+            window.initPOSOffline().then(() => {
+                // Si ya hay sesión activa (recarga de página), refrescar cajeros en IndexedDB
+                if (navigator.onLine) {
+                    fetch('pos.php?load_cashiers=1', { cache: 'no-store' })
+                        .then(r => r.json())
+                        .then(d => {
+                            if (d.status === 'success' && window.posCache && window.posCache.saveCajeros) {
+                                window.posCache.saveCajeros(d.cashiers);
+                            }
+                        })
+                        .catch(() => {});
+                }
+            }).catch(() => {});
         }
     }, 300);
     
@@ -358,13 +374,13 @@ function saveToCache(data) {
     } catch (e) {} 
 }
 
-async function refreshProducts() {
-    const btn = document.getElementById('btnRefresh'); 
+async function refreshProducts(almId = null) {
+    const btn = document.getElementById('btnRefresh');
     if (btn) { btn.innerHTML = '<i class="fas fa-spin fa-spinner"></i>'; btn.disabled = true; }
-    
+
     try {
         localStorage.removeItem(CACHE_KEY);
-        
+
         if (typeof window.posCache !== 'undefined' && window.posCache.db) {
             try {
                 const tx = window.posCache.db.transaction(['products', 'metadata'], 'readwrite');
@@ -373,8 +389,9 @@ async function refreshProducts() {
                 await new Promise(resolve => tx.oncomplete = resolve);
             } catch (e) {}
         }
-        
-        const response = await fetch('pos.php?load_products=1&t=' + Date.now(), {
+
+        const almParam = almId ? '&alm=' + parseInt(almId, 10) : '';
+        const response = await fetch('pos.php?load_products=1&t=' + Date.now() + almParam, {
             method: 'GET',
             cache: 'no-store',
             headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
@@ -582,11 +599,15 @@ async function verifyPin() {
                 cajeroRol = data.rol ?? 'cajero';
                 loginContext = data;
 
-                if (typeof CAJEROS_CONFIG !== 'undefined' &&
-                    typeof window.posCache !== 'undefined' &&
-                    window.posCache.db &&
+                // Refrescar IndexedDB con lista completa de cajeros (incluyendo PINs)
+                // Los PINs NO están en CAJEROS_CONFIG del HTML — se obtienen del servidor
+                // solo tras autenticación exitosa, para mantener el login offline seguro.
+                if (typeof window.posCache !== 'undefined' && window.posCache.db &&
                     typeof window.posCache.saveCajeros === 'function') {
-                    window.posCache.saveCajeros(CAJEROS_CONFIG);
+                    fetch('pos.php?load_cashiers=1', { cache: 'no-store' })
+                        .then(r => r.json())
+                        .then(d => { if (d.status === 'success') window.posCache.saveCajeros(d.cashiers); })
+                        .catch(() => {});
                 }
             }
         } catch(e) {
@@ -594,28 +615,19 @@ async function verifyPin() {
         }
     }
 
-    if (!loginSuccess) {
-        if (typeof CAJEROS_CONFIG !== 'undefined' && Array.isArray(CAJEROS_CONFIG)) {
-            const cajero = CAJEROS_CONFIG.find(c => c.pin === enteredPin);
+    // Fallback offline: solo IndexedDB (PINs guardados en login previo online)
+    // CAJEROS_CONFIG ya NO contiene PINs por seguridad
+    if (!loginSuccess && typeof window.posCache !== 'undefined' &&
+        typeof window.posCache.verifyCajeroOffline === 'function') {
+        try {
+            const cajero = await window.posCache.verifyCajeroOffline(enteredPin);
             if (cajero) {
                 loginSuccess = true;
                 currentCashier = cajero.nombre;
                 cajeroRol = cajero.rol ?? 'cajero';
                 loginContext = cajero;
             }
-        }
-
-        if (!loginSuccess && typeof window.posCache !== 'undefined' && typeof window.posCache.verifyCajeroOffline === 'function') {
-            try {
-                const cajero = await window.posCache.verifyCajeroOffline(enteredPin);
-                if (cajero) {
-                    loginSuccess = true;
-                    currentCashier = cajero.nombre;
-                    cajeroRol = cajero.rol ?? 'cajero';
-                    loginContext = cajero;
-                }
-            } catch(e) {}
-        }
+        } catch(e) {}
     }
 
     if (loginSuccess) {
@@ -630,15 +642,34 @@ async function verifyPin() {
             if (almBadge && loginContext.id_almacen) almBadge.innerText = String(loginContext.id_almacen);
         }
 
-        // Releer productos con el contexto (sucursal/almacén) recién autenticado.
-        if (navigator.onLine) {
-            try { await refreshProducts(); } catch (e) {}
-        }
+        // Función que completa el login tras confirmar almacén
+        const finalizarLogin = async function (almId, almNombre) {
+            // Actualizar contexto con el almacén elegido
+            if (almId && loginContext) loginContext.id_almacen = almId;
 
-        Synth.tada();
-        applyRoleRestrictions();
-        startInactivityTimer();
-        unlockPos();
+            // Releer productos pasando el almacén como parámetro URL para garantizar
+            // que se usa el correcto incluso si el POST set_almacen no llegó al servidor.
+            if (navigator.onLine) {
+                try { await refreshProducts(almId || null); } catch (e) {}
+            }
+
+            Synth.tada();
+            applyRoleRestrictions();
+            startInactivityTimer();
+            unlockPos();
+        };
+
+        // Si la sucursal tiene múltiples almacenes, mostrar selector antes de continuar
+        const sucId    = loginContext ? loginContext.id_sucursal : null;
+        const almacenes = (typeof ALMACENES_BY_SUCURSAL !== 'undefined' && sucId)
+            ? (ALMACENES_BY_SUCURSAL[sucId] || [])
+            : [];
+
+        if (almacenes.length > 1 && typeof window.showAlmacenPicker === 'function') {
+            window.showAlmacenPicker(almacenes, loginContext, finalizarLogin);
+        } else {
+            await finalizarLogin();
+        }
     } else {
         pinAttempts++;
         if (pinAttempts >= PIN_MAX_ATTEMPTS) {
@@ -1065,24 +1096,26 @@ function filterProducts() {
 // ==========================================
 // CARRITO
 // ==========================================
-function addToCart(p) {
+// forceQty: cantidad a agregar (por defecto 1). Se usa en autopedidos para cantidades decimales.
+function addToCart(p, forceQty) {
+    const qty = (forceQty !== undefined && forceQty > 0) ? parseFloat(forceQty) : 1;
     // Verificacion de stock considerando lo que ya esta en carrito
-    const idx = cart.findIndex(i => i.id === p.codigo && (!i.note)); 
+    const idx = cart.findIndex(i => i.id === p.codigo && (!i.note));
     const currentQtyInCart = (idx >= 0) ? cart[idx].qty : 0;
     const stockAvailable = parseFloat(p.stock) || 0;
 
-    if(!invModeActive && p.es_servicio == 0 && (currentQtyInCart + 1) > stockAvailable) {
+    if(!invModeActive && p.es_servicio == 0 && (currentQtyInCart + qty) > stockAvailable) {
         return showToast("Stock insuficiente (" + stockAvailable + " disp)", "error");
     }
 
-    if(idx >= 0) { 
-        cart[idx].qty++; 
-        selectedIndex = idx; 
-    } else { 
-        cart.push({ id: p.codigo, name: p.nombre, price: parseFloat(p.precio), qty: 1, discountPct: 0, note: '' }); 
-        selectedIndex = cart.length - 1; 
+    if(idx >= 0) {
+        cart[idx].qty = Math.round((cart[idx].qty + qty) * 1000) / 1000; // evitar imprecisión de punto flotante
+        selectedIndex = idx;
+    } else {
+        cart.push({ id: p.codigo, name: p.nombre, price: parseFloat(p.precio), qty: qty, discountPct: 0, note: '' });
+        selectedIndex = cart.length - 1;
     }
-    Synth.addCart(); 
+    Synth.addCart();
     renderCart();
     saveCartState();
     updateStockBadges(); // Actualizar visualmente
@@ -1287,6 +1320,8 @@ function addNote() {
 }
 
 // Auto-guardado del carrito
+const CART_EXPIRY_MS = 8 * 60 * 60 * 1000; // 8 horas — cubre jornada laboral completa
+
 function saveCartState() {
     if (cart.length > 0) {
         const state = {
@@ -1295,34 +1330,63 @@ function saveCartState() {
             selectedIndex: selectedIndex,
             timestamp: Date.now()
         };
-        localStorage.setItem('pos_cart_state', JSON.stringify(state));
+        // Guardar en localStorage (síncrono, rápido)
+        try { localStorage.setItem('pos_cart_state', JSON.stringify(state)); } catch(e) {}
+        // Backup en IndexedDB (más resistente a fallo eléctrico / crash de navegador)
+        if (typeof window.posCache !== 'undefined' && window.posCache.db &&
+            typeof window.posCache.saveCart === 'function') {
+            window.posCache.saveCart(state).catch(() => {});
+        }
     } else {
-        localStorage.removeItem('pos_cart_state');
-    }
-}
-
-function restoreCartState() {
-    const saved = localStorage.getItem('pos_cart_state');
-    if (saved) {
-        try {
-            const state = JSON.parse(saved);
-            if (Date.now() - state.timestamp < 3600000) {
-                cart = state.cart || [];
-                globalDiscountPct = state.globalDiscountPct || 0;
-                selectedIndex = state.selectedIndex || -1;
-                renderCart();
-            } else {
-                localStorage.removeItem('pos_cart_state');
-            }
-        } catch(e) {
-            localStorage.removeItem('pos_cart_state');
+        try { localStorage.removeItem('pos_cart_state'); } catch(e) {}
+        if (typeof window.posCache !== 'undefined' && window.posCache.db &&
+            typeof window.posCache.clearCart === 'function') {
+            window.posCache.clearCart().catch(() => {});
         }
     }
 }
 
-// Restaurar carrito al cargar
+async function restoreCartState() {
+    let state = null;
+
+    // 1) Intentar localStorage primero (más rápido)
+    try {
+        const saved = localStorage.getItem('pos_cart_state');
+        if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Date.now() - parsed.timestamp < CART_EXPIRY_MS) {
+                state = parsed;
+            } else {
+                localStorage.removeItem('pos_cart_state');
+            }
+        }
+    } catch(e) {}
+
+    // 2) Fallback: IndexedDB (resistente a crash / fallo eléctrico)
+    if (!state && typeof window.posCache !== 'undefined' &&
+        typeof window.posCache.getCart === 'function') {
+        try {
+            const idbState = await window.posCache.getCart();
+            if (idbState && Date.now() - (idbState.timestamp || 0) < CART_EXPIRY_MS) {
+                state = idbState;
+                console.log('[POS] Carrito restaurado desde IndexedDB tras fallo/reinicio');
+            }
+        } catch(e) {}
+    }
+
+    if (state && Array.isArray(state.cart) && state.cart.length > 0) {
+        cart = state.cart;
+        globalDiscountPct = state.globalDiscountPct || 0;
+        selectedIndex = state.selectedIndex ?? -1;
+        renderCart();
+        showToast('Carrito restaurado (' + cart.length + ' ítem' + (cart.length > 1 ? 's' : '') + ')', 'info');
+    }
+}
+
+// Restaurar carrito al cargar — esperar a que IndexedDB esté listo
 document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(restoreCartState, 500);
+    // Delay para dar tiempo a initPOSOffline (300ms) + IndexedDB init
+    setTimeout(restoreCartState, 800);
 });
 
 // ==========================================
@@ -1352,9 +1416,47 @@ function toggleServiceOptions() {
     const dd = document.getElementById('deliveryDiv'); 
     if (rd) rd.classList.add('d-none'); 
     if (dd) dd.classList.add('d-none'); 
-    if(t === 'reserva' && rd) rd.classList.remove('d-none'); 
-    if(t === 'mensajeria' && dd) dd.classList.remove('d-none'); 
+    if(t === 'reserva' && rd) rd.classList.remove('d-none');
+    if(t === 'mensajeria' && dd) dd.classList.remove('d-none');
 }
+
+// Bandera para evitar clics duplicados
+let paymentProcessing = false;
+
+window.confirmPaymentSafe = async function() {
+    // Si ya se está procesando un pago, ignorar el clic
+    if (paymentProcessing) {
+        showToast('Procesando pago...', 'info');
+        return;
+    }
+
+    // Marcar como procesando
+    paymentProcessing = true;
+
+    // Deshabilitar botón
+    const btn = document.getElementById('btn-confirm-payment');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ PROCESANDO...';
+    }
+
+    try {
+        // Llamar a la función original de pago
+        await confirmPayment();
+    } catch (e) {
+        console.error('Error en pago:', e);
+    } finally {
+        // Restaurar botón solo si el modal aún está abierto
+        const modal = bootstrap.Modal.getInstance(document.getElementById('paymentModal'));
+        if (modal && modal._element.classList.contains('show')) {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'CONFIRMAR PAGO';
+            }
+            paymentProcessing = false;
+        }
+    }
+};
 
 async function confirmPayment() {
     let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct/100)) * i.qty), 0);
@@ -1431,20 +1533,24 @@ async function confirmPayment() {
             
             if (res.status === 'success') {
                 if(tot < 0) Synth.refund(); else Synth.cash();
-                if(pr) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600'); 
+                if(pr) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
                 else showToast('Venta #' + res.id + ' registrada');
+                paymentProcessing = false;
                 finishSale();
                 return;
             } else {
                 saveOffline(payload);
+                paymentProcessing = false;
                 return;
             }
         } catch (e) {
             saveOffline(payload);
+            paymentProcessing = false;
             return;
         }
     } else {
         saveOffline(payload);
+        paymentProcessing = false;
     }
 }
 
