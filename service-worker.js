@@ -3,7 +3,7 @@
 // Versión 8.3 - Cache individual + ping offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v83';
+const CACHE_NAME = 'palweb-pos-v84';
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
@@ -32,7 +32,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.3...');
+    console.log('[SW-POS] Instalando Service Worker v8.4...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -59,7 +59,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.3...');
+    console.log('[SW-POS] Activando Service Worker v8.4...');
     
     event.waitUntil(
         caches.keys()
@@ -249,7 +249,7 @@ self.addEventListener('message', (event) => {
     }
 });
 
-console.log('[SW-POS] Service Worker v8.3 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.4 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

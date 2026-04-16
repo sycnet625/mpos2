@@ -46,13 +46,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'search_products') {
     if (strlen($q) < 2) { echo json_encode([]); exit; }
 
     try {
-        $sql = "SELECT codigo, nombre, costo 
-                FROM productos 
-                WHERE (nombre LIKE ? OR codigo LIKE ?) 
-                AND id_empresa = ? AND activo = 1 
+        $sql = "SELECT p.codigo, p.nombre,
+                COALESCE(ps.precio_costo, p.costo) AS costo
+                FROM productos p
+                LEFT JOIN productos_precios_sucursal ps
+                    ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+                WHERE (p.nombre LIKE ? OR p.codigo LIKE ?)
+                AND p.id_empresa = ? AND p.activo = 1
                 LIMIT 20";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute(["%$q%", "%$q%", $EMP_ID]);
+        $stmt->execute([$SUC_ID, "%$q%", "%$q%", $EMP_ID]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } catch (Exception $e) { echo json_encode([]); }
     exit;
@@ -121,8 +124,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sku = $item['sku'];
             $qty = floatval($item['cantidad']);
             
-            $stmtCosto = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? AND id_empresa = ?");
-            $stmtCosto->execute([$sku, $EMP_ID]);
+            $stmtCosto = $pdo->prepare(
+                "SELECT COALESCE(ps.precio_costo, p.costo) AS costo
+                 FROM productos p
+                 LEFT JOIN productos_precios_sucursal ps
+                     ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+                 WHERE p.codigo = ? AND p.id_empresa = ?"
+            );
+            $stmtCosto->execute([$SUC_ID, $sku, $EMP_ID]);
             $costo = floatval($stmtCosto->fetchColumn() ?: 0);
 
             $pdo->prepare("INSERT INTO mermas_detalle (id_merma, id_producto, cantidad, costo_al_momento, motivo_especifico) VALUES (?, ?, ?, ?, ?)")
@@ -219,7 +228,7 @@ try {
                     <span class="soft-pill"><i class="fas fa-layer-group"></i>{{cart.length}} líneas</span>
                 </div>
                 
-                <!-- FECHA Y MOTIVO GENERAL -->
+                <!-- FECHA, ALMACÉN Y MOTIVO -->
                 <div class="row g-3 mb-3 pb-3 border-bottom">
                     <div class="col-md-3">
                         <label class="fw-bold text-muted small"><i class="fas fa-calendar-alt me-1"></i> FECHA DE SALIDA</label>
@@ -231,21 +240,20 @@ try {
                             <option v-for="a in almacenes" :value="a.id">{{a.nombre}}</option>
                         </select>
                     </div>
-                    <div class="col-md-3">
-                        <label class="fw-bold text-muted small"><i class="fas fa-tag me-1"></i> MOTIVO GENERAL (CABECERA)</label>
-                        <select class="form-select" v-model="generalReason">
-                            <option>Vencimiento</option><option>Daño</option><option>Robo</option><option>Consumo</option><option>Error de Entrada</option>
+                    <div class="col-md-6">
+                        <label class="fw-bold text-muted small"><i class="fas fa-tag me-1"></i> MOTIVO DE LA MERMA (APLICA A TODA LA CARGA)</label>
+                        <select class="form-select fw-bold border-danger" v-model="reason">
+                            <option>Vencimiento</option><option>Daño / Rotura</option><option>Robo / Pérdida</option><option>Consumo Interno</option><option>Error de Entrada</option><option>Calidad / Mal Estado</option>
                         </select>
                     </div>
                 </div>
 
                 <div class="row g-3 mb-4 align-items-end">
-                    
-                    <div class="col-md-6 position-relative">
+                    <div class="col-md-9 position-relative">
                         <label class="fw-bold text-muted small">PRODUCTO</label>
                         <div class="input-group">
                             <span class="input-group-text bg-white text-danger"><i class="fas fa-search"></i></span>
-                            <input type="text" class="form-control" v-model="search" @input="filterProds" placeholder="Buscar por Nombre o SKU..." autocomplete="off">
+                            <input type="text" class="form-control form-control-lg" v-model="search" @input="filterProds" placeholder="Buscar por Nombre o SKU..." autocomplete="off">
                             <span class="input-group-text bg-white" v-if="isLoadingSearch"><i class="fas fa-spinner fa-spin text-danger"></i></span>
                         </div>
                         <ul class="list-group position-absolute w-100 shadow" style="z-index:1000;max-height:250px;overflow:auto;" v-if="filteredProds.length > 0">
@@ -258,30 +266,58 @@ try {
                         </ul>
                     </div>
 
-                    <div class="col-md-2"><label class="fw-bold text-muted small">CANTIDAD</label><input type="number" class="form-control" v-model.number="qty" min="0.1" step="0.01"></div>
-                    <div class="col-md-3"><label class="fw-bold text-muted small">MOTIVO</label>
-                        <select class="form-select" v-model="reason">
-                            <option>Vencimiento</option><option>Daño</option><option>Robo</option><option>Consumo</option><option>Error de Entrada</option>
-                        </select>
+                    <div class="col-md-2">
+                        <label class="fw-bold text-muted small">CANTIDAD</label>
+                        <input type="number" class="form-control form-control-lg text-center fw-bold" v-model.number="qty" min="0.1" step="0.01">
                     </div>
-                    <div class="col-md-1"><button class="btn btn-danger w-100" @click="add" :disabled="!selectedSku || qty<=0"><i class="fas fa-plus"></i></button></div>
+                    
+                    <div class="col-md-1">
+                        <button class="btn btn-danger btn-lg w-100" @click="add" :disabled="!selectedSku || qty<=0">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
                 </div>
 
                 <div class="table-responsive">
                     <table class="table table-hover align-middle">
-                        <thead class="table-light"><tr><th>Código</th><th>Producto</th><th>Causa</th><th class="text-center">Cant</th><th class="text-end">Costo Total</th><th></th></tr></thead>
+                        <thead class="table-light">
+                            <tr>
+                                <th>Código</th>
+                                <th>Producto</th>
+                                <th class="text-center">Cant</th>
+                                <th class="text-end">Costo U.</th>
+                                <th class="text-end">Costo Total</th>
+                                <th class="text-center">Acción</th>
+                            </tr>
+                        </thead>
                         <tbody>
-                            <tr v-if="cart.length === 0"><td colspan="6" class="text-center text-muted py-4">Lista vacía.</td></tr>
+                            <tr v-if="cart.length === 0"><td colspan="6" class="text-center text-muted py-5">
+                                <i class="fas fa-shopping-basket fa-3x mb-3 opacity-25 d-block"></i>
+                                La lista está vacía. Busca un producto arriba para comenzar.
+                            </td></tr>
                             <tr v-for="(item, i) in cart">
-                                <td class="small text-muted">{{item.sku}}</td><td class="fw-bold">{{item.nombre}}</td><td><span class="badge bg-secondary">{{item.motivo}}</span></td>
-                                <td class="text-center">{{item.cantidad}}</td><td class="text-end fw-bold text-danger">${{(item.cantidad*item.costo).toFixed(2)}}</td>
-                                <td class="text-end"><button class="btn btn-sm btn-outline-danger border-0" @click="cart.splice(i,1)">&times;</button></td>
+                                <td class="small text-muted">{{item.sku}}</td>
+                                <td class="fw-bold">{{item.nombre}}</td>
+                                <td class="text-center fw-bold">{{item.cantidad}}</td>
+                                <td class="text-end text-muted">${{item.costo.toFixed(2)}}</td>
+                                <td class="text-end fw-bold text-danger">${{(item.cantidad*item.costo).toFixed(2)}}</td>
+                                <td class="text-center"><button class="btn btn-sm btn-link text-danger" @click="cart.splice(i,1)"><i class="fas fa-trash-alt"></i></button></td>
                             </tr>
                         </tbody>
-                        <tfoot v-if="cart.length > 0"><tr class="table-active"><td colspan="4" class="text-end fw-bold">TOTAL:</td><td class="text-end fw-bold text-danger fs-5">${{totalLoss.toFixed(2)}}</td><td></td></tr></tfoot>
+                        <tfoot v-if="cart.length > 0">
+                            <tr class="table-active">
+                                <td colspan="4" class="text-end fw-bold fs-5">TOTAL PÉRDIDA ESTIMADA:</td>
+                                <td class="text-end fw-bold text-danger fs-4">${{totalLoss.toFixed(2)}}</td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
-                <div class="d-grid mt-4"><button class="btn btn-danger btn-lg" @click="submit" :disabled="cart.length==0"><i class="fas fa-check-circle me-2"></i> CONFIRMAR BAJA</button></div>
+                <div class="d-grid mt-4">
+                    <button class="btn btn-danger btn-lg py-3 fw-bold shadow-sm" @click="submit" :disabled="cart.length==0">
+                        <i class="fas fa-check-circle me-2"></i> CONFIRMAR BAJA DE INVENTARIO
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -340,8 +376,8 @@ try {
         el: '#app',
         data: {
             search: '', filteredProds: [], isLoadingSearch: false, debounceTimer: null,
-            selectedSku: '', currentProd: null, qty: 1, reason: 'Vencimiento', 
-            generalReason: 'Vencimiento', fecha: new Date().toISOString().split('T')[0],
+            selectedSku: '', currentProd: null, qty: 1, 
+            reason: 'Vencimiento', fecha: new Date().toISOString().split('T')[0],
             cart: [],
             almacenes: <?php echo json_encode($almacenes); ?>,
             selectedAlmacen: <?php echo (int)$ALM_ID; ?>,
@@ -364,17 +400,35 @@ try {
             },
             add() {
                 if (!this.currentProd) return;
-                this.cart.push({ sku: this.selectedSku, nombre: this.currentProd.nombre, costo: parseFloat(this.currentProd.costo), cantidad: this.qty, motivo: this.reason });
-                // Si el motivo general es el default, actualizarlo al motivo del primer item
-                if (this.cart.length === 1) this.generalReason = this.reason;
+                this.cart.push({ 
+                    sku: this.selectedSku, 
+                    nombre: this.currentProd.nombre, 
+                    costo: parseFloat(this.currentProd.costo), 
+                    cantidad: this.qty, 
+                    motivo: this.reason 
+                });
                 this.selectedSku = ''; this.currentProd = null; this.search = ''; this.qty = 1;
             },
             async submit() {
                 if(!confirm('⚠️ ¿Confirmar salida de inventario?')) return;
                 try {
-                    const res = await fetch('pos_shrinkage.php', { method: 'POST', body: JSON.stringify({ motivo: this.generalReason, fecha: this.fecha, total: this.totalLoss, items: this.cart, id_almacen: this.selectedAlmacen }) });
+                    const res = await fetch('pos_shrinkage.php', { 
+                        method: 'POST', 
+                        body: JSON.stringify({ 
+                            motivo: this.reason, 
+                            fecha: this.fecha, 
+                            total: this.totalLoss, 
+                            items: this.cart, 
+                            id_almacen: this.selectedAlmacen 
+                        }) 
+                    });
                     const d = await res.json();
-                    if(d.status==='success') { alert('✅ Listo'); window.location.reload(); } else { alert('❌ Error: ' + d.msg); }
+                    if(d.status==='success') { 
+                        alert('✅ Merma procesada con éxito'); 
+                        window.location.reload(); 
+                    } else { 
+                        alert('❌ Error: ' + d.msg); 
+                    }
                 } catch(e) { alert('Error de conexión'); }
             },
             async cancelMerma(id) {

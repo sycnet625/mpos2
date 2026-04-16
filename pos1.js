@@ -7,6 +7,66 @@ const CACHE_DURATION = 5 * 60 * 1000;
 const PARKED_ORDERS_KEY = 'pos_parked_orders';
 
 // ==========================================
+// MODO DE PRECIO
+// ==========================================
+// 'global'       → p.precio_global  (precio principal del producto)
+// 'sucursal'     → p.precio_suc     (precio venta de la sucursal, con fallback a global)
+// 'mayorista_suc'→ p.precio_mayorista_suc (mayorista de la sucursal, con fallback a global)
+let priceMode = localStorage.getItem('pos_price_mode') || 'sucursal';
+
+function getPrice(p) {
+    if (priceMode === 'global')        return parseFloat(p.precio_global        || p.precio || 0);
+    if (priceMode === 'mayorista_suc') return parseFloat(p.precio_mayorista_suc || p.precio_suc || p.precio_global || p.precio || 0);
+    return parseFloat(p.precio_suc || p.precio_global || p.precio || 0); // 'sucursal' (default)
+}
+
+const PRICE_MODE_LABELS = {
+    sucursal:      'Suc.',
+    mayorista_suc: 'Mayor.',
+    global:        'Global'
+};
+
+function setPriceMode(mode) {
+    priceMode = mode;
+    localStorage.setItem('pos_price_mode', mode);
+    _applyPriceModeUI();
+    renderProducts();
+}
+
+function _applyPriceModeUI() {
+    // Actualiza label del botón en el menú de inventario
+    const lbl = document.getElementById('priceModeLabel');
+    if (lbl) lbl.textContent = PRICE_MODE_LABELS[priceMode] || 'Precio';
+
+    // Resalta la opción activa en el modal
+    document.querySelectorAll('.price-mode-opt').forEach(btn => {
+        const active = btn.dataset.mode === priceMode;
+        btn.style.opacity     = active ? '1'   : '0.6';
+        btn.style.boxShadow   = active ? '0 0 0 3px currentColor' : 'none';
+        btn.style.fontWeight  = active ? '800' : '600';
+    });
+}
+
+function openPriceModeModal() {
+    _applyPriceModeUI();
+    const el = document.getElementById('priceModeModal');
+    if (!el) return;
+    const m = bootstrap.Modal.getOrCreateInstance(el);
+    m.show();
+
+    // Enlazar clicks de opciones (una sola vez con flag)
+    if (!el._pmBound) {
+        el._pmBound = true;
+        el.querySelectorAll('.price-mode-opt').forEach(btn => {
+            btn.addEventListener('click', () => {
+                setPriceMode(btn.dataset.mode);
+                m.hide();
+            });
+        });
+    }
+}
+
+// ==========================================
 // MOTOR DE AUDIO (Synth)
 // ==========================================
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -100,6 +160,7 @@ const INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos de inactividad
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Iniciando POS...');
+    _applyPriceModeUI();
     clearSearchAndRefreshProductList(false);
     // Algunos navegadores autocompletan luego del DOMContentLoaded.
     setTimeout(() => clearSearchAndRefreshProductList(false), 120);
@@ -930,13 +991,15 @@ function renderProducts(category, searchTerm) {
 
     const grid = document.getElementById('productContainer');
     if (!grid) return;
-    
+
     grid.innerHTML = '';
-    
+
     const searchInput = document.getElementById('searchInput');
     const term = (typeof searchTerm === 'string' ? searchTerm : (searchInput ? searchInput.value : '')).toLowerCase();
 
     const sourceData = window.productsDB || window.PRODUCTS_DATA || [];
+    window._lastCatalog = sourceData; // guardar para re-render al cambiar modo
+    _applyPriceModeUI();
     
     if (!Array.isArray(sourceData) || sourceData.length === 0) {
         grid.innerHTML = '<div class="text-center text-muted p-4"><i class="fas fa-box-open fa-3x mb-2"></i><p>No hay productos disponibles</p></div>';
@@ -988,7 +1051,7 @@ function renderProducts(category, searchTerm) {
             imgHTML +
             '<div class="product-info">' +
                 '<div class="product-name text-dark">' + (p.nombre || 'Sin nombre') + '</div>' +
-                '<div class="product-price">$' + parseFloat(p.precio || 0).toFixed(2) + '</div>' +
+                '<div class="product-price">$' + getPrice(p).toFixed(2) + '</div>' +
             '</div>';
         
         if (hasStock || invModeActive) {
@@ -1054,7 +1117,7 @@ function renderFavoritesBar() {
         const fc = document.createElement('div');
         fc.className = 'fav-card' + (hasStock ? '' : ' out-of-stock');
         fc.innerHTML = '<div class="fav-name">' + (p.nombre || '') + '</div>' +
-                       '<div class="fav-price">$' + parseFloat(p.precio || 0).toFixed(2) + '</div>';
+                       '<div class="fav-price">$' + getPrice(p).toFixed(2) + '</div>';
         fc.onclick = () => { if (hasStock) addToCart(p); else showToast('Sin Stock', 'error'); };
         row.appendChild(fc);
     });
@@ -1118,7 +1181,7 @@ function addToCart(p, forceQty) {
         cart[idx].qty = Math.round((cart[idx].qty + qty) * 1000) / 1000; // evitar imprecisión de punto flotante
         selectedIndex = idx;
     } else {
-        cart.push({ id: p.codigo, name: p.nombre, price: parseFloat(p.precio), qty: qty, discountPct: 0, note: '' });
+        cart.push({ id: p.codigo, name: p.nombre, price: getPrice(p), qty: qty, discountPct: 0, note: '' });
         selectedIndex = cart.length - 1;
     }
     Synth.addCart();
@@ -1452,14 +1515,13 @@ window.confirmPaymentSafe = async function() {
     } catch (e) {
         console.error('Error en pago:', e);
     } finally {
-        // Restaurar botón solo si el modal aún está abierto
-        const modal = bootstrap.Modal.getInstance(document.getElementById('paymentModal'));
-        if (modal && modal._element.classList.contains('show')) {
-            if (btn) {
-                btn.disabled = false;
-                btn.textContent = 'CONFIRMAR PAGO';
-            }
-            paymentProcessing = false;
+        // Restaurar botón y estado global siempre al terminar (independientemente de si el modal se cerró o no)
+        paymentProcessing = false;
+        
+        const btn = document.getElementById('btn-confirm-payment');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'CONFIRMAR PAGO';
         }
     }
 };

@@ -118,6 +118,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 ?, ?, ?, ?, ?, ?, ?, ?
             )";
 
+            // Si los precios principales están en 0, intentar rellenarlos desde los precios por sucursal
+            $mainPrecio    = floatval($_POST['precio']);
+            $mainCosto     = floatval($_POST['costo']);
+            $mainMayorista = floatval($_POST['precio_mayorista'] ?? 0);
+
+            if (($mainPrecio <= 0 || $mainCosto <= 0 || $mainMayorista <= 0) && !empty($_POST['suc_precio'])) {
+                // Prioridad: sucursal actual → primera sucursal con datos
+                $sucOrder = array_merge([$SUC_ID], range(1, 6));
+                foreach ($sucOrder as $s) {
+                    $sv = floatval($_POST['suc_precio'][$s]    ?? 0);
+                    $sc = floatval($_POST['suc_costo'][$s]     ?? 0);
+                    $sm = floatval($_POST['suc_mayorista'][$s] ?? 0);
+                    if ($sv > 0 || $sc > 0 || $sm > 0) {
+                        if ($mainPrecio    <= 0 && $sv > 0) $mainPrecio    = $sv;
+                        if ($mainCosto     <= 0 && $sc > 0) $mainCosto     = $sc;
+                        if ($mainMayorista <= 0 && $sm > 0) $mainMayorista = $sm;
+                        // Si quedan 0, usar precio de venta como fallback de los otros
+                        if ($mainCosto     <= 0 && $sv > 0) $mainCosto     = $sv;
+                        if ($mainMayorista <= 0 && $sv > 0) $mainMayorista = round($sv * 0.95, 2);
+                        break;
+                    }
+                }
+            }
+
             $stmt = $pdo->prepare($sql);
             $stmt->execute([
                 $codigo,
@@ -127,9 +151,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                 $_POST['categoria'] ?? 'General',
                 trim((string)($_POST['codigo_barra_1'] ?? '')) ?: null,
                 trim((string)($_POST['codigo_barra_2'] ?? '')) ?: null,
-                floatval($_POST['precio']),
-                floatval($_POST['costo']),
-                floatval($_POST['precio_mayorista'] ?? 0),
+                $mainPrecio,
+                $mainCosto,
+                $mainMayorista,
                 floatval($_POST['impuesto'] ?? 0),
                 floatval($_POST['stock_minimo'] ?? 0),
                 isset($_POST['es_materia_prima']) ? 1 : 0,
@@ -170,6 +194,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
                     if (function_exists('imagewebp'))  imagewebp($out,  $base . '.webp', 82);
                     if (function_exists('imageavif'))  imageavif($out,  $base . '.avif', 60, 6);
                     imagedestroy($out);
+                }
+            }
+
+            // Guardar precios por sucursal (si se especificaron)
+            if (!empty($_POST['suc_precio'])) {
+                $stmtSucPrc = $pdo->prepare(
+                    "INSERT INTO productos_precios_sucursal (codigo_producto, id_sucursal, precio_costo, precio_venta, precio_mayorista)
+                     VALUES (?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE precio_costo=VALUES(precio_costo), precio_venta=VALUES(precio_venta), precio_mayorista=VALUES(precio_mayorista)"
+                );
+                for ($s = 1; $s <= 6; $s++) {
+                    $sv = floatval($_POST['suc_precio'][$s]    ?? 0);
+                    $sc = floatval($_POST['suc_costo'][$s]     ?? 0);
+                    $sm = floatval($_POST['suc_mayorista'][$s] ?? 0);
+                    if ($sv > 0 || $sc > 0 || $sm > 0) {
+                        $stmtSucPrc->execute([$codigo, $s, $sc ?: null, $sv ?: null, $sm ?: null]);
+                    }
                 }
             }
 
@@ -291,6 +332,7 @@ if ($is_direct_access) {
                     <ul class="nav nav-tabs nav-fill small mb-3" id="qpTabs" role="tablist">
                         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab_detalles">Detalles</a></li>
                         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_visibilidad">Visibilidad & Sucursales</a></li>
+                        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_precios_suc">Precios x Suc.</a></li>
                         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_web">Web Info</a></li>
                     </ul>
 
@@ -353,6 +395,33 @@ if ($is_direct_access) {
                                         <?php endfor; ?>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- TAB: PRECIOS POR SUCURSAL -->
+                        <div class="tab-pane fade" id="tab_precios_suc">
+                            <p class="small text-muted mb-2"><i class="fas fa-info-circle me-1"></i>Deja en 0.00 para usar el precio general. Solo se guarda si al menos un campo es mayor que 0.</p>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-bordered align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th class="small">Sucursal</th>
+                                            <th class="small text-center">Costo</th>
+                                            <th class="small text-center text-success">Precio Venta</th>
+                                            <th class="small text-center text-info">Mayorista</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php for($s=1; $s<=6; $s++): ?>
+                                        <tr>
+                                            <td class="fw-bold small">Suc <?= $s ?></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_costo[<?= $s ?>]" value="0.00"></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end fw-bold" name="suc_precio[<?= $s ?>]" value="0.00"></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_mayorista[<?= $s ?>]" value="0.00"></td>
+                                        </tr>
+                                        <?php endfor; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
 

@@ -465,6 +465,7 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
     $facturaAdjunto = trim((string)($payload['factura_adjunto'] ?? ''));
     $duplicatedFrom = (int)($payload['duplicated_from_id'] ?? 0);
     $forceDuplicate = !empty($payload['force_duplicate_invoice']);
+    $precioScope = ($payload['precio_scope'] ?? 'global') === 'sucursal' ? 'sucursal' : 'global';
 
     $itemsIn = $payload['items'] ?? [];
     if (!is_array($itemsIn) || count($itemsIn) === 0) {
@@ -551,15 +552,56 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
             }
             $stockDespues = $stockAntes + $item['cantidad'];
             $precioMayorista = $item['precio_venta'] > 0 ? round($item['precio_venta'] * 0.95, 2) : round($costoResultante * 1.10, 2);
-            $stmtUpdateProductCost->execute([
-                $costoResultante,
-                $item['nombre'],
-                $item['categoria'],
-                max(0, $item['precio_venta']),
-                $precioMayorista,
-                $item['sku'],
-                $empresaId,
-            ]);
+
+            if ($precioScope === 'sucursal') {
+                // Actualizar solo el precio de esta sucursal
+                $pdo->prepare(
+                    "INSERT INTO productos_precios_sucursal (codigo_producto, id_sucursal, precio_costo, precio_venta, precio_mayorista)
+                     VALUES (?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                         precio_costo     = VALUES(precio_costo),
+                         precio_venta     = VALUES(precio_venta),
+                         precio_mayorista = VALUES(precio_mayorista)"
+                )->execute([
+                    $item['sku'],
+                    $sucursalId,
+                    $costoResultante > 0 ? $costoResultante : null,
+                    $item['precio_venta'] > 0 ? $item['precio_venta'] : null,
+                    $precioMayorista > 0 ? $precioMayorista : null,
+                ]);
+
+                // Si el precio/costo global está en 0, rellenar también para no dejarlo vacío
+                if ($existing) {
+                    $globalPrecio = floatval($existing['precio'] ?? 0);
+                    $globalCosto  = floatval($existing['costo']  ?? 0);
+                    if ($globalPrecio <= 0 || $globalCosto <= 0) {
+                        $pdo->prepare(
+                            "UPDATE productos SET
+                                costo  = CASE WHEN costo  <= 0 THEN ? ELSE costo  END,
+                                precio = CASE WHEN precio <= 0 THEN ? ELSE precio END,
+                                precio_mayorista = CASE WHEN COALESCE(precio_mayorista,0) <= 0 THEN ? ELSE precio_mayorista END
+                             WHERE codigo = ? AND id_empresa = ?"
+                        )->execute([
+                            $costoResultante,
+                            max(0, $item['precio_venta']),
+                            $precioMayorista,
+                            $item['sku'],
+                            $empresaId,
+                        ]);
+                    }
+                }
+            } else {
+                // Actualizar precio global del producto
+                $stmtUpdateProductCost->execute([
+                    $costoResultante,
+                    $item['nombre'],
+                    $item['categoria'],
+                    max(0, $item['precio_venta']),
+                    $precioMayorista,
+                    $item['sku'],
+                    $empresaId,
+                ]);
+            }
 
             $reference = 'COMPRA #' . $purchaseId . ($numeroFactura !== '' ? ' (' . $numeroFactura . ')' : '');
             $kardex->registrarMovimiento(
@@ -1256,6 +1298,28 @@ $today = date('Y-m-d');
                             </table>
                         </div>
 
+                        <!-- Toggle: alcance del precio -->
+                        <div class="d-flex align-items-center gap-2 mb-3 p-2 rounded-3" style="background:#f8f9fa; border:1px solid #dee2e6;">
+                            <i class="fas fa-tags text-muted small"></i>
+                            <span class="small fw-bold text-muted">Actualizar precio al procesar:</span>
+                            <div class="btn-group btn-group-sm ms-auto" role="group">
+                                <button type="button"
+                                    class="btn"
+                                    :class="precioScope === 'global' ? 'btn-primary' : 'btn-outline-primary'"
+                                    @click="setPrecioScope('global')"
+                                    title="Actualiza precio y costo en la tabla general de productos (afecta todas las sucursales que no tengan precio específico)">
+                                    <i class="fas fa-globe me-1"></i>Global
+                                </button>
+                                <button type="button"
+                                    class="btn"
+                                    :class="precioScope === 'sucursal' ? 'btn-success' : 'btn-outline-success'"
+                                    @click="setPrecioScope('sucursal')"
+                                    title="Actualiza solo el precio de esta sucursal en productos_precios_sucursal, sin tocar el precio global">
+                                    <i class="fas fa-store me-1"></i>Esta Sucursal
+                                </button>
+                            </div>
+                        </div>
+
                         <div class="d-flex flex-wrap gap-2 justify-content-between align-items-center">
                             <div class="tiny text-muted" v-if="duplicatedFromId">Duplicando compra #{{ duplicatedFromId }}</div>
                             <div class="btn-group flex-wrap">
@@ -1431,6 +1495,7 @@ const app = new Vue({
             almacen: parseInt(initialFilters.almacen || 0)
         },
         almacenActual: defaultWarehouse,
+        precioScope: localStorage.getItem('pos_purchases_precio_scope') || 'global',
         form: {
             sku: '', nombre: '', cantidad: 1, costo: 0, precio_venta: 0, categoria: initialCategories[0] || 'General', tipo_costo: 'promedio', stock_actual: 0
         },
@@ -1712,8 +1777,13 @@ const app = new Vue({
                 items: this.cart,
                 almacen: this.almacenActual,
                 factura_adjunto: this.header.factura_adjunto,
-                duplicated_from_id: this.duplicatedFromId || null
+                duplicated_from_id: this.duplicatedFromId || null,
+                precio_scope: this.precioScope
             };
+        },
+        setPrecioScope(scope) {
+            this.precioScope = scope;
+            localStorage.setItem('pos_purchases_precio_scope', scope);
         },
         async submitPurchase(estado) {
             if (!this.canCreate) {

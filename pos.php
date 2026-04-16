@@ -168,13 +168,22 @@ if (isset($_GET['load_products'])) {
         $almacenID = (int)$ctxConfig['id_almacen'];
         $params = $ctxConfig['categorias_ocultas'] ?? [];
         
-        $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
+        $sucursalID = (int)$ctxConfig['id_sucursal'];
+        $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre,
+                    p.precio                                                         AS precio_global,
+                    COALESCE(p.precio_mayorista, 0)                                  AS precio_mayorista_global,
+                    COALESCE(ps.precio_venta,    p.precio)                           AS precio_suc,
+                    COALESCE(ps.precio_mayorista, p.precio_mayorista, p.precio)      AS precio_mayorista_suc,
+                    COALESCE(ps.precio_venta,    p.precio)                           AS precio,
+                    p.categoria, p.es_elaborado, p.es_servicio,
                     p.codigo_barra_1, p.codigo_barra_2,
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
                      FROM stock_almacen s
                      WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
                     FROM productos p
+                    LEFT JOIN productos_precios_sucursal ps
+                           ON ps.codigo_producto = p.codigo AND ps.id_sucursal = $sucursalID
                     WHERE $where
                     ORDER BY p.nombre";
 
@@ -1187,6 +1196,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <a href="reportes_caja.php" target="_blank" rel="noopener" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Reportes">
                         <i class="fas fa-chart-line"></i>
                     </a>
+
                 </div>
             </div>
         </div>
@@ -1278,8 +1288,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <button class="inv-btn" style="background:linear-gradient(175deg,#ffe066 0%,#ffc107 60%,#e0a800 100%);color:#212529;" onclick="openInvModal('ajuste')">
                         <i class="fas fa-sliders-h"></i> Ajuste
                     </button>
-                    <button class="inv-btn" style="background:linear-gradient(175deg,#3dd6f5 0%,#0dcaf0 60%,#0aa8ca 100%);color:#212529;" onclick="openInvModal('conteo')">
-                        <i class="fas fa-barcode"></i> Conteo
+                    <button class="inv-btn" id="btnPriceMode" style="background:linear-gradient(175deg,#3dd6f5 0%,#0dcaf0 60%,#0aa8ca 100%);color:#212529;" onclick="openPriceModeModal()">
+                        <i class="fas fa-tags"></i> <span id="priceModeLabel">Precio</span>
                     </button>
                     <button class="inv-btn" style="background:linear-gradient(175deg,#4d96ff 0%,#0d6efd 60%,#0a54d4 100%);color:white;" onclick="openInvModal('transferencia')">
                         <i class="fas fa-exchange-alt"></i> Transferir
@@ -1740,6 +1750,38 @@ window.updateCartBackground = function (sucursalId) {
             <div id="progressBar" class="progress-bar-fill">0%</div>
         </div>
         <p id="progressDetail" class="progress-detail"></p>
+    </div>
+</div>
+
+<!-- Modal Origen del Precio -->
+<div class="modal fade" id="priceModeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:360px">
+        <div class="modal-content border-0 shadow-lg" style="border-radius:18px;overflow:hidden">
+            <div class="modal-header border-0 text-white" style="background:#0dcaf0">
+                <h6 class="modal-title fw-bold"><i class="fas fa-tags me-2"></i>Origen del Precio</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <p class="text-muted small mb-3">Selecciona qué precio se muestra en las tarjetas y se agrega al carrito.</p>
+                <div class="d-flex flex-column gap-2">
+                    <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="sucursal"
+                        style="border-radius:12px; border:2px solid #0dcaf0; background:#e0f9fd">
+                        <i class="fas fa-store me-2 text-info"></i>Precio de esta Sucursal
+                        <div class="small fw-normal text-muted mt-1">Usa el precio específico de la sucursal. Si no hay uno definido, usa el precio global.</div>
+                    </button>
+                    <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="mayorista_suc"
+                        style="border-radius:12px; border:2px solid #ffc107; background:#fffbe6">
+                        <i class="fas fa-tags me-2 text-warning"></i>Mayorista de esta Sucursal
+                        <div class="small fw-normal text-muted mt-1">Precio mayorista de la sucursal. Si no hay uno, usa el mayorista global y si tampoco, el precio general.</div>
+                    </button>
+                    <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="global"
+                        style="border-radius:12px; border:2px solid #6c757d; background:#f8f9fa">
+                        <i class="fas fa-globe me-2 text-secondary"></i>Precio Global
+                        <div class="small fw-normal text-muted mt-1">Precio principal del catálogo, igual para todas las sucursales.</div>
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

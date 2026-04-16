@@ -113,6 +113,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $EMP_ID
         ]);
 
+        // Guardar/actualizar precios por sucursal
+        if (!empty($_POST['suc_precio'])) {
+            $stmtSucPrc = $pdo->prepare(
+                "INSERT INTO productos_precios_sucursal (codigo_producto, id_sucursal, precio_costo, precio_venta, precio_mayorista)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE precio_costo=VALUES(precio_costo), precio_venta=VALUES(precio_venta), precio_mayorista=VALUES(precio_mayorista)"
+            );
+            $stmtDel = $pdo->prepare("DELETE FROM productos_precios_sucursal WHERE codigo_producto=? AND id_sucursal=?");
+            for ($s = 1; $s <= 6; $s++) {
+                $sv = floatval($_POST['suc_precio'][$s]    ?? 0);
+                $sc = floatval($_POST['suc_costo'][$s]     ?? 0);
+                $sm = floatval($_POST['suc_mayorista'][$s] ?? 0);
+                if ($sv > 0 || $sc > 0 || $sm > 0) {
+                    $stmtSucPrc->execute([$sku, $s, $sc ?: null, $sv ?: null, $sm ?: null]);
+                } else {
+                    // Si todos son 0, eliminar la fila (vuelve al precio general)
+                    $stmtDel->execute([$sku, $s]);
+                }
+            }
+        }
+
         echo json_encode(['status' => 'success', 'msg' => 'Producto actualizado correctamente.']);
 
     } catch (Exception $e) {
@@ -131,6 +152,14 @@ $p = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$p) die('<div class="alert alert-warning">Producto no encontrado.</div>');
 
 $localPath = '/var/www/assets/product_images/';
+
+// Cargar precios por sucursal
+$stmtSucPrc = $pdo->prepare("SELECT id_sucursal, precio_costo, precio_venta, precio_mayorista FROM productos_precios_sucursal WHERE codigo_producto = ?");
+$stmtSucPrc->execute([$sku]);
+$preciosSucursal = [];
+foreach ($stmtSucPrc->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $preciosSucursal[intval($row['id_sucursal'])] = $row;
+}
 
 // Colores predefinidos para etiqueta
 $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#22c55e'=>'Verde','#3b82f6'=>'Azul','#8b5cf6'=>'Morado','#ec4899'=>'Rosa'];
@@ -256,6 +285,34 @@ $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#2
                 <span class="input-group-text">%</span>
             </div>
         </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════
+         SECCIÓN 2b — PRECIOS POR SUCURSAL
+    ═══════════════════════════════════════════════════ -->
+    <h6 class="border-bottom pb-2 mb-3 mt-4" style="color:#7c3aed"><i class="fas fa-store me-1"></i> Precios por Sucursal <small class="text-muted fw-normal">(opcional — sobrescribe el precio general)</small></h6>
+    <div class="table-responsive mb-3">
+        <table class="table table-sm table-bordered align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th class="small">Sucursal</th>
+                    <th class="small text-center">Costo ($)</th>
+                    <th class="small text-center text-success">Precio Venta ($)</th>
+                    <th class="small text-center text-warning">Mayorista ($)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php for($s=1; $s<=6; $s++): $sp = $preciosSucursal[$s] ?? []; ?>
+                <tr>
+                    <td class="fw-bold small">Suc <?= $s ?></td>
+                    <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_costo[<?= $s ?>]" value="<?= number_format(floatval($sp['precio_costo'] ?? 0), 2, '.', '') ?>"></td>
+                    <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end fw-bold" name="suc_precio[<?= $s ?>]" value="<?= number_format(floatval($sp['precio_venta'] ?? 0), 2, '.', '') ?>"></td>
+                    <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_mayorista[<?= $s ?>]" value="<?= number_format(floatval($sp['precio_mayorista'] ?? 0), 2, '.', '') ?>"></td>
+                </tr>
+                <?php endfor; ?>
+            </tbody>
+        </table>
+        <div class="small text-muted"><i class="fas fa-info-circle me-1"></i>Deja en 0.00 para usar el precio general en esa sucursal.</div>
     </div>
 
     <!-- ═══════════════════════════════════════════════════

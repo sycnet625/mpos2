@@ -24,20 +24,25 @@ try {
     }
 
     $where = implode(" AND ", $cond);
-    $almacenID = intval($config['id_almacen']);
+    $almacenID  = intval($config['id_almacen']);
+    $sucursalID = intval($config['id_sucursal']);
 
     // Categorías
     $stmtCat = $pdo->prepare("SELECT DISTINCT categoria FROM productos p WHERE $where ORDER BY categoria");
     $stmtCat->execute($params);
     $categorias = $stmtCat->fetchAll(PDO::FETCH_COLUMN);
 
-    // Productos (Una sola consulta optimizada)
-    $sqlProd = "SELECT p.id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
-                COALESCE(s.cantidad, 0) as stock
-                FROM productos p 
-                LEFT JOIN stock_almacen s ON p.id = s.id_producto AND s.id_almacen = $almacenID
-                WHERE $where 
-                AND p.id IN (SELECT MAX(id) FROM productos GROUP BY codigo) 
+    // Productos con precio específico por sucursal (fallback al precio principal)
+    $sqlProd = "SELECT p.codigo, p.nombre, p.categoria, p.es_elaborado, p.es_servicio,
+                COALESCE(ps.precio_venta,    p.precio)            AS precio,
+                COALESCE(ps.precio_mayorista, p.precio_mayorista) AS precio_mayorista,
+                COALESCE(ps.precio_costo,    p.costo)             AS costo,
+                COALESCE(s.cantidad, 0) AS stock
+                FROM productos p
+                LEFT JOIN productos_precios_sucursal ps
+                       ON ps.codigo_producto = p.codigo AND ps.id_sucursal = $sucursalID
+                LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = $almacenID
+                WHERE $where
                 ORDER BY p.nombre";
     
     $stmtProd = $pdo->prepare($sqlProd);

@@ -3,6 +3,7 @@
 // DESCRIPCIÓN: Visualizador de facturas existentes (Solo Lectura)
 // Mantiene el diseño exacto "Hoja Carta" del generador.
 require_once 'db.php';
+require_once 'config_loader.php';
 session_start();
 
 // Validar ID
@@ -20,6 +21,35 @@ if (!$factura) { die("Factura no encontrada."); }
 $stmtDet = $pdo->prepare("SELECT * FROM facturas_detalle WHERE id_factura = ?");
 $stmtDet->execute([$id]);
 $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
+
+// 3. Buscar NIT del cliente en la tabla clientes (por teléfono)
+$clienteNit = '';
+$clienteEmail = '';
+if (!empty($factura['cliente_telefono'])) {
+    $stmtCli = $pdo->prepare("SELECT nit_ci, email FROM clientes WHERE telefono = ? OR telefono_principal = ? LIMIT 1");
+    $stmtCli->execute([$factura['cliente_telefono'], $factura['cliente_telefono']]);
+    $cliData = $stmtCli->fetch(PDO::FETCH_ASSOC);
+    if ($cliData) {
+        $clienteNit   = $cliData['nit_ci'] ?? '';
+        $clienteEmail = $cliData['email']  ?? '';
+    }
+}
+
+// 4. Costo de envío: usar columna explícita si existe, sino derivar de total-subtotal
+$costoEnvio = isset($factura['costo_envio']) && floatval($factura['costo_envio']) > 0
+    ? floatval($factura['costo_envio'])
+    : round(floatval($factura['total']) - floatval($factura['subtotal']), 2);
+
+// 5. Datos de empresa desde config
+$empNombre  = $config['tienda_nombre']    ?? $config['marca_empresa_nombre'] ?? 'Empresa';
+$empDir     = $config['direccion']         ?? '';
+$empTel     = $config['telefono']          ?? '';
+$empNIT     = $config['nit']              ?? '';
+$empWeb     = $config['website']          ?? '';
+$empEmail   = $config['email']            ?? '';
+$empCuenta  = $config['cuenta_bancaria']  ?? '';
+$empBanco   = $config['banco']            ?? '';
+$pieTexto   = $config['factura_pie_texto'] ?? 'Si tiene alguna duda respecto a esta factura, por favor contáctenos.';
 
 // Configuración de filas vacías para mantener diseño fijo
 $totalRows = 13;
@@ -92,15 +122,15 @@ $watermark = ($factura['estado'] === 'ANULADA') ? 'opacity: 0.5; background-imag
         <tbody>
             <tr>
                 <td width="60%" valign="top">
-                    <div class="company-name">PALWEB SURL</div>
-                    <div>Magnolia #258 / Parque y Bella Vista<br>Canal, Cerro, La Habana</div>
-                    <div>Teléfono: (+53) 5278-3083</div>
-                    <div><a href="http://www.palweb.net/" style="color:blue">http://www.palweb.net</a></div>
-                    <div>NIT: 50004328264</div>
+                    <div class="company-name"><?= htmlspecialchars($empNombre) ?></div>
+                    <?php if($empDir): ?><div><?= htmlspecialchars($empDir) ?></div><?php endif; ?>
+                    <?php if($empTel): ?><div>Teléfono: <?= htmlspecialchars($empTel) ?></div><?php endif; ?>
+                    <?php if($empWeb): ?><div><a href="<?= htmlspecialchars($empWeb) ?>" style="color:blue"><?= htmlspecialchars($empWeb) ?></a></div><?php endif; ?>
+                    <?php if($empNIT): ?><div>NIT: <?= htmlspecialchars($empNIT) ?></div><?php endif; ?>
+                    <?php if($empEmail): ?><div><?= htmlspecialchars($empEmail) ?></div><?php endif; ?>
                 </td>
                 <td width="40%" valign="top" align="right">
-                    <div class="invoice-title">FACTURA</div>
-                    <div style="font-size:10px; color:#666;">PAL WEB DELICIOSA COMIDA</div>
+                    <div class="invoice-title"><?= ($factura['tipo'] ?? 'FACTURA') === 'PREFACTURA' ? 'PRE-FACTURA' : 'FACTURA' ?></div>
                     <table width="100%" cellspacing="0" style="margin-top:10px;">
                         <tbody>
                             <tr><td class="blue-header">FACTURA #</td><td class="blue-header">FECHA</td></tr>
@@ -116,13 +146,38 @@ $watermark = ($factura['estado'] === 'ANULADA') ? 'opacity: 0.5; background-imag
         <tbody>
             <tr>
                 <td width="45%" valign="top">
-                    <div class="blue-header" style="text-align:left; padding-left:10px;">FACTURAR A CLIENTE #</div>
-                    <div style="padding:5px; font-weight:bold;">
-                        <?php echo htmlspecialchars($factura['cliente_nombre']); ?><br>
-                        <span style="font-weight: normal; font-size: 10px;">
-                            <?php echo htmlspecialchars($factura['cliente_direccion']); ?><br>
-                            <?php echo htmlspecialchars($factura['cliente_telefono']); ?>
-                        </span>
+                    <div class="blue-header" style="text-align:left; padding-left:10px;">FACTURAR A CLIENTE</div>
+                    <div style="padding:5px; line-height:1.6;">
+                        <table cellspacing="0" cellpadding="0" style="width:100%; font-size:11px;">
+                            <tr>
+                                <td style="font-weight:bold; width:70px; color:#2F75B5;">Nombre:</td>
+                                <td style="font-weight:bold;"><?php echo htmlspecialchars($factura['cliente_nombre']); ?></td>
+                            </tr>
+                            <?php if (!empty($factura['cliente_direccion'])): ?>
+                            <tr>
+                                <td style="font-weight:bold; color:#2F75B5;">Dirección:</td>
+                                <td><?php echo htmlspecialchars($factura['cliente_direccion']); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            <?php if (!empty($factura['cliente_telefono'])): ?>
+                            <tr>
+                                <td style="font-weight:bold; color:#2F75B5;">Teléfono:</td>
+                                <td><?php echo htmlspecialchars($factura['cliente_telefono']); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            <?php if (!empty($clienteNit)): ?>
+                            <tr>
+                                <td style="font-weight:bold; color:#2F75B5;">NIT/CI:</td>
+                                <td><?php echo htmlspecialchars($clienteNit); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                            <?php if (!empty($clienteEmail)): ?>
+                            <tr>
+                                <td style="font-weight:bold; color:#2F75B5;">Email:</td>
+                                <td><?php echo htmlspecialchars($clienteEmail); ?></td>
+                            </tr>
+                            <?php endif; ?>
+                        </table>
                     </div>
                 </td>
                 <td width="5%"></td>
@@ -176,7 +231,7 @@ $watermark = ($factura['estado'] === 'ANULADA') ? 'opacity: 0.5; background-imag
             
             <tr>
                 <td colspan="3" class="right" style="border:none; font-weight:bold;">TOTAL&gt;&gt;</td>
-                <td class="center" style="font-weight:bold;"><?php echo count($items); ?></td>
+                <td class="center" style="font-weight:bold;"><?php echo array_sum(array_column($items, 'cantidad')) + 0; ?></td>
                 <td colspan="2" style="border:none;"></td>
             </tr>
         </tbody>
@@ -187,17 +242,23 @@ $watermark = ($factura['estado'] === 'ANULADA') ? 'opacity: 0.5; background-imag
             <tr>
                 <td width="60%" valign="top" style="font-size:12px;">
                     <div style="font-style:italic; color:#2F75B5; font-size:14px; font-weight:bold; margin-bottom:5px;">¡Gracias por su compra!</div>
-                    <div>Dirija su Cheque a: <b>PALWEB SURL</b></div>
-                    <div style="margin-top:5px;">Por transferencia Bancaria a la cta MN:</div>
-                    <div style="font-size:16px; font-weight:bold;">0530445000251210</div>
-                    <div style="font-size:11px;">de la sucursal 304 del banco metropolitano</div>
+                    <?php if($empNombre): ?><div>Dirija su Cheque a: <b><?= htmlspecialchars($empNombre) ?></b></div><?php endif; ?>
+                    <?php if($empCuenta): ?>
+                        <div style="margin-top:5px;">Por transferencia Bancaria a la cta MN:</div>
+                        <div style="font-size:16px; font-weight:bold;"><?= htmlspecialchars($empCuenta) ?></div>
+                        <?php if($empBanco): ?><div style="font-size:11px;"><?= htmlspecialchars($empBanco) ?></div><?php endif; ?>
+                    <?php endif; ?>
+                    <?php if(!empty($factura['notas'])): ?>
+                        <div style="margin-top:8px; font-size:10px; color:#555; border-top:1px solid #eee; padding-top:5px;">
+                            <b>Notas:</b> <?= nl2br(htmlspecialchars($factura['notas'])) ?>
+                        </div>
+                    <?php endif; ?>
                 </td>
                 <td width="40%" valign="top">
                     <table class="totals-table" align="right" width="100%">
                         <tbody>
                             <tr style="background-color:#D9E1F2;"><td class="left">SUBTOTAL</td><td class="right"><?php echo number_format($factura['subtotal'], 2); ?></td></tr>
-                            <tr style="background-color:#D9E1F2;"><td class="left">Manipulacion y envio %</td><td class="right">0.000%</td></tr>
-                            <tr style="background-color:#D9E1F2;"><td class="left">Manipulacion y envio $</td><td class="right">-</td></tr>
+                            <tr style="background-color:#D9E1F2;"><td class="left">Manipulación y envío</td><td class="right"><?php echo $costoEnvio > 0 ? '$'.number_format($costoEnvio, 2) : '-'; ?></td></tr>
                             <tr>
                                 <td class="left total-final" style="color:#2F75B5;">TOTAL</td>
                                 <td class="right total-final">$<?php echo number_format($factura['total'], 2); ?></td>
@@ -210,14 +271,12 @@ $watermark = ($factura['estado'] === 'ANULADA') ? 'opacity: 0.5; background-imag
     </table>
 
     <div style="margin-top:30px; border-top:1px solid #ccc; padding-top:5px; font-size:10px;">
-        Facturado por: <i><?php echo htmlspecialchars($factura['creado_por']); ?></i> (Administrador PALWEB SURL)<br>
-        Si tiene alguna duda respecto esta factura, por favor contáctenos: <b>admin@palweb.net</b>
+        Facturado por: <i><?php echo htmlspecialchars($factura['creado_por']); ?></i> (<?= htmlspecialchars($empNombre) ?>)<br>
+        <?= htmlspecialchars($pieTexto) ?><?php if($empEmail): ?> <b><?= htmlspecialchars($empEmail) ?></b><?php endif; ?>
     </div>
-    <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">Generado por PalWeb POS v2.0</div>
+    <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0<?php if($empWeb): ?> · <?= htmlspecialchars($empWeb) ?><?php endif; ?></div>
 
 </div>
 
-<?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

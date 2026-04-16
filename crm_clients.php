@@ -139,6 +139,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // ---------------------------------------------------------
+// 📋 AJAX: HISTORIAL FACTURAS / OFERTAS POR CLIENTE
+// ---------------------------------------------------------
+if (isset($_GET['action']) && $_GET['action'] === 'get_history') {
+    header('Content-Type: application/json');
+    $cid = intval($_GET['id'] ?? 0);
+    if (!$cid) { echo json_encode(['facturas'=>[],'ofertas'=>[]]); exit; }
+
+    $stmtF = $pdo->prepare(
+        "SELECT id, numero_factura, fecha_emision, total, estado, estado_pago
+         FROM facturas WHERE cliente_nombre IN (SELECT nombre FROM clientes WHERE id=?) OR
+         cliente_telefono IN (
+             SELECT numero FROM clientes_telefonos WHERE id_cliente=?
+         )
+         ORDER BY id DESC LIMIT 30"
+    );
+    $stmtF->execute([$cid, $cid]);
+    $facturas = $stmtF->fetchAll(PDO::FETCH_ASSOC);
+
+    $stmtO = $pdo->prepare(
+        "SELECT id, numero_oferta, fecha_emision, total, estado
+         FROM ofertas WHERE id_cliente=?
+         ORDER BY id DESC LIMIT 30"
+    );
+    $stmtO->execute([$cid]);
+    $ofertas = $stmtO->fetchAll(PDO::FETCH_ASSOC);
+
+    echo json_encode(['facturas' => $facturas, 'ofertas' => $ofertas], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// ---------------------------------------------------------
 // 📊 LECTURA DE DATOS E INTELIGENCIA (GET)
 // ---------------------------------------------------------
 $filter = $_GET['q'] ?? '';
@@ -220,6 +251,12 @@ $negocios = $pdo->query("SELECT COUNT(*) FROM clientes WHERE tipo_cliente = 'Neg
         .table-dinamica input, .table-dinamica select { height: 32px; padding: 4px 8px; }
         .btn-agregar-fila { padding: 2px 8px; font-size: 0.75rem; }
         .hidden-input { display: none; }
+        /* Fix modal scrollbars */
+        .modal-dialog-scrollable .modal-body {
+            overflow-y: auto !important;
+            max-height: calc(100vh - 200px);
+            scrollbar-gutter: stable;
+        }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
@@ -384,6 +421,7 @@ $negocios = $pdo->query("SELECT COUNT(*) FROM clientes WHERE tipo_cliente = 'Neg
                             <?php endif; ?>
                         </td>
                         <td class="text-end pe-4">
+                            <button class="btn btn-sm btn-outline-info me-1" onclick="openHistory(<?php echo $c['id']; ?>, '<?php echo htmlspecialchars(addslashes($c['nombre'])); ?>')" title="Ver Facturas y Ofertas"><i class="fas fa-history"></i></button>
                             <button class="btn btn-sm btn-outline-primary me-1" onclick='editClient(<?php echo json_encode($c); ?>)' title="Editar"><i class="fas fa-edit"></i></button>
                             <button class="btn btn-sm btn-outline-danger" onclick="deleteClient(<?php echo $c['id']; ?>, '<?php echo htmlspecialchars($c['nombre']); ?>')" title="Eliminar"><i class="fas fa-trash"></i></button>
                         </td>
@@ -563,6 +601,42 @@ $negocios = $pdo->query("SELECT COUNT(*) FROM clientes WHERE tipo_cliente = 'Neg
     <input type="hidden" name="action" value="delete">
     <input type="hidden" name="id" id="deleteId">
 </form>
+
+<!-- MODAL HISTORIAL -->
+<div class="modal fade" id="historyModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title fw-bold"><i class="fas fa-history me-2"></i>Historial: <span id="histClientName"></span></h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div id="histLoading" class="text-center py-5"><div class="spinner-border text-info"></div><div class="mt-2 text-muted">Cargando...</div></div>
+                <div id="histContent" style="display:none">
+                    <!-- Facturas -->
+                    <h6 class="fw-bold text-primary mb-3"><i class="fas fa-file-invoice-dollar me-1"></i>Facturas Emitidas</h6>
+                    <div id="histFacturasWrap" class="table-responsive mb-4">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead class="table-light"><tr><th>#</th><th>Fecha</th><th class="text-end">Total</th><th class="text-center">Estado</th><th class="text-center">Pago</th><th></th></tr></thead>
+                            <tbody id="histFacturasBody"></tbody>
+                        </table>
+                    </div>
+                    <!-- Ofertas -->
+                    <h6 class="fw-bold text-warning mb-3"><i class="fas fa-file-signature me-1"></i>Ofertas Comerciales</h6>
+                    <div id="histOfertasWrap" class="table-responsive">
+                        <table class="table table-sm table-hover align-middle">
+                            <thead class="table-light"><tr><th>#</th><th>Fecha</th><th class="text-end">Total</th><th class="text-center">Estado</th><th></th></tr></thead>
+                            <tbody id="histOfertasBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -870,6 +944,62 @@ $negocios = $pdo->query("SELECT COUNT(*) FROM clientes WHERE tipo_cliente = 'Neg
         // Enviar formulario
         this.submit();
     });
+
+    // ===== HISTORIAL FACTURAS / OFERTAS =====
+    function openHistory(clientId, clientName) {
+        document.getElementById('histClientName').textContent = clientName;
+        document.getElementById('histLoading').style.display = 'block';
+        document.getElementById('histContent').style.display = 'none';
+        const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+        modal.show();
+        fetch(`crm_clients.php?action=get_history&id=${clientId}`)
+            .then(r => r.json())
+            .then(data => {
+                // Facturas
+                const fBody = document.getElementById('histFacturasBody');
+                fBody.innerHTML = '';
+                if (!data.facturas.length) {
+                    fBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">Sin facturas registradas</td></tr>';
+                } else {
+                    data.facturas.forEach(f => {
+                        const st = f.estado === 'ANULADA' ? 'bg-secondary' : 'bg-success';
+                        const pg = f.estado_pago === 'PAGADA' ? 'bg-primary' : 'bg-warning text-dark';
+                        const fecha = new Date(f.fecha_emision).toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit',year:'numeric'});
+                        fBody.innerHTML += `<tr>
+                            <td class="fw-bold text-primary">#${f.numero_factura}</td>
+                            <td>${fecha}</td>
+                            <td class="text-end fw-bold">$${parseFloat(f.total).toFixed(2)}</td>
+                            <td class="text-center"><span class="badge ${st} rounded-pill">${f.estado}</span></td>
+                            <td class="text-center"><span class="badge ${pg} rounded-pill">${f.estado_pago}</span></td>
+                            <td><a href="invoice_print.php?id=${f.id}" target="_blank" class="btn btn-xs btn-outline-secondary btn-sm"><i class="fas fa-print"></i></a></td>
+                        </tr>`;
+                    });
+                }
+                // Ofertas
+                const oBody = document.getElementById('histOfertasBody');
+                oBody.innerHTML = '';
+                if (!data.ofertas.length) {
+                    oBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Sin ofertas registradas</td></tr>';
+                } else {
+                    const stMap = { 'PENDIENTE': 'bg-warning text-dark', 'APROBADA': 'bg-success', 'FACTURADA': 'bg-primary', 'RECHAZADA': 'bg-secondary' };
+                    data.ofertas.forEach(o => {
+                        const fecha = new Date(o.fecha_emision).toLocaleDateString('es-ES', {day:'2-digit',month:'2-digit',year:'numeric'});
+                        oBody.innerHTML += `<tr>
+                            <td class="fw-bold text-warning">${o.numero_oferta}</td>
+                            <td>${fecha}</td>
+                            <td class="text-end fw-bold">$${parseFloat(o.total).toFixed(2)}</td>
+                            <td class="text-center"><span class="badge ${stMap[o.estado]||'bg-secondary'} rounded-pill">${o.estado}</span></td>
+                            <td><a href="offer_print.php?id=${o.id}" target="_blank" class="btn btn-xs btn-outline-secondary btn-sm"><i class="fas fa-print"></i></a></td>
+                        </tr>`;
+                    });
+                }
+                document.getElementById('histLoading').style.display = 'none';
+                document.getElementById('histContent').style.display = 'block';
+            })
+            .catch(() => {
+                document.getElementById('histLoading').innerHTML = '<div class="text-danger">Error al cargar el historial</div>';
+            });
+    }
 
     // Mostrar mensaje de éxito si existe
     window.addEventListener('load', function() {

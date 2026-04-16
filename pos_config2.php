@@ -82,6 +82,7 @@ $defaultConfig = [
     "hero_color_2" => "#15803d",
     "hero_mostrar_usuario" => true,
     "hero_mostrar_logo" => true,
+    "hero_mostrar_banner_sucursal" => true,
     "vapid_public_key" => "",
     "vapid_private_key" => "",
     "metodos_pago" => [
@@ -111,7 +112,12 @@ $defaultConfig = [
         ["titulo" => "🛒 Ofertas Semanales",    "subtitulo" => "Grandes descuentos",             "imagen" => "", "color_clase" => "gradient-3", "bg_size" => "cover"],
         ["titulo" => "🍕 Comida Caliente",      "subtitulo" => "Lista para llevar",              "imagen" => "", "color_clase" => "gradient-4", "bg_size" => "cover"]
     ],
-    "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]]
+    "cajeros" => [["nombre" => "Admin", "pin" => "0000", "rol" => "admin"]],
+    "factura_numero_formato"  => "fecha_id",
+    "factura_numero_prefijo"  => "F-",
+    "factura_pie_texto"       => "Si tiene alguna duda respecto a esta factura, por favor contáctenos.",
+    "factura_vigencia_dias"   => 15,
+    "oferta_vigencia_dias"    => 15,
 ];
 
 $notificationTypeLabels = [
@@ -222,7 +228,7 @@ if ($editUserId > 0) {
 } elseif ((int)($_GET['edit_empresa'] ?? 0) > 0 || (int)($_GET['edit_sucursal'] ?? 0) > 0 || (int)($_GET['edit_almacen'] ?? 0) > 0) {
     $activeTab = 'estructura';
 } elseif (!empty($_GET['tab'])) {
-    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'banners', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'];
+    $allowedTabs = ['shop', 'ticket', 'pantalla', 'finanzas', 'banners', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo', 'facturacion'];
     $requestedTab = (string)$_GET['tab'];
     if (in_array($requestedTab, $allowedTabs, true)) {
         $activeTab = $requestedTab;
@@ -446,6 +452,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['hero_color_2'] = trim((string)($_POST['hero_color_2'] ?? '#15803d'));
             $newConfig['hero_mostrar_usuario'] = isset($_POST['hero_mostrar_usuario']);
             $newConfig['hero_mostrar_logo']    = isset($_POST['hero_mostrar_logo']);
+            $newConfig['hero_mostrar_banner_sucursal'] = isset($_POST['hero_mostrar_banner_sucursal']);
             $newConfig['categorias_ocultas'] = $_POST['categorias_ocultas'] ?? [];
             $newConfig['vapid_public_key'] = trim((string)($_POST['vapid_public_key'] ?? ($currentConfig['vapid_public_key'] ?? '')));
             $replacePrivate = isset($_POST['replace_vapid_private']);
@@ -541,6 +548,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $currentConfig = array_merge($defaultConfig, $savedConfig);
             $msg = 'Configuración web/shop guardada.';
+        }
+
+        if ($formAction === 'save_factura_config') {
+            $activeTab = 'facturacion';
+            $newConfig = $currentConfig;
+            $fmt = trim((string)($_POST['factura_numero_formato'] ?? 'fecha_id'));
+            $newConfig['factura_numero_formato'] = in_array($fmt, ['fecha_id','consecutivo'], true) ? $fmt : 'fecha_id';
+            $newConfig['factura_numero_prefijo']  = trim((string)($_POST['factura_numero_prefijo'] ?? 'F-'));
+            $newConfig['factura_pie_texto']        = trim((string)($_POST['factura_pie_texto'] ?? ''));
+            $newConfig['factura_vigencia_dias']    = max(1, (int)($_POST['factura_vigencia_dias'] ?? 30));
+            $newConfig['oferta_vigencia_dias']     = max(1, (int)($_POST['oferta_vigencia_dias'] ?? 15));
+            $encoded = json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+            if ($encoded === false || file_put_contents($configFile, $encoded) === false) {
+                throw new RuntimeException('No se pudo guardar la configuración de facturación.');
+            }
+            $currentConfig = array_merge($defaultConfig, json_decode(file_get_contents($configFile), true));
+            $msg = 'Configuración de facturación guardada.';
         }
 
         if ($formAction === 'save_user') {
@@ -1090,6 +1114,7 @@ unset($treeCompany);
         <a class="sidebar-nav-link" data-tab="cajeros"       onclick="showCfgTab('cajeros', this)"><i class="fas fa-cash-register"></i><span class="nav-text">🧑‍💼 Cajeros POS</span></a>
         <a class="sidebar-nav-link" data-tab="notificaciones"onclick="showCfgTab('notificaciones', this)"><i class="fas fa-bell"></i>  <span class="nav-text">🔔 Notificaciones</span></a>
         <a class="sidebar-nav-link" data-tab="estilo"        onclick="showCfgTab('estilo', this)"><i class="fas fa-palette"></i>       <span class="nav-text">🎨 Identidad</span></a>
+        <a class="sidebar-nav-link" data-tab="facturacion" onclick="showCfgTab('facturacion', this)"><i class="fas fa-file-invoice-dollar"></i><span class="nav-text">🧾 Facturación</span></a>
     </div>
     <div class="sidebar-footer">
         <a href="dashboard.php" class="sidebar-nav-link px-0"><i class="fas fa-arrow-left"></i><span class="nav-text">Volver al Dashboard</span></a>
@@ -2481,6 +2506,13 @@ unset($treeCompany);
                             <input class="form-check-input" type="checkbox" name="hero_mostrar_logo" id="hero_mostrar_logo" <?php echo ($currentConfig['hero_mostrar_logo'] ?? true) ? 'checked' : ''; ?>>
                             <label class="form-check-label" for="hero_mostrar_logo">Mostrar logo en esquina (desktop)</label>
                         </div>
+                        <div class="form-check form-switch mt-2">
+                            <input class="form-check-input" type="checkbox" name="hero_mostrar_banner_sucursal" id="hero_mostrar_banner_sucursal" <?php echo ($currentConfig['hero_mostrar_banner_sucursal'] ?? true) ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="hero_mostrar_banner_sucursal">
+                                Imagen de sucursal de fondo
+                                <span class="text-muted small d-block" style="font-weight:normal;">Desactivar usa solo el degradado de colores</span>
+                            </label>
+                        </div>
                     </div>
                     <div class="col-12 mt-3">
                         <div class="alert alert-info">
@@ -2518,6 +2550,53 @@ unset($treeCompany);
             </div>
 
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar identidad corporativa</button>
+        </form>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- TAB: FACTURACIÓN                                            -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="cfg-tab d-none" data-tab-panel="facturacion">
+        <form method="post">
+            <input type="hidden" name="form_action" value="save_factura_config">
+            <input type="hidden" name="active_tab"  value="facturacion">
+            <div class="card mb-3">
+                <div class="card-header fw-bold text-primary">🔢 Numeración de Facturas</div>
+                <div class="card-body row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Formato del número</label>
+                        <select name="factura_numero_formato" class="form-select">
+                            <option value="fecha_id"     <?= ($currentConfig['factura_numero_formato'] ?? 'fecha_id') === 'fecha_id'     ? 'selected' : '' ?>>Fecha + ID (ej: 20260416001)</option>
+                            <option value="consecutivo"  <?= ($currentConfig['factura_numero_formato'] ?? '')          === 'consecutivo'  ? 'selected' : '' ?>>Prefijo + Consecutivo (ej: F-0001)</option>
+                        </select>
+                        <div class="form-text">El modo consecutivo usa un contador global incremental.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Prefijo (modo consecutivo)</label>
+                        <input type="text" name="factura_numero_prefijo" class="form-control" value="<?= htmlspecialchars($currentConfig['factura_numero_prefijo'] ?? 'F-') ?>" placeholder="F-">
+                        <div class="form-text">Ej: <code>F-</code>, <code>FAC-</code>, <code>INV-</code></div>
+                    </div>
+                </div>
+            </div>
+            <div class="card mb-3">
+                <div class="card-header fw-bold text-success">📄 Textos del documento</div>
+                <div class="card-body row g-3">
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Texto pie de factura</label>
+                        <input type="text" name="factura_pie_texto" class="form-control" value="<?= htmlspecialchars($currentConfig['factura_pie_texto'] ?? '') ?>" placeholder="Si tiene alguna duda, contáctenos...">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Vigencia crédito en facturas (días)</label>
+                        <input type="number" name="factura_vigencia_dias" class="form-control" min="1" value="<?= (int)($currentConfig['factura_vigencia_dias'] ?? 30) ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Vigencia de ofertas comerciales (días)</label>
+                        <input type="number" name="oferta_vigencia_dias" class="form-control" min="1" value="<?= (int)($currentConfig['oferta_vigencia_dias'] ?? 15) ?>">
+                        <div class="form-text">Aparece en el pie de cada oferta impresa.</div>
+                    </div>
+                </div>
+            </div>
+            <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar configuración de facturación</button>
         </form>
     </div>
 

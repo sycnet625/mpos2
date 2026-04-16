@@ -231,20 +231,24 @@ if (isset($_GET['ajax_search'])) {
     if (strlen($q) < 1) { echo json_encode([]); exit; }
 
     try {
-        $sql = "SELECT p.codigo, p.nombre, p.precio, p.descripcion, p.categoria, p.unidad_medida, p.color, p.es_reservable,
+        $sql = "SELECT p.codigo, p.nombre,
+                COALESCE(ps.precio_venta, p.precio) AS precio,
+                p.descripcion, p.categoria, p.unidad_medida, p.color, p.es_reservable,
                 COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s
                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?), 0) as stock
                 FROM productos p
+                LEFT JOIN productos_precios_sucursal ps
+                    ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
                 WHERE p.es_web = 1
-                  AND p.activo = 1 
+                  AND p.activo = 1
                   AND p.id_empresa = ?
                   AND (p.sucursales_web = '' OR p.sucursales_web IS NULL OR FIND_IN_SET(?, p.sucursales_web) > 0)
                   AND (p.nombre LIKE ? OR p.codigo LIKE ? OR p.descripcion LIKE ?)
-                ORDER BY CASE 
-                    WHEN p.nombre = ? THEN 1 
-                    WHEN p.codigo = ? THEN 2 
-                    WHEN p.nombre LIKE ? THEN 3 
-                    ELSE 4 END, p.nombre ASC 
+                ORDER BY CASE
+                    WHEN p.nombre = ? THEN 1
+                    WHEN p.codigo = ? THEN 2
+                    WHEN p.nombre LIKE ? THEN 3
+                    ELSE 4 END, p.nombre ASC
                 LIMIT 15";
         
         $searchPattern = "%$q%";
@@ -252,9 +256,9 @@ if (isset($_GET['ajax_search'])) {
         
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
-            $ALM_ID, $EMP_ID, $SUC_ID,          
-            $searchPattern, $searchPattern, $searchPattern,   
-            $q, $q, $searchStart      
+            $ALM_ID, $SUC_ID, $EMP_ID, $SUC_ID,
+            $searchPattern, $searchPattern, $searchPattern,
+            $q, $q, $searchStart
         ]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
         
@@ -298,19 +302,22 @@ try {
 
 try {
     $sql = "SELECT p.*,
+            COALESCE(ps.precio_venta, p.precio) AS precio,
             (SELECT COALESCE(SUM(s.cantidad), 0)
              FROM stock_almacen s
              WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock_total,
             (SELECT ROUND(AVG(r.rating),1) FROM resenas_productos r WHERE r.producto_codigo = p.codigo AND r.aprobada = 1) as avg_rating,
             (SELECT COUNT(*) FROM resenas_productos r WHERE r.producto_codigo = p.codigo AND r.aprobada = 1) as total_resenas
             FROM productos p
-            WHERE p.activo = 1 
-              AND p.es_web = 1 
+            LEFT JOIN productos_precios_sucursal ps
+                ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+            WHERE p.activo = 1
+              AND p.es_web = 1
               AND p.id_empresa = ?
               AND (p.sucursales_web = '' OR p.sucursales_web IS NULL OR FIND_IN_SET(?, p.sucursales_web) > 0)";
 
-    $params = [$ALM_ID, $EMP_ID, $SUC_ID];
-    
+    $params = [$ALM_ID, $SUC_ID, $EMP_ID, $SUC_ID];
+
     if ($catFilter) {
         $sql .= " AND p.categoria = ?";
         $params[] = $catFilter;
@@ -318,8 +325,8 @@ try {
 
     $sortMap = [
         'categoria_asc' => 'p.categoria ASC, p.nombre ASC',
-        'price_asc' => 'p.precio ASC',
-        'price_desc' => 'p.precio DESC',
+        'price_asc' => 'COALESCE(ps.precio_venta, p.precio) ASC',
+        'price_desc' => 'COALESCE(ps.precio_venta, p.precio) DESC',
         'popular' => '(SELECT COUNT(*) FROM vistas_productos v WHERE v.codigo_producto = p.codigo) DESC, p.nombre ASC',
     ];
     
