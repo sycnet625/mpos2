@@ -220,7 +220,7 @@ function bot_send_catalog_showcase(PDO $pdo, string $wa, array $appCfg, array $m
 
 function bot_greeting_text(array $cfg, array $appCfg, array $cart, string $fallbackName='Cliente'): string {
     $name = bot_customer_display_name($cart, $fallbackName);
-    $business = trim((string)($cfg['business_name'] ?? ($appCfg['tienda_nombre'] ?? 'PalWeb POS')));
+    $business = trim((string)($cfg['business_name'] ?? ($appCfg['marca_sistema_nombre'] ?? ($appCfg['tienda_nombre'] ?? 'Sistema POS'))));
     $tone = bot_tone_variants($cfg);
     $greet = sprintf(bot_pick($tone['greetings'], $name . date('YmdH')), $name);
     $extra = ((int)($cart['greet_count'] ?? 0) > 0)
@@ -498,4 +498,3 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
         return ['ok'=>false, 'msg'=>$e->getMessage()];
     }
 }
-

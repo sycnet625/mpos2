@@ -75,7 +75,7 @@ if (!$isCli): ?>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Conversor de Imágenes – PALWEB POS</title>
+<title>Conversor de Imágenes – <?= htmlspecialchars(config_loader_system_name()) ?></title>
 <link href="assets/css/bootstrap.min.css" rel="stylesheet">
 <style>
     body { background:#f8f9fa; }
@@ -289,7 +289,7 @@ if ($isCli) {
     echo "<tr><td>Tamaño AVIF total</td><td><strong class=\"text-success\">" . fmt_bytes($stats['avif_bytes']) . "</strong> <span class=\"badge bg-success\">$ahorroAvif% ahorrado</span></td></tr>";
     echo "<tr><td>Uso de memoria pico</td><td>" . fmt_bytes(memory_get_peak_usage(true)) . "</td></tr>";
     echo "</table>";
-    echo "<p class='text-muted mb-0'>Sistema PALWEB POS v3.0</p>";
+    echo "<p class='text-muted mb-0'>Sistema " . htmlspecialchars(config_loader_system_name(), ENT_QUOTES, 'UTF-8') . " v3.0</p>";
     echo "</div></div>";
     echo "</div></body></html>";
 }

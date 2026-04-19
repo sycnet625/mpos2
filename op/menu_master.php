@@ -7,6 +7,10 @@ if (file_exists(__DIR__ . '/tools_unit_converter.php')) {
     include_once __DIR__ . '/tools_unit_converter.php';
 }
 
+if (file_exists(__DIR__ . '/../config_loader.php')) {
+    require_once __DIR__ . '/../config_loader.php';
+}
+
 // --- DEFINICIÓN DE ENLACES ---
 $menuCategories = [
     // --- NUEVO: CHAT DE SOPORTE ---
@@ -204,7 +208,7 @@ $menuCategories = [
 <div id="palweb-float-nav">
     <div class="pw-menu-content" id="pwMenuContent">
         <div style="text-align:center; padding-bottom:5px; border-bottom:1px solid var(--border-color); margin-bottom:5px;">
-            <strong style="color:var(--primary-color);">PalWeb POS</strong> <small class="text-muted">v2.9</small>
+            <strong style="color:var(--primary-color);"><?php echo htmlspecialchars(function_exists('config_loader_system_name') ? config_loader_system_name() : 'Sistema'); ?></strong> <small class="text-muted">v2.9</small>
         </div>
         
         <?php foreach($menuCategories as $catName => $links): ?>
@@ -478,6 +482,5 @@ window.sendAdminMsg = async function() {
     });
 })();
 </script>
-
 
 

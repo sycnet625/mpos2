@@ -150,10 +150,11 @@ window.toggleStockFilter = function() { window.stockFilterActive = !window.stock
 window.toggleImages = function() { document.body.classList.toggle('mode-no-images'); const btn = document.getElementById('btnToggleImages'); if(btn) btn.classList.toggle('btn-filter-active'); renderProducts(); };
 
 // CARRITO
-window.addToCart = function(p) {
-    const idx = cart.findIndex(i => i.id === p.codigo && (!i.note)); 
-    if(idx >= 0) { if(p.es_servicio==0 && (cart[idx].qty+1)>parseFloat(p.stock)) { Synth.error(); return showToast("Stock insuficiente", "error"); } cart[idx].qty++; selectedIndex = idx; } 
-    else { cart.push({ id: p.codigo, name: p.nombre, price: parseFloat(p.precio), qty: 1, discountPct: 0, note: '' }); selectedIndex = cart.length - 1; }
+window.addToCart = function(p, qty = 1) {
+    qty = Math.max(1, parseFloat(qty) || 1);
+    const idx = cart.findIndex(i => i.id === p.codigo && (!i.note));
+    if(idx >= 0) { if(p.es_servicio==0 && (cart[idx].qty+qty)>parseFloat(p.stock)) { Synth.error(); return showToast("Stock insuficiente", "error"); } cart[idx].qty += qty; selectedIndex = idx; }
+    else { cart.push({ id: p.codigo, name: p.nombre, price: parseFloat(p.precio), qty: qty, discountPct: 0, note: '' }); selectedIndex = cart.length - 1; }
     Synth.addCart(); renderCart(); saveCartState();
 };
 window.renderCart = function() {
@@ -231,6 +232,43 @@ window.toggleServiceOptions = function() {
     if(t === 'mensajeria' || t === 'delivery') document.getElementById('deliveryDiv').classList.remove('d-none');
     if(t === 'reserva') document.getElementById('reservationDiv').classList.remove('d-none');
 };
+
+// Bandera para evitar clics duplicados
+let opPaymentProcessing = false;
+
+window.confirmPaymentSafe = async function() {
+    // Si ya se está procesando un pago, ignorar el clic
+    if (opPaymentProcessing) {
+        alert('Por favor espera a que se procese el pago anterior...');
+        return;
+    }
+
+    // Marcar como procesando
+    opPaymentProcessing = true;
+
+    // Deshabilitar botón y cambiar texto
+    const btn = document.getElementById('btn-confirm-payment');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ PROCESANDO...';
+    }
+
+    try {
+        // Llamar a la función original de pago
+        await confirmPayment();
+    } catch (e) {
+        console.error('Error en pago:', e);
+    } finally {
+        // Restaurar botón y estado global siempre al terminar
+        opPaymentProcessing = false;
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'CONFIRMAR PAGO';
+        }
+    }
+};
+
 window.confirmPayment = async function() {
     let payments = []; let mainMethod = 'Efectivo';
     if (currentPaymentMode === 'mixed') {
@@ -268,6 +306,9 @@ window.confirmPayment = async function() {
             alert('Error: ' + res.msg);
         }
     } catch(e) { saveOffline(payload); }
+    finally {
+        opPaymentProcessing = false;
+    }
 };
 
 // Mostrar opciones después de registrar venta

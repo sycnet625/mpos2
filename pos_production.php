@@ -209,11 +209,12 @@ try {
                 <div class="glass-card h-100 inventory-fade-in">
                     <div class="card-header bg-transparent fw-bold d-flex justify-content-between align-items-center">
                         <span><i class="fas fa-list text-warning me-2"></i> Ingredientes del Lote</span>
-                        <div>
-                            <button class="btn btn-info btn-sm text-white fw-bold me-2" @click="openAnalyzeModal"><i class="fas fa-calculator me-1"></i> Analizar Capacidad</button>
-                            <button class="btn btn-primary btn-sm fw-bold shadow-sm" @click="confirmProduce"><i class="fas fa-cogs me-1"></i> PRODUCIR</button>
-                            <button class="btn btn-dark btn-sm ms-2" @click="printReport(selectedRecipe.id)"><i class="fas fa-print"></i></button>
-                        </div>
+                                 <div>
+                                     <button class="btn btn-info btn-sm text-white fw-bold me-2" @click="openAnalyzeModal"><i class="fas fa-calculator me-1"></i> Analizar Capacidad</button>
+                                     <button class="btn btn-primary btn-sm fw-bold shadow-sm" @click="confirmProduce"><i class="fas fa-cogs me-1"></i> PRODUCIR</button>
+                                     <button class="btn btn-dark btn-sm ms-2" @click="printReport(selectedRecipe.id)"><i class="fas fa-print"></i></button>
+                                     <button class="btn btn-success btn-sm ms-2" @click="generateCostSheet(selectedRecipe.id)"><i class="fas fa-file-invoice-dollar me-1"></i> Ficha de Costo</button>
+                                 </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-sm align-middle mb-0">
@@ -788,6 +789,231 @@ try {
                 const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "recetas_produccion.csv"; link.click();
             },
             printReport(id) { window.open(`pos_production_report.php?id=${id}`, '_blank', 'width=900,height=800'); },
+            generateCostSheet(id) {
+                const r = this.selectedRecipe;
+                const d = this.details;
+                if (!r || !d || d.length === 0) { alert('Seleccione una receta con ingredientes.'); return; }
+
+                const empresa  = <?php echo json_encode($config['nombre_empresa'] ?? $config['shop_name'] ?? ''); ?>;
+                const today    = new Date().toLocaleDateString('es-ES', {day:'2-digit', month:'2-digit', year:'numeric'});
+                const unidades = parseFloat(r.unidades_resultantes) || 1;
+                const precioVenta = parseFloat(r.precio_venta) || 0;
+
+                // Fila 1.1 — Insumos (materias primas): suma de ingredientes de la receta
+                const costoInsumos = d.reduce((a, i) => a + (parseFloat(i.cantidad) * parseFloat(i.costo_actual)), 0);
+                // Fila 1 = 1.1 + 1.2 + 1.3 + 1.4 (1.2/1.3/1.4 vacíos → igual a 1.1)
+                const costoMatPrima = costoInsumos;
+                // Fila 5 parcial (solo con lo que tenemos; filas 2,3,4 las completa el usuario)
+                const costoTotalParcial = costoMatPrima;
+                const costoUnitario = costoTotalParcial / unidades;
+
+                // ── Anexo Desagregación de Insumos ───────────────────────────────────────
+                const ingRows = d.map(i => {
+                    const cant   = parseFloat(i.cantidad);
+                    const precio = parseFloat(i.costo_actual);
+                    return `<tr>
+                        <td>${i.codigo || ''}</td>
+                        <td>${i.nombre || ''}</td>
+                        <td class="tc">${i.unidad_medida || 'u'}</td>
+                        <td class="tc"></td>
+                        <td class="tr">${cant.toFixed(4)}</td>
+                        <td class="tr">${precio.toFixed(4)}</td>
+                        <td class="tr bold">${(cant * precio).toFixed(2)}</td>
+                    </tr>`;
+                }).join('');
+
+                const css = `
+                    *{margin:0;padding:0;box-sizing:border-box}
+                    body{font-family:Arial,sans-serif;font-size:9.5pt;color:#000;background:#fff;padding:14mm 16mm}
+                    h1{font-size:11.5pt;text-align:center;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+                    h2{font-size:9.5pt;text-align:center;font-weight:normal;margin-bottom:10px}
+                    .page-break{page-break-before:always;padding-top:12mm}
+                    table{width:100%;border-collapse:collapse;font-size:8.5pt;margin-bottom:6px}
+                    th,td{border:1px solid #000;padding:2px 4px;vertical-align:middle}
+                    th{background:#d8d8d8;font-weight:bold;text-align:center;white-space:nowrap}
+                    .tc{text-align:center}.tr{text-align:right}.bold{font-weight:bold}
+                    .head-box{border:1px solid #000;padding:4px 8px;margin-bottom:8px;font-size:9pt;line-height:1.7}
+                    .head-box table{margin:0;font-size:9pt} .head-box td{border:none;padding:1px 4px}
+                    .row-total td{background:#e4e4e4;font-weight:bold}
+                    .row-sub td{background:#f2f2f2;font-weight:bold}
+                    .row-indent td:first-child{padding-left:18px}
+                    .row-indent2 td:first-child{padding-left:32px}
+                    .sign-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:18px;font-size:8.5pt}
+                    .sign-cell{border:1px solid #000;padding:4px 8px;line-height:1.6}
+                    .sign-cell .line{border-bottom:1px solid #555;min-height:22px;margin-bottom:2px}
+                    .note{font-size:7.5pt;color:#444;margin-top:4px;font-style:italic}
+                    .res-note{font-size:7pt;text-align:center;color:#555;margin-top:10px}
+                    @media print{.print-btn{display:none}body{padding:8mm 10mm}}
+                    .print-btn{text-align:center;margin-bottom:12px}
+                    .print-btn button{padding:5px 18px;font-size:10pt;cursor:pointer;background:#1a5276;color:#fff;border:none;border-radius:4px}
+                `;
+
+                // ── Ficha principal ───────────────────────────────────────────────────────
+                const mainFicha = `
+                <div style="text-align:center;font-weight:bold;font-size:10pt;border:2px solid #000;padding:4px;margin-bottom:6px">
+                    MINISTERIO DE FINANZAS Y PRECIOS<br>
+                    <span style="font-size:9pt">FICHA DE COSTOS Y GASTOS DE PRODUCTOS Y SERVICIOS<br>PARA LA EVALUACIÓN DE PRECIOS Y TARIFAS</span>
+                </div>
+
+                <div class="head-box">
+                    <table style="width:100%">
+                        <tr>
+                            <td style="width:60%"><b>Producto o Servicio:</b> ${r.nombre_receta}</td>
+                            <td></td>
+                        </tr>
+                        <tr>
+                            <td><b>Código Prod. o Serv.:</b> ${r.id_producto_final || ''}</td>
+                            <td><b>UM:</b> lote (${unidades} unid./lote)</td>
+                            <td><b>Nivel de Producción:</b></td>
+                            <td><b>% utilización capacidad:</b></td>
+                        </tr>
+                    </table>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:58%">CONCEPTOS</th>
+                            <th style="width:6%">Fila</th>
+                            <th style="width:18%">Costo Base ($)</th>
+                            <th style="width:18%">Costo Nuevo ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td class="bold">Gasto Material</td><td class="tc bold">1</td><td class="tr bold">${costoMatPrima.toFixed(2)}</td><td></td></tr>
+                        <tr class="row-indent2"><td>De ello: Insumos (Materias primas y materiales)</td><td class="tc">1.1</td><td class="tr">${costoInsumos.toFixed(2)}</td><td></td></tr>
+                        <tr class="row-indent2"><td>Combustibles y lubricantes</td><td class="tc">1.2</td><td></td><td></td></tr>
+                        <tr class="row-indent2"><td>Energía</td><td class="tc">1.3</td><td></td><td></td></tr>
+                        <tr class="row-indent2"><td>Agua</td><td class="tc">1.4</td><td></td><td></td></tr>
+                        <tr><td>Salario Directo o retribución directa</td><td class="tc bold">2</td><td></td><td></td></tr>
+                        <tr><td>Otros Gastos Directos (Desglosar)</td><td class="tc bold">3</td><td></td><td></td></tr>
+                        <tr><td>Gastos asociados a la producción</td><td class="tc bold">4</td><td></td><td></td></tr>
+                        <tr class="row-indent2"><td>De ello, salarios</td><td class="tc">4.1</td><td></td><td></td></tr>
+                        <tr class="row-total"><td>COSTO TOTAL (1+2+3+4)</td><td class="tc">5</td><td class="tr">${costoTotalParcial.toFixed(2)} *</td><td></td></tr>
+                        <tr><td>Gastos Generales y de Administración</td><td class="tc bold">6</td><td></td><td></td></tr>
+                        <tr class="row-indent2"><td>De ello, salarios</td><td class="tc">6.1</td><td></td><td></td></tr>
+                        <tr><td>Gastos de Distribución y Venta</td><td class="tc bold">7</td><td></td><td></td></tr>
+                        <tr class="row-indent2"><td>De ello, salarios</td><td class="tc">7.1</td><td></td><td></td></tr>
+                        <tr><td>Gastos Financieros</td><td class="tc bold">8</td><td></td><td></td></tr>
+                        <tr><td>Gastos por Financiamiento entregado a la OSDE</td><td class="tc bold">9</td><td></td><td></td></tr>
+                        <tr><td style="line-height:1.3">Gastos Tributarios (Contribución a la Seguridad Social e Impuesto sobre la Utilización de la Fuerza de Trabajo. Otros autorizados)</td><td class="tc bold">10</td><td></td><td></td></tr>
+                        <tr class="row-sub"><td>TOTAL DE GASTOS (suma de las filas 6, 7, 8, 9 y 10)</td><td class="tc">11</td><td></td><td></td></tr>
+                        <tr class="row-total"><td>TOTAL DE COSTOS Y GASTOS (5+11)</td><td class="tc">12</td><td></td><td></td></tr>
+                        <tr><td>Utilidad</td><td class="tc bold">13</td>
+                            <td class="tr">${precioVenta > 0 ? (precioVenta * unidades - costoTotalParcial).toFixed(2) : ''}</td><td></td></tr>
+                        <tr class="row-total"><td class="bold">PRECIO O TARIFA</td><td class="tc">14</td>
+                            <td class="tr bold">${precioVenta > 0 ? (precioVenta * unidades).toFixed(2) : ''}</td><td></td></tr>
+                        <tr class="row-total"><td class="bold">PRECIO O TARIFA UNITARIO AJUSTADO</td><td class="tc">15</td>
+                            <td class="tr bold">${precioVenta > 0 ? precioVenta.toFixed(2) : ''}</td><td></td></tr>
+                        <tr><td>Datos sobre precios de referencia</td><td class="tc">16</td><td colspan="2"></td></tr>
+                    </tbody>
+                </table>
+
+                <p class="note">* Fila 5 calculada sólo con Materias Primas (Fila 1). Complete las Filas 2, 3 y 4 para obtener el Costo Total definitivo.</p>
+
+                <div class="sign-grid">
+                    <div class="sign-cell"><div class="line"></div><b>Elaborado por:</b> &nbsp;&nbsp;&nbsp; <b>Firma:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Cargo:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Fecha:</b></div>
+                    <div class="sign-cell"><div class="line"></div><b>Aprobado por:</b> &nbsp;&nbsp;&nbsp; <b>Firma:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Cargo:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Fecha:</b></div>
+                </div>`;
+
+                // ── Anexo I: Desagregación de Insumos ────────────────────────────────────
+                const anexoInsumos = `
+                <div class="page-break">
+                <div style="text-align:center;font-weight:bold;font-size:10pt;border:2px solid #000;padding:3px;margin-bottom:6px">
+                    DESAGREGACIÓN DE LOS INSUMOS FUNDAMENTALES
+                </div>
+                <div class="head-box">
+                    <b>EMPRESA:</b> ${empresa} &nbsp;&nbsp;&nbsp;
+                    <b>CÓDIGO DEL PRODUCTO:</b> ${r.id_producto_final || ''} &nbsp;&nbsp;&nbsp;
+                    <b>DESCRIPCIÓN DEL PROD.:</b> ${r.nombre_receta}<br>
+                    <b>UNIDAD DE MEDIDA:</b> lote &nbsp;&nbsp;&nbsp;
+                    <b>CANTIDADES FÍSICAS:</b> ${unidades} unid./lote
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:10%">CÓDIGO<br>(1)</th>
+                            <th>PRODUCTOS<br>(2)</th>
+                            <th style="width:7%">UM<br>(3)</th>
+                            <th style="width:10%">COSTO BASE<br>(4)</th>
+                            <th style="width:12%">NORMA DE CONSUMO<br>(5)</th>
+                            <th style="width:12%">PRECIO UNITARIO<br>(6)</th>
+                            <th style="width:12%">COSTO PROPUESTO<br>7 (5×6)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${ingRows}
+                        <tr class="row-sub">
+                            <td colspan="6" class="tr bold">TOTAL</td>
+                            <td class="tr bold">${costoInsumos.toFixed(2)}</td>
+                        </tr>
+                        <tr class="row-total">
+                            <td colspan="6" class="tr bold">TOTAL INSUMOS</td>
+                            <td class="tr bold">${costoInsumos.toFixed(2)}</td>
+                        </tr>
+                        <tr><td></td><td>Combustibles y lubricantes</td><td class="tc">LITROS</td><td></td><td></td><td></td><td></td></tr>
+                        <tr><td></td><td>Energía eléctrica</td><td class="tc">kW</td><td></td><td></td><td></td><td></td></tr>
+                    </tbody>
+                </table>
+                <div class="sign-grid">
+                    <div class="sign-cell"><div class="line"></div><b>Elaborado por:</b> Nombre y apellidos &nbsp;&nbsp; <b>Cargo:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Firma:</b></div>
+                    <div class="sign-cell"><div class="line"></div><b>Aprobado por:</b> Nombre y apellidos &nbsp;&nbsp; <b>Cargo:</b> &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>Firma:</b></div>
+                </div>
+                </div>`;
+
+                // ── Anexo II: Gasto de Salario ────────────────────────────────────────────
+                const anexoSalario = `
+                <div class="page-break">
+                <div style="text-align:center;font-weight:bold;font-size:10pt;border:2px solid #000;padding:3px;margin-bottom:6px">
+                    GASTO DE SALARIO DE LOS OBREROS DE LA PRODUCCIÓN O LOS SERVICIOS
+                </div>
+                <div class="head-box">
+                    <b>Entidad:</b> ${empresa} &nbsp;&nbsp;&nbsp; <b>Órgano/Organismo:</b><br>
+                    <b>Descripción del producto o servicio:</b> ${r.nombre_receta} &nbsp;&nbsp;&nbsp;
+                    <b>Código:</b> ${r.id_producto_final || ''}<br>
+                    <b>Cantidad de U.F. a producir:</b> ${unidades} &nbsp;&nbsp;&nbsp; <b>UM:</b> lote
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Descripción de las operaciones<br>(1)</th>
+                            <th style="width:9%">Gasto de salario del Costo Base<br>(2)</th>
+                            <th style="width:9%">Cantidad de trabajadores por operación o actividad<br>(3)</th>
+                            <th style="width:9%">Categoría ocupacional<br>(4)</th>
+                            <th style="width:7%">Grupo escala<br>(5)</th>
+                            <th style="width:10%">Salario/hora por categoría y grupo (pesos y ctvos)<br>(6)</th>
+                            <th style="width:10%">Pagos adicionales (por hora)<br>(7)</th>
+                            <th style="width:9%">Norma de tiempo (en horas)<br>(8)</th>
+                            <th style="width:11%">Gasto de Salario del costo propuesto (pesos y ctvos)<br>(9) = 3×(6+7)×8</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td style="height:22px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                        <tr><td style="height:22px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                        <tr><td style="height:22px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                        <tr><td style="height:22px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                        <tr><td style="height:22px"></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                        <tr class="row-total"><td class="bold">TOTAL</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+                    </tbody>
+                </table>
+                <div class="sign-grid">
+                    <div class="sign-cell"><div class="line"></div><b>Confeccionado por:</b> Nombre y apellidos &nbsp;&nbsp; <b>FIRMA:</b> &nbsp;&nbsp;&nbsp; <b>DÍA:</b> ___ <b>MES:</b> ___ <b>AÑO:</b> ____</div>
+                    <div class="sign-cell"><div class="line"></div><b>Aprobado por:</b> Nombre y apellidos &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; <b>FIRMA:</b> &nbsp;&nbsp;&nbsp; <b>DÍA:</b> ___ <b>MES:</b> ___ <b>AÑO:</b> ____</div>
+                </div>
+                </div>`;
+
+                const w = window.open('', '_blank', 'width=1000,height=850');
+                w.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
+                <title>Ficha de Costos — ${r.nombre_receta}</title>
+                <style>${css}</style></head><body>
+                <div class="print-btn"><button onclick="window.print()">🖨️ Imprimir / Guardar PDF</button></div>
+                ${mainFicha}
+                ${anexoInsumos}
+                ${anexoSalario}
+                <p class="res-note">Confeccionada conforme a la Resolución No. 148/2023 del Ministerio de Finanzas y Precios de la República de Cuba — GOC-2023-593-O64</p>
+                </body></html>`);
+                w.document.close();
+            },
             loadHistory() { this.currentTab = 'history'; this.isEditing=false; this.api('get_history', this.historyFilter).then(d => this.history = d); },
             loadReports() { this.currentTab = 'reports'; this.isEditing=false; this.api('get_reports').then(d => this.reports = d); },
             canalBadge(canal) {

@@ -2,6 +2,7 @@
 // =============================================================
 // IsoCraft — Editor de Mapas Isométrico | PalWeb POS Marinero
 // =============================================================
+require_once 'config_loader.php';
 $seed     = isset($_GET['seed'])  ? abs(intval($_GET['seed'])) % 999999 : 42;
 $mapW     = isset($_GET['w'])     ? min(60, max(20, intval($_GET['w']))) : 40;
 $mapH     = isset($_GET['h'])     ? min(60, max(20, intval($_GET['h']))) : 40;
@@ -705,7 +706,7 @@ canvas.edit { cursor:crosshair; }
   </div>
   <div id="tp-body"><!-- JS --></div>
   <div id="tp-footer">
-    isocraft_tilemap.json — edita el campo "terrain" de cada tile para asignarlo al terreno correspondiente &nbsp;|&nbsp; Sistema PALWEB POS v3.0
+    isocraft_tilemap.json — edita el campo "terrain" de cada tile para asignarlo al terreno correspondiente &nbsp;|&nbsp; Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0
   </div>
 </div>
 
@@ -729,7 +730,7 @@ canvas.edit { cursor:crosshair; }
   <!-- Centro: info tile + footer -->
   <div id="bar-mid">
     <div id="tinfo">Haz clic en un tile para ver información</div>
-    <div id="footer-inline">Sistema PALWEB POS v3.0</div>
+    <div id="footer-inline">Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</div>
   </div>
 
   <!-- Derecha: botón menú -->

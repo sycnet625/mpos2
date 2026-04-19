@@ -82,7 +82,7 @@ if (isset($_GET['render_mode'])) {
         $stmtPagos->execute($paramsPagos);
         $resumenCrudo = $stmtPagos->fetchAll(PDO::FETCH_ASSOC);
 
-        // NORMALIZACIÓN EN PHP (BUCKETS)
+        // NORMALIZACIÓN EN PHP (BUCKETS - TODOS LOS PAGOS)
         $buckets = ['Efectivo' => 0, 'Transferencia' => 0, 'Tarjeta/Gasto' => 0];
         foreach ($resumenCrudo as $rp) {
             $m = strtolower($rp['metodo_pago']);
@@ -93,22 +93,73 @@ if (isset($_GET['render_mode'])) {
             else $buckets['Efectivo'] += $val; // Fallback para etiquetas raras o Mixto sin desglose
         }
 
+        // INGRESOS REALES (SOLO TICKETS POSITIVOS)
+        $filtroBase = $idSesion ? "v.id_caja = ?" : "DATE(v.fecha) = CURDATE()";
+
+        $sqlIngresosReales = "SELECT metodo_pago, SUM(monto_ajustado) as total_metodo
+                              FROM (
+                                 /* Caso A: Pagos de tickets positivos */
+                                 SELECT p.metodo_pago,
+                                        (p.monto * v.total / NULLIF((SELECT SUM(m2.monto) FROM ventas_pagos m2 WHERE m2.id_venta_cabecera = v.id), 0)) as monto_ajustado
+                                 FROM ventas_pagos p
+                                 JOIN ventas_cabecera v ON p.id_venta_cabecera = v.id
+                                 WHERE v.total > 0 AND $filtroBase
+
+                                 UNION ALL
+
+                                 /* Caso B: Tickets antiguos/legacy positivos sin desglose */
+                                 SELECT v.metodo_pago,
+                                        v.total as monto_ajustado
+                                 FROM ventas_cabecera v
+                                 WHERE v.total > 0 AND $filtroBase
+                                 AND NOT EXISTS (SELECT 1 FROM ventas_pagos p2 WHERE p2.id_venta_cabecera = v.id)
+                              ) as desglose
+                              GROUP BY metodo_pago";
+
+        // Arreglar los parámetros para la nueva consulta
+        $paramsReales = [];
+        if ($idSesion) {
+            $paramsReales[] = $idSesion;
+            $paramsReales[] = $idSesion;
+        }
+
+        $stmtReales = $pdo->prepare($sqlIngresosReales);
+        $stmtReales->execute($paramsReales);
+        $resumenReales = $stmtReales->fetchAll(PDO::FETCH_ASSOC);
+
+        // BUCKETS PARA INGRESOS REALES
+        $bucketsReales = ['Efectivo' => 0, 'Transferencia' => 0, 'Tarjeta/Gasto' => 0];
+        foreach ($resumenReales as $rp) {
+            $m = strtolower($rp['metodo_pago']);
+            $val = floatval($rp['total_metodo']);
+            if (strpos($m, 'efectivo') !== false) $bucketsReales['Efectivo'] += $val;
+            elseif (strpos($m, 'transferencia') !== false) $bucketsReales['Transferencia'] += $val;
+            elseif (strpos($m, 'tarjeta') !== false || strpos($m, 'gasto') !== false) $bucketsReales['Tarjeta/Gasto'] += $val;
+            else $bucketsReales['Efectivo'] += $val;
+        }
+
         // Calcular Totales Generales
-        $totalVenta = 0; $totalDev = 0;
-        
+        $totalVenta = 0; $totalDev = 0; $totalPagosRegistrados = 0;
+
         // Ventas netas (solo tickets positivos, ya que los anulados/devueltos enteros están en negativo)
         foreach ($tickets as $t) {
             $monto = floatval($t['total']);
             if ($monto > 0) $totalVenta += $monto;
         }
-        
+
         // Devoluciones (sumando los ítems devueltos en los detalles, para abarcar devoluciones parciales y totales)
         foreach ($allDetalles as $d) {
             $qty = floatval($d['cantidad']);
             if ($qty < 0) $totalDev += abs($qty * floatval($d['precio']));
         }
-        
-        $totalNeto = $totalVenta; // El total neto ya es la suma de los tickets positivos (los devueltos parciales ya tienen su total descontado)
+
+        // Total de pagos registrados (suma de todos los registros en ventas_pagos, incluyendo devoluciones)
+        foreach ($buckets as $monto) {
+            $totalPagosRegistrados += floatval($monto);
+        }
+
+        // El total neto es la suma de todos los pagos registrados (transacciones brutas)
+        $totalNeto = $totalPagosRegistrados;
 
         // RENDERIZADO HTML
         ?>
@@ -143,7 +194,7 @@ if (isset($_GET['render_mode'])) {
                         </div>
                         <div class="p-0">
                             <ul class="list-group list-group-flush small">
-                                <?php foreach ($buckets as $nombre => $monto): 
+                                <?php foreach ($bucketsReales as $nombre => $monto):
                                     if ($monto <= 0) continue;
                                     $icon = 'fa-money-bill-wave text-success';
                                     $textClass = 'text-success';
@@ -208,6 +259,11 @@ if (isset($_GET['render_mode'])) {
                                         onclick="refundTicketComplete(<?php echo $t['id']; ?>)"
                                         title="Devolución (admin)">
                                     <i class="fas fa-undo"></i>
+                                </button>
+                                <button class="btn btn-sm btn-info py-0 px-2 shadow-sm me-1"
+                                        onclick="openEditSale(<?php echo $t['id']; ?>)"
+                                        title="Editar venta">
+                                    <i class="fas fa-edit"></i>
                                 </button>
                             <?php endif; ?>
                             <button class="btn btn-sm btn-dark py-0 px-2 shadow-sm"

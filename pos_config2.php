@@ -9,6 +9,7 @@ ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'runtime_context.php';
 require_once 'inventory_suite_layout.php';
+require_once 'shop_skins.php';
 
 function poscfg_table_has_column(PDO $pdo, string $table, string $column): bool
 {
@@ -458,6 +459,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $replacePrivate = isset($_POST['replace_vapid_private']);
             $newPrivate = trim((string)($_POST['vapid_private_key'] ?? ''));
             $newConfig['vapid_private_key'] = $replacePrivate ? $newPrivate : ($currentConfig['vapid_private_key'] ?? '');
+
+            // Mapa de apariencia (skin) por sucursal
+            $skinIds = $_POST['skin_map_suc'] ?? [];
+            $skinVals = $_POST['skin_map_skin'] ?? [];
+            $validSkins = array_keys(shop_skin_all());
+            $skinMap = [];
+            foreach ($skinIds as $i => $sucId) {
+                $sucId = (int)$sucId;
+                $sk = (string)($skinVals[$i] ?? '');
+                if ($sucId <= 0 || $sk === '' || !in_array($sk, $validSkins, true)) continue;
+                $skinMap[(string)$sucId] = $sk;
+            }
+            $newConfig['sucursal_skins'] = $skinMap;
+
+            // Mapa de subdominios → sucursales
+            $sdHosts = $_POST['subdomain_map_host'] ?? [];
+            $sdSucs  = $_POST['subdomain_map_suc']  ?? [];
+            $sdAlms  = $_POST['subdomain_map_alm']  ?? [];
+            $sdMap = [];
+            foreach ($sdHosts as $i => $h) {
+                $h   = strtolower(trim((string)$h));
+                $suc = (int)($sdSucs[$i] ?? 0);
+                if ($h === '' || $suc <= 0) continue;
+                $sdMap[] = ['host' => $h, 'id_sucursal' => $suc, 'id_almacen' => (int)($sdAlms[$i] ?? 0)];
+            }
+            $newConfig['subdomain_sucursal_map'] = $sdMap;
 
             if (isset($_POST['metodo_id']) && is_array($_POST['metodo_id'])) {
                 $newConfig['metodos_pago'] = [];
@@ -1211,6 +1238,119 @@ unset($treeCompany);
                     <div class="col-md-6"><label class="form-label">Moneda default POS</label><select class="form-select" name="moneda_default_pos"><option value="CUP" <?php echo ($currentConfig['moneda_default_pos'] ?? 'CUP') === 'CUP' ? 'selected' : ''; ?>>CUP</option><option value="USD" <?php echo ($currentConfig['moneda_default_pos'] ?? '') === 'USD' ? 'selected' : ''; ?>>USD</option><option value="MLC" <?php echo ($currentConfig['moneda_default_pos'] ?? '') === 'MLC' ? 'selected' : ''; ?>>MLC</option></select></div>
                     <div class="col-md-3"><label class="form-label">Cambio USD</label><input type="number" step="0.01" name="tipo_cambio_usd" class="form-control" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_usd']); ?>"></div>
                     <div class="col-md-3"><label class="form-label">Cambio MLC</label><input type="number" step="0.01" name="tipo_cambio_mlc" class="form-control" value="<?php echo htmlspecialchars((string)$currentConfig['tipo_cambio_mlc']); ?>"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header fw-bold text-primary">🎨 Apariencia (Skin) por Sucursal</div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Cada sucursal puede usar una apariencia distinta (tipografías, colores y disposición). Se aplica automáticamente en la tienda web según la sucursal activa (resuelta por subdominio o configuración predeterminada).</p>
+                    <?php $skinCatalog = shop_skin_all(); $skinMapCur = $currentConfig['sucursal_skins'] ?? []; ?>
+                    <div class="row g-2 mb-3" id="skinPreviewRow">
+                        <?php foreach ($skinCatalog as $sid => $sk): ?>
+                        <div class="col-md-4 col-lg-2">
+                            <div class="border rounded p-2 h-100" style="font-size:.78rem">
+                                <div class="d-flex gap-1 mb-1">
+                                    <?php foreach (($sk['preview'] ?? []) as $c): ?>
+                                    <span style="display:inline-block;width:18px;height:18px;border-radius:4px;background:<?php echo htmlspecialchars($c); ?>;border:1px solid rgba(0,0,0,.1)"></span>
+                                    <?php endforeach; ?>
+                                </div>
+                                <div class="fw-bold"><?php echo htmlspecialchars($sk['nombre']); ?></div>
+                                <div class="text-muted" style="font-size:.68rem"><?php echo htmlspecialchars($sk['descripcion']); ?></div>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <table class="table table-sm table-bordered align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Sucursal</th>
+                                <th style="width:280px">Apariencia asignada</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($sucursales as $s):
+                                $cur = $skinMapCur[(string)$s['id']] ?? $skinMapCur[(int)$s['id']] ?? shop_skin_default();
+                            ?>
+                            <tr>
+                                <td>
+                                    <?php echo htmlspecialchars($s['nombre']); ?>
+                                    <small class="text-muted">(ID <?php echo (int)$s['id']; ?>)</small>
+                                    <input type="hidden" name="skin_map_suc[]" value="<?php echo (int)$s['id']; ?>">
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm" name="skin_map_skin[]">
+                                        <?php foreach ($skinCatalog as $sid => $sk): ?>
+                                        <option value="<?php echo htmlspecialchars($sid); ?>" <?php echo $cur === $sid ? 'selected' : ''; ?>><?php echo htmlspecialchars($sk['nombre']); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <div class="d-flex align-items-center gap-3 mt-2">
+                        <small class="text-muted"><i class="fas fa-info-circle me-1"></i>Los skins personalizados se guardan en <code>shop_skins_custom.json</code>. Los predefinidos están en <code>shop_skins.php</code>.</small>
+                        <a href="shop_skin_editor.php" class="btn btn-sm btn-outline-primary ms-auto text-nowrap" target="_blank">
+                            <i class="fas fa-palette me-1"></i>Abrir editor visual
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header fw-bold text-info">🌍 Subdominios por Sucursal</div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Cada subdominio (o dominio) abre la tienda mostrando los productos de la sucursal asignada. El almacén es opcional; si lo dejas en 0 usa el predeterminado de pos.cfg.</p>
+                    <table class="table table-sm table-bordered align-middle mb-2" id="subdomainTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Host / Dominio</th>
+                                <th style="width:200px">Sucursal</th>
+                                <th style="width:200px">Almacén (opcional)</th>
+                                <th style="width:40px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="subdomainRows">
+                            <?php
+                            $sdCurrent = $currentConfig['subdomain_sucursal_map'] ?? [];
+                            foreach ($sdCurrent as $sdEntry): ?>
+                            <tr>
+                                <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" value="<?php echo htmlspecialchars($sdEntry['host']); ?>" placeholder="ej: marinero.palweb.net"></td>
+                                <td>
+                                    <select class="form-select form-select-sm" name="subdomain_map_suc[]">
+                                        <option value="0">— Seleccionar —</option>
+                                        <?php foreach ($sucursales as $s): ?>
+                                        <option value="<?php echo $s['id']; ?>" <?php echo (int)($sdEntry['id_sucursal'] ?? 0) === (int)$s['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($s['nombre']); ?> (<?php echo $s['id']; ?>)</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm" name="subdomain_map_alm[]">
+                                        <option value="0">— Predeterminado —</option>
+                                        <?php foreach ($almacenes as $a): ?>
+                                        <option value="<?php echo $a['id']; ?>" <?php echo (int)($sdEntry['id_almacen'] ?? 0) === (int)$a['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($a['nombre']); ?> (<?php echo $a['id']; ?>)</option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </td>
+                                <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="fas fa-trash"></i></button></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="addSubdomainRow()"><i class="fas fa-plus me-1"></i>Agregar dominio</button>
+
+                    <script>
+                    const _sdSucOptions = `<?php foreach ($sucursales as $s): ?><option value="<?php echo $s['id']; ?>"><?php echo htmlspecialchars($s['nombre']); ?> (<?php echo $s['id']; ?>)</option><?php endforeach; ?>`;
+                    const _sdAlmOptions = `<?php foreach ($almacenes as $a): ?><option value="<?php echo $a['id']; ?>"><?php echo htmlspecialchars($a['nombre']); ?> (<?php echo $a['id']; ?>)</option><?php endforeach; ?>`;
+                    function addSubdomainRow() {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `
+                            <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" placeholder="ej: tienda.palweb.net"></td>
+                            <td><select class="form-select form-select-sm" name="subdomain_map_suc[]"><option value="0">— Seleccionar —</option>${_sdSucOptions}</select></td>
+                            <td><select class="form-select form-select-sm" name="subdomain_map_alm[]"><option value="0">— Predeterminado —</option>${_sdAlmOptions}</select></td>
+                            <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="fas fa-trash"></i></button></td>`;
+                        document.getElementById('subdomainRows').appendChild(tr);
+                    }
+                    </script>
                 </div>
             </div>
             <div class="card">

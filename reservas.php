@@ -1193,7 +1193,7 @@ if (isset($_GET['ajax'])) {
 </div>
 
 <?php include_once 'menu_master.php'; ?>
-<footer class="text-center text-muted py-3" style="font-size:.72rem;">Sistema PALWEB POS v3.0</footer>
+<footer class="text-center text-muted py-3" style="font-size:.72rem;">Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</footer>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
@@ -2046,7 +2046,7 @@ async function printReport() {
             <div class="report-body">
                 <div class="header">
                     <h1>📦 Reporte de Reservas — Productos sin Stock</h1>
-                    <div class="sub">Generado: ${printDate} · Sistema PALWEB POS v3.0</div>
+                    <div class="sub">Generado: ${printDate} · Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</div>
                 </div>
                 <div class="kpi-row">
                     <div class="kpi"><div class="num">${data.all_products.length}</div><div class="lbl">Productos reservados</div></div>
@@ -2060,7 +2060,7 @@ async function printReport() {
                 <h2>Sección 2 — A fabricar por semana del mes: ${data.month_name} ${data.year}</h2>
                 ${weekSections}
 
-                <div class="footer">Sistema PALWEB POS v3.0 · Reporte generado automáticamente</div>
+                <div class="footer">Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · Reporte generado automáticamente</div>
             </div>
         </body></html>`;
 

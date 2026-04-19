@@ -173,6 +173,7 @@ try {
     <title>BI & Finanzas de Sucursal</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
         .card-fin { border:none; border-radius:15px; box-shadow:0 5px 15px rgba(0,0,0,0.05); transition:transform 0.2s; height: 100%; }

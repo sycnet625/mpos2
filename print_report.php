@@ -4,6 +4,7 @@ session_start();
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) { die("Acceso denegado"); }
 
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // CONFIGURACIÓN MÍNIMA
 $id_sucursal = 1; 
@@ -85,7 +86,7 @@ try {
 <div class="container-fluid p-4">
     <div class="header-box d-flex justify-content-between align-items-end">
         <div>
-            <h1 class="fw-bold mb-0">PALWEB POS</h1>
+            <h1 class="fw-bold mb-0"><?= htmlspecialchars(config_loader_system_name()) ?></h1>
             <p class="mb-0 text-muted">Reporte de Cierre de Negocio</p>
         </div>
         <div class="text-end">
@@ -174,7 +175,6 @@ try {
         <button onclick="window.close()" class="btn btn-secondary">Cerrar</button>
     </div>
 </div>
-<center><small>Generado por PALWEB POS 3.0</small></center>
+<center><small>Generado por <?= htmlspecialchars(config_loader_system_name()) ?> 3.0</small></center>
 </body>
 </html>
-

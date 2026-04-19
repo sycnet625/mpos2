@@ -242,7 +242,7 @@ try {
     * Datos basados en movimientos históricos del Kardex.
 </div>
 <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">
-    Generado por PalWeb POS v2.1 (Kardex Engine) - <?php echo date('d/m/Y H:i'); ?>
+    Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v2.1 (Kardex Engine) - <?php echo date('d/m/Y H:i'); ?>
 </div>
 
 
@@ -250,4 +250,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

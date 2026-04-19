@@ -88,7 +88,8 @@ foreach ($allDetalles as $d) {
 }
 
 // 4. KPIs
-$totalVentaNeta = 0;
+$totalVentaNeta = 0;        // Suma de todos los pagos registrados (bruto)
+$ventasReales = 0;          // Suma de tickets positivos (neto después de devoluciones)
 $metodosPago = [];
 $conteoTickets = 0;
 $cantDevoluciones = 0;
@@ -98,25 +99,57 @@ $horaInicio = strtotime($sesion['fecha_apertura']);
 $horaFin = $sesion['fecha_cierre'] ? strtotime($sesion['fecha_cierre']) : time();
 $horasOperacion = max(1, round(($horaFin - $horaInicio) / 3600, 2));
 
+// Calcular venta neta desde ventas_pagos (todos los pagos registrados)
+$sqlTotalPagos = "SELECT SUM(monto) as total FROM ventas_pagos WHERE id_venta_cabecera IN (SELECT id FROM ventas_cabecera WHERE id_caja = ?)";
+$stmtTP = $pdo->prepare($sqlTotalPagos);
+$stmtTP->execute([$idSesion]);
+$totalVentaNeta = floatval($stmtTP->fetchColumn() ?? 0);
+
 foreach ($tickets as $t) {
-    $totalVentaNeta += $t['total'];
-    
+    // Ventas reales = solo tickets positivos
+    if ($t['total'] > 0) {
+        $ventasReales += $t['total'];
+        $conteoTickets++;
+    }
+
     if ($t['total'] < 0 || $t['cliente_nombre'] === 'DEVOLUCIÓN') {
         $cantDevoluciones++;
-        $valorDevoluciones += abs($t['total']); 
-    } else {
-        $conteoTickets++; 
+        $valorDevoluciones += abs($t['total']);
     }
 
     if (!isset($metodosPago[$t['metodo_pago']])) $metodosPago[$t['metodo_pago']] = 0;
     $metodosPago[$t['metodo_pago']] += $t['total'];
 }
 
-$ganancia = $totalVentaBruta - $totalCosto;
-$margen = ($totalVentaBruta != 0) ? ($ganancia / $totalVentaBruta) * 100 : 0; 
+// Ganancia = solo de tickets positivos (sin incluir devoluciones)
+$totalCostoPositivos = 0;
+$totalVentaBrutaPositivos = 0;
+foreach ($allDetalles as $d) {
+    if ($d['cantidad'] > 0) {  // Solo items positivos
+        $totalCostoPositivos += ($d['cantidad'] * $d['costo']);
+        $totalVentaBrutaPositivos += ($d['cantidad'] * $d['precio']);
+    }
+}
 
-$ticketPromedio = ($conteoTickets > 0) ? $totalVentaNeta / $conteoTickets : 0;
-$ventasPorHora = $totalVentaNeta / $horasOperacion;
+$ganancia = $totalVentaBrutaPositivos - $totalCostoPositivos;
+$margen = ($totalVentaBrutaPositivos != 0) ? ($ganancia / $totalVentaBrutaPositivos) * 100 : 0;
+
+// KPIs modificados según solicitud:
+$ticketPromedio = $ventasReales * 0.20; // 20% para Crecimiento Negoc.
+$ventasPorHora  = $ventasReales * 0.30; // 30% para nuevo KPI de Velocidad
+$variacion      = $ventasReales * 0.10; // 10% para nuevo KPI de Variación
+
+// Mantener el cálculo de ventas ayer por si se usa, pero la variable $variacion se sobreescribe arriba
+$fechaAyer = date('Y-m-d', strtotime('-1 day', strtotime($sesion['fecha_contable'])));
+$sqlVentasAyer = "SELECT COALESCE(SUM(monto), 0) as total FROM ventas_pagos
+                  WHERE id_venta_cabecera IN (
+                    SELECT id FROM ventas_cabecera
+                    WHERE DATE(fecha) = ? AND id_sucursal = ?
+                  )";
+$stmtAyer = $pdo->prepare($sqlVentasAyer);
+$stmtAyer->execute([$fechaAyer, $sucursalID]);
+$ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
+// La variable $variacion ya fue calculada como el 10% de ventasReales arriba.
 ?>
 
 <!DOCTYPE html>
@@ -125,6 +158,7 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Reporte Caja #<?php echo $idSesion; ?></title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <style>
@@ -156,7 +190,65 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
             display: inline-block;
             margin-top: 10px;
         }
-        @media print { * { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+        @media print {
+            * { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+            @page { size: A4 landscape; margin: 5mm 4mm; }
+            body { background-color: #fff !important; font-size: 8px; padding: 0 !important; margin: 0 !important; }
+            .no-print, .btn, #palweb-float-nav, .fas.fa-chevron-down, .kpi-icon, .text-center i { display: none !important; }
+            .container-fluid { width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
+
+            /* Compactar Cabecera */
+            .mb-4 { margin-bottom: 4px !important; }
+            h4 { font-size: 13px !important; display: inline-block; margin-right: 8px !important; }
+            .accounting-date-badge { padding: 1px 4px !important; font-size: 9px !important; margin: 0 !important; box-shadow: none !important; border: 1px solid #000 !important; }
+            .text-muted.small.mt-1 { display: inline-block; font-size: 8.5px !important; }
+
+            /* KPIs Grid */
+            .row { display: flex !important; flex-wrap: wrap !important; --bs-gutter-x: 3px !important; --bs-gutter-y: 3px !important; margin-bottom: 3px !important; }
+            .col-md-4 { width: 33.33% !important; flex: 0 0 auto !important; }
+
+            .kpi-card { padding: 3px 5px !important; border: 1px solid #bbb !important; box-shadow: none !important; height: auto !important; min-height: auto !important; }
+            h3 { font-size: 12px !important; font-weight: 800 !important; margin: 0 !important; }
+            small { font-size: 7.5px !important; }
+
+            /* Fila de Resaltado (Venta Neta, Reales, Ganancia) */
+            .kpi-highlight-row .kpi-card { border: 1px solid #000 !important; background-color: #f8f9fa !important; padding: 6px !important; }
+            .kpi-highlight-row h3 { font-size: 18px !important; color: #000 !important; }
+            .kpi-highlight-row small { font-size: 9px !important; font-weight: bold !important; color: #000 !important; }
+
+            /* Tabla principal ultra-compacta
+               Columnas visibles tras ocultar col1 (expand) y col6 (origen):
+               col2=Ticket  col3=Hora  col4=Cliente  col5=TipoSvc  col7=Pago  col8=Total */
+            .table { font-size: 7.5px !important; table-layout: fixed; width: 100% !important; border: 1px solid #ddd !important; }
+            .table th, .table td { padding: 1px 3px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+            .ticket-row td { font-size: 8px !important; }
+            .fs-5 { font-size: 10px !important; }
+
+            /* Ocultar col1 (expand) y col6 (origen/canal) de la tabla principal */
+            .card > .table-responsive > table th:nth-child(1),
+            .card > .table-responsive > table td:nth-child(1),
+            .card > .table-responsive > table th:nth-child(6),
+            .card > .table-responsive > table td:nth-child(6) { display: none !important; }
+
+            /* Anchos de columnas de la tabla principal (sobre 100% sin col1 y col6) */
+            .card > .table-responsive > table th:nth-child(2),
+            .card > .table-responsive > table td:nth-child(2) { width: 8% !important; }   /* Ticket */
+            .card > .table-responsive > table th:nth-child(3),
+            .card > .table-responsive > table td:nth-child(3) { width: 8% !important; }   /* Hora */
+            .card > .table-responsive > table th:nth-child(4),
+            .card > .table-responsive > table td:nth-child(4) { width: 38% !important; }  /* Cliente */
+            .card > .table-responsive > table th:nth-child(5),
+            .card > .table-responsive > table td:nth-child(5) { width: 14% !important; }  /* Tipo Svc */
+            .card > .table-responsive > table th:nth-child(7),
+            .card > .table-responsive > table td:nth-child(7) { width: 16% !important; }  /* Forma Pago */
+            .card > .table-responsive > table th:nth-child(8),
+            .card > .table-responsive > table td:nth-child(8) { width: 16% !important; text-align: right !important; font-size: 11px !important; font-weight: 900 !important; font-family: 'Roboto', Arial, sans-serif !important; } /* Total */
+
+            /* Sub-tabla de detalle: ocultar columna Acción (última) */
+            .detail-row table th:last-child,
+            .detail-row table td:last-child { display: none !important; }
+            .detail-row { padding: 1px !important; }
+        }
     </style>
 </head>
 <body class="p-3">
@@ -180,13 +272,14 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
                 <i class="far fa-clock"></i> <?php echo date('d/m/Y h:i A', strtotime($sesion['fecha_apertura'])); ?>
             </div>
         </div>
-        <div>
+        <div class="no-print">
+            <button onclick="window.print()" class="btn btn-success btn-sm"><i class="fas fa-print"></i> Imprimir A4 Horizontal</button>
             <a href="sales_history.php" class="btn btn-outline-secondary btn-sm"><i class="fas fa-history"></i> Historial</a>
             <a href="pos.php" class="btn btn-primary btn-sm"><i class="fas fa-desktop"></i> POS</a>
         </div>
     </div>
 
-    <div class="row g-3 mb-3">
+    <div class="row g-3 mb-2">
         <div class="col-md-4">
             <div class="kpi-card border-start border-4 border-danger">
                 <div class="d-flex justify-content-between align-items-center">
@@ -205,7 +298,7 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
         </div>
         <div class="col-md-4">
             <div class="kpi-card border-start border-4 border-primary">
-                <div class="d-flex justify-content-between align-items-center mb-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-primary fw-bold">RESUMEN POR PAGO</small>
                     <div class="text-primary"><i class="fas fa-wallet"></i></div>
                 </div>
@@ -214,9 +307,9 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
                         <div class="text-muted small">Sin movimientos</div>
                     <?php else: ?>
                         <?php foreach($metodosPago as $metodo => $valor): ?>
-                        <div class="d-flex justify-content-between border-bottom border-light pb-1 mb-1 small">
-                            <span class="text-muted text-uppercase"><?php echo htmlspecialchars($metodo); ?></span>
-                            <span class="fw-bold">$<?php echo number_format($valor, 2); ?></span>
+                        <div class="d-flex justify-content-between border-bottom border-light pb-0 mb-0 small">
+                            <span class="text-muted text-uppercase" style="font-size: 0.65rem;"><?php echo htmlspecialchars($metodo); ?></span>
+                            <span class="fw-bold" style="font-size: 0.75rem;">$<?php echo number_format($valor, 2); ?></span>
                         </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -225,11 +318,16 @@ $ventasPorHora = $totalVentaNeta / $horasOperacion;
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-primary bg-opacity-10 text-primary"><i class="fas fa-dollar-sign"></i></div><small class="text-muted fw-bold">VENTA NETA</small><h3 class="fw-bold mb-0">$<?php echo number_format($totalVentaNeta, 2); ?></h3></div></div>
-        <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-chart-line"></i></div><small class="text-muted fw-bold">GANANCIA</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ganancia, 2); ?></h3><small class="text-muted">Margen: <?php echo number_format($margen, 1); ?>%</small></div></div>
-        <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-info bg-opacity-10 text-info"><i class="fas fa-shopping-bag"></i></div><small class="text-muted fw-bold">TICKET PROM.</small><h3 class="fw-bold mb-0">$<?php echo number_format($ticketPromedio, 2); ?></h3></div></div>
-        <div class="col-md-3 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-warning bg-opacity-10 text-warning"><i class="fas fa-stopwatch"></i></div><small class="text-muted fw-bold">VELOCIDAD</small><h3 class="fw-bold mb-0">$<?php echo number_format($ventasPorHora, 2); ?></h3><small class="text-muted">/ hora</small></div></div>
+    <div class="row g-3 mb-2">
+        <div class="col-md-4 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-info bg-opacity-10 text-info"><i class="fas fa-chart-line"></i></div><small class="text-muted fw-bold">CRECIMIENTO NEGOC.</small><h3 class="fw-bold mb-0">$<?php echo number_format($ticketPromedio, 2); ?></h3><small class="text-muted">(20%)</small></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card"><div class="kpi-icon bg-warning bg-opacity-10 text-warning"><i class="fas fa-percentage"></i></div><small class="text-muted fw-bold">30% VENTA</small><h3 class="fw-bold mb-0">$<?php echo number_format($ventasPorHora, 2); ?></h3></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-coins"></i></div><small class="text-muted fw-bold">10% VENTA</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($variacion, 2); ?></h3></div></div>
+    </div>
+
+    <div class="row g-3 mb-3 kpi-highlight-row">
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-primary"><div class="kpi-icon bg-primary bg-opacity-10 text-primary"><i class="fas fa-dollar-sign"></i></div><small class="text-muted fw-bold">VENTA NETA</small><h3 class="fw-bold mb-0">$<?php echo number_format($totalVentaNeta, 2); ?></h3><small class="text-muted">(Total movimientos)</small></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-wallet"></i></div><small class="text-muted fw-bold">VENTAS REALES</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ventasReales, 2); ?></h3><small class="text-muted">(Neto)</small></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-chart-line"></i></div><small class="text-muted fw-bold">GANANCIA</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ganancia, 2); ?></h3><small class="text-muted">Margen: <?php echo number_format($margen, 1); ?>%</small></div></div>
     </div>
 
     <div class="card border-0 shadow-sm">

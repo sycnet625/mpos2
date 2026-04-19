@@ -104,18 +104,26 @@ window.POS_MONEDA_DEFAULT = <?= json_encode($config['moneda_default_pos'] ?? 'CU
 
                 <div class="mb-3 d-none bg-info bg-opacity-10 p-2 rounded border border-info" id="deliveryDiv">
                     <label class="small fw-bold text-primary mb-1"><i class="fas fa-motorcycle me-1"></i> Asignar Mensajero:</label>
-                    <select class="form-select form-select-sm border-primary" id="deliveryDriver">
+                    <select class="form-select form-select-sm border-primary mb-2" id="deliveryDriver">
                         <option value="">- Seleccionar -</option>
                         <?php foreach($mensajeros as $m): ?>
                             <option value="<?php echo htmlspecialchars($m); ?>"><?php echo htmlspecialchars($m); ?></option>
                         <?php endforeach; ?>
                     </select>
+                    <label class="small fw-bold text-primary mb-1"><i class="fas fa-dollar-sign me-1"></i> Costo de Mensajería:</label>
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-primary text-white border-primary">$</span>
+                        <input type="number" id="deliveryCostInput" class="form-control fw-bold text-end border-primary"
+                               placeholder="0.00" min="0" step="0.50" value="0"
+                               oninput="recalcDeliveryCost()">
+                        <span class="input-group-text bg-light text-muted small" id="deliveryCostHint">Total: $0.00</span>
+                    </div>
                 </div>
 
                 <input type="hidden" id="cliPhone"><input type="hidden" id="cliAddr"><input type="hidden" id="invTicketId">
                 <div class="form-check form-switch text-end"><input class="form-check-input" type="checkbox" id="printTicket" checked><label class="form-check-label small" for="printTicket">Imprimir Ticket</label></div>
             </div>
-            <div class="modal-footer p-0 border-0"><button class="btn btn-primary w-100 py-3 fw-bold fs-4 rounded-0" id="btn-confirm-payment" onclick="confirmPayment()">CONFIRMAR PAGO</button></div>
+            <div class="modal-footer p-0 border-0"><button class="btn btn-primary w-100 py-3 fw-bold fs-4 rounded-0" id="btn-confirm-payment" onclick="confirmPaymentSafe()">CONFIRMAR PAGO</button></div>
         </div>
     </div>
 </div>
@@ -124,6 +132,7 @@ window.POS_MONEDA_DEFAULT = <?= json_encode($config['moneda_default_pos'] ?? 'CU
 // ───── Estado del modal de pago ─────
 let posCurrentCurrency = 'CUP';
 let posCurrentTC       = 1.0;
+let deliveryCostBase   = 0; // Total del carrito sin mensajería
 
 window.setQuickAmount = function(amount) {
     const si = document.getElementById('singleAmountInput');
@@ -333,6 +342,11 @@ window.openPaymentModal = function() {
 
     let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct / 100)) * i.qty), 0);
     currentSaleTotal = sub * (1 - globalDiscountPct / 100);
+    deliveryCostBase = currentSaleTotal;
+
+    // Resetear costo mensajería
+    const dci = document.getElementById('deliveryCostInput');
+    if (dci) dci.value = '0';
 
     // Limpiar inputs mixtos
     document.querySelectorAll('.split-payment-input').forEach(el => el.value = '');
@@ -366,8 +380,32 @@ window.toggleServiceOptions = function() {
     const t = document.getElementById('serviceType').value;
     document.getElementById('deliveryDiv').classList.add('d-none');
     document.getElementById('reservationDiv').classList.add('d-none');
-    if (t === 'mensajeria' || t === 'delivery') document.getElementById('deliveryDiv').classList.remove('d-none');
+    if (t === 'mensajeria' || t === 'delivery') {
+        document.getElementById('deliveryDiv').classList.remove('d-none');
+    } else {
+        // Restaurar total base sin mensajería
+        currentSaleTotal = deliveryCostBase;
+        const dci = document.getElementById('deliveryCostInput');
+        if (dci) dci.value = '0';
+        updateTotalDisplay();
+    }
     if (t === 'reserva') document.getElementById('reservationDiv').classList.remove('d-none');
+};
+
+window.recalcDeliveryCost = function() {
+    const cost = parseFloat(document.getElementById('deliveryCostInput').value) || 0;
+    currentSaleTotal = deliveryCostBase + cost;
+    updateTotalDisplay();
+};
+
+function updateTotalDisplay() {
+    const montoDisplay = currentSaleTotal / posCurrentTC;
+    const sym = posCurrentCurrency === 'CUP' ? '$' : posCurrentCurrency + ' ';
+    document.getElementById('payment-total-due').innerText = sym + montoDisplay.toFixed(2);
+    const hint = document.getElementById('deliveryCostHint');
+    if (hint) hint.textContent = 'Total: $' + currentSaleTotal.toFixed(2);
+    if (currentPaymentMode !== 'mixed') calcChange();
+    else calculateMixedTotals();
 };
 
 // ───── Confirmar pago ─────
@@ -396,10 +434,11 @@ window.confirmPayment = async function() {
 
     const cliName = document.getElementById('cliName').value || 'Mostrador';
     const serv    = document.getElementById('serviceType').value;
-    let msj = '';
+    let msj = '', costoMensajeria = 0;
     if (serv === 'mensajeria' || serv === 'delivery') {
         msj = document.getElementById('deliveryDriver').value;
         if (!msj) return alert("Seleccione mensajero");
+        costoMensajeria = parseFloat(document.getElementById('deliveryCostInput').value) || 0;
     }
     let rDate = '', rAbono = 0;
     if (serv === 'reserva') {
@@ -417,6 +456,7 @@ window.confirmPayment = async function() {
         tipo_servicio:        serv,
         cliente_nombre:       cliName,
         mensajero_nombre:     msj,
+        costo_mensajeria:     costoMensajeria,
         fecha_reserva:        rDate,
         abono:                rAbono,
         id_caja:              cashId,

@@ -36,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='save_config') {
         substr(trim((string)($in['verify_token'] ?? $cfg['verify_token'] ?? 'palweb_bot_verify')),0,120),
         $waMode === 'web' ? '' : substr(trim((string)($in['wa_phone_number_id'] ?? $cfg['wa_phone_number_id'] ?? '')),0,80),
         $token,
-        substr(trim((string)($in['business_name'] ?? $cfg['business_name'] ?? 'PalWeb POS')),0,120),
+        substr(trim((string)($in['business_name'] ?? $cfg['business_name'] ?? ($config['marca_sistema_nombre'] ?? 'Sistema POS'))),0,120),
         trim((string)($in['welcome_message'] ?? $cfg['welcome_message'] ?? '')),
         trim((string)($in['menu_intro'] ?? $cfg['menu_intro'] ?? '')),
         trim((string)($in['no_match_message'] ?? $cfg['no_match_message'] ?? '')),

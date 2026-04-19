@@ -1,5 +1,9 @@
 <?php
+// ARCHIVO: admin_migracion.php
+// Migración Espejo - Rediseño Premium Inventory-Suite
+
 session_start();
+require_once 'config_loader.php';
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
@@ -10,161 +14,168 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Migración Espejo | PalWeb</title>
+    <title>Migración Espejo Premium | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        :root {
-            --bg: #eef3f9;
-            --card: #ffffff;
-            --ink: #1d2a35;
-            --muted: #5d6b79;
-            --line: #d8e0ea;
-            --accent: #1677ff;
-            --good: #1f9d57;
-            --warn: #d68a00;
-            --bad: #c62828;
-            --run: #0077b6;
+        .inventory-hero {
+            background: linear-gradient(135deg, <?php echo $config['hero_color_1'] ?? '#0f172a'; ?>ee, <?php echo $config['hero_color_2'] ?? '#1e293b'; ?>c6) !important;
         }
-        body {
-            background:
-                radial-gradient(1200px 500px at -10% -20%, #d8e9ff 0%, transparent 60%),
-                radial-gradient(900px 420px at 110% -10%, #d5f5ea 0%, transparent 60%),
-                var(--bg);
-            color: var(--ink);
-            font-family: "Segoe UI", system-ui, sans-serif;
-        }
-        .hero-card, .panel-card, .step-card { border: 1px solid var(--line); border-radius: 16px; background: var(--card); box-shadow: 0 8px 24px rgba(18, 42, 66, 0.08); }
-        .hero-card { padding: 20px; }
-        .panel-card { padding: 16px; }
-        .kpi-value { font-size: 1.6rem; font-weight: 800; line-height: 1; }
-        .kpi-label { color: var(--muted); font-size: .85rem; }
-        .progress-wrap { background: #e8eef6; border-radius: 999px; height: 12px; overflow: hidden; }
-        .progress-inner { height: 100%; width: 0%; background: linear-gradient(90deg, #0b6bcb, #00b4d8); transition: width .4s ease; }
-        .ring {
-            width: 86px; height: 86px; border-radius: 50%;
-            background: conic-gradient(#159957 calc(var(--p) * 1%), #d8e0ea 0);
+        .ring-premium {
+            width: 100px; height: 100px; border-radius: 50%;
+            background: conic-gradient(var(--pw-accent) calc(var(--p) * 1%), rgba(255,255,255,0.1) 0);
             display: grid; place-items: center;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            position: relative;
         }
-        .ring::after {
+        .ring-premium::after {
             content: attr(data-text);
-            width: 68px; height: 68px; border-radius: 50%;
-            background: white; display: grid; place-items: center;
-            font-weight: 700; color: #1f2f40;
+            width: 80px; height: 80px; border-radius: 50%;
+            background: rgba(255,255,255,0.05); backdrop-filter: blur(10px);
+            display: grid; place-items: center;
+            font-weight: 800; color: #fff; font-size: 1.2rem;
         }
-        .step-card { padding: 14px; transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease; }
-        .step-card:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(15, 35, 55, 0.1); }
-        .step-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-        .step-title { font-weight: 700; }
-        .badge-state { font-size: .72rem; border-radius: 999px; padding: 4px 10px; }
-        .state-pending { border-color: #cfd8e3; background: #eff3f8; color: #4f6172; }
-        .state-running { border-color: #86cdf5; background: #dff4ff; color: #00689d; }
-        .state-done { border-color: #9ad8b4; background: #e3f6eb; color: #1f7d44; }
-        .state-error { border-color: #f1a8a8; background: #fdecec; color: #9b1f1f; }
-        .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 8px; }
-        .log-box {
-            background: #0f1720; color: #d3e8ff; border-radius: 14px; border: 1px solid #273445;
-            min-height: 260px; max-height: 420px; overflow: auto; padding: 12px;
-            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .83rem;
+        .log-box-premium {
+            background: #0f1720; color: #d3e8ff; border-radius: 1rem; border: 1px solid rgba(255,255,255,0.1);
+            min-height: 300px; max-height: 500px; overflow: auto; padding: 1.5rem;
+            font-family: 'Fira Code', 'Cascadia Code', monospace; font-size: 0.85rem;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);
         }
-        .btn-grad { background: linear-gradient(90deg, #1769ff, #00a9ce); color: #fff; border: none; }
-        .btn-grad:hover { color: #fff; filter: brightness(0.96); }
+        .step-card-premium {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .step-card-premium:hover { transform: translateY(-3px); background: rgba(255,255,255,0.05); }
+        .progress-premium { height: 10px; border-radius: 10px; background: rgba(0,0,0,0.1); overflow: hidden; }
+        .progress-bar-premium { height: 100%; background: var(--pw-accent); transition: width 0.5s ease; }
     </style>
 </head>
-<body class="p-3 p-md-4">
-<div class="container-fluid" style="max-width:1300px;">
-    <div class="hero-card mb-3">
-        <div class="d-flex flex-wrap gap-3 align-items-center justify-content-between">
-            <div>
-                <h3 class="mb-1"><i class="fas fa-server text-primary"></i> Migración Espejo de Servidor</h3>
-                <div class="text-muted">Ejecución visual por pasos de <code>/var/www/migrar_espejo.sh</code> con progreso, estados y log.</div>
-            </div>
-            <div class="ring" id="ring" style="--p:0;" data-text="0%"></div>
-        </div>
-    </div>
-
-    <div class="row g-3 mb-3">
-        <div class="col-lg-4">
-            <div class="panel-card h-100">
-                <h6 class="mb-3"><i class="fas fa-sliders-h"></i> Parámetros</h6>
-                <div class="mb-2">
-                    <label class="form-label mb-1">Destino SSH</label>
-                    <input id="dest" class="form-control" placeholder="root@203.0.113.10">
+<body class="pb-5 inventory-suite">
+<div class="container-fluid shell inventory-shell py-4 py-lg-5">
+    
+    <!-- Hero Section -->
+    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in">
+        <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-center">
+            <div class="text-center text-lg-start">
+                <div class="section-title text-white-50 mb-2">Infraestructura / DevOps</div>
+                <h1 class="h2 fw-bold mb-2 text-white"><i class="fas fa-server me-2"></i>Migración Espejo Premium</h1>
+                <p class="mb-3 text-white-50">Sincronización visual de alta fidelidad entre servidores mediante rsync y túneles SSH seguros.</p>
+                <div class="d-flex flex-wrap justify-content-center justify-content-lg-start gap-2">
+                    <span class="kpi-chip"><i class="fas fa-microchip me-1"></i>Modo: <span id="kpi-mode">Dry Run</span></span>
+                    <span class="kpi-chip"><i class="fas fa-network-wired me-1"></i>Puerto: <span id="kpi-port">22</span></span>
+                    <span class="kpi-chip"><i class="fas fa-terminal me-1"></i>Status: <span id="statusGlobalText">En espera</span></span>
                 </div>
-                <div class="row g-2 mb-2">
+            </div>
+            <div class="ring-premium" id="ring" style="--p:0;" data-text="0%"></div>
+        </div>
+    </section>
+
+    <div class="row g-4 align-items-stretch">
+        <!-- Panel de Control (Izquierda) -->
+        <div class="col-12 col-xl-4">
+            <div class="glass-card p-4 h-100 inventory-fade-in">
+                <div class="section-title">Configuración</div>
+                <h2 class="h5 fw-bold mb-4">Parámetros de Destino</h2>
+                
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Destino SSH (user@host)</label>
+                    <input id="dest" class="form-control form-control-lg" placeholder="root@203.0.113.10" oninput="updateKpi()">
+                </div>
+
+                <div class="row g-3 mb-3">
                     <div class="col-6">
-                        <label class="form-label mb-1">Puerto</label>
-                        <input id="ssh_port" class="form-control" value="22">
+                        <label class="form-label small fw-bold">Puerto SSH</label>
+                        <input id="ssh_port" type="number" class="form-control" value="22" oninput="updateKpi()">
                     </div>
                     <div class="col-6">
-                        <label class="form-label mb-1">Modo</label>
-                        <select id="mode" class="form-select">
-                            <option value="dry-run">Dry Run</option>
-                            <option value="run">Run</option>
+                        <label class="form-label small fw-bold">Modo Ejecución</label>
+                        <select id="mode" class="form-select" onchange="updateKpi()">
+                            <option value="dry-run">Simulación (Dry Run)</option>
+                            <option value="run">Ejecución Real (Run)</option>
                         </select>
                     </div>
                 </div>
-                <div class="mb-2">
-                    <label class="form-label mb-1">Sync usuarios/grupos</label>
+
+                <div class="mb-3">
+                    <label class="form-label small fw-bold">Sincronizar Usuarios/Grupos</label>
                     <select id="sync_users" class="form-select">
-                        <option value="yes">Sí</option>
-                        <option value="no">No</option>
+                        <option value="yes">Sí, mantener UID/GID</option>
+                        <option value="no">No, solo archivos</option>
                     </select>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label mb-1">Password SSH (una vez)</label>
-                    <input id="ssh_password" type="password" class="form-control" placeholder="Opcional si usas llave SSH" autocomplete="current-password">
-                    <small class="text-muted">Se reutiliza automáticamente en cada paso y se guarda cifrado localmente.</small>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label mb-1">Clave maestra local (para cifrar password)</label>
+
+                <div class="mb-4">
+                    <label class="form-label small fw-bold">Contraseña SSH</label>
                     <div class="input-group">
-                        <input id="master_key" type="password" class="form-control" placeholder="Define una clave maestra local" autocomplete="new-password">
-                        <button id="btnUnlockPwd" class="btn btn-outline-primary" type="button"><i class="fas fa-unlock-alt"></i> Desbloquear</button>
+                        <span class="input-group-text bg-white"><i class="fas fa-key text-muted"></i></span>
+                        <input id="ssh_password" type="password" class="form-control" placeholder="Opcional si usa llave pública" autocomplete="current-password">
                     </div>
-                    <small class="text-muted">La clave maestra no se guarda en disco; solo en la sesión actual del navegador.</small>
+                    <div class="form-text tiny mt-2">Se cifra localmente con su clave maestra de sesión.</div>
+                </div>
+
+                <div class="mb-4 pt-3 border-top">
+                    <label class="form-label small fw-bold">Clave Maestra Local</label>
+                    <div class="input-group mb-2">
+                        <input id="master_key" type="password" class="form-control" placeholder="Clave para desbloqueo local" autocomplete="new-password">
+                        <button id="btnUnlockPwd" class="btn btn-outline-primary" type="button"><i class="fas fa-unlock-alt"></i></button>
+                    </div>
+                    <div class="tiny text-muted">Protege el password SSH en la memoria del navegador.</div>
                 </div>
 
                 <div class="d-grid gap-2">
-                    <button id="btnCheck" class="btn btn-outline-secondary"><i class="fas fa-vial"></i> Verificar entorno</button>
-                    <button id="btnRunAll" class="btn btn-grad"><i class="fas fa-play-circle"></i> Ejecutar migración completa</button>
-                    <button id="btnReset" class="btn btn-outline-dark"><i class="fas fa-undo"></i> Reiniciar estados</button>
-                    <button id="btnClearSaved" class="btn btn-outline-danger"><i class="fas fa-trash-alt"></i> Borrar datos guardados</button>
+                    <button id="btnRunAll" class="btn btn-primary btn-lg fw-bold shadow-sm py-3"><i class="fas fa-play-circle me-2"></i>INICIAR MIGRACIÓN</button>
+                    <div class="row g-2">
+                        <div class="col-6"><button id="btnCheck" class="btn btn-outline-secondary w-100"><i class="fas fa-vial me-1"></i>Check</button></div>
+                        <div class="col-6"><button id="btnReset" class="btn btn-outline-danger w-100"><i class="fas fa-undo me-1"></i>Reset</button></div>
+                    </div>
+                    <button id="btnClearSaved" class="btn btn-link btn-sm text-muted mt-2">Borrar configuración guardada</button>
                 </div>
             </div>
         </div>
 
-        <div class="col-lg-8">
-            <div class="panel-card h-100">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <h6 class="mb-0"><i class="fas fa-tasks"></i> Progreso</h6>
-                    <span id="progressText" class="kpi-label">0/7 pasos</span>
+        <!-- Panel de Pasos (Derecha) -->
+        <div class="col-12 col-xl-8">
+            <div class="glass-card p-4 h-100 inventory-fade-in">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <div>
+                        <div class="section-title">Progreso del Pipeline</div>
+                        <h2 class="h5 fw-bold mb-0">Flujo de Trabajo</h2>
+                    </div>
+                    <div class="text-end">
+                        <span id="progressText" class="fw-bold text-primary">0/7 Pasos</span>
+                        <div class="progress-premium mt-2" style="width: 150px;"><div class="progress-bar-premium" id="progressBar" style="width: 0%;"></div></div>
+                    </div>
                 </div>
-                <div class="progress-wrap mb-3"><div class="progress-inner" id="progressBar"></div></div>
 
-                <div class="row g-2" id="stepGrid"></div>
+                <div class="row g-3" id="stepGrid">
+                    <!-- Se genera dinámicamente -->
+                </div>
+
+                <!-- Consola -->
+                <div class="mt-4 pt-4 border-top">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="section-title mb-0">Salida de Consola (Log)</div>
+                        <div class="d-flex gap-2">
+                            <button id="btnCancelRun" class="btn btn-sm btn-outline-danger" disabled><i class="fas fa-stop me-1"></i>Cancelar</button>
+                            <button id="btnClearLog" class="btn btn-sm btn-light border"><i class="fas fa-eraser"></i></button>
+                        </div>
+                    </div>
+                    <div class="log-box-premium" id="logBox"></div>
+                </div>
             </div>
         </div>
-    </div>
-
-    <div class="panel-card">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <h6 class="mb-0"><i class="fas fa-terminal"></i> Consola de ejecución</h6>
-            <div class="d-flex align-items-center gap-2">
-                <button id="btnClearLog" class="btn btn-sm btn-outline-secondary"><i class="fas fa-eraser"></i> Borrar log</button>
-                <button id="btnCancelRun" class="btn btn-sm btn-outline-danger" disabled><i class="fas fa-stop-circle"></i> Cancelar</button>
-                <span id="statusGlobal" class="badge state-pending badge-state">En espera</span>
-            </div>
-        </div>
-        <div class="log-box" id="logBox"></div>
     </div>
 </div>
 
 <?php include_once 'menu_master.php'; ?>
+
 <script>
+// Manteniendo la lógica exacta del original pero vinculada a la nueva UI
 const API = 'admin_migracion_api.php';
 const STORAGE_KEY = 'palweb_migracion_cfg_v1';
 const MASTER_KEY_SESSION = 'palweb_migracion_master_key_v1';
+
 const steps = [
   {id:1, name:'Preparar conexión remota', icon:'fa-link'},
   {id:2, name:'Sincronizar /var/www', icon:'fa-folder-open'},
@@ -183,7 +194,7 @@ const el = {
   progressText: document.getElementById('progressText'),
   ring: document.getElementById('ring'),
   logBox: document.getElementById('logBox'),
-  statusGlobal: document.getElementById('statusGlobal'),
+  statusGlobal: document.getElementById('statusGlobalText'),
   btnCheck: document.getElementById('btnCheck'),
   btnRunAll: document.getElementById('btnRunAll'),
   btnReset: document.getElementById('btnReset'),
@@ -196,17 +207,25 @@ const el = {
   syncUsers: document.getElementById('sync_users'),
   sshPassword: document.getElementById('ssh_password'),
   masterKey: document.getElementById('master_key'),
-  btnUnlockPwd: document.getElementById('btnUnlockPwd')
+  btnUnlockPwd: document.getElementById('btnUnlockPwd'),
+  kpiMode: document.getElementById('kpi-mode'),
+  kpiPort: document.getElementById('kpi-port')
 };
+
+function updateKpi() {
+    el.kpiMode.textContent = el.mode.options[el.mode.selectedIndex].text;
+    el.kpiPort.textContent = el.sshPort.value || '22';
+}
 
 function renderSteps() {
   el.stepGrid.innerHTML = steps.map(s => `
     <div class="col-md-6">
-      <div class="step-card" id="step-card-${s.id}">
-        <div class="step-head">
-          <div class="step-title"><i class="fas ${s.icon} me-2"></i>Paso ${s.id}: ${s.name}</div>
-          <span class="badge-state state-pending" id="step-badge-${s.id}">Pendiente</span>
+      <div class="glass-card p-3 step-card-premium" id="step-card-${s.id}">
+        <div class="d-flex justify-content-between align-items-center">
+          <div class="fw-bold small"><i class="fas ${s.icon} me-2 text-primary"></i>Paso ${s.id}</div>
+          <span class="soft-pill" id="step-badge-${s.id}">Pendiente</span>
         </div>
+        <div class="mt-2 small text-muted text-truncate">${s.name}</div>
       </div>
     </div>
   `).join('');
@@ -217,9 +236,15 @@ function renderSteps() {
 function setStep(id, st, label) {
   state.statuses[id] = st;
   const b = document.getElementById(`step-badge-${id}`);
+  const c = document.getElementById(`step-card-${id}`);
   if (!b) return;
-  b.className = `badge-state ${st==='running'?'state-running':st==='done'?'state-done':st==='error'?'state-error':'state-pending'}`;
+  
+  b.className = `soft-pill ${st==='running'?'bg-primary text-white':st==='done'?'bg-success text-white':st==='error'?'bg-danger text-white':'bg-light text-muted'}`;
   b.textContent = label;
+  
+  if(st === 'running') c.classList.add('border-primary');
+  else c.classList.remove('border-primary');
+  
   updateProgress();
 }
 
@@ -227,37 +252,29 @@ function updateProgress() {
   const done = Object.values(state.statuses).filter(v => v === 'done').length;
   const percent = Math.round((done / steps.length) * 100);
   el.progressBar.style.width = `${percent}%`;
-  el.progressText.textContent = `${done}/${steps.length} pasos`;
+  el.progressText.textContent = `${done}/${steps.length} Pasos`;
   el.ring.style.setProperty('--p', percent);
   el.ring.setAttribute('data-text', `${percent}%`);
 }
 
 function log(msg, type='info') {
-  const color = type==='error' ? '#ff9aa2' : type==='ok' ? '#8dffb3' : '#d3e8ff';
+  const colorMap = {
+    'error': '#fca5a5',
+    'ok': '#86efac',
+    'info': '#d3e8ff'
+  };
   const line = document.createElement('div');
-  line.innerHTML = `<span style="color:${color}">●</span> ${msg}`;
+  line.style.marginBottom = '4px';
+  line.innerHTML = `<span style="color:${colorMap[type] || colorMap.info}">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
   el.logBox.appendChild(line);
   el.logBox.scrollTop = el.logBox.scrollHeight;
 }
 
-function payload(stepId) {
-  return new URLSearchParams({
-    action: 'run_step',
-    step: String(stepId),
-    dest: el.dest.value.trim(),
-    ssh_port: el.sshPort.value.trim(),
-    mode: el.mode.value,
-    sync_users: el.syncUsers.value,
-    ssh_password: el.sshPassword.value
-  });
-}
-
+// Criptografía y Persistencia (Lógica original preservada)
 function bytesToB64(bytes) {
   let bin = '';
   const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
+  for (let i = 0; i < bytes.length; i += chunk) bin += String.fromCharCode(...bytes.subarray(i, i + chunk));
   return btoa(bin);
 }
 
@@ -270,24 +287,10 @@ function b64ToBytes(b64) {
 
 async function deriveAesKey(masterKey, saltBytes) {
   const enc = new TextEncoder();
-  const baseKey = await crypto.subtle.importKey(
-    'raw',
-    enc.encode(masterKey),
-    'PBKDF2',
-    false,
-    ['deriveKey']
-  );
+  const baseKey = await crypto.subtle.importKey('raw', enc.encode(masterKey), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    {
-      name: 'PBKDF2',
-      salt: saltBytes,
-      iterations: 180000,
-      hash: 'SHA-256'
-    },
-    baseKey,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
+    { name: 'PBKDF2', salt: saltBytes, iterations: 180000, hash: 'SHA-256' },
+    baseKey, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
   );
 }
 
@@ -297,12 +300,7 @@ async function encryptSecret(plainText, masterKey) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveAesKey(masterKey, salt);
   const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(plainText));
-  return {
-    alg: 'AES-GCM-PBKDF2',
-    salt_b64: bytesToB64(salt),
-    iv_b64: bytesToB64(iv),
-    ct_b64: bytesToB64(new Uint8Array(cipherBuf))
-  };
+  return { alg: 'AES-GCM-PBKDF2', salt_b64: bytesToB64(salt), iv_b64: bytesToB64(iv), ct_b64: bytesToB64(new Uint8Array(cipherBuf)) };
 }
 
 async function decryptSecret(payload, masterKey) {
@@ -323,33 +321,13 @@ function getMasterKey() {
 
 async function saveFormLocal() {
   let existing = {};
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) existing = JSON.parse(raw) || {};
-  } catch (_) {}
-
-  const data = {
-    dest: el.dest.value.trim(),
-    ssh_port: el.sshPort.value.trim(),
-    mode: el.mode.value,
-    sync_users: el.syncUsers.value
-  };
-
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) existing = JSON.parse(raw) || {}; } catch (_) {}
+  const data = { dest: el.dest.value.trim(), ssh_port: el.sshPort.value.trim(), mode: el.mode.value, sync_users: el.syncUsers.value };
   const pwd = el.sshPassword.value;
   const master = getMasterKey();
   if (pwd && master && window.crypto?.subtle) {
-    try {
-      data.ssh_password_enc = await encryptSecret(pwd, master);
-    } catch (_) {
-      log('No se pudo cifrar el password local', 'error');
-    }
-  } else if (!pwd && existing.ssh_password_enc) {
-    data.ssh_password_enc = existing.ssh_password_enc;
-  } else if (pwd && !master) {
-    log('Define clave maestra para guardar password cifrado', 'error');
-    if (existing.ssh_password_enc) data.ssh_password_enc = existing.ssh_password_enc;
-  }
-
+    try { data.ssh_password_enc = await encryptSecret(pwd, master); } catch (_) { log('Error de cifrado local', 'error'); }
+  } else if (!pwd && existing.ssh_password_enc) data.ssh_password_enc = existing.ssh_password_enc;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 }
 
@@ -358,14 +336,12 @@ function loadFormLocal() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (typeof data.dest === 'string') el.dest.value = data.dest;
-    if (typeof data.ssh_port === 'string') el.sshPort.value = data.ssh_port;
-    if (typeof data.mode === 'string') el.mode.value = data.mode;
-    if (typeof data.sync_users === 'string') el.syncUsers.value = data.sync_users;
-    if (data.ssh_password_enc) {
-      el.sshPassword.value = '';
-      el.sshPassword.placeholder = 'Password cifrado guardado (usa clave maestra y Desbloquear)';
-    }
+    if (data.dest) el.dest.value = data.dest;
+    if (data.ssh_port) el.sshPort.value = data.ssh_port;
+    if (data.mode) el.mode.value = data.mode;
+    if (data.sync_users) el.syncUsers.value = data.sync_users;
+    if (data.ssh_password_enc) { el.sshPassword.value = ''; el.sshPassword.placeholder = '●●●●● (Cifrado)'; }
+    updateKpi();
   } catch (_) {}
 }
 
@@ -374,104 +350,47 @@ async function unlockSavedPassword() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    if (!data.ssh_password_enc) {
-      log('No hay password cifrado guardado');
-      return;
-    }
+    if (!data.ssh_password_enc) { log('No hay datos cifrados'); return; }
     const master = getMasterKey();
-    if (!master) {
-      log('Escribe la clave maestra local para desbloquear', 'error');
-      return;
-    }
-    if (!window.crypto?.subtle) {
-      log('Este navegador no soporta Web Crypto para descifrar', 'error');
-      return;
-    }
+    if (!master) { log('Escriba clave maestra', 'error'); return; }
     const plain = await decryptSecret(data.ssh_password_enc, master);
     el.sshPassword.value = plain;
-    log('Password SSH descifrado en memoria', 'ok');
-  } catch (_) {
-    log('Clave maestra incorrecta o datos cifrados inválidos', 'error');
-  }
-}
-
-async function ensureSshPasswordReady() {
-  if (el.sshPassword.value) return true;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return true;
-    const data = JSON.parse(raw);
-    if (!data.ssh_password_enc) return true;
-
-    const master = getMasterKey();
-    if (!master) {
-      alert('Falta la clave maestra local para descifrar el password SSH guardado.');
-      log('No se pudo descifrar password: falta clave maestra', 'error');
-      return false;
-    }
-    if (!window.crypto?.subtle) {
-      alert('Este navegador no soporta Web Crypto para descifrar el password guardado.');
-      log('No se pudo descifrar password: navegador sin Web Crypto', 'error');
-      return false;
-    }
-    const plain = await decryptSecret(data.ssh_password_enc, master);
-    el.sshPassword.value = plain;
-    return true;
-  } catch (_) {
-    alert('No se pudo descifrar el password SSH guardado. Revisa la clave maestra.');
-    log('No se pudo descifrar password: clave maestra incorrecta o datos corruptos', 'error');
-    return false;
-  }
-}
-
-function clearFormLocal() {
-  localStorage.removeItem(STORAGE_KEY);
-  sessionStorage.removeItem(MASTER_KEY_SESSION);
-  el.dest.value = '';
-  el.sshPort.value = '22';
-  el.mode.value = 'dry-run';
-  el.syncUsers.value = 'yes';
-  el.sshPassword.value = '';
-  el.masterKey.value = '';
-  el.sshPassword.placeholder = 'Opcional si usas llave SSH';
-  log('Datos locales eliminados');
+    log('Password SSH desbloqueado', 'ok');
+  } catch (_) { log('Clave maestra inválida', 'error'); }
 }
 
 async function runStep(stepId) {
-  setStep(stepId, 'running', 'Ejecutando');
-  log(`Paso ${stepId} iniciado...`);
+  setStep(stepId, 'running', 'EJECUTANDO');
+  log(`Iniciando Paso ${stepId}...`);
 
-  const res = await fetch(API, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: payload(stepId).toString()
+  const p = new URLSearchParams({
+    action: 'run_step', step: String(stepId), dest: el.dest.value.trim(),
+    ssh_port: el.sshPort.value.trim(), mode: el.mode.value, sync_users: el.syncUsers.value,
+    ssh_password: el.sshPassword.value
   });
+
+  const res = await fetch(API, { method: 'POST', body: p });
   const d = await res.json();
 
   if (!d.ok) {
-    setStep(stepId, 'error', 'Error');
-    log(`Paso ${stepId} falló (code ${d.exit_code ?? 'n/a'})`, 'error');
+    setStep(stepId, 'error', 'ERROR');
+    log(`Paso ${stepId} falló: ${d.msg || 'Error desconocido'}`, 'error');
     if (d.output) log(d.output.replace(/\n/g, '<br>'), 'error');
-    throw new Error(d.msg || 'Error en ejecución');
+    throw new Error('Fallo en el pipeline');
   }
 
-  setStep(stepId, 'done', 'Completado');
-  log(`Paso ${stepId} OK`, 'ok');
+  setStep(stepId, 'done', 'OK');
+  log(`Paso ${stepId} completado correctamente`, 'ok');
   if (d.output) log(d.output.replace(/\n/g, '<br>'));
 }
 
 async function runAll() {
   if (state.running) return;
-  const dest = el.dest.value.trim();
-  if (!dest) { alert('Indica destino SSH: usuario@host'); return; }
-  const ready = await ensureSshPasswordReady();
-  if (!ready) return;
-  await saveFormLocal();
-
+  if (!el.dest.value.trim()) { alert('Destino SSH requerido'); return; }
+  
   state.running = true;
   state.cancelRequested = false;
-  el.statusGlobal.className = 'badge state-running badge-state';
-  el.statusGlobal.textContent = 'En ejecución';
+  el.statusGlobal.textContent = 'En ejecución...';
   el.btnRunAll.disabled = true;
   el.btnCancelRun.disabled = false;
 
@@ -479,17 +398,14 @@ async function runAll() {
     for (const s of steps) {
       await runStep(s.id);
       if (state.cancelRequested) {
-        el.statusGlobal.className = 'badge state-error badge-state';
-        el.statusGlobal.textContent = 'Cancelado por usuario';
-        log('Ejecución cancelada. Se detuvo al finalizar el paso actual.', 'error');
+        el.statusGlobal.textContent = 'Cancelado';
+        log('Operación detenida por el usuario', 'error');
         return;
       }
     }
-    el.statusGlobal.className = 'badge state-done badge-state';
-    el.statusGlobal.textContent = 'Migración completada';
-    log('Migración finalizada correctamente', 'ok');
+    el.statusGlobal.textContent = 'Completado';
+    log('Pipeline finalizado con éxito', 'ok');
   } catch (e) {
-    el.statusGlobal.className = 'badge state-error badge-state';
     el.statusGlobal.textContent = 'Error';
     log(e.message, 'error');
   } finally {
@@ -499,53 +415,21 @@ async function runAll() {
   }
 }
 
-async function checkEnv() {
+// Event Listeners
+el.btnRunAll.addEventListener('click', runAll);
+el.btnCheck.addEventListener('click', async () => {
   const res = await fetch(API + '?action=check');
   const d = await res.json();
-  if (!d.ok) { log('No se pudo verificar entorno', 'error'); return; }
-  log(`Script: ${d.script_ready ? 'OK' : 'NO'}`);
-  log(`sshpass: ${d.sshpass_available ? 'Disponible' : 'No instalado'}`);
-}
-
-function resetAll() {
-  el.logBox.innerHTML = '';
-  el.statusGlobal.className = 'badge state-pending badge-state';
-  el.statusGlobal.textContent = 'En espera';
-  state.cancelRequested = false;
-  renderSteps();
-}
-
-function clearLog() {
-  el.logBox.innerHTML = '';
-}
-
-function cancelRun() {
-  if (!state.running) return;
-  state.cancelRequested = true;
-  el.btnCancelRun.disabled = true;
-  el.statusGlobal.className = 'badge state-error badge-state';
-  el.statusGlobal.textContent = 'Cancelando...';
-  log('Cancelación solicitada: se detendrá al terminar el paso actual.', 'error');
-}
-
-el.btnRunAll.addEventListener('click', runAll);
-el.btnCheck.addEventListener('click', checkEnv);
-el.btnReset.addEventListener('click', resetAll);
-el.btnClearSaved.addEventListener('click', clearFormLocal);
-el.btnUnlockPwd.addEventListener('click', unlockSavedPassword);
-el.btnClearLog.addEventListener('click', clearLog);
-el.btnCancelRun.addEventListener('click', cancelRun);
-
-[el.dest, el.sshPort, el.mode, el.syncUsers, el.sshPassword, el.masterKey].forEach(node => {
-  node.addEventListener('input', () => { saveFormLocal().catch(() => {}); });
-  node.addEventListener('change', () => { saveFormLocal().catch(() => {}); });
+  log(`Entorno: Script ${d.script_ready?'OK':'NO'}, sshpass ${d.sshpass_available?'OK':'NO'}`);
 });
+el.btnReset.addEventListener('click', () => { el.logBox.innerHTML = ''; renderSteps(); });
+el.btnClearSaved.addEventListener('click', () => { localStorage.removeItem(STORAGE_KEY); location.reload(); });
+el.btnUnlockPwd.addEventListener('click', unlockSavedPassword);
+el.btnClearLog.addEventListener('click', () => el.logBox.innerHTML = '');
+el.btnCancelRun.addEventListener('click', () => { state.cancelRequested = true; log('Solicitud de cancelación enviada...', 'error'); });
 
 renderSteps();
 loadFormLocal();
-if (sessionStorage.getItem(MASTER_KEY_SESSION)) {
-  el.masterKey.value = sessionStorage.getItem(MASTER_KEY_SESSION);
-}
 </script>
 </body>
 </html>

@@ -21,12 +21,17 @@ $orderBy     = $_GET['orderby'] ?? 'nombre';      // 'nombre', 'codigo', 'precio
 
 // Construcción de la Query
 // IMPORTANTE: El JOIN filtra por id_almacen Y id_sucursal para asegurar integridad
-$sql = "SELECT p.codigo, p.nombre, p.categoria, p.costo, p.precio, p.stock_minimo,
+$sql = "SELECT p.codigo, p.nombre, p.categoria, 
+               COALESCE(ps.precio_costo, p.costo) as costo, 
+               COALESCE(ps.precio_venta, p.precio) as precio, 
+               p.stock_minimo,
                COALESCE(s.cantidad, 0) as stock_actual
         FROM productos p
         LEFT JOIN stock_almacen s ON p.codigo = s.id_producto 
                                   AND s.id_almacen = :alm 
                                   AND s.id_sucursal = :suc
+        LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto 
+                                               AND ps.id_sucursal = :suc
         WHERE p.id_empresa = :emp AND p.activo = 1";
 
 // Filtro de Stock

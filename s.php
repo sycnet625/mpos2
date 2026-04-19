@@ -192,7 +192,7 @@ ob_end_flush();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PalWeb Shop - Sucursal <?= $SUC_ID ?></title>
+    <title><?= htmlspecialchars(config_loader_system_name()) ?> - Sucursal <?= $SUC_ID ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/animate.min.css">
@@ -1273,7 +1273,7 @@ ob_end_flush();
         <div class="d-flex align-items-center justify-content-between w-100 flex-wrap gap-3">
             <a href="shop.php" class="navbar-brand-premium">
                 <i class="fas fa-store"></i>
-                <span>PalWeb Shop</span>
+                <span><?= htmlspecialchars(config_loader_system_name()) ?></span>
                 <span class="badge-sucursal">Sucursal <?= $SUC_ID ?></span>
             </a>
             
@@ -2197,7 +2197,7 @@ ob_end_flush();
     // Mostrar mensaje de bienvenida
     document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => {
-            Toast.success('Bienvenido a PalWeb Shop', '¡Hola!');
+            Toast.success('Bienvenido a <?= addslashes(config_loader_system_name()) ?>', '¡Hola!');
         }, 1000);
     });
 </script>

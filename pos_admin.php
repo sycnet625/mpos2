@@ -4,6 +4,7 @@ ini_set('display_errors', 0);
 ini_set('max_execution_time', 600);
 ini_set('memory_limit', '512M');
 require_once 'db.php';
+require_once 'config_loader.php';
 
 $backupDir = __DIR__ . '/backups';
 if (!file_exists($backupDir)) mkdir($backupDir, 0777, true);
@@ -284,7 +285,7 @@ rsort($backups);
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Admin Panel | PalWeb</title>
+    <title>Admin Panel | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">

@@ -326,9 +326,9 @@ try {
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table mb-0 align-middle">
-                        <thead class="table-light"><tr><th style="width:50px"></th><th>ID</th><th>Fecha</th><th>Usuario</th><th>Almacén</th><th>Motivo Gral</th><th class="text-end">Total Pérdida</th><th class="text-center">Estado</th></tr></thead>
+                        <thead class="table-light"><tr><th style="width:50px"></th><th>ID</th><th>Fecha</th><th>Usuario</th><th>Almacén</th><th>Motivo Gral</th><th class="text-end">Total Pérdida</th><th class="text-center">Estado</th><th class="text-center">Impr.</th></tr></thead>
                         <tbody>
-                            <tr v-if="recentList.length===0"><td colspan="8" class="text-center py-4 text-muted">No hay historial reciente.</td></tr>
+                            <tr v-if="recentList.length===0"><td colspan="9" class="text-center py-4 text-muted">No hay historial reciente.</td></tr>
                             <template v-for="m in recentList">
                                 <tr :class="{'row-cancelled': m.estado === 'CANCELADA'}">
                                     <td class="text-center cursor-pointer text-muted" @click="m.expanded = !m.expanded"><i class="fas fa-chevron-down rotate-icon" :class="{'rotated': m.expanded}"></i></td>
@@ -342,9 +342,12 @@ try {
                                         <span v-if="m.estado === 'CANCELADA'" class="badge bg-danger">REVERTIDA</span>
                                         <button v-else @click="cancelMerma(m.id)" class="btn btn-outline-secondary btn-sm" title="Revertir y devolver stock"><i class="fas fa-undo"></i></button>
                                     </td>
+                                    <td class="text-center">
+                                        <button @click="printMerma(m)" class="btn btn-outline-primary btn-sm" title="Imprimir acta oficial"><i class="fas fa-print"></i></button>
+                                    </td>
                                 </tr>
                                 <tr v-if="m.expanded">
-                                    <td colspan="7" class="p-0">
+                                    <td colspan="9" class="p-0">
                                         <div class="bg-light p-3 border-start border-4 border-danger">
                                             <h6 class="small fw-bold text-muted mb-2">Detalle de productos:</h6>
                                             <table class="table table-sm table-bordered bg-white mb-0 small">
@@ -372,6 +375,16 @@ try {
     </div>
 
 <script>
+    const EMPRESA_DATA = <?php echo json_encode([
+        'nombre'   => $config['marca_empresa_nombre'] ?? $config['tienda_nombre'] ?? 'Empresa',
+        'direccion'=> $config['direccion'] ?? '',
+        'telefono' => $config['telefono'] ?? '',
+        'email'    => $config['email'] ?? '',
+        'nit'      => $config['nit'] ?? '',
+        'suc_id'   => $SUC_ID,
+        'alm_id'   => $ALM_ID,
+    ]); ?>;
+
     new Vue({
         el: '#app',
         data: {
@@ -439,7 +452,143 @@ try {
                     if(d.status==='success') { alert('✅ Merma revertida.'); window.location.reload(); } else { alert('❌ Error: ' + d.msg); }
                 } catch(e) { alert('Error de conexión'); }
             },
-            formatDate(d) { return d ? new Date(d).toLocaleString('es-ES') : '-'; }
+            formatDate(d) { return d ? new Date(d).toLocaleString('es-ES') : '-'; },
+            printMerma(m) {
+                const fmt = d => d ? new Date(d).toLocaleString('es-ES') : '-';
+                const totalPerdida = parseFloat(m.total_costo_perdida).toFixed(2);
+                const almacen = m.nombre_almacen || 'Principal';
+                const estado = m.estado === 'CANCELADA' ? 'REVERTIDA' : 'PROCESADA';
+
+                let itemsRows = '';
+                let sumTotal = 0;
+                (m.details || []).forEach((d, i) => {
+                    const subtotal = parseFloat(d.cantidad) * parseFloat(d.costo_al_momento);
+                    sumTotal += subtotal;
+                    itemsRows += `<tr>
+                        <td class="tc">${i+1}</td>
+                        <td>${d.nombre || ''} <span class="sku">(${d.id_producto})</span></td>
+                        <td class="tc">${d.motivo_especifico || '—'}</td>
+                        <td class="tr">${parseFloat(d.cantidad).toFixed(2)}</td>
+                        <td class="tr">$${parseFloat(d.costo_al_momento).toFixed(2)}</td>
+                        <td class="tr fw">$${subtotal.toFixed(2)}</td>
+                    </tr>`;
+                });
+
+                const html = `<!DOCTYPE html><html lang="es"><head>
+<meta charset="UTF-8">
+<title>Acta Merma #${m.id}</title>
+<style>
+  @page { size: A4; margin: 18mm 15mm 20mm 15mm; }
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  body{ font-family:'Arial',sans-serif; font-size:11px; color:#111; }
+  .page{ width:100%; }
+  /* --- HEADER --- */
+  .hdr{ display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2.5px solid #c0392b; padding-bottom:10px; margin-bottom:12px; }
+  .hdr-left h1{ font-size:16px; font-weight:700; color:#c0392b; margin-bottom:2px; }
+  .hdr-left p{ font-size:10px; color:#555; line-height:1.5; }
+  .hdr-right{ text-align:right; }
+  .hdr-right .doc-title{ font-size:19px; font-weight:900; color:#c0392b; text-transform:uppercase; letter-spacing:1px; }
+  .hdr-right .doc-num{ font-size:13px; font-weight:700; margin-top:2px; }
+  .hdr-right .doc-estado{ display:inline-block; margin-top:4px; padding:2px 8px; border-radius:3px; font-size:10px; font-weight:700; background:${m.estado==='CANCELADA'?'#c0392b':'#1a7a40'}; color:#fff; }
+  /* --- META --- */
+  .meta-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px 16px; margin-bottom:14px; }
+  .meta-box{ border:1px solid #ddd; border-radius:4px; padding:5px 8px; }
+  .meta-box .lbl{ font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:#888; }
+  .meta-box .val{ font-size:12px; font-weight:700; color:#111; margin-top:1px; }
+  /* --- TABLE --- */
+  table{ width:100%; border-collapse:collapse; margin-bottom:10px; }
+  thead tr{ background:#c0392b; color:#fff; }
+  thead th{ padding:6px 8px; font-size:10px; text-align:left; }
+  tbody tr:nth-child(even){ background:#fdf2f2; }
+  tbody td{ padding:5px 8px; border-bottom:1px solid #f0d8d8; font-size:11px; }
+  .tc{ text-align:center; }
+  .tr{ text-align:right; }
+  .fw{ font-weight:700; }
+  .sku{ color:#888; font-size:9px; }
+  tfoot td{ padding:6px 8px; border-top:2px solid #c0392b; font-size:12px; }
+  /* --- TOTALS --- */
+  .total-box{ display:flex; justify-content:flex-end; margin-bottom:16px; }
+  .total-inner{ border:2px solid #c0392b; border-radius:6px; padding:8px 20px; text-align:right; }
+  .total-inner .lbl{ font-size:10px; text-transform:uppercase; color:#888; }
+  .total-inner .val{ font-size:22px; font-weight:900; color:#c0392b; }
+  /* --- SIGNATURES --- */
+  .sigs{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; margin-top:28px; }
+  .sig-box{ text-align:center; }
+  .sig-line{ border-top:1.5px solid #333; margin-bottom:4px; margin-top:36px; }
+  .sig-label{ font-size:10px; color:#555; }
+  /* --- FOOTER --- */
+  .footer{ margin-top:18px; border-top:1px solid #ddd; padding-top:8px; font-size:9px; color:#999; text-align:center; }
+  .stamp-area{ border:1.5px dashed #c0392b; border-radius:6px; width:90px; height:70px; margin:20px auto 0; display:flex; align-items:center; justify-content:center; color:#c0392b; font-size:9px; text-align:center; opacity:.5; }
+  @media print{ body{ -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
+</style></head><body>
+<div class="page">
+  <div class="hdr">
+    <div class="hdr-left">
+      <h1>${EMPRESA_DATA.nombre}</h1>
+      <p>${EMPRESA_DATA.direccion}${EMPRESA_DATA.telefono ? ' &bull; Tel: '+EMPRESA_DATA.telefono : ''}${EMPRESA_DATA.email ? ' &bull; '+EMPRESA_DATA.email : ''}</p>
+      ${EMPRESA_DATA.nit ? `<p><strong>NIT/RUC:</strong> ${EMPRESA_DATA.nit}</p>` : ''}
+    </div>
+    <div class="hdr-right">
+      <div class="doc-title">Acta de Baja de Inventario</div>
+      <div class="doc-num">N&deg; MERMA-${String(m.id).padStart(6,'0')}</div>
+      <div class="doc-estado">${estado}</div>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-box"><div class="lbl">Fecha y Hora</div><div class="val">${fmt(m.fecha_registro)}</div></div>
+    <div class="meta-box"><div class="lbl">Almacén</div><div class="val">${almacen}</div></div>
+    <div class="meta-box"><div class="lbl">Responsable</div><div class="val">${m.usuario || '—'}</div></div>
+    <div class="meta-box"><div class="lbl">Sucursal</div><div class="val">N&deg; ${EMPRESA_DATA.suc_id}</div></div>
+    <div class="meta-box"><div class="lbl">Motivo General</div><div class="val">${m.motivo_general}</div></div>
+    <div class="meta-box"><div class="lbl">Generado el</div><div class="val">${new Date().toLocaleString('es-ES')}</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="tc" style="width:30px">#</th>
+        <th>Producto / Código</th>
+        <th style="width:120px">Motivo Específico</th>
+        <th class="tr" style="width:60px">Cant.</th>
+        <th class="tr" style="width:80px">Costo U.</th>
+        <th class="tr" style="width:90px">Subtotal</th>
+      </tr>
+    </thead>
+    <tbody>${itemsRows}</tbody>
+  </table>
+
+  <div class="total-box">
+    <div class="total-inner">
+      <div class="lbl">Total Pérdida de Inventario</div>
+      <div class="val">$${totalPerdida}</div>
+    </div>
+  </div>
+
+  <div class="sigs">
+    <div class="sig-box">
+      <div class="sig-line"></div>
+      <div class="sig-label"><strong>Responsable de Almacén</strong><br>Firma y sello</div>
+    </div>
+    <div class="sig-box">
+      <div class="sig-line"></div>
+      <div class="sig-label"><strong>Responsable Administrativo</strong><br>Firma y sello</div>
+    </div>
+    <div class="sig-box">
+      <div class="stamp-area">SELLO<br>OFICIAL</div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Documento generado por ${EMPRESA_DATA.nombre} &mdash; Sistema PalWeb POS &mdash; ${new Date().toLocaleString('es-ES')} &mdash; Este documento es un comprobante oficial de baja de inventario.
+  </div>
+</div>
+<script>window.onload=()=>{window.print();}<\/script>
+</body></html>`;
+
+                const w = window.open('', '_blank', 'width=900,height=700');
+                if (w) { w.document.write(html); w.document.close(); }
+            }
         }
     });
 </script>

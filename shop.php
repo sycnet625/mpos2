@@ -25,7 +25,7 @@ ob_start();
 // ── Cabeceras de Seguridad HTTP ──────────────────────────────────────────────
 // Content-Security-Policy: los scripts e inline-styles son necesarios por la
 // arquitectura monolítica; migrar a nonces/hashes en refactorización futura.
-header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://www.googletagmanager.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com https://www.googletagmanager.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
 // HTTP/2: informa al cliente que el servidor soporta h2 en el puerto 443.
 // La habilitación real del protocolo requiere configuración en Nginx/Apache.
 header("Alt-Svc: h2=\":443\"; ma=86400");
@@ -39,12 +39,24 @@ header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
 
+// CSRF token por sesión (protege checkout, login y registro)
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$CSRF_TOKEN = $_SESSION['csrf_token'];
+
 require_once 'config_loader.php';
 require_once 'push_notify.php';
+require_once 'shop_skins.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
+
+// Skin activo para esta sucursal
+$ACTIVE_SKIN_ID   = shop_skin_for_sucursal($SUC_ID, $config);
+$ACTIVE_SKIN      = shop_skin_get($ACTIVE_SKIN_ID);
+$ACTIVE_SKIN_BODY_CLASS = $ACTIVE_SKIN['body_class'] ?? '';
 $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
 
 // Datos de tarjeta para pasarela de transferencia
@@ -63,20 +75,35 @@ $systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS 
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 
+// Cache estático para evitar N+1 de file_exists (se llena una sola vez por request)
 function shop_image_meta(string $code): array {
+    static $cache    = null;
+    static $dirCache = [];
+
     $safe = trim($code);
     if ($safe === '' || !preg_match('/^[A-Za-z0-9_.-]+$/', $safe)) return [false, 0];
-    $bases = [
-        __DIR__ . '/assets/product_images/' . $safe,
-        dirname(__DIR__) . '/assets/product_images/' . $safe,
-    ];
-    foreach ($bases as $base) {
-        foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $ext) {
-            $f = $base . $ext;
-            if (file_exists($f)) return [true, (int)filemtime($f)];
+
+    // Primera llamada: pre-escanear el directorio completo con glob() (1 syscall)
+    if ($cache === null) {
+        $cache = [];
+        $dirs  = [
+            __DIR__ . '/assets/product_images/',
+            dirname(__DIR__) . '/assets/product_images/',
+        ];
+        foreach ($dirs as $dir) {
+            if (!is_dir($dir)) continue;
+            foreach (glob($dir . '*.{avif,webp,jpg,jpeg}', GLOB_BRACE) as $f) {
+                $base = basename($f);
+                // Guardar el primer formato encontrado por nombre base (sin extensión)
+                $stem = pathinfo($base, PATHINFO_FILENAME);
+                if (!isset($cache[$stem])) {
+                    $cache[$stem] = [true, (int)filemtime($f)];
+                }
+            }
         }
     }
-    return [false, 0];
+
+    return $cache[$safe] ?? [false, 0];
 }
 
 try {
@@ -418,6 +445,42 @@ if (isset($input_client_api['action_client'])) {
     header('Content-Type: application/json; charset=utf-8');
     $act = $input_client_api['action'] ?? '';
 
+    // Validar CSRF token en acciones que modifican estado
+    $csrfActionsProtected = ['login', 'register', 'submit_review', 'toggle_wishlist', 'update_profile'];
+    if (in_array($act, $csrfActionsProtected, true)) {
+        $sentToken = $input_client_api['csrf_token'] ?? '';
+        if (!hash_equals($_SESSION['csrf_token'] ?? '', $sentToken)) {
+            http_response_code(403);
+            echo json_encode(['status' => 'error', 'msg' => 'Token de seguridad inválido. Recarga la página.']);
+            exit;
+        }
+    }
+
+    // Rate limiting: max 10 intentos por IP en 60 segundos (APCu o sesión)
+    $rl_ip  = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+    $rl_key = 'rl_shop_auth_' . md5($rl_ip);
+    $rl_max = 10; $rl_win = 60;
+    if (function_exists('apcu_fetch')) {
+        $rl_hits = (int)apcu_fetch($rl_key);
+        if ($rl_hits >= $rl_max) {
+            http_response_code(429);
+            echo json_encode(['status' => 'error', 'msg' => 'Demasiados intentos. Espera un minuto.']);
+            exit;
+        }
+        apcu_add($rl_key, 0, $rl_win);
+        apcu_inc($rl_key);
+    } else {
+        // Fallback: sesión PHP (menos preciso pero funciona sin APCu)
+        if (!isset($_SESSION['rl_auth'])) $_SESSION['rl_auth'] = ['n' => 0, 't' => time()];
+        if (time() - $_SESSION['rl_auth']['t'] > $rl_win) $_SESSION['rl_auth'] = ['n' => 0, 't' => time()];
+        if ($_SESSION['rl_auth']['n'] >= $rl_max) {
+            http_response_code(429);
+            echo json_encode(['status' => 'error', 'msg' => 'Demasiados intentos. Espera un minuto.']);
+            exit;
+        }
+        $_SESSION['rl_auth']['n']++;
+    }
+
     try {
         // LOGIN
         if ($act === 'login') {
@@ -444,9 +507,10 @@ if (isset($input_client_api['action_client'])) {
                 if (empty($input_client_api['captcha_ans'])) $missing[] = 'Captcha';
                 throw new Exception("Campos obligatorios incompletos: " . implode(", ", $missing) . ".");
             }
-            if (intval($input_client_api['captcha_ans']) !== intval($input_client_api['captcha_val'])) {
+            if (intval($input_client_api['captcha_ans']) !== intval($_SESSION['captcha_reg'] ?? -1)) {
                 throw new Exception("Captcha incorrecto. Eres un robot?");
             }
+            unset($_SESSION['captcha_reg'], $_SESSION['captcha_q']);
             
             $hash = password_hash($input_client_api['password'], PASSWORD_DEFAULT);
             $stmt = $pdo->prepare("INSERT INTO clientes_tienda (nombre, telefono, password_hash, direccion) VALUES (?, ?, ?, ?)");
@@ -529,14 +593,15 @@ if (isset($input_client_api['action_client'])) {
 }
 
 // --- ACTUALIZAR CARRITO ABANDONADO ---
-if (isset($_POST['update_cart_tracker'])) {
+if (isset($input_client_api['update_cart_tracker'])) {
     while (ob_get_level()) ob_end_clean();
     header('Content-Type: application/json');
-    $input = json_decode(file_get_contents('php://input'), true);
     try {
-        $stmt = $pdo->prepare("INSERT INTO carritos_abandonados (session_id, items_json, total) VALUES (?, ?, ?) 
+        $cartItems = $input_client_api['items'] ?? [];
+        $cartTotal = $input_client_api['total'] ?? 0;
+        $stmt = $pdo->prepare("INSERT INTO carritos_abandonados (session_id, items_json, total) VALUES (?, ?, ?)
                                ON DUPLICATE KEY UPDATE items_json = ?, total = ?, fecha_actualizacion = NOW()");
-        $stmt->execute([session_id(), json_encode($input['items']), $input['total'], json_encode($input['items']), $input['total']]);
+        $stmt->execute([session_id(), json_encode($cartItems), $cartTotal, json_encode($cartItems), $cartTotal]);
         echo json_encode(['status' => 'ok']);
     } catch (Exception $e) { echo json_encode(['error' => $e->getMessage()]); }
     exit;
@@ -551,6 +616,18 @@ if (isset($_GET['action_view_product'])) {
         $pdo->prepare("INSERT INTO vistas_productos (codigo_producto, ip) VALUES (?, ?)")->execute([$code, $_SERVER['REMOTE_ADDR']]);
     }
     echo json_encode(['status' => 'ok']);
+    exit;
+}
+
+// =========================================================
+//  API: GENERAR CAPTCHA NUEVO (server-side, almacena en sesión)
+// =========================================================
+if (isset($_GET['action_new_captcha'])) {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $cn1 = rand(1, 10); $cn2 = rand(1, 10);
+    $_SESSION['captcha_reg'] = $cn1 + $cn2;
+    echo json_encode(['q' => "$cn1 + $cn2 ="]);
     exit;
 }
 
@@ -573,6 +650,25 @@ if (isset($input_client_api['action_restock_aviso'])) {
     } catch (Exception $e) {
         echo json_encode(['error' => $e->getMessage()]);
     }
+    exit;
+}
+
+// =========================================================
+//  API: JS ERROR LOGGING
+// =========================================================
+if (isset($_GET['action_js_error'])) {
+    while (ob_get_level()) ob_end_clean();
+    header('Content-Type: application/json; charset=utf-8');
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    $msg  = substr(trim($body['msg']  ?? ''), 0, 500);
+    $src  = substr(trim($body['src']  ?? ''), 0, 200);
+    $line = intval($body['line'] ?? 0);
+    $ua   = substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 200);
+    $ip   = $_SERVER['REMOTE_ADDR'] ?? '';
+    if ($msg) {
+        error_log("[JS-shop] {$msg} @ {$src}:{$line} | UA:{$ua} | IP:{$ip}");
+    }
+    echo json_encode(['ok' => 1]);
     exit;
 }
 
@@ -634,7 +730,7 @@ if (isset($_GET['action_variants'])) {
     exit;
 }
 
-// ── Build compact product list for client-side JS cache (Feature 11) ──
+// ── Build compact product list for client-side JS cache ──────────────────────
 $productsJs = [];
 foreach ($productos as $_p) {
     [$_hasImg, $_imgV] = shop_image_meta((string)$_p['codigo']);
@@ -658,28 +754,73 @@ foreach ($productos as $_p) {
     ];
 }
 
-// Endpoint: catálogo como JSON para refresh silencioso al reconectar
+// ── Endpoint: catálogo JSON con ETag para evitar retransmisión innecesaria ────
 if (isset($_GET['action']) && $_GET['action'] === 'products_json') {
     ob_end_clean();
-    header('Content-Type: application/json');
-    header('Cache-Control: no-store');
-    echo json_encode(['products' => $productsJs, 'ts' => time()], JSON_UNESCAPED_UNICODE);
+    $catalogJson = json_encode(['products' => $productsJs, 'suc' => $SUC_ID], JSON_UNESCAPED_UNICODE);
+    $etag = '"' . md5($catalogJson) . '"';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-cache'); // revalidar siempre, pero usar ETag
+    header('ETag: ' . $etag);
+    header('Vary: Accept-Encoding');
+    if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && $_SERVER['HTTP_IF_NONE_MATCH'] === $etag) {
+        http_response_code(304);
+        exit;
+    }
+    if (str_contains($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '', 'gzip')) {
+        header('Content-Encoding: gzip');
+        echo gzencode($catalogJson, 6);
+    } else {
+        echo $catalogJson;
+    }
     exit;
 }
 
-ob_end_flush();
+// Captcha inicial para el formulario de registro
+if (empty($_SESSION['captcha_reg'])) {
+    $captcha_n1 = rand(1, 10); $captcha_n2 = rand(1, 10);
+    $_SESSION['captcha_reg'] = $captcha_n1 + $captcha_n2;
+    $_SESSION['captcha_q']   = "$captcha_n1 + $captcha_n2 =";
+}
+
+// Gzip del HTML si el cliente lo soporta y el servidor no lo hace globalmente
+if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_ENCODING'] ?? '', 'gzip')) {
+    ob_end_clean();
+    ob_start('ob_gzhandler');
+} else {
+    ob_end_flush();
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
+<!-- Google Analytics — cargado en idle para no bloquear FCP/LCP -->
 <script>
   window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
+  window.gtag = function(){dataLayer.push(arguments);};
+  // Cola de eventos antes de que cargue el script real
   gtag('js', new Date());
+  gtag('config', 'G-ZM015S9N6M', {send_page_view: false});
 
-  gtag('config', 'G-ZM015S9N6M');
+  function _loadGA() {
+    if (window._gaLoaded) return;
+    window._gaLoaded = true;
+    var s = document.createElement('script');
+    s.src = 'https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M';
+    s.async = true;
+    s.onload = function(){ gtag('event', 'page_view'); };
+    document.head.appendChild(s);
+  }
+
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(_loadGA, {timeout: 4000});
+  } else {
+    // Fallback: carga tras primer evento de usuario o a los 4s
+    ['pointerdown','touchstart','scroll','keydown'].forEach(function(e){
+      window.addEventListener(e, _loadGA, {once:true, passive:true});
+    });
+    setTimeout(_loadGA, 4000);
+  }
 </script>
 
     <meta charset="UTF-8">
@@ -707,27 +848,28 @@ ob_end_flush();
 
     <!-- Structured Data: LocalBusiness -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "LocalBusiness",
-      "name": "<?php echo addslashes($storeName); ?>",
-      "url": "<?php echo addslashes($siteUrl); ?>",
-      "image": "<?php echo addslashes($metaImg); ?>",
-      "description": "<?php echo addslashes($metaDesc); ?>",
-      "address": {
-        "@type": "PostalAddress",
-        "streetAddress": "<?php echo addslashes($storeAddr); ?>",
-        "addressLocality": "La Habana",
-        "addressCountry": "CU"
-      },
-      "telephone": "<?php echo addslashes($storeTel); ?>"
-      <?php if ($fbUrl): ?>,"sameAs": [
-        "<?php echo addslashes($fbUrl); ?>"
-        <?php if ($xUrl): ?>, "<?php echo addslashes($xUrl); ?>"<?php endif; ?>
-        <?php if ($igUrl): ?>, "<?php echo addslashes($igUrl); ?>"<?php endif; ?>
-        <?php if ($ytUrl): ?>, "<?php echo addslashes($ytUrl); ?>"<?php endif; ?>
-      ]<?php endif; ?>
+    <?php
+    $ldJson = [
+        '@context' => 'https://schema.org',
+        '@type'    => 'LocalBusiness',
+        'name'     => $storeName,
+        'url'      => $siteUrl,
+        'image'    => $metaImg,
+        'description' => $metaDesc,
+        'address'  => [
+            '@type'           => 'PostalAddress',
+            'streetAddress'   => $storeAddr,
+            'addressLocality' => 'La Habana',
+            'addressCountry'  => 'CU',
+        ],
+        'telephone' => $storeTel,
+    ];
+    if ($fbUrl) {
+        $sameAs = array_filter([$fbUrl, $xUrl, $igUrl, $ytUrl]);
+        $ldJson['sameAs'] = array_values($sameAs);
     }
+    echo json_encode($ldJson, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_HEX_TAG);
+    ?>
     </script>
 
     <!-- PWA Tienda -->
@@ -738,13 +880,111 @@ ob_end_flush();
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
 
-    <!-- Performance: preconnect -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="dns-prefetch" href="//fonts.googleapis.com">
+    <!-- Performance: preconnect + preload recursos críticos -->
+    <!-- Fuentes servidas en local — sin peticiones externas -->
 
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/all.min.css">
+    <!-- Fuentes WOFF2 críticas: preload para eliminar FOIT -->
+    <link rel="preload" href="assets/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/js/bootstrap.bundle.min.js" as="script">
+
+    <!-- Bootstrap CSS — async (no render-blocking). El CSS crítico va inline abajo. -->
+    <link rel="preload" href="assets/css/bootstrap.min.css" as="style"
+          onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="assets/css/bootstrap.min.css"></noscript>
+
+    <!-- FontAwesome CSS — async (iconos no son above-the-fold críticos) -->
+    <link rel="preload" href="assets/css/all.min.css" as="style"
+          onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="assets/css/all.min.css"></noscript>
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         CSS CRÍTICO: subconjunto de Bootstrap necesario para el
+         primer paint (grid + utilidades + btn + badge + form básico).
+         Evita FOUC mientras carga bootstrap.min.css de forma async.
+         ═══════════════════════════════════════════════════════════════ -->
     <style>
+        /* Reset mínimo (el <style> principal refuerza esto) */
+        *,*::before,*::after{box-sizing:border-box}
+        /* Grid */
+        .container,.container-fluid{width:100%;padding-right:1rem;padding-left:1rem;margin-right:auto;margin-left:auto}
+        @media(min-width:576px){.container{max-width:540px}}
+        @media(min-width:768px){.container{max-width:720px}}
+        @media(min-width:992px){.container{max-width:960px}}
+        @media(min-width:1200px){.container{max-width:1140px}}
+        @media(min-width:1400px){.container{max-width:1320px}}
+        .row{--bs-gutter-x:1.5rem;--bs-gutter-y:0;display:flex;flex-wrap:wrap;margin-top:calc(-1*var(--bs-gutter-y));margin-right:calc(-.5*var(--bs-gutter-x));margin-left:calc(-.5*var(--bs-gutter-x))}
+        .row>*{flex-shrink:0;width:100%;max-width:100%;padding-right:calc(var(--bs-gutter-x)*.5);padding-left:calc(var(--bs-gutter-x)*.5);margin-top:var(--bs-gutter-y)}
+        @media(min-width:768px){.col-md-6{flex:0 0 auto;width:50%}.col-md-4{flex:0 0 auto;width:33.333%}.col-md-8{flex:0 0 auto;width:66.667%}}
+        @media(min-width:992px){.col-lg-4{flex:0 0 auto;width:33.333%}.col-lg-6{flex:0 0 auto;width:50%}.col-lg-8{flex:0 0 auto;width:66.667%}}
+        /* Display */
+        .d-none{display:none!important}.d-block{display:block!important}.d-flex{display:flex!important}.d-inline-block{display:inline-block!important}.d-grid{display:grid!important}
+        @media(min-width:768px){.d-md-none{display:none!important}.d-md-flex{display:flex!important}.d-md-block{display:block!important}}
+        @media(min-width:992px){.d-lg-none{display:none!important}.d-lg-flex{display:flex!important}.d-lg-block{display:block!important}}
+        /* Flex */
+        .flex-wrap{flex-wrap:wrap!important}.flex-grow-1{flex-grow:1!important}.flex-shrink-0{flex-shrink:0!important}
+        .align-items-center{align-items:center!important}.align-items-start{align-items:flex-start!important}.align-items-end{align-items:flex-end!important}
+        .justify-content-center{justify-content:center!important}.justify-content-between{justify-content:space-between!important}.justify-content-end{justify-content:flex-end!important}
+        .gap-1{gap:.25rem!important}.gap-2{gap:.5rem!important}.gap-3{gap:1rem!important}
+        /* Spacing */
+        .m-0{margin:0!important}.m-1{margin:.25rem!important}.m-2{margin:.5rem!important}.m-3{margin:1rem!important}
+        .mb-0{margin-bottom:0!important}.mb-1{margin-bottom:.25rem!important}.mb-2{margin-bottom:.5rem!important}.mb-3{margin-bottom:1rem!important}.mb-4{margin-bottom:1.5rem!important}.mb-5{margin-bottom:3rem!important}
+        .mt-0{margin-top:0!important}.mt-1{margin-top:.25rem!important}.mt-2{margin-top:.5rem!important}.mt-3{margin-top:1rem!important}.mt-4{margin-top:1.5rem!important}.mt-5{margin-top:3rem!important}
+        .me-0{margin-right:0!important}.me-1{margin-right:.25rem!important}.me-2{margin-right:.5rem!important}.me-3{margin-right:1rem!important}
+        .ms-0{margin-left:0!important}.ms-1{margin-left:.25rem!important}.ms-2{margin-left:.5rem!important}.ms-3{margin-left:1rem!important}.ms-auto{margin-left:auto!important}
+        .p-0{padding:0!important}.p-1{padding:.25rem!important}.p-2{padding:.5rem!important}.p-3{padding:1rem!important}.p-4{padding:1.5rem!important}
+        .py-1{padding-top:.25rem!important;padding-bottom:.25rem!important}.py-2{padding-top:.5rem!important;padding-bottom:.5rem!important}.py-3{padding-top:1rem!important;padding-bottom:1rem!important}
+        .px-1{padding-right:.25rem!important;padding-left:.25rem!important}.px-2{padding-right:.5rem!important;padding-left:.5rem!important}.px-3{padding-right:1rem!important;padding-left:1rem!important}.px-4{padding-right:1.5rem!important;padding-left:1.5rem!important}.px-5{padding-right:3rem!important;padding-left:3rem!important}
+        .pe-1{padding-right:.25rem!important}.pe-2{padding-right:.5rem!important}.pe-3{padding-right:1rem!important}
+        .ps-1{padding-left:.25rem!important}.ps-2{padding-left:.5rem!important}.ps-3{padding-left:1rem!important}
+        /* Typography */
+        .fw-bold{font-weight:700!important}.fw-semibold{font-weight:600!important}.fw-normal{font-weight:400!important}
+        .text-center{text-align:center!important}.text-end{text-align:right!important}.text-start{text-align:left!important}
+        .text-muted{color:#6c757d!important}.text-white{color:#fff!important}.text-primary{color:#0d6efd!important}.text-success{color:#198754!important}.text-danger{color:#dc3545!important}.text-warning{color:#ffc107!important}
+        .small{font-size:.875em}.fs-5{font-size:1.25rem!important}.fs-6{font-size:1rem!important}
+        .lh-1{line-height:1!important}
+        /* Sizing */
+        .w-100{width:100%!important}.w-auto{width:auto!important}.h-100{height:100%!important}.mw-100{max-width:100%!important}
+        /* Button */
+        .btn{display:inline-block;font-weight:400;line-height:1.5;text-align:center;text-decoration:none;vertical-align:middle;cursor:pointer;user-select:none;background-color:transparent;border:1px solid transparent;padding:.375rem .75rem;font-size:1rem;border-radius:.375rem;transition:color .15s,background-color .15s,border-color .15s,box-shadow .15s}
+        .btn:disabled{opacity:.65;pointer-events:none}
+        .btn-primary{color:#fff;background-color:#0d6efd;border-color:#0d6efd}
+        .btn-secondary{color:#fff;background-color:#6c757d;border-color:#6c757d}
+        .btn-outline-light{color:#f8f9fa;border-color:#f8f9fa}
+        .btn-outline-secondary{color:#6c757d;border-color:#6c757d}
+        .btn-sm{padding:.25rem .5rem;font-size:.875rem;border-radius:.25rem}
+        .btn-lg{padding:.5rem 1rem;font-size:1.25rem;border-radius:.5rem}
+        /* Badge */
+        .badge{display:inline-block;padding:.35em .65em;font-size:.75em;font-weight:700;line-height:1;color:#fff;text-align:center;white-space:nowrap;vertical-align:baseline;border-radius:.375rem}
+        .bg-primary{background-color:#0d6efd!important}.bg-success{background-color:#198754!important}.bg-danger{background-color:#dc3545!important}.bg-warning{background-color:#ffc107!important}.bg-secondary{background-color:#6c757d!important}.bg-light{background-color:#f8f9fa!important}.bg-dark{background-color:#212529!important}
+        /* Form */
+        .form-control,.form-select{display:block;width:100%;padding:.375rem .75rem;font-size:1rem;font-weight:400;line-height:1.5;color:#212529;background-color:#fff;background-clip:padding-box;border:1px solid #ced4da;border-radius:.375rem;transition:border-color .15s,box-shadow .15s}
+        .form-control:focus,.form-select:focus{color:#212529;background-color:#fff;border-color:#86b7fe;outline:0;box-shadow:0 0 0 .25rem rgba(13,110,253,.25)}
+        .form-label{margin-bottom:.5rem;font-weight:500}
+        .form-check{min-height:1.5rem;padding-left:1.5em;margin-bottom:.125rem}
+        .form-check-input{width:1em;height:1em;margin-top:.25em;vertical-align:top;background-color:#fff;background-repeat:no-repeat;background-position:center;background-size:contain;border:1px solid rgba(0,0,0,.25);appearance:none}
+        /* Visibility */
+        .visually-hidden,.visually-hidden-focusable{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+        /* Misc */
+        .img-fluid{max-width:100%;height:auto}
+        .rounded{border-radius:.375rem!important}.rounded-circle{border-radius:50%!important}.rounded-pill{border-radius:50rem!important}
+        .border{border:1px solid #dee2e6!important}.border-0{border:0!important}
+        .shadow-sm{box-shadow:0 .125rem .25rem rgba(0,0,0,.075)!important}.shadow{box-shadow:0 .5rem 1rem rgba(0,0,0,.15)!important}
+        .position-relative{position:relative!important}.position-absolute{position:absolute!important}.position-fixed{position:fixed!important}.position-sticky{position:sticky!important}
+        .top-0{top:0!important}.bottom-0{bottom:0!important}.start-0{left:0!important}.end-0{right:0!important}
+        .z-3{z-index:3!important}
+        .overflow-hidden{overflow:hidden!important}.overflow-auto{overflow:auto!important}
+        .opacity-0{opacity:0!important}.opacity-25{opacity:.25!important}.opacity-75{opacity:.75!important}
+        .text-decoration-none{text-decoration:none!important}
+        .cursor-pointer{cursor:pointer}
+        /* Alert (se usan en el body) */
+        .alert{position:relative;padding:1rem;margin-bottom:1rem;border:1px solid transparent;border-radius:.375rem}
+        .alert-info{color:#055160;background-color:#cff4fc;border-color:#b6effb}
+        .alert-warning{color:#664d03;background-color:#fff3cd;border-color:#ffecb5}
+        .alert-danger{color:#842029;background-color:#f8d7da;border-color:#f5c2c7}
+        .alert-light{color:#636464;background-color:#fefefe;border-color:#fdfdfe}
+    </style>
+    <style>
+        /* Fallbacks - sobreescritos por el skin activo al final del <head> */
         :root {
             --primary: #0d6efd;
             --secondary: #6c757d;
@@ -889,7 +1129,7 @@ ob_end_flush();
             color: white;
         }
         
-        .promo-slide h2 {
+        .promo-slide h2, .promo-slide-title {
             font-size: 1.25rem;
             font-weight: 800;
             margin-bottom: 0.25rem;
@@ -1076,15 +1316,20 @@ ob_end_flush();
         
         .product-image-wrapper {
             position: relative;
-            height: 240px;
+            /* aspect-ratio reserva el espacio antes de que cargue la imagen (CLS=0) */
+            aspect-ratio: 1 / 1;
+            height: auto;
             overflow: hidden;
             background: #f3f4f6;
+            contain: layout;
         }
-        
+
         .product-image {
             width: 100%;
             height: 100%;
             object-fit: cover;
+            /* Mejora el renderizado en conexiones lentas: muestra el color de fondo rápido */
+            background-color: #e5e7eb;
         }
         
         .product-placeholder {
@@ -1231,7 +1476,7 @@ ob_end_flush();
         @media (max-width: 768px) {
             .products-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
             .promo-slide { height: 80px; }
-            .promo-slide h2 { font-size: 1rem; }
+            .promo-slide h2, .promo-slide-title { font-size: 1rem; }
             .promo-slide p { font-size: 0.65rem; }
         }
 
@@ -1275,16 +1520,264 @@ ob_end_flush();
         .chat-badge-notify { position: absolute; top: 0; right: 0; background: red; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; display: none; }
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
-        /* Thumbnails galería detalle producto */
-        .detail-thumb {
-            width: 56px; height: 56px; object-fit: cover;
-            border-radius: 8px; cursor: pointer;
-            border: 2px solid transparent;
-            transition: border-color 0.2s, transform 0.15s, opacity 0.15s;
-            opacity: 0.65;
+        /* Zoom overlay imagen producto */
+        #imgZoomOverlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            background: rgba(0,0,0,0.85);
+            align-items: center;
+            justify-content: center;
+            cursor: zoom-out;
+            animation: fadeInZoom .18s ease;
         }
-        .detail-thumb:hover { transform: scale(1.1); opacity: 1; }
-        .detail-thumb.active { border-color: #0d6efd; opacity: 1; box-shadow: 0 0 0 3px rgba(13,110,253,0.25); }
+        #imgZoomOverlay.active { display: flex; }
+        #imgZoomOverlay img {
+            max-width: 90vw;
+            max-height: 90vh;
+            object-fit: contain;
+            border-radius: 12px;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+            transform: scale(1);
+            animation: popZoom .2s cubic-bezier(.34,1.56,.64,1);
+        }
+        @keyframes popZoom { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeInZoom { from { opacity: 0; } to { opacity: 1; } }
+        #btnZoomImg {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.92);
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            cursor: zoom-in;
+            color: #333;
+            font-size: 15px;
+            transition: background .15s, transform .15s;
+            z-index: 5;
+        }
+        #btnZoomImg:hover { background: #fff; transform: scale(1.1); }
+        #btnZoomImg.visible { display: flex; }
+
+        /* ══════════════════════════════════════════════════
+           MODAL DETALLE PRODUCTO — DISEÑO PREMIUM
+           ══════════════════════════════════════════════════ */
+        #modalDetail .modal-content {
+            border: none !important;
+            border-radius: 20px !important;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.22) !important;
+            overflow: hidden;
+        }
+        #modalDetail .modal-dialog { max-width: 860px; }
+
+        /* Panel izquierdo: imagen */
+        .detail-img-panel {
+            background: #f4f5f7;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 1.5rem 1.25rem;
+            position: relative;
+            min-height: 420px;
+        }
+        .detail-img-main-wrap {
+            position: relative;
+            width: 100%;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #detailImg {
+            max-width: 100%;
+            max-height: 320px;
+            object-fit: contain;
+            border-radius: 12px;
+            transition: opacity .25s;
+        }
+        #detailPlaceholder {
+            width: 140px; height: 140px;
+            border-radius: 16px;
+            font-size: 2.5rem;
+            display: flex; align-items: center; justify-content: center;
+        }
+        /* Thumbnails verticales bajo la imagen principal */
+        #detailThumbs {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            gap: 10px;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .detail-thumb {
+            width: 64px; height: 64px;
+            object-fit: cover;
+            border-radius: 10px;
+            cursor: pointer;
+            border: 2.5px solid transparent;
+            background: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: border-color .18s, transform .15s, box-shadow .15s;
+            opacity: .72;
+        }
+        .detail-thumb:hover { transform: translateY(-2px); opacity: 1; box-shadow: 0 4px 14px rgba(0,0,0,0.14); }
+        .detail-thumb.active { border-color: var(--primary, #0d6efd); opacity: 1; box-shadow: 0 0 0 3px rgba(13,110,253,0.18); }
+
+        /* Panel derecho: información */
+        .detail-info-panel {
+            display: flex;
+            flex-direction: column;
+            padding: 2rem 2rem 1.5rem;
+            max-height: 85vh;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        .detail-info-panel::-webkit-scrollbar { width: 4px; }
+        .detail-info-panel::-webkit-scrollbar-track { background: transparent; }
+        .detail-info-panel::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+
+        .detail-category-label {
+            font-size: .7rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--primary, #0d6efd);
+            margin-bottom: .4rem;
+        }
+        #detailName {
+            font-size: 1.45rem !important;
+            font-weight: 800;
+            line-height: 1.25;
+            color: #111827;
+            margin-bottom: .6rem;
+        }
+        .detail-price-row {
+            display: flex;
+            align-items: baseline;
+            gap: .6rem;
+            margin-bottom: 1rem;
+        }
+        #detailPrice {
+            font-size: 2rem !important;
+            font-weight: 800;
+            color: var(--primary, #0d6efd);
+            line-height: 1;
+        }
+        .price-original { font-size: 1rem; color: #9ca3af; text-decoration: line-through; }
+        .detail-unit-label { font-size: .78rem; color: #9ca3af; font-weight: 500; }
+        .detail-stars { font-size: .85rem; color: #f59e0b; }
+
+        .detail-divider { border: none; border-top: 1px solid #f0f0f0; margin: .9rem 0; }
+
+        .detail-meta {
+            display: flex; gap: 1.25rem; flex-wrap: wrap;
+            font-size: .78rem; color: #6b7280;
+            margin-bottom: .9rem;
+        }
+        .detail-meta span { display: flex; align-items: center; gap: .3rem; }
+        .detail-meta strong { color: #374151; }
+
+        .detail-desc {
+            font-size: .875rem;
+            color: #4b5563;
+            line-height: 1.65;
+            white-space: pre-line;
+            margin-bottom: 1rem;
+        }
+        .detail-desc-label {
+            font-size: .7rem;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: #9ca3af;
+            margin-bottom: .3rem;
+        }
+
+        /* Stock badge encima de la imagen */
+        #detailStockBadge {
+            position: absolute;
+            top: 14px; left: 14px;
+            font-size: .72rem;
+            padding: .35em .75em;
+            z-index: 3;
+        }
+
+        /* Botón de acción principal */
+        #btnAddDetail {
+            border-radius: 50px !important;
+            font-size: 1rem;
+            font-weight: 700;
+            padding: .75rem 1.5rem;
+            letter-spacing: .02em;
+            box-shadow: 0 4px 14px rgba(13,110,253,0.35);
+            transition: transform .15s, box-shadow .15s;
+        }
+        #btnAddDetail:not(:disabled):hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(13,110,253,0.45);
+        }
+
+        /* Variantes */
+        .variant-chip {
+            padding: .35rem .9rem;
+            border-radius: 50px;
+            border: 1.5px solid #d1d5db;
+            background: #fff;
+            font-size: .8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color .15s, background .15s, color .15s;
+            color: #374151;
+        }
+        .variant-chip.active, .variant-chip:hover {
+            border-color: var(--primary, #0d6efd);
+            background: var(--primary, #0d6efd);
+            color: #fff;
+        }
+
+        /* Reseñas */
+        .detail-reviews-label {
+            font-size: .7rem; font-weight: 700;
+            letter-spacing: .06em; text-transform: uppercase;
+            color: #9ca3af;
+        }
+        #reviewsList { max-height: 140px; overflow-y: auto; scrollbar-width: thin; }
+
+        /* Cerrar modal: posición */
+        #modalDetail .btn-close-premium {
+            position: absolute;
+            top: 14px; right: 14px;
+            z-index: 10;
+            width: 32px; height: 32px;
+            background: rgba(255,255,255,.9);
+            border: none;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0,0,0,.12);
+            transition: background .15s, transform .15s;
+            color: #374151;
+            font-size: 14px;
+        }
+        #modalDetail .btn-close-premium:hover { background: #fff; transform: scale(1.1); }
+
+        @media (max-width: 767px) {
+            #modalDetail .modal-dialog { margin: .5rem; max-width: 100%; }
+            .detail-img-panel { min-height: 220px; padding: 1.25rem 1rem .75rem; }
+            #detailImg { max-height: 200px; }
+            .detail-info-panel { padding: 1.25rem 1rem 1rem; max-height: none; }
+            #detailName { font-size: 1.2rem !important; }
+            #detailPrice { font-size: 1.6rem !important; }
+        }
 
         /* Feature 2: precio tachado */
         .price-original { font-size:.82em; color:#999; text-decoration:line-through; margin-right:4px; }
@@ -1320,9 +1813,23 @@ ob_end_flush();
             font-weight: 600;
         }
         body.shop-is-offline { padding-top: 36px; }
+
+        /* Modo ahorro de datos (2G/saveData): oculta imágenes, reduce animaciones */
+        body.conn-slow .product-image-wrapper picture,
+        body.conn-slow .product-image { display: none; }
+        body.conn-slow .product-placeholder { display: flex !important; }
+        body.conn-slow *, body.conn-slow *::before, body.conn-slow *::after {
+            animation-duration: 0.01ms !important;
+            transition-duration: 0.01ms !important;
+        }
+        /* 3G: mantiene imágenes pero desactiva animaciones pesadas */
+        body.conn-medium *, body.conn-medium *::before, body.conn-medium *::after {
+            animation-duration: 0.1ms !important;
+        }
     </style>
+    <?php echo shop_skin_render($ACTIVE_SKIN_ID); ?>
 </head>
-<body>
+<body class="<?php echo htmlspecialchars($ACTIVE_SKIN_BODY_CLASS); ?>">
 
 <div id="shopOfflineBanner" class="d-none shop-offline-bar">
     <i class="fas fa-wifi-slash me-2"></i>Sin conexión &mdash; viendo catálogo guardado
@@ -1397,6 +1904,11 @@ ob_end_flush();
     </div>
 </nav>
 
+<main id="main-content">
+
+<!-- h1 visible solo para lectores de pantalla; el logo/marca visual lo reemplaza visualmente -->
+<h1 class="visually-hidden"><?= htmlspecialchars($config['tienda_nombre'] ?? 'Tienda') ?> — Catálogo de productos</h1>
+
 <div class="container">
     <div id="promoCarousel" class="carousel slide promo-carousel" data-bs-ride="carousel">
         <div class="carousel-inner">
@@ -1418,7 +1930,7 @@ ob_end_flush();
             ?>
             <div class="carousel-item <?php echo $bi === 0 ? 'active' : ''; ?>">
                 <div class="promo-slide <?php echo $sbClass; ?>" style="<?php echo $sbBg; ?>">
-                    <h2><?php echo htmlspecialchars((string)($sb['titulo'] ?? ''), ENT_QUOTES); ?></h2>
+                    <p class="promo-slide-title"><?php echo htmlspecialchars((string)($sb['titulo'] ?? ''), ENT_QUOTES); ?></p>
                     <p><?php echo htmlspecialchars((string)($sb['subtitulo'] ?? ''), ENT_QUOTES); ?></p>
                 </div>
             </div>
@@ -1437,9 +1949,9 @@ ob_end_flush();
     <div class="filter-section">
         <div class="row align-items-center">
             <div class="col-md-6">
-                <h5 class="mb-3 mb-md-0 fw-bold">
-                    <i class="fas fa-filter me-2"></i><span data-i18n="filter.categories">Categorías</span>
-                </h5>
+                <p class="mb-3 mb-md-0 fw-bold fs-5">
+                    <i class="fas fa-filter me-2" aria-hidden="true"></i><span data-i18n="filter.categories">Categorías</span>
+                </p>
             </div>
             <div class="col-md-6 text-md-end">
                 <label for="sortSelect" class="visually-hidden">Ordenar productos</label>
@@ -1452,15 +1964,14 @@ ob_end_flush();
             </div>
         </div>
         
-        <div class="category-pills">
-            <a href="?sort=<?= htmlspecialchars($sort) ?>" class="cat-pill <?= empty($catFilter)?'active':'' ?>">
+        <div class="category-pills" id="categoryPills">
+            <button class="cat-pill <?= empty($catFilter)?'active':'' ?>" onclick="filterByCategory('')">
                 <i class="fas fa-th me-1"></i> <span data-i18n="filter.all">Todas</span>
-            </a>
+            </button>
             <?php foreach($cats as $c): ?>
-                <a href="?cat=<?= urlencode($c) ?>&sort=<?= htmlspecialchars($sort) ?>" 
-                   class="cat-pill <?= $c===$catFilter?'active':'' ?>">
+                <button class="cat-pill <?= $c===$catFilter?'active':'' ?>" onclick="filterByCategory(<?= json_encode($c) ?>)">
                     <?= htmlspecialchars($c) ?>
-                </a>
+                </button>
             <?php endforeach; ?>
         </div>
     </div>
@@ -1468,7 +1979,7 @@ ob_end_flush();
 
 <div class="container">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4 class="fw-bold mb-0" data-i18n="prod.available_title">Productos Disponibles</h4>
+        <h2 class="fw-bold mb-0 fs-4" data-i18n="prod.available_title">Productos Disponibles</h2>
         <span class="badge bg-primary" style="font-size: 1rem; padding: 0.5rem 1rem;">
             <?= count($productos) ?> <span data-i18n="prod.count" data-i18n-n="<?= count($productos) ?>">productos</span>
         </span>
@@ -1520,7 +2031,7 @@ ob_end_flush();
             $bg = "#" . substr(md5($p['nombre']), 0, 6);
             $initials = mb_strtoupper(mb_substr($p['nombre'], 0, 2));
         ?>
-        <div class="product-card" onclick='openProductDetail(<?= json_encode([
+        <div class="product-card" data-cat="<?= htmlspecialchars($p['categoria'] ?? '', ENT_QUOTES) ?>" onclick='openProductDetail(<?= json_encode([
             "id"          => $p['codigo'],
             "name"        => $p['nombre'],
             "price"       => floatval($p['precio']),
@@ -1572,8 +2083,11 @@ ob_end_flush();
                         <img src="<?= $imgUrl ?>&amp;fmt=jpg"
                              class="product-image lazy-img"
                              alt="<?= htmlspecialchars($p['nombre']) ?>"
+                             width="400" height="400"
                              loading="lazy"
-                             onload="this.classList.add('loaded')">
+                             decoding="async"
+                             onload="this.classList.add('loaded')"
+                             onerror="this.closest('picture').replaceWith(Object.assign(document.createElement('div'),{className:'product-placeholder',textContent:'<?= addslashes($initials) ?>',style:'background:<?= $bg ?>cc'}))">
                     </picture>
                 <?php else: ?>
                     <div class="product-placeholder" style="background: <?= $bg ?>cc"><?= $initials ?></div>
@@ -1590,7 +2104,7 @@ ob_end_flush();
 
             <div class="product-body">
                 <div class="product-category"><?= htmlspecialchars($p['categoria'] ?? 'General') ?></div>
-                <h6 class="product-name"><?= htmlspecialchars($p['nombre']) ?></h6>
+                <h3 class="product-name"><?= htmlspecialchars($p['nombre']) ?></h3>
 
                 <?php if (floatval($p['avg_rating'] ?? 0) > 0): ?>
                 <div class="card-stars">
@@ -1636,6 +2150,7 @@ ob_end_flush();
             </div>
         </div>
         <?php endforeach; ?>
+        <div id="infiniteScrollSentinel" style="grid-column:1/-1;height:1px;"></div>
     </div>
 </div>
 
@@ -1674,92 +2189,122 @@ ob_end_flush();
     </div>
 </div>
 
-<div class="modal fade" id="modalDetail" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content overflow-hidden" style="border-radius: 16px; border: none; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
-            <div class="modal-header border-0 pb-0">
-                <button type="button" class="btn-close" data-bs-dismiss="modal" style="z-index: 5;" aria-label="Cerrar detalle del producto"></button>
-            </div>
-            <div class="modal-body pt-0">
-                <div class="row g-4">
-                    <div class="col-md-5 d-flex flex-column align-items-center justify-content-center bg-light rounded-3 p-3 position-relative" style="min-height: 250px;">
-                         <img id="detailImg" class="d-none img-fluid rounded shadow-sm" style="max-height: 210px; object-fit: contain;">
-                         <div id="detailPlaceholder" class="d-none rounded shadow-sm d-flex align-items-center justify-content-center text-white fw-bold display-4" style="width: 150px; height: 150px;"></div>
-                         <span id="detailStockBadge" class="position-absolute top-0 start-0 m-3 badge rounded-pill"></span>
-                         <div id="detailThumbs" class="justify-content-center flex-wrap gap-2 mt-3" style="display:none;"></div>
+<div class="modal fade" id="modalDetail" tabindex="-1" aria-labelledby="detailName">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+
+            <!-- Botón cerrar flotante -->
+            <button type="button" class="btn-close-premium" data-bs-dismiss="modal" aria-label="Cerrar detalle del producto">
+                <i class="fas fa-times" aria-hidden="true"></i>
+            </button>
+
+            <div class="d-flex flex-column flex-md-row" style="min-height:480px">
+
+                <!-- ══ COLUMNA IZQUIERDA: imagen + miniaturas ══ -->
+                <div class="detail-img-panel" style="flex:0 0 42%">
+                    <span id="detailStockBadge" class="badge rounded-pill"></span>
+
+                    <div class="detail-img-main-wrap">
+                        <img id="detailImg" class="d-none" alt="" draggable="false"
+                             onerror="this.classList.add('d-none');document.getElementById('detailPlaceholder').classList.remove('d-none');document.getElementById('btnZoomImg').classList.remove('visible')">
+                        <div id="detailPlaceholder" class="d-none text-white fw-bold"></div>
+                        <button id="btnZoomImg" onclick="openImgZoom()" title="Ampliar imagen" aria-label="Ampliar imagen">
+                            <i class="fas fa-search-plus" aria-hidden="true"></i>
+                        </button>
                     </div>
 
-                    <div class="col-md-7 d-flex flex-column" style="max-height:70vh;overflow-y:auto;padding-right:4px;">
-                        <small class="text-uppercase text-muted fw-bold mb-1" id="detailCat">Categoría</small>
-                        <h3 class="fw-bold mb-2" id="detailName">Nombre Producto</h3>
-                        
-                        <div class="d-flex align-items-center mb-2">
-                            <div class="me-3">
-                                <span id="detailPriceOriginal" class="price-original" style="display:none"></span>
-                                <h2 class="text-primary fw-bold mb-0 d-inline" id="detailPrice">$0.00</h2>
-                            </div>
-                            <small class="text-muted" id="detailUnit"></small>
-                            <span id="detailAvgStars" class="ms-auto text-warning small fw-bold"></span>
-                        </div>
+                    <!-- Miniaturas debajo de la imagen principal -->
+                    <div id="detailThumbs"></div>
+                </div>
 
-                        <!-- Variantes -->
-                        <div id="variantSection" class="mb-3" style="display:none">
-                            <p class="mb-1 small text-uppercase text-muted fw-bold" style="letter-spacing:.5px">Presentación</p>
-                            <div id="variantButtons" class="d-flex flex-wrap gap-2"></div>
-                        </div>
+                <!-- ══ COLUMNA DERECHA: información del producto ══ -->
+                <div class="detail-info-panel" style="flex:1">
 
-                        <div class="row g-2 mb-3 small text-muted border-top border-bottom py-2">
-                            <div class="col-6">
-                                <i class="fas fa-barcode me-1"></i> SKU: <span id="detailSku" class="fw-bold text-dark"></span>
-                            </div>
-                            <div class="col-6" id="divDetailColor">
-                                <i class="fas fa-palette me-1"></i> Color: <span id="detailColor" class="fw-bold text-dark"></span>
-                            </div>
-                        </div>
+                    <!-- Categoría -->
+                    <p class="detail-category-label" id="detailCat">Categoría</p>
 
-                        <div class="mb-4 flex-grow-1" style="max-height: 200px; overflow-y: auto;">
-                            <h6 class="fw-bold mb-1">Descripción</h6>
-                            <p class="text-secondary" id="detailDesc" style="white-space: pre-line;">Sin descripción.</p>
-                        </div>
+                    <!-- Nombre -->
+                    <h2 id="detailName">Nombre Producto</h2>
 
-                        <div class="mt-auto">
-                            <button type="button" id="btnAddDetail" class="btn btn-primary w-100 py-2 fw-bold shadow-sm rounded-pill">
-                                <i class="fas fa-cart-plus me-2"></i> AGREGAR AL CARRITO
-                            </button>
-                            <!-- Feature 1: restock aviso (visible sólo cuando agotado) -->
-                            <div id="restockAvisoSection" style="display:none" class="aviso-form-wrap mt-2">
-                                <p class="small text-muted mb-2"><i class="fas fa-bell me-1 text-warning"></i><span data-i18n="restock.notice">Recibe un aviso cuando llegue:</span></p>
-                                <div class="row g-1">
-                                    <div class="col-5"><input type="text" id="avisoNombre" class="form-control form-control-sm" placeholder="Tu nombre" data-i18n-attr="placeholder:restock.name_ph"></div>
-                                    <div class="col-5"><input type="tel" id="avisoTelefono" class="form-control form-control-sm" placeholder="Teléfono" data-i18n-attr="placeholder:restock.tel_ph"></div>
-                                    <div class="col-2"><button class="btn btn-warning btn-sm w-100" onclick="submitRestock()"><i class="fas fa-bell"></i></button></div>
-                                </div>
-                            </div>
-                            <!-- Feature 15: share -->
-                            <div class="text-center mt-2">
-                                <button class="btn btn-outline-secondary btn-sm px-3" onclick="shareCurrentProduct()">
-                                    <i class="fas fa-share-alt me-1"></i><span data-i18n="modal.share">Compartir</span>
+                    <!-- Precio + estrellas -->
+                    <div class="detail-price-row">
+                        <span id="detailPriceOriginal" class="price-original" style="display:none"></span>
+                        <p id="detailPrice" class="mb-0">$0.00</p>
+                        <span class="detail-unit-label" id="detailUnit"></span>
+                        <span id="detailAvgStars" class="detail-stars ms-auto"></span>
+                    </div>
+
+                    <!-- Variantes -->
+                    <div id="variantSection" style="display:none; margin-bottom:.9rem">
+                        <p class="detail-desc-label">Presentación</p>
+                        <div id="variantButtons" class="d-flex flex-wrap gap-2"></div>
+                    </div>
+
+                    <hr class="detail-divider">
+
+                    <!-- Meta: SKU + Color -->
+                    <div class="detail-meta">
+                        <span><i class="fas fa-barcode" aria-hidden="true"></i> SKU: <strong id="detailSku"></strong></span>
+                        <span id="divDetailColor"><i class="fas fa-palette" aria-hidden="true"></i> Color: <strong id="detailColor"></strong></span>
+                    </div>
+
+                    <!-- Descripción -->
+                    <p class="detail-desc-label">Descripción</p>
+                    <p class="detail-desc" id="detailDesc">Sin descripción.</p>
+
+                    <!-- Acción -->
+                    <div class="mt-auto pt-1">
+                        <button type="button" id="btnAddDetail" class="btn btn-primary w-100">
+                            <i class="fas fa-cart-plus me-2" aria-hidden="true"></i><span data-i18n="modal.add_cart">AGREGAR AL CARRITO</span>
+                        </button>
+
+                        <!-- Aviso restock -->
+                        <div id="restockAvisoSection" style="display:none" class="aviso-form-wrap mt-2">
+                            <p class="small text-muted mb-2">
+                                <i class="fas fa-bell me-1 text-warning" aria-hidden="true"></i>
+                                <span data-i18n="restock.notice">Recibe un aviso cuando llegue:</span>
+                            </p>
+                            <div class="d-flex gap-1">
+                                <input type="text" id="avisoNombre" class="form-control form-control-sm" placeholder="Tu nombre" data-i18n-attr="placeholder:restock.name_ph">
+                                <input type="tel" id="avisoTelefono" class="form-control form-control-sm" placeholder="Teléfono" data-i18n-attr="placeholder:restock.tel_ph">
+                                <button class="btn btn-warning btn-sm px-3" onclick="submitRestock()" aria-label="Enviar aviso">
+                                    <i class="fas fa-bell" aria-hidden="true"></i>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- ── Sección de reseñas ── -->
-                        <hr class="mt-3 mb-2">
-                        <div id="reviewsSection">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <h6 class="fw-bold mb-0" style="font-size:.9rem">
-                                    <i class="fas fa-star text-warning me-1"></i><span data-i18n="modal.reviews">Opiniones</span>
-                                </h6>
-                                <span id="reviewsAvgDisplay" class="small text-muted"></span>
-                            </div>
-                            <div id="reviewsList" style="max-height:160px;overflow-y:auto;"></div>
-                            <div id="reviewFormWrap" class="mt-2"></div>
+                        <!-- Compartir -->
+                        <div class="text-center mt-2">
+                            <button class="btn btn-outline-secondary btn-sm px-4" onclick="shareCurrentProduct()">
+                                <i class="fas fa-share-alt me-1" aria-hidden="true"></i>
+                                <span data-i18n="modal.share">Compartir</span>
+                            </button>
                         </div>
                     </div>
-                </div>
-            </div>
-        </div>
+
+                    <!-- Reseñas -->
+                    <hr class="detail-divider mt-3">
+                    <div id="reviewsSection">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h3 class="detail-reviews-label mb-0">
+                                <i class="fas fa-star text-warning me-1" aria-hidden="true"></i>
+                                <span data-i18n="modal.reviews">Opiniones</span>
+                            </h3>
+                            <span id="reviewsAvgDisplay" class="small text-muted"></span>
+                        </div>
+                        <div id="reviewsList"></div>
+                        <div id="reviewFormWrap" class="mt-2"></div>
+                    </div>
+
+                </div><!-- /detail-info-panel -->
+            </div><!-- /flex row -->
+        </div><!-- /modal-content -->
     </div>
+</div>
+
+<!-- Zoom overlay imagen producto -->
+<div id="imgZoomOverlay" onclick="closeImgZoom()" role="dialog" aria-label="Imagen ampliada">
+    <img id="imgZoomSrc" src="" alt="Imagen ampliada del producto">
 </div>
 
 <div class="modal fade" id="modalCart" tabindex="-1">
@@ -2121,10 +2666,9 @@ ob_end_flush();
                                     <div class="bg-warning bg-opacity-10 p-3 rounded-3 border border-warning border-opacity-20">
                                         <label class="small fw-bold text-warning-emphasis mb-2 d-block" data-i18n="auth.captcha">Verificación Humana</label>
                                         <div class="d-flex align-items-center gap-2">
-                                            <span id="captchaLabel" class="fw-bold fs-5 text-dark"></span>
+                                            <span id="captchaLabel" class="fw-bold fs-5 text-dark"><?php echo htmlspecialchars($_SESSION['captcha_q'] ?? '? + ? ='); ?></span>
                                             <input type="number" id="regCaptcha" class="form-control border-warning p-2" style="width: 80px" placeholder="?" required>
                                         </div>
-                                        <input type="hidden" id="captchaVal">
                                     </div>
                                 </div>
                             </div>
@@ -2410,56 +2954,154 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <!-- ── /i18n Engine ─────────────────────────────────────────────────── -->
 
-<script src="assets/js/bootstrap.bundle.min.js"></script>
+<script src="assets/js/bootstrap.bundle.min.js" defer></script>
 
 <!-- Toast de notificación -->
 <div id="shopToastContainer" aria-live="polite" aria-atomic="true"
      style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;min-width:240px;"></div>
 
 <script>
-    // Feature 11: product catalog for client-side search + localStorage cache
-    const PRODUCTS_DATA = <?= json_encode($productsJs, JSON_UNESCAPED_UNICODE) ?>;
-    const PRODUCTS_CACHE_KEY = 'palweb_products_v1_<?= $SUC_ID ?>';
-    const PRODUCTS_CACHE_TS  = 'palweb_products_ts_<?= $SUC_ID ?>';
-    const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutos
+    // ── Captura global de errores JS → servidor ──────────────────────────────
+    (function() {
+        let _errCount = 0;
+        function _sendErr(msg, src, line) {
+            if (_errCount++ > 5) return; // máximo 5 errores por sesión de página
+            try {
+                navigator.sendBeacon('shop.php?action_js_error=1', JSON.stringify({ msg, src, line }));
+            } catch(e) {}
+        }
+        window.onerror = function(msg, src, line) { _sendErr(String(msg).slice(0,400), src, line); return false; };
+        window.addEventListener('unhandledrejection', function(e) {
+            _sendErr(String(e.reason?.message || e.reason || 'Promise rejected').slice(0,400), 'promise', 0);
+        });
+    })();
+    // ── /error logger ────────────────────────────────────────────────────────
 
-    // Guardar catálogo en localStorage al cargar
-    try {
-        localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(PRODUCTS_DATA));
-        localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString());
-    } catch(e) {}
+    // Catálogo de productos — cargado bajo demanda con ETag (sin inline JSON)
+    const PRODUCTS_CACHE_KEY  = 'palweb_products_v2_<?= $SUC_ID ?>';
+    const PRODUCTS_ETAG_KEY   = 'palweb_products_etag_<?= $SUC_ID ?>';
+    const PRODUCTS_CACHE_TS   = 'palweb_products_ts_<?= $SUC_ID ?>';
+    const CATALOG_TTL_MS      = 10 * 60 * 1000; // 10 min sin revalidar
+
+    let _catalogReady  = false;
+    let _catalogData   = null; // se rellena al primer uso
 
     function getProductsFromCache() {
+        if (_catalogData) return _catalogData;
         try {
-            const ts = parseInt(localStorage.getItem(PRODUCTS_CACHE_TS) || '0');
-            if (Date.now() - ts > CACHE_TTL_MS) return null;
             const raw = localStorage.getItem(PRODUCTS_CACHE_KEY);
-            return raw ? JSON.parse(raw) : null;
-        } catch(e) { return null; }
+            if (!raw) return null;
+            _catalogData = JSON.parse(raw);
+            return _catalogData;
+        } catch { return null; }
     }
+
+    async function ensureCatalog(force = false) {
+        if (_catalogReady && !force) return _catalogData;
+
+        const storedEtag = localStorage.getItem(PRODUCTS_ETAG_KEY) || '';
+        const storedTs   = parseInt(localStorage.getItem(PRODUCTS_CACHE_TS) || '0');
+        const age        = Date.now() - storedTs;
+
+        // Si el catálogo es reciente, usar sin revalidar
+        if (!force && age < CATALOG_TTL_MS && getProductsFromCache()) {
+            _catalogReady = true;
+            return _catalogData;
+        }
+
+        try {
+            const headers = {};
+            if (storedEtag) headers['If-None-Match'] = storedEtag;
+
+            const res = await fetch('shop.php?action=products_json', { headers, credentials: 'same-origin' });
+
+            if (res.status === 304) {
+                // Sin cambios — refrescar timestamp
+                localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString());
+                _catalogReady = true;
+                return _catalogData || getProductsFromCache();
+            }
+
+            if (res.ok) {
+                const json = await res.json();
+                _catalogData = json.products || [];
+                const newEtag = res.headers.get('ETag') || '';
+                try {
+                    localStorage.setItem(PRODUCTS_CACHE_KEY, JSON.stringify(_catalogData));
+                    localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString());
+                    if (newEtag) localStorage.setItem(PRODUCTS_ETAG_KEY, newEtag);
+                } catch { /* localStorage lleno */ }
+                _catalogReady = true;
+                return _catalogData;
+            }
+        } catch { /* offline — usar lo que haya */ }
+
+        _catalogReady = true;
+        return getProductsFromCache();
+    }
+
+    // Iniciar carga del catálogo en background inmediatamente
+    ensureCatalog();
 
     // Variable para el producto actualmente mostrado en modal (Feature 15)
     let _currentDetailProduct = null;
 
+    // Infinite scroll: muestra los primeros PAGE_SIZE productos y revela más al llegar al final
+    function _initInfiniteScroll(grid) {
+        const PAGE_SIZE = 24;
+        const cards = Array.from(grid.querySelectorAll('.product-card'));
+        if (cards.length <= PAGE_SIZE) return;
+
+        let shown = PAGE_SIZE;
+        cards.slice(shown).forEach(c => { c.style.display = 'none'; c.dataset.lazy = '1'; });
+
+        const sentinel = document.getElementById('infiniteScrollSentinel');
+        if (!sentinel || !('IntersectionObserver' in window)) {
+            cards.forEach(c => { c.style.display = ''; delete c.dataset.lazy; });
+            return;
+        }
+
+        const obs = new IntersectionObserver((entries) => {
+            if (!entries[0].isIntersecting) return;
+            const batch = cards.slice(shown, shown + PAGE_SIZE);
+            batch.forEach(c => { c.style.display = ''; delete c.dataset.lazy; });
+            shown += batch.length;
+            if (shown >= cards.length) obs.disconnect();
+        }, { rootMargin: '200px' });
+
+        obs.observe(sentinel);
+
+        window._infiniteScrollReset = () => {
+            obs.disconnect();
+            cards.forEach(c => { c.style.display = ''; delete c.dataset.lazy; });
+        };
+    }
+
     // INICIALIZACIÓN
     window.addEventListener('load', () => {
         const skeleton = document.getElementById('skeletonLoader');
-        const grid = document.getElementById('productsGrid');
-        
+        const grid     = document.getElementById('productsGrid');
+
         if (skeleton) skeleton.style.display = 'none';
-        if (grid) grid.style.display = 'grid'; // O el valor que tenga tu CSS
-        
-        // Lazy loading manual para navegadores que no cargan onload automáticamente
+        if (grid) {
+            grid.style.display = 'grid';
+            _initInfiniteScroll(grid);
+        }
+
         document.querySelectorAll('.lazy-img').forEach(img => {
             if (img.complete) img.classList.add('loaded');
         });
     });
 
-    const modalDetail = new bootstrap.Modal(document.getElementById('modalDetail'));
-    const modalCart = new bootstrap.Modal(document.getElementById('modalCart'));
-    const trackingModal = new bootstrap.Modal(document.getElementById('trackingModal'));
-    const authModal = new bootstrap.Modal(document.getElementById('authModal'));
-    const profileModal = new bootstrap.Modal(document.getElementById('profileModal'));
+    // Bootstrap se carga con defer: los modales se instancian cuando Bootstrap está listo
+    let modalDetail, modalCart, trackingModal, authModal, profileModal;
+    document.addEventListener('DOMContentLoaded', () => {
+        modalDetail   = new bootstrap.Modal(document.getElementById('modalDetail'));
+        modalCart     = new bootstrap.Modal(document.getElementById('modalCart'));
+        trackingModal = new bootstrap.Modal(document.getElementById('trackingModal'));
+        authModal     = new bootstrap.Modal(document.getElementById('authModal'));
+        profileModal  = new bootstrap.Modal(document.getElementById('profileModal'));
+    });
 
     // ========================================================
     // TOAST DE NOTIFICACIÓN
@@ -2754,9 +3396,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     // Config de tarjeta para pasarela (inyectada desde PHP)
-    const CFG_TARJETA = <?= json_encode($CFG_TARJETA) ?>;
-    const CFG_TITULAR = <?= json_encode($CFG_TITULAR) ?>;
-    const CFG_BANCO   = <?= json_encode($CFG_BANCO)   ?>;
+    const CFG_TARJETA  = <?= json_encode($CFG_TARJETA) ?>;
+    const CFG_TITULAR  = <?= json_encode($CFG_TITULAR) ?>;
+    const CFG_BANCO    = <?= json_encode($CFG_BANCO)   ?>;
+    const CSRF_TOKEN   = <?= json_encode($CSRF_TOKEN) ?>;
 
     // Multi-divisa
     window.SHOP_METODOS = <?= json_encode($metodosShop, JSON_UNESCAPED_UNICODE) ?>;
@@ -2778,7 +3421,59 @@ document.addEventListener('DOMContentLoaded', () => {
     // ===== BUSCADOR (Feature 11: usa caché local si disponible, AJAX como fallback) =====
     const searchInput = document.getElementById('searchInput');
     const searchResults = document.getElementById('searchResults');
-    let searchTimeout = null;
+    let searchTimeout   = null;
+    // Caché en memoria de resultados AJAX (máx 30 entradas, FIFO)
+    const _searchCache  = new Map();
+    const _SEARCH_MAX   = 30;
+
+    function _searchCachePut(q, results) {
+        if (_searchCache.size >= _SEARCH_MAX) {
+            _searchCache.delete(_searchCache.keys().next().value);
+        }
+        _searchCache.set(q, results);
+    }
+
+    // ── Prefetch de variantes+reseñas al hacer hover 350ms en tarjeta ────────
+    const _prefetchCache = new Set();
+    function attachPrefetch(card) {
+        let hoverTimer = null;
+        card.addEventListener('mouseenter', () => {
+            hoverTimer = setTimeout(() => {
+                try {
+                    const dataStr = card.getAttribute('onclick') || '';
+                    const match   = dataStr.match(/"codigo"\s*:\s*"([^"]+)"/);
+                    if (!match) return;
+                    const codigo = match[1];
+                    if (_prefetchCache.has(codigo)) return;
+                    _prefetchCache.add(codigo);
+                    // Prefetch silencioso en background
+                    fetch(`shop.php?action_variants=1&codigo=${encodeURIComponent(codigo)}`, { priority: 'low' }).catch(() => {});
+                    fetch(`shop.php?action_reviews=1&codigo=${encodeURIComponent(codigo)}`, { priority: 'low' }).catch(() => {});
+                } catch {}
+            }, 350);
+        });
+        card.addEventListener('mouseleave', () => clearTimeout(hoverTimer));
+        // Móvil: prefetch en touchstart
+        card.addEventListener('touchstart', () => {
+            try {
+                const match = (card.getAttribute('onclick')||'').match(/"codigo"\s*:\s*"([^"]+)"/);
+                if (!match || _prefetchCache.has(match[1])) return;
+                _prefetchCache.add(match[1]);
+                fetch(`shop.php?action_variants=1&codigo=${encodeURIComponent(match[1])}`, { priority: 'low' }).catch(() => {});
+            } catch {}
+        }, { passive: true });
+    }
+
+    // Aplicar prefetch a todas las tarjetas presentes y futuras (MutationObserver)
+    document.querySelectorAll('.product-card').forEach(attachPrefetch);
+    new MutationObserver(mutations => {
+        mutations.forEach(m => m.addedNodes.forEach(n => {
+            if (n.nodeType === 1) {
+                if (n.classList?.contains('product-card')) attachPrefetch(n);
+                n.querySelectorAll?.('.product-card').forEach(attachPrefetch);
+            }
+        }));
+    }).observe(document.getElementById('productsGrid') || document.body, { childList: true, subtree: true });
 
     function renderSearchItem(item) {
         const div = document.createElement('div');
@@ -2817,7 +3512,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function doClientSearch(query) {
         const cached = getProductsFromCache();
-        if (!cached) return false; // usar AJAX
+        if (!cached) return false;
         const q = query.toLowerCase();
         const matches = cached.filter(p =>
             p.nombre.toLowerCase().includes(q) ||
@@ -2847,28 +3542,54 @@ document.addEventListener('DOMContentLoaded', () => {
         // Intentar búsqueda client-side instantánea
         if (doClientSearch(query)) return;
 
-        // Fallback a AJAX si no hay caché
+        // Fallback a AJAX — verificar caché en memoria primero
+        if (_searchCache.has(query)) {
+            const cached = _searchCache.get(query);
+            searchResults.innerHTML = '';
+            if (cached.length > 0) {
+                cached.forEach(item => searchResults.appendChild(renderSearchItem(item)));
+            } else {
+                searchResults.innerHTML = `<div class="p-3 text-center text-muted">${t('search.not_found')}</div>`;
+            }
+            searchResults.style.display = 'block';
+            return;
+        }
+
         searchResults.innerHTML = `<div class="p-3 text-center">${t('search.searching')}</div>`;
         searchResults.style.display = 'block';
 
+        // Debounce adaptativo: más largo en conexiones lentas
+        const conn = navigator.connection || {};
+        const debounceMs = ['slow-2g','2g'].includes(conn.effectiveType) ? 700
+                         : conn.effectiveType === '3g' ? 450
+                         : 280;
+
         searchTimeout = setTimeout(async () => {
             try {
-                const response = await fetch(`shop.php?ajax_search=${encodeURIComponent(query)}`);
+                const controller = new AbortController();
+                const timeoutId  = setTimeout(() => controller.abort(), 8000);
+                const response   = await fetch(`shop.php?ajax_search=${encodeURIComponent(query)}`, { signal: controller.signal });
+                clearTimeout(timeoutId);
                 const data = await response.json();
                 searchResults.innerHTML = '';
                 if (data.error) {
                     searchResults.innerHTML = `<div class="p-3 text-danger">❌ ${data.message}</div>`;
                     return;
                 }
+                _searchCachePut(query, Array.isArray(data) ? data : []);
                 if (data.length > 0) {
                     data.forEach(item => searchResults.appendChild(renderSearchItem(item)));
                 } else {
                     searchResults.innerHTML = `<div class="p-3 text-center text-muted">${t('search.not_found')}</div>`;
                 }
             } catch (error) {
-                searchResults.innerHTML = `<div class="p-3 text-danger">${t('search.error')}</div>`;
+                if (error.name === 'AbortError') {
+                    searchResults.innerHTML = `<div class="p-3 text-muted">${t('search.timeout') || 'Tiempo de espera superado. Intenta de nuevo.'}</div>`;
+                } else {
+                    searchResults.innerHTML = `<div class="p-3 text-danger">${t('search.error')}</div>`;
+                }
             }
-        }, 300);
+        }, debounceMs);
     });
 
     document.addEventListener('click', function(e) {
@@ -3075,21 +3796,31 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data.imgExtra2) allImgs.push(data.imgExtra2);
 
         // Mostrar imagen activa (la primera)
+        const btnZoom = document.getElementById('btnZoomImg');
         if (allImgs.length > 0) {
             img.src = allImgs[0];
             img.classList.remove('d-none');
             placeholder.classList.add('d-none');
+            btnZoom.classList.add('visible');
+            img.onerror = function() {
+                img.classList.add('d-none');
+                placeholder.innerText = data.initials;
+                placeholder.style.background = data.bg + 'cc';
+                placeholder.classList.remove('d-none');
+                btnZoom.classList.remove('visible');
+                img.onerror = null;
+            };
         } else {
             placeholder.innerText = data.initials;
             placeholder.style.background = data.bg + 'cc';
             img.classList.add('d-none');
             placeholder.classList.remove('d-none');
+            btnZoom.classList.remove('visible');
         }
 
-        // Thumbnails — solo si hay más de 1 imagen
+        // Thumbnails — siempre limpiar; mostrar si hay ≥1 imagen (incluye principal)
         thumbsWrap.innerHTML = '';
         if (allImgs.length > 1) {
-            thumbsWrap.style.display = 'flex';
             allImgs.forEach((src, i) => {
                 const t = document.createElement('img');
                 t.src       = src;
@@ -3097,6 +3828,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 t.alt       = 'Vista ' + (i + 1);
                 t.onclick   = () => {
                     img.src = src;
+                    document.getElementById('imgZoomSrc').src = src;
                     thumbsWrap.querySelectorAll('.detail-thumb').forEach(x => x.classList.remove('active'));
                     t.classList.add('active');
                 };
@@ -3289,6 +4021,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const sym = shopCurrency === 'CUP' ? '$' : shopCurrency + ' ';
         return sym + p.toLocaleString('es-CU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
+
+    // Filtro de categoría client-side — sin recarga de página
+    let _activeCat = '';
+    window.filterByCategory = function(cat) {
+        _activeCat = cat;
+        // Restablecer infinite scroll antes de filtrar
+        if (typeof window._infiniteScrollReset === 'function') window._infiniteScrollReset();
+
+        const cards = document.querySelectorAll('#productsGrid .product-card');
+        let visible = 0;
+        cards.forEach(card => {
+            const match = !cat || card.dataset.cat === cat;
+            card.style.display = match ? '' : 'none';
+            if (match) visible++;
+        });
+
+        // Actualizar pills activos
+        document.querySelectorAll('#categoryPills .cat-pill').forEach(btn => {
+            const btnCat = btn.getAttribute('onclick')?.match(/filterByCategory\(([^)]*)\)/)?.[1];
+            const isAll  = btnCat === "''";
+            btn.classList.toggle('active', isAll ? !cat : btnCat === JSON.stringify(cat));
+        });
+
+        // Actualizar contador visible
+        const badge = document.querySelector('.badge.bg-primary');
+        if (badge) badge.firstChild.textContent = visible + ' ';
+    };
 
     window.setShopCurrency = function(m) {
         shopCurrency = m;
@@ -3557,6 +4316,7 @@ document.addEventListener('DOMContentLoaded', () => {
             moneda:                  shopCurrency,
             tipo_cambio:             shopTC,
             monto_moneda_original:   parseFloat((grandTotalCUP / shopTC).toFixed(2)),
+            csrf_token:              CSRF_TOKEN,
             items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, note: '', isReserva: i.isReserva || false }))
         };
 
@@ -3584,8 +4344,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert('Error: ' + (json.msg || 'Error desconocido'));
             }
         } catch (error) {
-            console.error('Error:', error);
-            alert('Error de red al enviar el pedido. Verifica tu conexión.');
+            console.error('[submitOrder]', error);
+            // Sin red → encolar para Background Sync
+            if (!navigator.onLine || error.name === 'TypeError') {
+                await queueCheckoutForSync(data);
+            } else {
+                alert('Error de red al enviar el pedido. Verifica tu conexión.');
+            }
         } finally {
             btn.disabled = false;
             btn.innerHTML = `<i class="fas fa-check-circle me-2"></i> ${t('checkout.confirm')}`;
@@ -3624,26 +4389,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let chatOpen = false;
     let chatInterval = null;
+    const CHAT_POLL_MS = 15000; // 15s — suficiente para chat humano, ahorra batería y ancho de banda
+
+    function _chatStartPolling() {
+        if (chatInterval) return;
+        chatInterval = setInterval(() => { if (chatOpen && document.visibilityState !== 'hidden') loadMessages(); }, CHAT_POLL_MS);
+    }
+    function _chatStopPolling() { clearInterval(chatInterval); chatInterval = null; }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') { _chatStopPolling(); }
+        else if (chatOpen) { loadMessages(); _chatStartPolling(); }
+    });
 
     function toggleChat() {
         const win = document.getElementById('chatWindow');
         chatOpen = !chatOpen;
         win.style.display = chatOpen ? 'flex' : 'none';
-        
+
         if (chatOpen) {
             document.getElementById('clientChatBadge').style.display = 'none';
             loadMessages();
-            chatInterval = setInterval(loadMessages, 3000); // Polling cada 3 seg
-            // Scroll al fondo
-            setTimeout(() => { 
+            _chatStartPolling();
+            setTimeout(() => {
                 const body = document.getElementById('chatBody');
-                body.scrollTop = body.scrollHeight; 
+                body.scrollTop = body.scrollHeight;
             }, 100);
         } else {
-            clearInterval(chatInterval);
+            _chatStopPolling();
         }
     }
-    window.toggleChat = toggleChat; // Exponer globalmente
+    window.toggleChat = toggleChat;
 
     async function sendClientMsg() {
         const input = document.getElementById('chatInput');
@@ -3787,11 +4563,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // ========================================================
     // LOGIN & REGISTRO DE CLIENTES
     // ========================================================
-    function generateCaptcha() {
-        const n1 = Math.floor(Math.random() * 10) + 1;
-        const n2 = Math.floor(Math.random() * 10) + 1;
-        document.getElementById('captchaLabel').innerText = `${n1} + ${n2} =`;
-        document.getElementById('captchaVal').value = n1 + n2;
+    async function generateCaptcha() {
+        try {
+            const res = await fetch('shop.php?action_new_captcha');
+            const data = await res.json();
+            const el = document.getElementById('captchaLabel');
+            if (el) el.innerText = data.q;
+        } catch (e) { console.warn('captcha refresh failed', e); }
     }
 
     async function loginClient() {
@@ -3803,7 +4581,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch('shop.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'login', action_client: 1, telefono: tel, password: pass })
+                body: JSON.stringify({ action: 'login', action_client: 1, telefono: tel, password: pass, csrf_token: CSRF_TOKEN })
             });
             const data = await res.json();
             if (data.status === 'success') {
@@ -3820,7 +4598,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const pass = document.getElementById('regPass').value.trim();
         const dir = document.getElementById('regDir').value.trim();
         const ans = document.getElementById('regCaptcha').value.trim();
-        const val = document.getElementById('captchaVal').value.trim();
 
         if (!nombre || !tel || !pass || !ans) return alert("Completa todos los campos.");
         
@@ -3829,9 +4606,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    action: 'register', action_client: 1, 
+                    action: 'register', action_client: 1, csrf_token: CSRF_TOKEN,
                     nombre, telefono: tel, password: pass, direccion: dir,
-                    captcha_ans: ans, captcha_val: val
+                    captcha_ans: ans
                 })
             });
             const data = await res.json();
@@ -3978,7 +4755,8 @@ if ('serviceWorker' in navigator) {
         if (offlineBanner) offlineBanner.classList.remove('d-none');
         document.body.classList.add('shop-is-offline');
         // Renovar timestamp del cache para que la búsqueda siga funcionando offline
-        try { localStorage.setItem(PRODUCTS_CACHE_TS, Date.now().toString()); } catch(e) {}
+        // Forzar revalidación del catálogo al reconectar
+        ensureCatalog(true).catch(() => {});
     }
 
     function goOnline() {
@@ -3996,6 +4774,80 @@ if ('serviceWorker' in navigator) {
 
     if (!navigator.onLine) goOffline();
 })();
+
+// ── Network Quality Detection (Connection API) ────────────────────────────
+(function() {
+    const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+    if (!conn) return;
+
+    function applyConnectionMode() {
+        const slow = conn.saveData || ['slow-2g','2g'].includes(conn.effectiveType);
+        const medium = conn.effectiveType === '3g';
+
+        if (slow) {
+            document.body.classList.add('conn-slow');
+            document.body.classList.remove('conn-medium');
+            showToast('<i class="fas fa-signal me-2"></i>Modo ahorro activo: imágenes reducidas.', 4000);
+        } else if (medium) {
+            document.body.classList.add('conn-medium');
+            document.body.classList.remove('conn-slow');
+        } else {
+            document.body.classList.remove('conn-slow','conn-medium');
+        }
+    }
+
+    applyConnectionMode();
+    conn.addEventListener('change', applyConnectionMode);
+})();
+
+// ── IndexedDB helper para cola de pedidos offline ─────────────────────────
+const CheckoutQueue = {
+    _db: null,
+    async db() {
+        if (this._db) return this._db;
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('palweb-shop-checkout', 1);
+            req.onupgradeneeded = e => e.target.result.createObjectStore('pending_checkouts', { keyPath: 'id', autoIncrement: true });
+            req.onsuccess = e => { this._db = e.target.result; resolve(this._db); };
+            req.onerror   = e => reject(e.target.error);
+        });
+    },
+    async push(payload) {
+        const db    = await this.db();
+        const store = db.transaction('pending_checkouts','readwrite').objectStore('pending_checkouts');
+        return new Promise((res, rej) => {
+            const req = store.add({ payload, ts: Date.now() });
+            req.onsuccess = () => res(req.result);
+            req.onerror   = e => rej(e.target.error);
+        });
+    },
+    async count() {
+        const db    = await this.db();
+        const store = db.transaction('pending_checkouts','readonly').objectStore('pending_checkouts');
+        return new Promise((res, rej) => {
+            const req = store.count();
+            req.onsuccess = () => res(req.result);
+            req.onerror   = e => rej(e.target.error);
+        });
+    }
+};
+
+// ── Background Sync: guardar pedido si la red falla ──────────────────────
+async function queueCheckoutForSync(data) {
+    try {
+        await CheckoutQueue.push({ action: 'crear_venta_web', ...data });
+        if ('serviceWorker' in navigator && 'SyncManager' in window) {
+            const reg = await navigator.serviceWorker.ready;
+            await reg.sync.register('checkout-retry');
+            showToast('<i class="fas fa-clock me-2"></i>Sin conexión. Tu pedido se enviará automáticamente cuando vuelva la red.', 8000);
+        } else {
+            showToast('<i class="fas fa-exclamation-triangle me-2"></i>Sin conexión. Anota tu pedido y reintenta más tarde.', 8000);
+        }
+    } catch(e) {
+        console.error('[CheckoutSync]', e);
+        showToast('Error al guardar pedido offline.', 5000);
+    }
+}
 
 // ── Push Notifications Tienda ─────────────────────────────────────────────
 const SHOP_PUSH_TIPO  = 'cliente';
@@ -4025,7 +4877,6 @@ async function subscribeShopPush() {
         const resp = await fetch(SHOP_PUSH_API + '?action=vapid_key');
         const { publicKey } = await resp.json();
 
-        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
         const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
         const swReg = await Promise.race([
             navigator.serviceWorker.ready,
@@ -4062,7 +4913,6 @@ async function subscribeShopPush() {
 
 async function unsubscribeShopPush() {
     try {
-        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         if (!reg) return;
         const sub = await reg.pushManager.getSubscription();
@@ -4102,7 +4952,6 @@ async function handleShopBellClick() {
         return;
     }
     const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
-    const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     if (sub) {
         await unsubscribeShopPush();
@@ -4120,7 +4969,6 @@ async function initShopPush() {
         updateShopBellUI('denied'); return;
     }
     try {
-        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
         const sub = reg ? await reg.pushManager.getSubscription() : null;
         updateShopBellUI(sub ? 'active' : 'off');
@@ -4167,6 +5015,22 @@ function flyToCart(srcX, srcY) {
 // =========================================================
 // Feature 15: COMPARTIR PRODUCTO
 // =========================================================
+function openImgZoom() {
+    const src = document.getElementById('detailImg').src;
+    if (!src) return;
+    const overlay = document.getElementById('imgZoomOverlay');
+    document.getElementById('imgZoomSrc').src = src;
+    overlay.classList.add('active');
+    document.addEventListener('keydown', _zoomKeyClose);
+}
+
+function closeImgZoom() {
+    document.getElementById('imgZoomOverlay').classList.remove('active');
+    document.removeEventListener('keydown', _zoomKeyClose);
+}
+
+function _zoomKeyClose(e) { if (e.key === 'Escape') closeImgZoom(); }
+
 function shareCurrentProduct() {
     if (!_currentDetailProduct) return;
     const prod = _currentDetailProduct;
@@ -4186,8 +5050,7 @@ function shareCurrentProduct() {
     const params = new URLSearchParams(location.search);
     const code = params.get('producto');
     if (!code) return;
-    const cached = getProductsFromCache();
-    const list = cached || PRODUCTS_DATA;
+    const list = getProductsFromCache() || [];
     const prod = list.find(p => p.codigo === code);
     if (prod) {
         document.addEventListener('DOMContentLoaded', () => {
@@ -4285,5 +5148,6 @@ function restoreAbandonedCart(banner) {
 }
 </script>
 
+</main><!-- /#main-content -->
 </body>
 </html>

@@ -1,6 +1,7 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_export.php
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // --- CONFIGURACIÓN ---
 $localPath = '/var/www/assets/product_images/'; // Ruta definida en pos.php y products_table.php
@@ -108,7 +109,7 @@ if (isset($_GET['action'])) {
 <!DOCTYPE html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8"><title>Exportador de Catálogo | PalWeb</title>
+    <meta charset="UTF-8"><title>Exportador de Catálogo | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <style> 
@@ -177,5 +178,4 @@ if (isset($_GET['action'])) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
 

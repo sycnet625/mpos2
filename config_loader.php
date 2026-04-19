@@ -83,6 +83,29 @@ if (!function_exists('config_loader_apply_user_context')) {
     }
 }
 
+if (!function_exists('config_loader_apply_subdomain_context')) {
+    function config_loader_apply_subdomain_context(array &$config): void
+    {
+        $map = $config['subdomain_sucursal_map'] ?? [];
+        if (empty($map) || !is_array($map)) return;
+
+        $host = strtolower(trim($_SERVER['HTTP_HOST'] ?? ''));
+        // Strip port if present (e.g. localhost:8080)
+        if (str_contains($host, ':')) $host = explode(':', $host)[0];
+
+        foreach ($map as $entry) {
+            $entryHost = strtolower(trim((string)($entry['host'] ?? '')));
+            if ($entryHost === '' || $entryHost !== $host) continue;
+
+            $suc = (int)($entry['id_sucursal'] ?? 0);
+            $alm = (int)($entry['id_almacen'] ?? 0);
+            if ($suc > 0) $config['id_sucursal'] = $suc;
+            if ($alm > 0) $config['id_almacen']  = $alm;
+            break;
+        }
+    }
+}
+
 if (!function_exists('config_loader_system_name')) {
     function config_loader_system_name(string $fallback = 'PalWeb POS Marinero'): string
     {
@@ -164,7 +187,9 @@ if (!isset($config)) {
         'manifest-shop.php', 'manifest-pos.php'
     ], true);
 
-    if (!$isShop) {
+    if ($isShop) {
+        config_loader_apply_subdomain_context($config);
+    } else {
         config_loader_apply_session_context($config);
         config_loader_apply_user_context($config);
     }

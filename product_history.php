@@ -291,7 +291,7 @@ try {
 </div>
 
 
-<div class="text-center text-muted small mt-4 mb-2" style="font-size:0.7rem;">Sistema PALWEB POS v3.0</div>
+<div class="text-center text-muted small mt-4 mb-2" style="font-size:0.7rem;">Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</div>
 
 <script>
 function recalcularKardex() {
@@ -327,4 +327,3 @@ function recalcularKardex() {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

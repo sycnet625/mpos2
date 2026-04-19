@@ -1,6 +1,7 @@
 <?php
 // ARCHIVO: dashboard.php
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // --- FUNCIONES DE CONSULTA (DATA FETCHING) ---
 function getScalar($pdo, $sql, $params = []) {
@@ -149,7 +150,7 @@ $stockPorCategoria = getRows($pdo, "
 <div class="container-fluid">
     <div class="d-flex justify-content-between align-items-center mb-4">
         <div>
-            <h2 class="fw-bold text-dark"><i class="fas fa-chart-line text-primary"></i> PalWeb Dashboard</h2>
+            <h2 class="fw-bold text-dark"><i class="fas fa-chart-line text-primary"></i> <?= htmlspecialchars(config_loader_system_name()) ?> Dashboard</h2>
             <p class="text-muted">Resumen ejecutivo de la empresa #<?php echo $empresaId; ?></p>
         </div>
         <button class="btn btn-outline-primary" onclick="location.reload()"><i class="fas fa-sync-alt"></i> Actualizar</button>
@@ -401,4 +402,3 @@ $stockPorCategoria = getRows($pdo, "
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

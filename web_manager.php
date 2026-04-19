@@ -39,7 +39,74 @@ function webmgr_has_image(string $code): bool {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     $input = json_decode(file_get_contents('php://input'), true);
-    
+
+    // Acción masiva: desmarcar sucursal entera (todos los productos)
+    if (isset($input['action']) && $input['action'] === 'bulk_unmark_sucursal_all') {
+        try {
+            $suc = intval($input['sucursal']);
+            if ($suc < 1 || $suc > 6) throw new Exception("Sucursal inválida");
+            $prods = $pdo->query("SELECT codigo, sucursales_web FROM productos WHERE activo=1 AND id_empresa=$EMP_ID")->fetchAll(PDO::FETCH_ASSOC);
+            $stmt = $pdo->prepare("UPDATE productos SET sucursales_web = ? WHERE codigo = ? AND id_empresa = ?");
+            $count = 0;
+            foreach ($prods as $pr) {
+                $parts = array_filter(array_map('trim', explode(',', $pr['sucursales_web'] ?? '')));
+                if (in_array((string)$suc, $parts)) {
+                    $parts = array_values(array_filter($parts, fn($v) => $v !== (string)$suc));
+                    $stmt->execute([implode(',', $parts), $pr['codigo'], $EMP_ID]);
+                    $count++;
+                }
+            }
+            echo json_encode(['status' => 'success', 'affected' => $count]);
+        } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
+        exit;
+    }
+
+    // Acción masiva sobre productos seleccionados
+    if (isset($input['action']) && $input['action'] === 'bulk_action') {
+        try {
+            $codes = $input['codes'] ?? [];
+            if (empty($codes)) throw new Exception("Sin productos seleccionados");
+            $placeholders = implode(',', array_fill(0, count($codes), '?'));
+            $params = array_merge($codes, [$EMP_ID]);
+
+            switch ($input['bulk'] ?? '') {
+                case 'web_on':
+                    $pdo->prepare("UPDATE productos SET es_web=1 WHERE codigo IN ($placeholders) AND id_empresa=?")->execute($params);
+                    break;
+                case 'web_off':
+                    $pdo->prepare("UPDATE productos SET es_web=0 WHERE codigo IN ($placeholders) AND id_empresa=?")->execute($params);
+                    break;
+                case 'suc_add':
+                    $suc = intval($input['sucursal'] ?? 0);
+                    if ($suc < 1 || $suc > 6) throw new Exception("Sucursal inválida");
+                    $rows = $pdo->prepare("SELECT codigo, sucursales_web FROM productos WHERE codigo IN ($placeholders) AND id_empresa=?");
+                    $rows->execute($params);
+                    $stmt = $pdo->prepare("UPDATE productos SET sucursales_web=? WHERE codigo=? AND id_empresa=?");
+                    foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $pr) {
+                        $parts = array_filter(array_map('trim', explode(',', $pr['sucursales_web'] ?? '')));
+                        if (!in_array((string)$suc, $parts)) $parts[] = (string)$suc;
+                        $stmt->execute([implode(',', $parts), $pr['codigo'], $EMP_ID]);
+                    }
+                    break;
+                case 'suc_remove':
+                    $suc = intval($input['sucursal'] ?? 0);
+                    if ($suc < 1 || $suc > 6) throw new Exception("Sucursal inválida");
+                    $rows = $pdo->prepare("SELECT codigo, sucursales_web FROM productos WHERE codigo IN ($placeholders) AND id_empresa=?");
+                    $rows->execute($params);
+                    $stmt = $pdo->prepare("UPDATE productos SET sucursales_web=? WHERE codigo=? AND id_empresa=?");
+                    foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $pr) {
+                        $parts = array_values(array_filter(array_map('trim', explode(',', $pr['sucursales_web'] ?? '')), fn($v) => $v !== (string)$suc));
+                        $stmt->execute([implode(',', $parts), $pr['codigo'], $EMP_ID]);
+                    }
+                    break;
+                default:
+                    throw new Exception("Acción desconocida");
+            }
+            echo json_encode(['status' => 'success']);
+        } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
+        exit;
+    }
+
     // Si es subida de imagen (Form Data)
     if (isset($_FILES['new_photo'])) {
         try {
@@ -111,8 +178,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // 3. FILTROS Y CONSULTA
 $search = trim($_GET['q'] ?? '');
 $cat = $_GET['cat'] ?? '';
-$filterStatus = $_GET['status'] ?? 'all'; 
+$filterStatus = $_GET['status'] ?? 'all';
 $filterType = $_GET['prod_type'] ?? '';
+$filterSucursal = intval($_GET['suc'] ?? 0);
+
+$allowedPerPage = [25, 50, 100, 200];
+$perPage = in_array(intval($_GET['pp'] ?? 0), $allowedPerPage) ? intval($_GET['pp']) : 50;
 
 $where = "WHERE p.activo = 1 AND p.id_empresa = $EMP_ID";
 
@@ -129,18 +200,22 @@ if ($search) {
     }
 }
 
-if ($cat) $where .= " AND p.categoria = '$cat'";
+if ($cat) $where .= " AND p.categoria = " . $pdo->quote($cat);
 
 if ($filterType === 'service')     $where .= " AND p.es_servicio = 1";
 if ($filterType === 'raw')         $where .= " AND p.es_materia_prima = 1";
 if ($filterType === 'elaborated')  $where .= " AND p.es_elaborado = 1";
 if ($filterType === 'merchandise') $where .= " AND p.es_servicio = 0 AND p.es_materia_prima = 0 AND p.es_elaborado = 0";
 
-if ($filterStatus === 'web_only') $where .= " AND p.es_web = 1";
-if ($filterStatus === 'no_desc')  $where .= " AND (p.descripcion IS NULL OR p.descripcion = '')";
+if ($filterStatus === 'web_only')  $where .= " AND p.es_web = 1";
+if ($filterStatus === 'no_web')    $where .= " AND p.es_web = 0";
+if ($filterStatus === 'no_desc')   $where .= " AND (p.descripcion IS NULL OR p.descripcion = '')";
+if ($filterStatus === 'no_img')    $where .= " AND p.es_web = 1";
+
+if ($filterSucursal >= 1 && $filterSucursal <= 6)
+    $where .= " AND FIND_IN_SET($filterSucursal, p.sucursales_web) > 0";
 
 $page = max(1, intval($_GET['page'] ?? 1));
-$perPage = 50;
 $offset = ($page - 1) * $perPage;
 
 $total = $pdo->query("SELECT COUNT(*) FROM productos p $where")->fetchColumn();
@@ -167,6 +242,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
     <title>Gestor E-commerce</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
         .table thead th { white-space: nowrap; }
@@ -204,8 +280,8 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
     </section>
 
     <!-- ── Filtros ─────────────────────────────────────────────────────────── -->
-    <div class="glass-card p-3 mb-4 inventory-fade-in no-print">
-        <form class="row g-2 align-items-center" method="get">
+    <div class="glass-card p-3 mb-3 inventory-fade-in no-print">
+        <form class="row g-2 align-items-center" method="get" id="filterForm">
             <div class="col-auto">
                 <select class="form-select form-select-sm" name="prod_type" onchange="this.form.submit()">
                     <option value="">Todos los Tipos</option>
@@ -219,28 +295,78 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                 <select class="form-select form-select-sm" name="status" onchange="this.form.submit()">
                     <option value="all">Estado: Todos</option>
                     <option value="web_only" <?php echo $filterStatus=='web_only'?'selected':''; ?>>🟢 Web Activos</option>
+                    <option value="no_web" <?php echo $filterStatus=='no_web'?'selected':''; ?>>🔴 Sin Web</option>
                     <option value="no_desc" <?php echo $filterStatus=='no_desc'?'selected':''; ?>>⚠️ Sin Descripción</option>
+                </select>
+            </div>
+            <div class="col-auto">
+                <select class="form-select form-select-sm" name="suc" onchange="this.form.submit()" title="Filtrar por sucursal asignada">
+                    <option value="0">Todas las Sucursales</option>
+                    <?php for($i=1; $i<=6; $i++): ?>
+                    <option value="<?php echo $i; ?>" <?php echo $filterSucursal==$i?'selected':''; ?>>Sucursal <?php echo $i; ?></option>
+                    <?php endfor; ?>
                 </select>
             </div>
             <div class="col-auto">
                 <select class="form-select form-select-sm" name="cat" onchange="this.form.submit()">
                     <option value="">Todas las Categorías</option>
-                    <?php foreach($cats as $c): ?><option value="<?php echo $c; ?>" <?php echo $cat==$c?'selected':''; ?>><?php echo $c; ?></option><?php endforeach; ?>
+                    <?php foreach($cats as $c): ?><option value="<?php echo htmlspecialchars($c); ?>" <?php echo $cat==$c?'selected':''; ?>><?php echo htmlspecialchars($c); ?></option><?php endforeach; ?>
                 </select>
             </div>
             <div class="col">
                 <div class="input-group input-group-sm">
-                    <span class="input-group-text bg-white"><i class="fas fa-search text-muted"></i></span>
+                    <span class="input-group-text"><i class="fas fa-search text-muted"></i></span>
                     <input type="text" class="form-control" name="q" placeholder="Nombre o SKUs (sep. comas)" value="<?php echo htmlspecialchars($search); ?>">
                     <button class="btn btn-outline-secondary" type="submit"><i class="fas fa-search"></i></button>
                 </div>
             </div>
-            <?php if ($search || $cat || $filterStatus !== 'all' || $filterType): ?>
+            <div class="col-auto">
+                <select class="form-select form-select-sm" name="pp" onchange="this.form.submit()" title="Productos por página">
+                    <?php foreach([25,50,100,200] as $pp): ?>
+                    <option value="<?php echo $pp; ?>" <?php echo $perPage==$pp?'selected':''; ?>><?php echo $pp; ?>/pág</option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <?php if ($search || $cat || $filterStatus !== 'all' || $filterType || $filterSucursal): ?>
             <div class="col-auto">
                 <a class="btn btn-outline-danger btn-sm" href="web_manager.php">✕ Limpiar</a>
             </div>
             <?php endif; ?>
         </form>
+    </div>
+
+    <!-- ── Acciones Masivas ───────────────────────────────────────────────── -->
+    <div class="glass-card p-3 mb-3 inventory-fade-in no-print" id="bulkBar">
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="fw-bold small text-muted me-1"><i class="fas fa-layer-group me-1"></i>Acciones masivas:</span>
+            <button class="btn btn-sm btn-outline-secondary" onclick="selectAll(true)"><i class="fas fa-check-square me-1"></i>Sel. todos</button>
+            <button class="btn btn-sm btn-outline-secondary" onclick="selectAll(false)"><i class="fas fa-square me-1"></i>Desel. todos</button>
+            <div class="vr mx-1"></div>
+            <button class="btn btn-sm btn-success" onclick="bulkAction('web_on')"><i class="fas fa-globe me-1"></i>Activar web</button>
+            <button class="btn btn-sm btn-danger" onclick="bulkAction('web_off')"><i class="fas fa-eye-slash me-1"></i>Desactivar web</button>
+            <div class="vr mx-1"></div>
+            <div class="d-flex align-items-center gap-1">
+                <select id="bulkSuc" class="form-select form-select-sm" style="width:auto">
+                    <?php for($i=1; $i<=6; $i++): ?>
+                    <option value="<?php echo $i; ?>">Suc. <?php echo $i; ?></option>
+                    <?php endfor; ?>
+                </select>
+                <button class="btn btn-sm btn-primary" onclick="bulkAction('suc_add')"><i class="fas fa-plus me-1"></i>Asignar suc.</button>
+                <button class="btn btn-sm btn-warning text-dark" onclick="bulkAction('suc_remove')"><i class="fas fa-minus me-1"></i>Quitar suc.</button>
+            </div>
+            <div class="vr mx-1"></div>
+            <div class="d-flex align-items-center gap-1">
+                <select id="unmarkAllSuc" class="form-select form-select-sm" style="width:auto">
+                    <?php for($i=1; $i<=6; $i++): ?>
+                    <option value="<?php echo $i; ?>">Suc. <?php echo $i; ?></option>
+                    <?php endfor; ?>
+                </select>
+                <button class="btn btn-sm btn-outline-danger" onclick="unmarkAllSucursal()" title="Quita esta sucursal de TODOS los productos">
+                    <i class="fas fa-trash-alt me-1"></i>Desmarcar suc. entera
+                </button>
+            </div>
+            <span id="bulkCount" class="badge bg-secondary ms-auto">0 seleccionados</span>
+        </div>
     </div>
 
     <!-- ── Tabla ───────────────────────────────────────────────────────────── -->
@@ -249,6 +375,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
             <table class="table table-hover table-align-middle mb-0">
                 <thead class="table-light small text-muted">
                     <tr>
+                        <th class="text-center" width="36"><input type="checkbox" id="checkAll" onchange="selectAll(this.checked)" title="Seleccionar todos"></th>
                         <th class="text-center" width="80">Foto</th>
                         <th>Producto</th>
                         <th class="text-center" width="100">Estado Web</th>
@@ -267,7 +394,10 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                         $unit = $p['unidad_medida'] ?? '';
                         $peso = $p['peso'] ?? 0;
                     ?>
-                    <tr>
+                    <tr data-code="<?php echo htmlspecialchars($p['codigo']); ?>">
+                        <td class="text-center">
+                            <input type="checkbox" class="row-check" value="<?php echo htmlspecialchars($p['codigo']); ?>" onchange="updateBulkCount()">
+                        </td>
                         <td class="text-center">
                             <img src="<?php echo $imgUrl; ?>" class="img-thumb shadow-sm" onclick="triggerUpload('<?php echo $p['codigo']; ?>')" title="Clic para cambiar foto">
                             <?php if(!$hasImg): ?><div class="text-danger small fw-bold mt-1" style="font-size:0.6rem">FALTA</div><?php endif; ?>
@@ -350,7 +480,7 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
                     </tr>
                     <?php endforeach; ?>
                     <?php if (empty($products)): ?>
-                    <tr><td colspan="6" class="text-center py-5 text-muted">
+                    <tr><td colspan="7" class="text-center py-5 text-muted">
                         <i class="fas fa-globe fa-3x mb-3 d-block opacity-25"></i>
                         No hay productos con estos filtros.
                     </td></tr>
@@ -360,19 +490,18 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
         </div>
 
         <div class="d-flex justify-content-between align-items-center py-3 px-3" style="border-top:1px solid var(--pw-line)">
-            <small class="text-muted">Total: <?php echo $total; ?> productos</small>
+            <small class="text-muted">Total: <?php echo $total; ?> productos · <?php echo $perPage; ?>/pág</small>
+            <?php
+                $pgBase = '?q='.urlencode($search).'&status='.$filterStatus.'&cat='.urlencode($cat).'&prod_type='.$filterType.'&suc='.$filterSucursal.'&pp='.$perPage;
+            ?>
             <nav>
                 <ul class="pagination pagination-sm mb-0">
                     <?php if($page > 1): ?>
-                        <li class="page-item">
-                            <a class="page-link" href="?page=<?php echo $page-1; ?>&q=<?php echo urlencode($search); ?>&status=<?php echo $filterStatus; ?>&cat=<?php echo urlencode($cat); ?>&prod_type=<?php echo $filterType; ?>">Anterior</a>
-                        </li>
+                        <li class="page-item"><a class="page-link" href="<?php echo $pgBase; ?>&page=<?php echo $page-1; ?>">Anterior</a></li>
                     <?php endif; ?>
                     <li class="page-item disabled"><span class="page-link"><?php echo $page; ?> / <?php echo $totalPages; ?></span></li>
                     <?php if($page < $totalPages): ?>
-                        <li class="page-item">
-                            <a class="page-link" href="?page=<?php echo $page+1; ?>&q=<?php echo urlencode($search); ?>&status=<?php echo $filterStatus; ?>&cat=<?php echo urlencode($cat); ?>&prod_type=<?php echo $filterType; ?>">Siguiente</a>
-                        </li>
+                        <li class="page-item"><a class="page-link" href="<?php echo $pgBase; ?>&page=<?php echo $page+1; ?>">Siguiente</a></li>
                     <?php endif; ?>
                 </ul>
             </nav>
@@ -534,6 +663,57 @@ $cats = $pdo->query("SELECT DISTINCT categoria FROM productos WHERE activo=1 AND
             } else {
                 alert('Error al guardar: ' + (json.msg || 'Desconocido'));
             }
+        } catch(e) { alert('Error de conexión'); }
+    }
+
+    function selectAll(checked) {
+        document.querySelectorAll('.row-check').forEach(cb => cb.checked = checked);
+        document.getElementById('checkAll').checked = checked;
+        updateBulkCount();
+    }
+
+    function updateBulkCount() {
+        const n = document.querySelectorAll('.row-check:checked').length;
+        document.getElementById('bulkCount').textContent = n + ' seleccionados';
+        const allChecked = n === document.querySelectorAll('.row-check').length;
+        document.getElementById('checkAll').indeterminate = n > 0 && !allChecked;
+        document.getElementById('checkAll').checked = allChecked && n > 0;
+    }
+
+    function getSelectedCodes() {
+        return [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+    }
+
+    async function bulkAction(type) {
+        const codes = getSelectedCodes();
+        if (!codes.length) { alert('Selecciona al menos un producto.'); return; }
+        const suc = document.getElementById('bulkSuc').value;
+        const labels = { web_on: 'activar en web', web_off: 'desactivar de web', suc_add: `asignar sucursal ${suc}`, suc_remove: `quitar sucursal ${suc}` };
+        if (!confirm(`¿${labels[type]} en ${codes.length} producto(s)?`)) return;
+        try {
+            const res = await fetch('web_manager.php', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'bulk_action', bulk: type, codes, sucursal: suc })
+            });
+            const json = await res.json();
+            if (json.status === 'success') location.reload();
+            else alert('Error: ' + (json.msg || 'Desconocido'));
+        } catch(e) { alert('Error de conexión'); }
+    }
+
+    async function unmarkAllSucursal() {
+        const suc = document.getElementById('unmarkAllSuc').value;
+        if (!confirm(`¿Quitar la sucursal ${suc} de TODOS los productos? Esta acción afecta a toda la base de datos.`)) return;
+        try {
+            const res = await fetch('web_manager.php', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'bulk_unmark_sucursal_all', sucursal: suc })
+            });
+            const json = await res.json();
+            if (json.status === 'success') {
+                alert(`Sucursal ${suc} desmarcada en ${json.affected} producto(s).`);
+                location.reload();
+            } else alert('Error: ' + (json.msg || 'Desconocido'));
         } catch(e) { alert('Error de conexión'); }
     }
 

@@ -3,6 +3,7 @@
 // DESCRIPCIÓN: Genera facturas HTML y guarda historial.
 // VERSIÓN: 2.6 (FIX: AUTO-INCREMENTO INTELIGENTE Y ANTI-DUPLICADOS)
 require_once 'db.php';
+require_once 'config_loader.php';
 session_start();
 
 // 1. PROCESAR EL FORMULARIO
@@ -309,7 +310,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Facturado por: <i><?php echo htmlspecialchars($admin); ?></i> (Administrador PALWEB SURL)<br>
         Si tiene alguna duda respecto esta factura, por favor contáctenos: <b>admin@palweb.net</b>
     </div>
-    <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">Generado por PalWeb POS v2.0</div>
+    <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v2.0</div>
 
 </div> <?php include_once 'menu_master.php'; ?>
 </body>
@@ -319,4 +320,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     echo "Acceso directo no permitido. Use el sistema POS.";
 }
 ?>
-

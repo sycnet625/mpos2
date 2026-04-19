@@ -1,21 +1,17 @@
-// ==========================================
+// ============================================================
 // SERVICE WORKER - TIENDA PUBLICA
-// Version 2.1 - Online First + Offline Real
-// Scope: directorio actual de la tienda
-// ==========================================
+// Version 3.0 - Stale-While-Revalidate + Offline Real
+// ============================================================
 
-const CACHE_NAME = 'palweb-shop-v21';
-const IMG_CACHE = 'palweb-shop-images-v1';
-const PUSH_CACHE = 'push-config-v1';
-const BASE_URL = new URL('./', self.registration.scope);
-const assetUrl = (rel) => new URL(rel, BASE_URL).toString();
+const CACHE_NAME      = 'palweb-shop-v30';
+const IMG_CACHE       = 'palweb-shop-images-v2';
+const STATIC_CACHE    = 'palweb-shop-static-v30';
+const PUSH_CACHE      = 'push-config-v1';
+const BASE_URL        = new URL('./', self.registration.scope);
+const assetUrl        = (rel) => new URL(rel, BASE_URL).toString();
 
-// Recursos estaticos minimos para offline
-const OFFLINE_ASSETS = [
-    assetUrl('shop.php'),
-    assetUrl('manifest-shop.php'),
-    assetUrl('icon-shop-192.png'),
-    assetUrl('icon-shop-512.png'),
+// Recursos estáticos: cacheados permanentemente, revalidados en background
+const STATIC_ASSETS = [
     assetUrl('assets/css/bootstrap.min.css'),
     assetUrl('assets/css/all.min.css'),
     assetUrl('assets/js/bootstrap.bundle.min.js'),
@@ -23,150 +19,231 @@ const OFFLINE_ASSETS = [
     assetUrl('assets/webfonts/fa-regular-400.woff2'),
     assetUrl('assets/webfonts/fa-brands-400.woff2'),
     assetUrl('assets/webfonts/fa-v4compatibility.woff2'),
+    assetUrl('icon-shop-192.png'),
+    assetUrl('icon-shop-512.png'),
+    assetUrl('manifest-shop.php'),
 ];
 
-// Parametros GET que identifican peticiones AJAX
+// Ruta principal de la tienda (SWR)
+const SHOP_MAIN_URL = assetUrl('shop.php');
+
+// Params GET que son siempre AJAX — nunca cachear, nunca servir offline con HTML
 const AJAX_PARAMS = [
     'ajax_search', 'action_reviews', 'action_variants', 'action_track',
-    'action_client', 'action_restock_aviso', 'action_wishlist', 'action', 'ping',
+    'action_client', 'action_restock_aviso', 'action_wishlist',
+    'action_new_captcha', 'action_geo', 'action_view_product',
+    'action', 'ping',
 ];
 
+// Params cuyo JSON vacío es respuesta offline válida
+const AJAX_OFFLINE_JSON = { status: 'offline', offline: true };
+
+// ── Instalación ──────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-    console.log('[SW-Shop] v2.1 Instalando...');
+    console.log('[SW-Shop] v3.0 Instalando...');
     event.waitUntil(
-        caches.open(CACHE_NAME)
-            .then((cache) => cache.addAll(OFFLINE_ASSETS).catch(() => {}))
-            .then(() => self.skipWaiting())
+        caches.open(STATIC_CACHE).then(async (cache) => {
+            // Instalación parcial tolerante: un fallo no bloquea el SW
+            await Promise.allSettled(
+                STATIC_ASSETS.map(url =>
+                    cache.add(url).catch(e => console.warn('[SW-Shop] No cacheado:', url, e.message))
+                )
+            );
+        }).then(() => self.skipWaiting())
     );
 });
 
+// ── Activación — limpia cachés viejas ───────────────────────────────────────
 self.addEventListener('activate', (event) => {
-    console.log('[SW-Shop] v2.1 Activando...');
+    console.log('[SW-Shop] v3.0 Activando...');
+    const keep = new Set([CACHE_NAME, IMG_CACHE, STATIC_CACHE, PUSH_CACHE]);
     event.waitUntil(
         caches.keys()
-            .then((keys) => Promise.all(
-                keys.map((key) => {
-                    if (
-                        (key.startsWith('palweb-shop-') || key.startsWith('palweb-shop-images-')) &&
-                        key !== CACHE_NAME &&
-                        key !== IMG_CACHE
-                    ) {
-                        console.log('[SW-Shop] v2.1 Eliminando cache vieja:', key);
-                        return caches.delete(key);
-                    }
-                    return Promise.resolve();
-                })
+            .then(keys => Promise.all(
+                keys.filter(k => k.startsWith('palweb-shop') && !keep.has(k))
+                    .map(k => { console.log('[SW-Shop] Eliminando caché vieja:', k); return caches.delete(k); })
             ))
             .then(() => self.clients.claim())
     );
 });
 
+// ── Interceptor de peticiones ────────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
     if (!event.request.url.startsWith('http')) return;
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
-    if (url.pathname.includes('image.php')) {
-        event.respondWith(serveImage(event.request));
+
+    // 1. Imágenes de producto → Cache-First con revalidación silenciosa
+    if (url.pathname.endsWith('image.php') || url.pathname.includes('/product_images/')) {
+        event.respondWith(cacheFirstRevalidate(event.request, IMG_CACHE));
         return;
     }
 
-    event.respondWith(onlineFirst(event.request));
+    // 2. Assets estáticos (.css .js .woff2 .png .ico .webp .jpg) → Cache-First
+    if (isStaticAsset(url)) {
+        event.respondWith(cacheFirstRevalidate(event.request, STATIC_CACHE));
+        return;
+    }
+
+    // 3. Peticiones AJAX / API → Network-Only con fallback JSON offline
+    if (isAjaxRequest(url)) {
+        event.respondWith(networkOnlyWithOfflineFallback(event.request, url));
+        return;
+    }
+
+    // 4. shop.php sin parámetros (navegación principal) → Stale-While-Revalidate
+    if (url.pathname.endsWith('shop.php') && !url.search) {
+        event.respondWith(staleWhileRevalidate(event.request, CACHE_NAME));
+        return;
+    }
+
+    // 5. Resto de páginas → Network-First con caché de emergencia
+    event.respondWith(networkFirstWithCache(event.request));
 });
 
-async function serveImage(request) {
-    const imgCache = await caches.open(IMG_CACHE);
-    const cached = await imgCache.match(request);
+// ── Estrategias de caché ─────────────────────────────────────────────────────
+
+// Stale-While-Revalidate: responde INMEDIATAMENTE con caché (si existe),
+// luego actualiza la caché en background para la próxima visita.
+async function staleWhileRevalidate(request, cacheName) {
+    const cache  = await caches.open(cacheName);
+    const cached = await cache.match(request);
+
+    // Lanzar revalidación en background (sin await)
+    const networkPromise = fetch(request, { credentials: 'same-origin' })
+        .then(response => {
+            if (response.ok) cache.put(request, response.clone());
+            return response;
+        })
+        .catch(() => null);
+
+    // Si hay caché → responder YA, actualizar en fondo
+    if (cached) {
+        networkPromise.catch(() => {}); // asegurar que no lanza si nadie lo escucha
+        return cached;
+    }
+
+    // Sin caché → esperar red
+    const networkResponse = await networkPromise;
+    if (networkResponse) return networkResponse;
+
+    // Offline y sin caché → página de emergencia
+    return offlineFallbackPage();
+}
+
+// Cache-First con revalidación silenciosa en background (imágenes y estáticos)
+async function cacheFirstRevalidate(request, cacheName) {
+    const cache  = await caches.open(cacheName);
+    const cached = await cache.match(request);
 
     if (cached) {
-        fetch(request)
-            .then((response) => {
-                if (response && response.ok) imgCache.put(request, response.clone());
-            })
-            .catch(() => {});
+        // Revalidar en background sin bloquear
+        fetch(request).then(r => { if (r && r.ok) cache.put(request, r.clone()); }).catch(() => {});
         return cached;
     }
 
     try {
         const response = await fetch(request);
-        if (response.ok) imgCache.put(request, response.clone());
+        if (response.ok) cache.put(request, response.clone());
         return response;
     } catch {
-        return new Response('', { status: 404 });
+        // Para imágenes rotas, respuesta vacía sin error visible
+        return new Response('', { status: 204, headers: { 'Content-Type': 'image/svg+xml' } });
     }
 }
 
-async function onlineFirst(request) {
-    const url = new URL(request.url);
-
+// Network-Only con fallback JSON para AJAX offline
+async function networkOnlyWithOfflineFallback(request, url) {
     try {
-        const networkResponse = await fetch(request, { credentials: 'same-origin' });
-
-        if (networkResponse.ok) {
-            const shouldCache =
-                request.url.endsWith('.js') ||
-                request.url.endsWith('.css') ||
-                request.url.endsWith('.woff2') ||
-                request.url.endsWith('.png') ||
-                (url.pathname.includes('shop.php') && !url.search) ||
-                url.pathname.includes('manifest-shop.php');
-
-            if (shouldCache) {
-                const cache = await caches.open(CACHE_NAME);
-                cache.put(request, networkResponse.clone());
-            }
-        }
-
-        return networkResponse;
+        // Timeout de 12s para requests AJAX en conexión lenta
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 12000);
+        const response   = await fetch(request, { signal: controller.signal, credentials: 'same-origin' });
+        clearTimeout(timeoutId);
+        return response;
     } catch {
-        console.log('[SW-Shop] v2.1 Offline, buscando en cache:', request.url);
-
-        const isAjax = AJAX_PARAMS.some((param) => url.searchParams.has(param));
-        if (isAjax) {
-            return new Response(
-                JSON.stringify({ status: 'offline', offline: true }),
-                { status: 200, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
-        const cached = await caches.match(request) || await caches.match(assetUrl('shop.php'));
-        if (cached) return cached;
-
-        return new Response('Sin conexion. Abre la tienda conectado primero.', { status: 503 });
+        return new Response(
+            JSON.stringify(AJAX_OFFLINE_JSON),
+            { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } }
+        );
     }
 }
+
+// Network-First con caché de emergencia
+async function networkFirstWithCache(request) {
+    const cache = await caches.open(CACHE_NAME);
+    try {
+        const response = await fetch(request, { credentials: 'same-origin' });
+        if (response.ok) cache.put(request, response.clone());
+        return response;
+    } catch {
+        const cached = await cache.match(request);
+        return cached || offlineFallbackPage();
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function isStaticAsset(url) {
+    return /\.(css|js|woff2?|ttf|eot|png|ico|svg|webp|jpg|jpeg|gif)(\?.*)?$/.test(url.pathname);
+}
+
+function isAjaxRequest(url) {
+    return AJAX_PARAMS.some(p => url.searchParams.has(p));
+}
+
+function offlineFallbackPage() {
+    return new Response(`<!DOCTYPE html>
+<html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sin conexión</title>
+<style>
+  body{font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb;color:#374151;text-align:center;padding:24px}
+  .icon{font-size:4rem;margin-bottom:16px}
+  h1{font-size:1.4rem;margin:0 0 8px}
+  p{color:#6b7280;margin:0 0 24px;max-width:320px}
+  button{background:#0d6efd;color:#fff;border:none;padding:12px 28px;border-radius:999px;font-size:1rem;font-weight:600;cursor:pointer}
+</style></head>
+<body>
+  <div class="icon">📶</div>
+  <h1>Sin conexión a internet</h1>
+  <p>La tienda no está disponible en este momento. Verifica tu conexión y vuelve a intentarlo.</p>
+  <button onclick="location.reload()">Reintentar</button>
+</body></html>`,
+        { status: 503, headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+    );
+}
+
+// ── Push Notifications ───────────────────────────────────────────────────────
 
 async function getPushTipo() {
     try {
         const cache = await caches.open(PUSH_CACHE);
-        const resp = await cache.match('push-tipo');
+        const resp  = await cache.match('push-tipo');
         return resp ? await resp.text() : 'operador';
-    } catch (e) {
-        return 'operador';
-    }
+    } catch { return 'operador'; }
 }
 
 self.addEventListener('push', (event) => {
     event.waitUntil(
-        getPushTipo().then((tipo) =>
+        getPushTipo().then(tipo =>
             fetch(assetUrl('push_api.php') + '?action=latest&tipo=' + encodeURIComponent(tipo), {
-                credentials: 'same-origin',
-                cache: 'no-store',
+                credentials: 'same-origin', cache: 'no-store',
             })
-                .then((response) => (response.ok ? response.json() : null))
-                .then((data) => {
-                    if (!data || !data.titulo) return;
-                    return self.registration.showNotification(data.titulo, {
-                        body: data.cuerpo || '',
-                        icon: assetUrl('icon-shop-192.png'),
-                        badge: assetUrl('icon-shop-192.png'),
-                        data: { url: data.url || assetUrl('shop.php') },
-                        tag: 'palweb-shop-' + (data.id || Date.now()),
-                        renotify: true,
-                        vibrate: [200, 100, 200],
-                    });
-                })
-                .catch((err) => console.error('[SW-Shop Push] Error:', err))
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (!data?.titulo) return;
+                return self.registration.showNotification(data.titulo, {
+                    body:      data.cuerpo || '',
+                    icon:      assetUrl('icon-shop-192.png'),
+                    badge:     assetUrl('icon-shop-192.png'),
+                    data:      { url: data.url || assetUrl('shop.php') },
+                    tag:       'palweb-shop-' + (data.id || Date.now()),
+                    renotify:  true,
+                    vibrate:   [200, 100, 200],
+                });
+            })
+            .catch(e => console.error('[SW-Shop Push]', e))
         )
     );
 });
@@ -175,13 +252,61 @@ self.addEventListener('notificationclick', (event) => {
     event.notification.close();
     const target = event.notification.data?.url || assetUrl('shop.php');
     event.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
-            for (const client of list) {
-                if (client.url === target && 'focus' in client) return client.focus();
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+            for (const c of list) {
+                if (c.url === target && 'focus' in c) return c.focus();
             }
             return clients.openWindow(target);
         })
     );
 });
 
-console.log('[SW-Shop] v2.1 Service Worker Tienda cargado');
+// ── Background Sync — checkout fallido ──────────────────────────────────────
+self.addEventListener('sync', (event) => {
+    if (event.tag === 'checkout-retry') {
+        event.waitUntil(retrySyncedCheckouts());
+    }
+});
+
+async function retrySyncedCheckouts() {
+    let db;
+    try {
+        db = await openCheckoutDB();
+        const store  = db.transaction('pending_checkouts', 'readwrite').objectStore('pending_checkouts');
+        const items  = await idbGetAll(store);
+        for (const item of items) {
+            try {
+                const res = await fetch(assetUrl('shop.php'), {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body:    JSON.stringify(item.payload),
+                    credentials: 'same-origin',
+                });
+                if (res.ok) {
+                    const del = db.transaction('pending_checkouts', 'readwrite').objectStore('pending_checkouts');
+                    del.delete(item.id);
+                }
+            } catch { /* dejar para el próximo sync */ }
+        }
+    } catch (e) { console.warn('[SW-Shop Sync]', e); }
+    finally     { if (db) db.close(); }
+}
+
+function openCheckoutDB() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open('palweb-shop-checkout', 1);
+        req.onupgradeneeded = e => e.target.result.createObjectStore('pending_checkouts', { keyPath: 'id', autoIncrement: true });
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror   = e => reject(e.target.error);
+    });
+}
+
+function idbGetAll(store) {
+    return new Promise((resolve, reject) => {
+        const req = store.getAll();
+        req.onsuccess = e => resolve(e.target.result);
+        req.onerror   = e => reject(e.target.error);
+    });
+}
+
+console.log('[SW-Shop] v3.0 Stale-While-Revalidate activo');

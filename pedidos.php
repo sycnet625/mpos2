@@ -7,6 +7,7 @@ error_reporting(E_ALL);
 
 try {
     require_once 'db.php';
+    require_once 'config_loader.php';
     date_default_timezone_set('America/Havana');
     $pdo->exec("SET time_zone = '-05:00';");
 } catch (Exception $e) {
@@ -68,7 +69,7 @@ function getStatusBadge($estado) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard Admin | PalWeb POS</title>
+    <title>Dashboard Admin | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
 
@@ -90,7 +91,7 @@ function getStatusBadge($estado) {
 
 <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow">
     <div class="container-fluid">
-        <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i>PalWeb Admin</a>
+        <a class="navbar-brand fw-bold" href="#"><i class="fas fa-tachometer-alt me-2"></i><?= htmlspecialchars(config_loader_system_name()) ?></a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
             <span class="navbar-toggler-icon"></span>
         </button>
@@ -330,5 +331,4 @@ function getStatusBadge($estado) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
 

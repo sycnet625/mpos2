@@ -58,11 +58,12 @@ $totAyer = getTotales($pdo, $EMP_ID, $SUC_ID, $ayer,    $horaActual);
 $totSem  = getTotales($pdo, $EMP_ID, $SUC_ID, $semAnt,  $horaActual);
 
 // 3. Ganancia neta hoy
-$gananciaHoy = (float)qs($pdo, "SELECT COALESCE(SUM((d.precio - p.costo)*d.cantidad),0)
+$gananciaHoy = (float)qs($pdo, "SELECT COALESCE(SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.cantidad),0)
     FROM ventas_detalle d
-    JOIN productos p ON d.id_producto=p.codigo
-    JOIN ventas_cabecera v ON d.id_venta_cabecera=v.id
-    WHERE v.id_empresa=? AND v.id_sucursal=? AND DATE(v.fecha)=?", [$EMP_ID, $SUC_ID, $hoy]);
+    JOIN productos p ON d.id_producto = p.codigo
+    LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = ?
+    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND DATE(v.fecha) = ?", [$SUC_ID, $EMP_ID, $SUC_ID, $hoy]);
 
 // 4. Top 10 productos del día
 $top10 = q($pdo, "SELECT p.nombre, SUM(d.cantidad) as vendidos, COALESCE(SUM(d.cantidad*d.precio),0) as total_venta

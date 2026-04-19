@@ -19,10 +19,24 @@ function vapi_str($val, $len = 250) {
     return substr((string)($val ?? ''), 0, $len);
 }
 
+// Iniciar sesión para leer CSRF token
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params(['lifetime' => 0, 'path' => '/', 'secure' => true, 'httponly' => true, 'samesite' => 'Lax']);
+    session_start();
+}
+
 try {
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) throw new Exception("JSON inválido o vacío.");
     if (empty($input['items'])) throw new Exception("Se requiere al menos un item.");
+
+    // Validar CSRF
+    $sentCsrf = $input['csrf_token'] ?? '';
+    if (empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $sentCsrf)) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'msg' => 'Token de seguridad inválido. Recarga la tienda.']);
+        exit;
+    }
 
     // Configuración desde pos.cfg
     $config = ['id_almacen' => 1, 'id_sucursal' => 1, 'id_empresa' => 1];

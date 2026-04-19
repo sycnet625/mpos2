@@ -88,7 +88,7 @@ section.inventory-hero {
         linear-gradient(120deg, rgba(255,255,255,.12), rgba(255,255,255,0)) !important;
 }
 
-<?php if (!empty($_t['sucursal_banner'])): ?>
+<?php if (!empty($_t['sucursal_banner']) && (($_t['hero_mostrar_banner_sucursal'] ?? true) !== false)): ?>
 <?php
     $_bgMode  = $_t['banner_bg_size'] ?? 'cover';
     $_bgScale = (int)($_t['banner_scale'] ?? 100);

@@ -2,6 +2,7 @@
 // =============================================================
 // MarcelCraft — Editor de Mapas Isométrico | PalWeb POS Marinero
 // =============================================================
+require_once 'config_loader.php';
 $seed     = isset($_GET['seed'])  ? abs(intval($_GET['seed'])) % 999999 : 42;
 $mapW     = isset($_GET['w'])     ? min(60, max(20, intval($_GET['w']))) : 40;
 $mapH     = isset($_GET['h'])     ? min(60, max(20, intval($_GET['h']))) : 40;
@@ -526,7 +527,7 @@ canvas.edit { cursor:crosshair; }
         </div>
       </div>
     </div>
-    <div id="footer-version">PALWEB POS v3.0 • MARCEL ENGINE</div>
+    <div id="footer-version"><?= htmlspecialchars(config_loader_system_name()) ?> v3.0 • MARCEL ENGINE</div>
   </div>
 
   <!-- Panel Derecho: Métricas -->

@@ -2,6 +2,7 @@
 // ARCHIVO: track.php
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'config_loader.php';
 
 $orderId = isset($_GET['order_id']) ? intval($_GET['order_id']) : 0;
 $order = null;
@@ -44,7 +45,7 @@ if ($order) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rastreo de Pedido | PalWeb</title>
+    <title>Rastreo de Pedido | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <style>
@@ -59,7 +60,7 @@ if ($order) {
 
 <nav class="navbar navbar-light bg-white shadow-sm mb-5">
     <div class="container justify-content-center">
-        <a class="navbar-brand fw-bold text-primary" href="shop.php"><i class="fas fa-store me-2"></i>PalWeb Shop</a>
+        <a class="navbar-brand fw-bold text-primary" href="shop.php"><i class="fas fa-store me-2"></i><?= htmlspecialchars(config_loader_system_name()) ?></a>
     </div>
 </nav>
 
@@ -150,4 +151,3 @@ if ($order) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

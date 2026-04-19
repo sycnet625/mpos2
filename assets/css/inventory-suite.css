@@ -4,7 +4,7 @@
     --pw-muted: #6b7280;
     --pw-card: rgba(255,255,255,.88);
     --pw-line: rgba(15,23,42,.08);
-    --pw-accent: #0f766e;
+    --pw-accent: var(--primary-color, #0f766e);
     --pw-accent-2: #ea580c;
     --pw-warn: #f59e0b;
     --pw-danger: #b42318;
@@ -40,7 +40,7 @@ body.inventory-suite {
     border-radius: 24px;
     margin-bottom: 1.5rem;
     background:
-        linear-gradient(135deg, rgba(15,118,110,.92), rgba(21,128,61,.78)),
+        var(--hero-gradient, linear-gradient(135deg, #0f766e, #15803d)),
         linear-gradient(120deg, rgba(255,255,255,.14), rgba(255,255,255,0));
     color: #fff;
     overflow: hidden;

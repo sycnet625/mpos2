@@ -103,10 +103,18 @@ $sqlPedidosSucursal = ($scope === 'local') ? " AND id_sucursal = $SUC_ID " : "";
 $sqlPedidosAliasSucursal = ($scope === 'local') ? " AND pc.id_sucursal = $SUC_ID " : "";
 $sqlDateRange = " AND DATE(v.fecha) BETWEEN ? AND ? ";
 
-// A. Inventario (COLLATE fix: stock_almacen.id_producto usa uca1400, productos.codigo usa unicode_ci)
-$sqlInvBase = "SELECT SUM(s.cantidad * %FIELD%) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE 1=1 $sqlEmpresa $sqlProductScope $sqlAlmacen";
-$valorInventarioCosto = getScalar($pdo, str_replace('%FIELD%', 'p.costo', $sqlInvBase));
-$valorInventarioVenta = getScalar($pdo, str_replace('%FIELD%', 'p.precio', $sqlInvBase));
+// A. Inventario (Priorizar precios por sucursal si existen)
+$sqlInvBase = "SELECT SUM(s.cantidad * COALESCE(%PS_FIELD%, %P_FIELD%)) 
+               FROM stock_almacen s 
+               JOIN productos p ON s.id_producto = p.codigo 
+               LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
+               WHERE 1=1 $sqlEmpresa $sqlProductScope $sqlAlmacen";
+
+$qCosto = str_replace(['%PS_FIELD%', '%P_FIELD%'], ['ps.precio_costo', 'p.costo'], $sqlInvBase);
+$valorInventarioCosto = getScalar($pdo, $qCosto);
+
+$qVenta = str_replace(['%PS_FIELD%', '%P_FIELD%'], ['ps.precio_venta', 'p.precio'], $sqlInvBase);
+$valorInventarioVenta = getScalar($pdo, $qVenta);
 
 $sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.cantidad <= p.stock_minimo $sqlEmpresa $sqlProductScope $sqlAlmacen";
 $stockCritico = getScalar($pdo, $sqlStockCritico);
@@ -118,9 +126,16 @@ $paramsDate = [$fechaInicio, $fechaFin];
 $sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
 $ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
 
-$sqlGanancia = "SELECT SUM((d.precio - p.costo) * d.cantidad)
+// C. Ofertas Comerciales (Periodo)
+$sqlOfertas = "SELECT COUNT(*) FROM ofertas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
+$cantOfertas = getScalar($pdo, $sqlOfertas, $paramsDate);
+$sqlOfertasTotal = "SELECT SUM(total) FROM ofertas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
+$montoOfertas = getScalar($pdo, $sqlOfertasTotal, $paramsDate);
+
+$sqlGanancia = "SELECT SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.cantidad)
                 FROM ventas_detalle d
                 JOIN productos p ON d.id_producto = p.codigo
+                LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
 $gananciaPeriodo = getScalar($pdo, $sqlGanancia, $paramsDate);
@@ -284,13 +299,13 @@ $slowMovingProds = getRows($pdo, $sqlSlow, [$sevenDaysAgo]);
 // ============================================================================
 
 // 4.1 Ventas por Categoría
-$sqlCatSales = "SELECT p.categoria, SUM(d.cantidad * d.precio) as total_venta
-                FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo
-                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
-                GROUP BY p.categoria
-                ORDER BY total_venta DESC";
+$sqlCatSales = "SELECT p.categoria, SUM(d.cantidad * COALESCE(ps.precio_venta, p.precio)) as total_venta
+                 FROM ventas_detalle d
+                 JOIN productos p ON d.id_producto = p.codigo
+                 LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
+                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+                 GROUP BY p.categoria ORDER BY total_venta DESC";
 $catSalesData = getRows($pdo, $sqlCatSales, $paramsDate);
 
 // 4.2 Ganancias por Categoría
@@ -708,12 +723,11 @@ function auditResumen(string $accion, array $d): string {
                 </h1>
                 <p class="mb-3 text-white-50">Vista integral de ventas, inventario, reservas, ecommerce y auditoria operativa para <?php echo htmlspecialchars($companyBrandName); ?>.</p>
                 <div class="d-flex flex-wrap gap-2">
-                    <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i><?= $scope === 'global' ? 'Alcance global' : 'Sucursal actual' ?></span>
+                    <a href="offers_editor.php?mode=offer" class="btn btn-success fw-bold"><i class="fas fa-plus me-1"></i>Nueva Oferta</a>
+                    <span class="kpi-chip"><i class="fas fa-file-signature me-1"></i><?= $cantOfertas ?> Ofertas</span>
+                    <span class="kpi-chip"><i class="fas fa-layer-group me-1"></i><?= $scope === 'local' ? 'Sucursal actual' : 'Alcance global' ?></span>
                     <span class="kpi-chip"><i class="fas fa-calendar-alt me-1"></i><?= htmlspecialchars($fechaInicio) ?> a <?= htmlspecialchars($fechaFin) ?></span>
-                    <span class="kpi-chip"><i class="fas fa-building me-1"></i>Suc <?= (int)$SUC_ID ?></span>
-                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Alm <?= (int)$ALM_ID ?></span>
-                </div>
-            </div>
+                </div>            </div>
             <div class="d-flex flex-wrap gap-2">
                 <a href="pos_purchases.php" class="btn btn-success"><i class="fas fa-dolly-flatbed me-1"></i>Compras</a>
                 <a href="products_table.php" class="btn btn-outline-light"><i class="fas fa-boxes me-1"></i>Inventario</a>

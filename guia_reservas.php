@@ -231,7 +231,7 @@ $tienda = htmlspecialchars($config['tienda_nombre'] ?? 'Marinero');
                             Manual de Operador — Sistema de Reservas
                         </h2>
                         <p class="text-muted mb-0" style="font-size:.85rem;">
-                            <?= $tienda ?> · PALWEB POS v3.0 · Esta guía explica cada función del módulo
+                            <?= $tienda ?> · <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · Esta guía explica cada función del módulo
                             <strong>reservas.php</strong> paso a paso para cajeros y operadores.
                         </p>
                     </div>
@@ -1113,7 +1113,7 @@ $tienda = htmlspecialchars($config['tienda_nombre'] ?? 'Marinero');
 </div><!-- /page-wrap -->
 
 <div class="guide-footer">
-    Sistema PALWEB POS v3.0 — <?= $tienda ?> · guia_reservas.php
+    Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 — <?= $tienda ?> · guia_reservas.php
 </div>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>

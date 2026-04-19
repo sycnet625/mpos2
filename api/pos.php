@@ -207,7 +207,7 @@ foreach ($prods as &$p) {
         #btnSync { z-index: 100; position: relative; margin-right: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
     </style>
 
-<link rel="manifest" href="manifest.json">
+<link rel="manifest" href="manifest-pos.php">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1031,4 +1031,3 @@ async function forceDownloadProducts() {
 
 </body>
 </html>
-

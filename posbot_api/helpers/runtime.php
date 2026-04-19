@@ -68,9 +68,31 @@ function bot_read_json_file(string $file, $default = []): array {
 
 function bot_write_json_file(string $file, array $data): bool {
     $tmp = $file . '.tmp';
-    $ok = @file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT), LOCK_EX);
-    if ($ok === false) return false;
-    return @rename($tmp, $file);
+
+    // Codificar datos a JSON
+    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    if ($json === false) return false;
+
+    // Asegurarse que el directorio existe
+    $dir = dirname($file);
+    if (!is_dir($dir) && !@mkdir($dir, 0777, true)) {
+        return false;
+    }
+
+    // Escribir a archivo temporal
+    $bytesWritten = @file_put_contents($tmp, $json, LOCK_EX);
+    if ($bytesWritten === false || $bytesWritten === 0) {
+        @unlink($tmp);  // Limpiar archivo temporal si falló
+        return false;
+    }
+
+    // Reemplazar archivo original con temporal
+    if (!@rename($tmp, $file)) {
+        @unlink($tmp);  // Limpiar archivo temporal si fallo el rename
+        return false;
+    }
+
+    return true;
 }
 
 function bot_enqueue_bridge_job(array $job): bool {
@@ -261,6 +283,12 @@ function bot_queue_bridge_control(array $command, ?string &$detail = null): bool
 }
 
 function bot_ensure_tables(PDO $pdo): void {
+    global $config;
+    $defaultBusinessName = trim((string)($config['marca_sistema_nombre'] ?? ''));
+    if ($defaultBusinessName === '') {
+        $defaultBusinessName = 'Sistema POS';
+    }
+
     $pdo->exec("CREATE TABLE IF NOT EXISTS pos_bot_config (
         id TINYINT PRIMARY KEY DEFAULT 1,
         enabled TINYINT(1) NOT NULL DEFAULT 0,
@@ -272,7 +300,7 @@ function bot_ensure_tables(PDO $pdo): void {
         verify_token VARCHAR(120) DEFAULT NULL,
         wa_phone_number_id VARCHAR(80) DEFAULT NULL,
         wa_access_token TEXT DEFAULT NULL,
-        business_name VARCHAR(120) DEFAULT 'PalWeb POS',
+        business_name VARCHAR(120) DEFAULT 'Sistema POS',
         welcome_message TEXT,
         menu_intro TEXT,
         no_match_message TEXT,
@@ -305,12 +333,13 @@ function bot_ensure_tables(PDO $pdo): void {
         KEY idx_pedido (id_pedido)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    $pdo->exec("INSERT IGNORE INTO pos_bot_config
+    $seed = $pdo->prepare("INSERT IGNORE INTO pos_bot_config
         (id,enabled,verify_token,business_name,welcome_message,menu_intro,no_match_message)
-        VALUES (1,0,'palweb_bot_verify','PalWeb POS',
+        VALUES (1,0,'palweb_bot_verify',?,
         'Hola {{name}}. Bienvenido a {{business}}. Escribe MENU.',
         'Usa AGREGAR CODIGO CANTIDAD | CARRITO | CONFIRMAR',
         'No te entendi. Usa MENU, AGREGAR, CARRITO o CONFIRMAR')");
+    $seed->execute([$defaultBusinessName]);
 
     if (!bot_has_column($pdo, 'pos_bot_config', 'wa_mode')) {
         $pdo->exec("ALTER TABLE pos_bot_config ADD COLUMN wa_mode ENUM('web','meta_api') NOT NULL DEFAULT 'web' AFTER enabled");

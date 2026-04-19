@@ -343,7 +343,7 @@ if (empty($logoUrl)) {
         <?php if ($email): ?> · Contacto: <b><?= htmlspecialchars($email) ?></b><?php endif; ?>
     </div>
     <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">
-        Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · Documento no válido como factura oficial
+        Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · VISITANOS EN https://www.palweb.net
     </div>
 
 </div>

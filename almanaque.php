@@ -1,5 +1,6 @@
 <?php
 date_default_timezone_set('America/Havana');
+require_once 'config_loader.php';
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -451,7 +452,7 @@ date_default_timezone_set('America/Havana');
           <div class="num-wrap" id="romanNumbers"></div>
           
           <div class="clock-brand">
-            <div class="brand-name">PalWeb</div>
+            <div class="brand-name"><?= htmlspecialchars(config_loader_system_name()) ?></div>
             <div class="brand-sub">Luxury Complication</div>
           </div>
           <div class="date-window" id="dateWindow">1</div>

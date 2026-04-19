@@ -183,12 +183,12 @@ if (isset($_GET['load_products'])) {
                      WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
                     FROM productos p
                     LEFT JOIN productos_precios_sucursal ps
-                           ON ps.codigo_producto = p.codigo AND ps.id_sucursal = $sucursalID
+                           ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
                     WHERE $where
                     ORDER BY p.nombre";
 
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtProd->execute(array_merge([$almacenID], $params));
+        $stmtProd->execute(array_merge([$almacenID, $sucursalID], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
 
         // Procesar para incluir colores e imágenes
@@ -1158,6 +1158,9 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <button id="btnSync" onclick="syncOfflineQueue()" class="btn btn-sm btn-warning text-dark px-2 d-none" title="Sincronizar cola offline">
                         <i class="fas fa-sync"></i>
                     </button>
+                    <a href="cocina_tickets.php" target="_blank" rel="noopener" class="btn btn-sm btn-light text-danger px-2 inv-btn" title="Pantalla de Cocina" style="font-size: 1.1rem; padding: 2px 8px !important;">
+                        <i class="fas fa-fire"></i>
+                    </a>
                     <button id="btnCaja" onclick="checkCashRegister()" class="btn btn-sm btn-light text-primary px-2 inv-btn border-primary shadow-sm" title="Caja" style="font-size: 1.1rem; padding: 2px 8px !important;">
                         <i class="fas fa-cash-register"></i>
                     </button>

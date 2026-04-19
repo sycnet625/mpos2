@@ -5,6 +5,8 @@
 
 $code = $_GET['code'] ?? ($_GET['id'] ?? '');
 $thumb = isset($_GET['thumb']);
+$reqW = isset($_GET['w']) ? max(16, min(1200, (int)$_GET['w'])) : 0; // ?w=N redimensiona al ancho N
+if ($reqW > 0) $thumb = true; // reutilizar el flujo de thumb
 
 if (empty($code)) {
     http_response_code(400);
@@ -77,7 +79,7 @@ function sendConditionalCacheHeaders(string $path, string $mime): bool {
     $lastMod = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
 
     header('Content-Type: ' . $mime);
-    header('Cache-Control: public, max-age=300, stale-while-revalidate=86400');
+    header('Cache-Control: public, max-age=604800, stale-while-revalidate=86400, immutable');
     header('Vary: Accept');
     header('ETag: ' . $etag);
     header('Last-Modified: ' . $lastMod);
@@ -111,7 +113,7 @@ if ($thumb) {
 
     $w = imagesx($image);
     $h = imagesy($image);
-    $newW = 200;
+    $newW = $reqW > 0 ? $reqW : 200;
     $newH = (int) floor($h * ($newW / $w));
 
     $thumb_img = imagecreatetruecolor($newW, $newH);

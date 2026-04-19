@@ -20,7 +20,9 @@ header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
+define('PALWEB_DB_ERROR_FORMAT', 'html');
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // --- Rate Limiting por IP ---
 function rl_file($ip) {
@@ -47,6 +49,9 @@ function rl_clear($ip) {
 
 $error = '';
 $rl_ip = $_SERVER['REMOTE_ADDR'];
+$systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
+$systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
+$companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     // Aplicar delay si hay 5+ intentos fallidos previos (ventana: 10 min)
@@ -104,7 +109,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Acceso Admin | PalWeb</title>
+    <title>Acceso Admin | <?php echo htmlspecialchars($systemBrandName); ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <style>
@@ -129,6 +134,24 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             text-align: center;
             border-bottom: 1px solid #eee;
         }
+        .brand-mark {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 14px;
+            border-radius: 18px;
+            border: 1px solid #dbe3ee;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            box-shadow: 0 10px 24px rgba(15,23,42,.08);
+        }
+        .brand-mark img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
         .login-body {
             padding: 40px 30px;
         }
@@ -138,8 +161,15 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
 <div class="login-card">
     <div class="login-header">
-        <h3 class="fw-bold text-primary mb-0"><i class="fas fa-user-shield me-2"></i>Admin Panel PALWEB</h3>
-        <p class="text-muted small mb-0">Ingresa tus credenciales</p>
+        <div class="brand-mark">
+            <?php if ($systemBrandLogo !== ''): ?>
+                <img src="<?php echo htmlspecialchars($systemBrandLogo); ?>" alt="<?php echo htmlspecialchars($systemBrandName); ?>">
+            <?php else: ?>
+                <i class="fas fa-user-shield text-primary fs-2"></i>
+            <?php endif; ?>
+        </div>
+        <h3 class="fw-bold text-primary mb-1"><?php echo htmlspecialchars($systemBrandName); ?></h3>
+        <p class="text-muted small mb-0">Acceso administrativo para <?php echo htmlspecialchars($companyBrandName); ?></p>
     </div>
     <div class="login-body">
         <?php if($error): ?>
@@ -174,4 +204,3 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

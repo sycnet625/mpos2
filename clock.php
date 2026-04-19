@@ -1466,14 +1466,15 @@ let events = [];
           $("#slideClockTime").textContent = h + ":" + m + ":" + s;
           $("#slideClockDate").textContent = formatDateEs(now);
         } else if (idx === 1) {
-          var wt = $("#weatherLine").textContent;
           var code = $("#weatherLine").dataset.code || localStorage.getItem("last_weather_code") || "0";
           var txt = weatherCodeText(code);
-          var emoji = txt.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\uD83C[\uDDE6-\uDDFF]|[\u2000-\u3300]/g);
+          var emojiMatch = txt.match(/[\uD800-\uDBFF][\uDC00-\uDFFF]|\uD83C[\uDDE6-\uDDFF]|[\u2000-\u3300]/g);
+          var emoji = emojiMatch ? emojiMatch[0] : "☀️";
+          var detail = txt.replace(emoji, "").trim();
           
-          $("#slideWeatherText").textContent = wt;
-          $("#slideWeatherEmoji").textContent = emoji ? emoji[0] : "☀️";
-          $("#slideWeatherDetail").textContent = txt.replace(emoji ? emoji[0] : "", "").trim();
+          $("#slideWeatherText").textContent = $("#weatherLine").textContent;
+          $("#slideWeatherEmoji").textContent = emoji;
+          $("#slideWeatherDetail").textContent = detail;
         } else if (idx === 2) {
           var st = $("#salesLine").textContent || "$0.00";
           var ct = $("#clientsLine").textContent || "0";
@@ -2084,10 +2085,11 @@ let events = [];
         const digits = line.querySelectorAll(".flip-digit");
         digits.forEach((digit, idx) => animateFlipDigit(digit, chars[idx] || "0"));
         const ampmNode = line.querySelector(".ampm");
-        if (ampmNode) ampmNode.textContent = ampm;
+        if (ampmNode) {
+          ampmNode.textContent = ampm;
+          ampmNode.style.display = useAmpm ? "" : "none";
+        }
       }
-      const ampmNode = line.querySelector(".ampm");
-      if (ampmNode) ampmNode.style.display = useAmpm ? "" : "none";
       line.classList.toggle("colorful", $("#colorMode").checked);
       lastRenderedClockKey = key;
     }
@@ -2117,11 +2119,11 @@ let events = [];
       if (selected === "random") return;
       if (style === "fluid") {
         fluidPalette = [];
-      } else {
-        const pool = style === "aurora" ? auroraPatterns : style === "plasma" ? plasmaPatterns : rainbowPatterns;
-        rainbowPatternIndex = (rainbowPatternIndex + 1) % pool.length;
-        document.documentElement.style.setProperty("--rainbow-gradient", pool[rainbowPatternIndex]);
-      }
+       } else {
+         const pool = style === "aurora" ? auroraPatterns : style === "plasma" ? plasmaPatterns : rainbowPatterns;
+         rainbowPatternIndex = (rainbowPatternIndex + 1) % pool.length;
+         document.documentElement.style.setProperty("--color-fill", pool[rainbowPatternIndex]);
+       }
       lastAppliedColorSignature = "";
       syncColorStyleIfNeeded(new Date(), true);
     }
@@ -2403,11 +2405,10 @@ const sec = String(now.getSeconds()).padStart(2, "0");
     });
 
     loadSettings();
-    bindAlarmDismiss();
-
     let showMoon = true;
     let showSales = true;
     let showClients = true;
+    bindAlarmDismiss();
 
     startClock();
     loadHavanaWeather();

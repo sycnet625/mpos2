@@ -183,9 +183,10 @@ try {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Cierre de Negocio | PalWeb</title>
+    <title>Cierre de Negocio | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
@@ -538,4 +539,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

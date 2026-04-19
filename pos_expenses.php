@@ -80,9 +80,10 @@ $plantillasRapidas = [
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Control de Gastos | PalWeb</title>
+    <title>Control de Gastos | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
         .table thead th { white-space: nowrap; }
@@ -642,4 +643,3 @@ function deleteTemplate() {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

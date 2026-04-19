@@ -920,7 +920,7 @@ $TARIFA_KM = floatval($config['mensajeria_tarifa_km'] ?? 150);
 
 <!-- Footer -->
 <div class="footer-palweb">
-    Sistema PALWEB POS v3.0
+    Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0
 </div>
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>

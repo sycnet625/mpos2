@@ -24,14 +24,45 @@ $manifest = [
     'start_url'        => $prefix . '/shop.php',
     'scope'            => ($prefix === '' ? '/' : $prefix . '/'),
     'display'          => 'standalone',
+    'display_override' => ['window-controls-overlay', 'standalone', 'minimal-ui'],
     'orientation'      => 'portrait-primary',
     'lang'             => 'es',
     'background_color' => '#0d6efd',
     'theme_color'      => '#0d6efd',
     'description'      => 'Tienda en línea — ' . $nombre,
+    'categories'       => ['shopping', 'food'],
     'icons'            => [
-        ['src' => 'icon-shop-192.png', 'sizes' => '192x192', 'type' => 'image/png'],
-        ['src' => 'icon-shop-512.png', 'sizes' => '512x512', 'type' => 'image/png'],
+        ['src' => 'icon-shop-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => 'icon-shop-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable any'],
+    ],
+    'screenshots'      => [
+        [
+            'src'          => $prefix . '/assets/product_images/screenshot-wide.jpg',
+            'sizes'        => '1280x720',
+            'type'         => 'image/jpeg',
+            'form_factor'  => 'wide',
+            'label'        => 'Catálogo de productos — ' . $nombre,
+        ],
+        [
+            'src'          => $prefix . '/assets/product_images/screenshot-mobile.jpg',
+            'sizes'        => '390x844',
+            'type'         => 'image/jpeg',
+            'form_factor'  => 'narrow',
+            'label'        => 'Tienda móvil — ' . $nombre,
+        ],
+    ],
+    'share_target'     => [
+        'action'  => $prefix . '/shop.php',
+        'method'  => 'GET',
+        'enctype' => 'application/x-www-form-urlencoded',
+        'params'  => ['title' => 'q', 'text' => 'q', 'url' => 'q'],
+    ],
+    'shortcuts'        => [
+        [
+            'name'      => 'Ver catálogo',
+            'url'       => $prefix . '/shop.php',
+            'icons'     => [['src' => 'icon-shop-192.png', 'sizes' => '192x192']],
+        ],
     ],
 ];
 

@@ -15,6 +15,7 @@ error_reporting(E_ALL);
 
 // CONEXIÓN BD (Para obtener categorías disponibles)
 require_once 'db.php';
+require_once 'config_loader.php';
 
 // ARCHIVO DE CONFIGURACIÓN (estricto por sucursal/carpeta actual)
 $configFile = __DIR__ . '/pos.cfg';
@@ -268,7 +269,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Configuración POS | PalWeb</title>
+    <title>Configuración POS | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <style>
@@ -1229,7 +1230,7 @@ function updateTicketPreview() {
     if (msgFinal) {
         h += `<div style="text-align:center;font-weight:bold;font-size:10px;">${_esc(msgFinal)}</div>`;
     }
-    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema PALWEB POS v3.0</div>';
+    h += '<div style="text-align:center;font-size:8px;color:#999;margin-top:2px;">Sistema <?= htmlspecialchars(config_loader_system_name()) ?> v3.0</div>';
 
     // QR placeholder
     if (showQr) {

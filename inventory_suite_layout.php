@@ -76,6 +76,14 @@ if (!function_exists('inventory_suite_render_hero')) {
             }
             echo '</div>';
         }
+
+        // Logo corporativo esquina inferior derecha (solo desktop, si está habilitado)
+        $__logo        = trim((string)($_c['marca_empresa_logo'] ?? ''));
+        $__mostrarLogo = ($_c['hero_mostrar_logo'] ?? true) !== false;
+        if ($__mostrarLogo && $__logo && file_exists(__DIR__ . '/' . $__logo)) {
+            echo '<img src="' . htmlspecialchars($__logo, ENT_QUOTES) . '" alt="" class="pw-hero-logo">';
+        }
+
         echo '</section>';
     }
 }

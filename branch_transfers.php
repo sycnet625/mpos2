@@ -1,7 +1,7 @@
 <?php
 // ARCHIVO: branch_transfers.php
 // DESCRIPCIÓN: Módulo de Transferencias y Facturación entre Sucursales.
-// VERSIÓN: 2.0 (AJAX SKU DESTINO + VISTAS PREVIAS)
+// VERSIÓN: 2.1 (ALMACÉN ORIGEN SELECCIONABLE EN INTRA-TRANSFER)
 require_once 'db.php';
 require_once 'kardex_engine.php';
 require_once 'inventory_suite_layout.php';
@@ -26,6 +26,7 @@ $sucOrigData = $stmtOrig->fetch(PDO::FETCH_ASSOC);
 if (isset($_GET['action']) && $_GET['action'] === 'search') {
     header('Content-Type: application/json');
     $q = $_GET['q'] ?? '';
+    $searchAlmID = isset($_GET['alm_id']) ? intval($_GET['alm_id']) : $ALM_ID;
     try {
         $sql = "SELECT p.codigo, p.nombre, p.precio, p.costo, p.precio_mayorista, p.unidad_medida,
                 (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
@@ -33,7 +34,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'search') {
                 WHERE (p.nombre LIKE ? OR p.codigo LIKE ?) AND p.id_empresa = ? AND p.activo = 1 
                 LIMIT 15";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$ALM_ID, "%$q%", "%$q%", $EMP_ID]);
+        $stmt->execute([$searchAlmID, "%$q%", "%$q%", $EMP_ID]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } catch (Exception $e) { echo json_encode([]); }
     exit;
@@ -151,8 +152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
     try {
         $pdo->beginTransaction();
         
+        $origAlmID = intval($input['orig_almacen'] ?? $ALM_ID);
         $destAlmID = intval($input['dest_almacen']);
-        if ($destAlmID === $ALM_ID) throw new Exception("El almacén destino no puede ser el mismo que el origen.");
+        
+        if ($destAlmID === $origAlmID) throw new Exception("El almacén destino no puede ser el mismo que el origen.");
         
         $stmtCheck = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_sucursal = ? AND activo = 1");
         $stmtCheck->execute([$destAlmID, $SUC_ID]);
@@ -161,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
         $uuid = bin2hex(random_bytes(16));
         
         $stmtHead = $pdo->prepare("INSERT INTO transferencias_cabecera (uuid_transf, id_empresa, id_almacen_origen, id_almacen_destino, fecha, estado) VALUES (?, ?, ?, ?, NOW(), 'COMPLETADO')");
-        $stmtHead->execute([$uuid, $EMP_ID, $ALM_ID, $destAlmID]);
+        $stmtHead->execute([$uuid, $EMP_ID, $origAlmID, $destAlmID]);
         $idTransf = $pdo->lastInsertId();
 
         foreach ($input['items'] as $item) {
@@ -170,7 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
             $price = floatval($item['price']);
             
             $stmtStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
-            $stmtStock->execute([$sku, $ALM_ID]);
+            $stmtStock->execute([$sku, $origAlmID]);
             $currentStock = floatval($stmtStock->fetchColumn() ?: 0);
             
             if ($currentStock < $qty) throw new Exception("Stock insuficiente para $sku ($currentStock < $qty)");
@@ -178,8 +181,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
             $stmtDet = $pdo->prepare("INSERT INTO transferencias_detalle (id_transf_cabecera, id_producto, cantidad) VALUES (?, ?, ?)");
             $stmtDet->execute([$idTransf, $sku, $qty]);
 
-            KardexEngine::registrarMovimiento($pdo, $sku, $ALM_ID, -$qty, 'TRANSFERENCIA_SALIDA', "Transf #$idTransf Alm→#$destAlmID", $price, $SUC_ID);
-            KardexEngine::registrarMovimiento($pdo, $sku, $destAlmID, $qty, 'TRANSFERENCIA_ENTRADA', "Transf #$idTransf Alm#$ALM_ID→", $price, $SUC_ID);
+            KardexEngine::registrarMovimiento($pdo, $sku, $origAlmID, -$qty, 'TRANSFERENCIA_SALIDA', "Transf #$idTransf Alm→#$destAlmID", $price, $SUC_ID);
+            KardexEngine::registrarMovimiento($pdo, $sku, $destAlmID, $qty, 'TRANSFERENCIA_ENTRADA', "Transf #$idTransf Alm#$origAlmID→", $price, $SUC_ID);
         }
 
         $pdo->commit();
@@ -259,10 +262,9 @@ if (isset($_GET['print_id'])) {
                 <div class="sign">Entregado por</div>
                 <div class="sign">Recibido por</div>
             </div>
-            <div style="margin-top:20px; text-align:center; color:#888; font-size:10px;">Generado por PalWeb ERP</div>
+            <div style="margin-top:20px; text-align:center; color:#888; font-size:10px;">Generado por <?= htmlspecialchars(config_loader_system_name()) ?></div>
         </div>
-    <?php include_once 'menu_master.php'; ?>
-</body>
+    </body>
     </html>
     <?php
     exit;
@@ -277,6 +279,7 @@ if (isset($_GET['print_id'])) {
     <title>Transferencias entre Sucursales</title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
+    <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
         .table thead th { white-space: nowrap; }
@@ -295,7 +298,7 @@ if (isset($_GET['print_id'])) {
                 <p class="mb-3 text-white-50">Movimiento entre sucursales y almacenes con comprobante interno, vista previa documental y factura inter-sucursal.</p>
                 <div class="d-flex flex-wrap gap-2">
                     <span class="kpi-chip"><i class="fas fa-building me-1"></i>Sucursal <?= (int)$SUC_ID ?> (<?= htmlspecialchars((string)($sucOrigData['nombre'] ?? 'N/A'), ENT_QUOTES, 'UTF-8') ?>)</span>
-                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Almacén <?= (int)$ALM_ID ?></span>
+                    <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Contexto Actual: Almacén <?= (int)$ALM_ID ?></span>
                     <span class="kpi-chip"><i class="fas fa-code-branch me-1"></i><?= count($sucursales) ?> sucursales destino</span>
                     <span class="kpi-chip"><i class="fas fa-boxes-stacked me-1"></i><?= count($almacenesSucursal) ?> almacenes locales</span>
                 </div>
@@ -328,6 +331,7 @@ if (isset($_GET['print_id'])) {
                     <span class="soft-pill"><i class="fas fa-truck-ramp-box"></i>{{cart.length}} líneas</span>
                 </div>
                 <div class="row g-3 mb-3">
+                    <!-- MODE INTER -->
                     <div class="col-md-6" v-if="mode==='inter'">
                         <label class="form-label small fw-bold">1. Sucursal destino</label>
                         <select class="form-select" v-model="destSucursal" @change="fetchDestInfo">
@@ -337,15 +341,27 @@ if (isset($_GET['print_id'])) {
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="col-md-6" v-if="mode==='intra'">
-                        <label class="form-label small fw-bold">1. Almacén destino</label>
-                        <select class="form-select" v-model="destAlmacen">
-                            <option value="">Seleccione almacén destino...</option>
-                            <option v-for="alm in almacenesDestino" :value="alm.id" :key="alm.id">{{alm.nombre}}</option>
-                        </select>
+
+                    <!-- MODE INTRA -->
+                    <div class="col-md-6 d-flex gap-2" v-if="mode==='intra'">
+                        <div class="flex-grow-1">
+                            <label class="form-label small fw-bold">1. Almacén origen</label>
+                            <select class="form-select" v-model="almacenOrigId" @change="onAlmacenOrigChange">
+                                <option v-for="alm in almacenesSucursal" :value="alm.id" :key="alm.id">{{alm.nombre}}</option>
+                            </select>
+                        </div>
+                        <div class="flex-grow-1">
+                            <label class="form-label small fw-bold">2. Almacén destino</label>
+                            <select class="form-select" v-model="destAlmacen">
+                                <option value="">Seleccione destino...</option>
+                                <option v-for="alm in almacenesDestino" :value="alm.id" :key="alm.id">{{alm.nombre}}</option>
+                            </select>
+                        </div>
                     </div>
+
+                    <!-- SEARCH (BOTH MODES) -->
                     <div class="col-md-6 position-relative">
-                        <label class="form-label small fw-bold">2. Buscar producto origen</label>
+                        <label class="form-label small fw-bold">{{ mode === 'intra' ? '3.' : '2.' }} Buscar producto origen</label>
                         <div class="input-group">
                             <span class="input-group-text bg-white border-end-0"><i class="fas fa-search text-muted"></i></span>
                             <input type="text" class="form-control border-start-0" placeholder="Nombre o SKU..." v-model="query" @input="searchProducts">
@@ -426,13 +442,19 @@ if (isset($_GET['print_id'])) {
                     </div>
                 </div>
 
-                <div class="mb-3" v-if="mode==='intra'">
+                <div class="mb-3">
                     <div class="stat-box">
                         <div class="small text-muted mb-1"><i class="fas fa-warehouse me-1"></i>Origen</div>
                         <div class="fw-bold">{{almacenOrigName}}</div>
                         <div class="small text-muted mt-1 mb-1"><i class="fas fa-arrow-right me-1"></i>Destino</div>
-                        <div class="fw-bold" v-if="destAlmacen">{{getAlmacenName(destAlmacen)}}</div>
-                        <div class="text-muted" v-else>Sin seleccionar</div>
+                        <div v-if="mode==='inter'">
+                            <div class="fw-bold" v-if="destSucursal">{{sucDest.nombre}}</div>
+                            <div class="text-muted" v-else>Sin seleccionar sucursal</div>
+                        </div>
+                        <div v-else>
+                            <div class="fw-bold" v-if="destAlmacen">{{getAlmacenName(destAlmacen)}}</div>
+                            <div class="text-muted" v-else>Sin seleccionar almacén</div>
+                        </div>
                     </div>
                 </div>
 
@@ -520,6 +542,12 @@ if (isset($_GET['print_id'])) {
                     const alm = this.almacenesSucursal.find(a => a.id == id);
                     return alm ? alm.nombre : 'Almacén ' + id;
                 },
+                onAlmacenOrigChange() {
+                    this.cart = [];
+                    this.query = '';
+                    this.results = [];
+                    this.destAlmacen = '';
+                },
                 async fetchDestInfo() {
                     if(!this.destSucursal) { this.sucDest = { nombre: 'Seleccione Sucursal...', id: '?' }; return; }
                     const res = await fetch(`branch_transfers.php?action=get_suc_info&id=${this.destSucursal}`);
@@ -527,7 +555,7 @@ if (isset($_GET['print_id'])) {
                 },
                 async searchProducts() {
                     if (this.query.length < 2) { this.results = []; return; }
-                    const res = await fetch(`branch_transfers.php?action=search&q=${this.query}`);
+                    const res = await fetch(`branch_transfers.php?action=search&q=${this.query}&alm_id=${this.almacenOrigId}`);
                     this.results = await res.json();
                 },
                 async searchDestSku(index) {
@@ -615,7 +643,7 @@ if (isset($_GET['print_id'])) {
                                 <div class="sign">Entregado por</div>
                                 <div class="sign">Recibido por</div>
                             </div>
-                            <div style="margin-top:20px;text-align:center;color:#888;font-size:10px">Generado por PalWeb ERP</div>
+                            <div style="margin-top:20px;text-align:center;color:#888;font-size:10px">Generado por <?= htmlspecialchars(config_loader_system_name()) ?></div>
                         </div>
                     </body></html>`;
                     const w = window.open('', '_blank', 'width=700,height=800');
@@ -702,6 +730,7 @@ if (isset($_GET['print_id'])) {
                             payload.dest_sucursal = this.destSucursal;
                             payload.dest_suc_nombre = this.sucDest.nombre;
                         } else {
+                            payload.orig_almacen = this.almacenOrigId;
                             payload.dest_almacen = this.destAlmacen;
                         }
                         const res = await fetch('branch_transfers.php', {
