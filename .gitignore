@@ -3,7 +3,42 @@
 # Build/runtime caches
 wa_web_bridge/.cache/
 **/.cache/puppeteer/
+**/.cache/
+**/.config/google-chrome-for-testing/
+**/.pki/
 
 # Local database backups
 backups/*.sql
+backups/*.tar.gz
 marinero/
+
+# Local agent/runtime artifacts
+.bash_history
+.rnd
+.claude/
+.claude.json
+.codex/
+.term_pipes/
+.palweb_ai_runtime/
+.pos_schema_v2
+.user.ini
+
+# Local logs/runtime files
+ai_daemon.log
+ai_tmux_daemon.log
+palweb_ai_debug.log
+palweb_ai_monitor.log
+tmux-*.log
+
+# Large/local data captured during sessions
+ai_data/chats.json
+ai_data/messages_*.json
+weather_cache.json
+
+# Browser profiles and bridge runtime state (local)
+fb_bot_browser_profile/
+wa_web_bridge/instances/
+
+# Temporary/output directories
+temp/
+uploads/
