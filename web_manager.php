@@ -14,6 +14,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'product_image_pipeline.php';
 
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
@@ -112,30 +113,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $code = trim((string)($_POST['prod_code'] ?? ''));
             if (!preg_match('/^[A-Za-z0-9_.-]+$/', $code)) throw new Exception("Código inválido");
-            $ext = strtolower(pathinfo($_FILES['new_photo']['name'], PATHINFO_EXTENSION));
-            if (!in_array($ext, ['jpg','jpeg','png'])) throw new Exception("Formato inválido");
             if (!is_dir($localPath) && !@mkdir($localPath, 0775, true)) throw new Exception("No se pudo crear carpeta de imágenes");
             if (!is_writable($localPath)) throw new Exception("Carpeta de imágenes sin permisos de escritura");
-            
-            $src = ($ext=='png') ? imagecreatefrompng($_FILES['new_photo']['tmp_name']) : imagecreatefromjpeg($_FILES['new_photo']['tmp_name']);
-            // Redimensionar a 800x800 max
-            $w = imagesx($src); $h = imagesy($src); $max=800;
-            if ($w > $max || $h > $max) {
-                $ratio = $w/$h; $newW = ($w>$h)?$max:$max*$ratio; $newH = ($w>$h)?$max/$ratio:$max;
-                $dst = imagecreatetruecolor($newW, $newH);
-                imagecopyresampled($dst, $src, 0, 0, 0, 0, $newW, $newH, $w, $h);
-                imagedestroy($src); $src = $dst;
+            if (!product_image_pipeline_store_upload($_FILES['new_photo']['tmp_name'], $code)) {
+                throw new Exception("No se pudo procesar la imagen.");
             }
-            // Limpiar variantes anteriores para evitar desincronía de formatos
-            $base = $localPath . $code;
-            foreach (['.avif', '.webp', '.jpg', '.jpeg'] as $oldExt) {
-                if (file_exists($base . $oldExt)) @unlink($base . $oldExt);
-            }
-
-            imagejpeg($src, $base . '.jpg', 85);
-            if (function_exists('imagewebp')) imagewebp($src, $base . '.webp', 82);
-            if (function_exists('imageavif')) imageavif($src, $base . '.avif', 60, 6);
-            imagedestroy($src);
             echo json_encode(['status'=>'success']);
         } catch (Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
         exit;

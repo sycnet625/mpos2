@@ -11,8 +11,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['a
     // Evitar conflictos si ya se incluyó db.php antes
     if (!isset($pdo)) {
         ini_set('display_errors', 0);
-        require_once 'db.php';
-        require_once 'config_loader.php';
+require_once 'db.php';
+require_once 'config_loader.php';
+require_once 'product_image_pipeline.php';
         $EMP_ID = intval($config['id_empresa']);
         $SUC_ID = intval($config['id_sucursal']);
     }
@@ -77,28 +78,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && $_GET['a
                 $SUC_ID
             ]);
 
-            // Guardar Imagen si viene — convierte a JPG/WebP/AVIF (acepta PNG, JPG, WebP)
+            // Guardar Imagen si viene — genera variantes para shop.php
             if (isset($_FILES['foto']) && $_FILES['foto']['error'] === UPLOAD_ERR_OK) {
-                $imgDir  = '/var/www/assets/product_images/';
-                $imgData = file_get_contents($_FILES['foto']['tmp_name']);
-                $src     = @imagecreatefromstring($imgData);
-                if ($src) {
-                    $w    = imagesx($src); $h = imagesy($src);
-                    $size = min($w, $h);
-                    $ox   = (int)(($w - $size) / 2); $oy = (int)(($h - $size) / 2);
-                    $out  = imagecreatetruecolor(800, 800);
-                    imagefill($out, 0, 0, imagecolorallocate($out, 255, 255, 255));
-                    imagecopyresampled($out, $src, 0, 0, $ox, $oy, 800, 800, $size, $size);
-                    imagedestroy($src);
-                    if (!is_dir($imgDir)) @mkdir($imgDir, 0777, true);
-                    $base = $imgDir . $codigo;
-                    foreach (['.avif','.webp','.jpg'] as $_e) { if (file_exists($base.$_e)) @unlink($base.$_e); }
-                    imagejpeg($out, $base . '.jpg', 85);
-                    if (function_exists('imagewebp'))  imagewebp($out,  $base . '.webp', 82);
-                    if (function_exists('imageavif'))  imageavif($out,  $base . '.avif', 60, 6);
-                    imagedestroy($out);
-                }
+                product_image_pipeline_store_upload($_FILES['foto']['tmp_name'], $codigo);
             }
+            product_image_pipeline_ensure_placeholder($codigo, (string)($_POST['nombre'] ?? $codigo));
 
             echo json_encode(['status' => 'success', 'msg' => 'Producto creado', 'data' => [
                 'codigo' => $codigo, 'nombre' => $_POST['nombre']

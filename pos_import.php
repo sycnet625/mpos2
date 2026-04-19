@@ -9,6 +9,7 @@ require_once 'db.php';
 
 // Cargar Configuración para valores por defecto y visualización
 require_once 'config_loader.php';
+require_once 'product_image_pipeline.php';
 // Variables para el HTML
 $DISPLAY_SUC = $config['id_sucursal'];
 $DISPLAY_ALM = $config['id_almacen'];
@@ -97,6 +98,7 @@ if (isset($_GET['action']) && $_GET['action'] == 'process_batch') {
                     if (!$isDryRun) {
                         $sql = "INSERT INTO productos (codigo, nombre, precio, costo, categoria, activo, es_elaborado, es_materia_prima, es_servicio, es_cocina, id_empresa, version_row) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                         $pdo->prepare($sql)->execute([$sku, $nombre, $newData['precio'], $newData['costo'], $newData['cat'], $newData['act'], $newData['elab'], $newData['mat'], $newData['serv'], $newData['coc'], $empID, time()]);
+                        product_image_pipeline_ensure_placeholder($sku, $nombre);
                     }
                 }
 
@@ -309,4 +311,3 @@ document.getElementById('btnStart').addEventListener('click', async () => {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

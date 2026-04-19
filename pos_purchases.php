@@ -9,6 +9,7 @@ require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'kardex_engine.php';
 require_once 'pos_audit.php';
+require_once 'product_image_pipeline.php';
 
 header('Content-Type: text/html; charset=utf-8');
 
@@ -543,6 +544,7 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                 $item['categoria'],
                 $empresaId,
             ]);
+            product_image_pipeline_ensure_placeholder($item['sku'], (string)$item['nombre']);
         }
 
         if ($estado === 'PROCESADA') {

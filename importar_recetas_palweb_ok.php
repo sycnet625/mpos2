@@ -9,6 +9,7 @@ ini_set('memory_limit', '1024M');
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
+require_once __DIR__ . '/product_image_pipeline.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -1201,6 +1202,7 @@ if (!$isCli && in_array($action, $jsonActions, true)) {
                 $now,
                 $unit,
             ]);
+            product_image_pipeline_ensure_placeholder($code, mb_substr($name, 0, 200, 'UTF-8'));
 
             $product = [
                 'id' => $code,

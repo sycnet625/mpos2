@@ -18,6 +18,7 @@ set_time_limit(300);
 require_once 'vendor/autoload.php';
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'product_image_pipeline.php';
 
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
@@ -138,6 +139,7 @@ function buscar_o_crear_producto($nombre_producto, $costo, $unidad, $pdo, $emp_i
         $categoria,
         $emp_id
     ]);
+    product_image_pipeline_ensure_placeholder($codigo, substr($nombre_limpio, 0, 100));
     
     return [
         'codigo' => $codigo,

@@ -883,18 +883,10 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
     <!-- Performance: preconnect + preload recursos críticos -->
     <!-- Fuentes servidas en local — sin peticiones externas -->
 
-    <!-- Fuentes WOFF2 críticas: preload para eliminar FOIT -->
-    <link rel="preload" href="assets/webfonts/fa-solid-900.woff2" as="font" type="font/woff2" crossorigin>
-    <link rel="preload" href="assets/js/bootstrap.bundle.min.js" as="script">
-
-    <!-- Bootstrap CSS — async (no render-blocking). El CSS crítico va inline abajo. -->
-    <link rel="preload" href="assets/css/bootstrap.min.css" as="style"
-          onload="this.onload=null;this.rel='stylesheet'">
+    <!-- Bootstrap base se carga bajo demanda; el above-the-fold queda cubierto por CSS crítico -->
     <noscript><link rel="stylesheet" href="assets/css/bootstrap.min.css"></noscript>
 
-    <!-- FontAwesome CSS — async (iconos no son above-the-fold críticos) -->
-    <link rel="preload" href="assets/css/all.min.css" as="style"
-          onload="this.onload=null;this.rel='stylesheet'">
+    <!-- FontAwesome se carga bajo demanda para no penalizar el primer render -->
     <noscript><link rel="stylesheet" href="assets/css/all.min.css"></noscript>
 
     <!-- ═══════════════════════════════════════════════════════════════
@@ -1111,6 +1103,20 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             color: white;
         }
 
+        /* Carrusel: visibilidad + transición slide antes de que Bootstrap CSS cargue */
+        .carousel{position:relative}.carousel-inner{overflow:hidden;position:relative;width:100%}
+        .carousel-item{display:none;float:left;width:100%;margin-right:-100%;backface-visibility:hidden;transition:transform .55s ease-in-out}
+        .carousel-item.active{display:block}
+        .carousel-item-next,.carousel-item-prev{display:block}
+        .carousel-item-next:not(.carousel-item-start),.active.carousel-item-end{transform:translateX(100%)}
+        .carousel-item-prev:not(.carousel-item-end),.active.carousel-item-start{transform:translateX(-100%)}
+        .carousel-item-start,.carousel-item-end{transform:translateX(0)}
+        .carousel-control-prev,.carousel-control-next{position:absolute;top:0;bottom:0;z-index:1;display:flex;align-items:center;justify-content:center;width:15%;color:#fff;opacity:.5;transition:opacity .15s}
+        .carousel-control-prev{left:0}.carousel-control-next{right:0}
+        .carousel-control-prev-icon,.carousel-control-next-icon{display:inline-block;width:2rem;height:2rem;background-repeat:no-repeat;background-position:50%;background-size:100% 100%}
+        .carousel-control-prev-icon{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23fff'%3e%3cpath d='M11.354 1.646a.5.5 0 0 1 0 .708L5.707 8l5.647 5.646a.5.5 0 0 1-.708.708l-6-6a.5.5 0 0 1 0-.708l6-6a.5.5 0 0 1 .708 0z'/%3e%3c/svg%3e")}
+        .carousel-control-next-icon{background-image:url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='%23fff'%3e%3cpath d='M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z'/%3e%3c/svg%3e")}
+
         .promo-carousel {
             margin: 2rem 0;
             border-radius: 20px;
@@ -1223,6 +1229,10 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         }
         .lazy-img.loaded {
             filter: blur(0);
+            opacity: 1;
+        }
+        .product-image.priority-image {
+            filter: none;
             opacity: 1;
         }
 
@@ -1832,7 +1842,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 <body class="<?php echo htmlspecialchars($ACTIVE_SKIN_BODY_CLASS); ?>">
 
 <div id="shopOfflineBanner" class="d-none shop-offline-bar">
-    <i class="fas fa-wifi-slash me-2"></i>Sin conexión &mdash; viendo catálogo guardado
+    <span class="me-2" aria-hidden="true">📡</span>Sin conexión &mdash; viendo catálogo guardado
 </div>
 
 <nav class="navbar-premium">
@@ -1842,7 +1852,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                 <?php if ($companyBrandLogo !== ''): ?>
                     <img src="<?php echo htmlspecialchars($companyBrandLogo); ?>" alt="<?php echo htmlspecialchars($companyBrandName); ?>" class="shop-brand-logo">
                 <?php else: ?>
-                    <i class="fas fa-store"></i>
+                    <span aria-hidden="true">🏬</span>
                 <?php endif; ?>
                 <span><?php echo htmlspecialchars($companyBrandName); ?></span>
                 <span class="badge-sucursal">Tienda online · Suc <?= $SUC_ID ?></span>
@@ -1850,13 +1860,13 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 
             <div class="d-flex align-items-center gap-2">
                 <button class="btn btn-outline-light btn-sm rounded-pill px-3" onclick="toggleTrackingModal()">
-                    <i class="fas fa-truck me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.tracking">Rastreo</span>
+                    <span class="me-1" aria-hidden="true">🚚</span> <span class="d-none d-md-inline" data-i18n="nav.tracking">Rastreo</span>
                 </button>
                 <a href="como_comprar.php" class="btn btn-outline-warning btn-sm rounded-pill px-3 fw-bold" title="¿Cómo comprar?">
-                    <i class="fas fa-question-circle me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.help">Ayuda</span>
+                    <span class="me-1" aria-hidden="true">?</span> <span class="d-none d-md-inline" data-i18n="nav.help">Ayuda</span>
                 </a>
                 <a href="quienes_somos.php" class="btn btn-outline-info btn-sm rounded-pill px-3 fw-bold" title="Quiénes Somos">
-                    <i class="fas fa-building me-1"></i> <span class="d-none d-md-inline" data-i18n="nav.about">Nosotros</span>
+                    <span class="me-1" aria-hidden="true">🏢</span> <span class="d-none d-md-inline" data-i18n="nav.about">Nosotros</span>
                 </a>
 
                 <!-- Selector de idioma -->
@@ -1889,14 +1899,14 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                         </div>
                     <?php else: ?>
                         <button class="btn btn-light btn-sm rounded-pill px-3" onclick="toggleAuthModal()">
-                            <i class="fas fa-user me-1"></i> <span data-i18n="nav.account">Mi Cuenta</span>
+                            <span class="me-1" aria-hidden="true">👤</span> <span data-i18n="nav.account">Mi Cuenta</span>
                         </button>
                     <?php endif; ?>
                 </div>
             </div>
             
             <div class="search-wrapper w-100 mt-2">
-                <i class="fas fa-search search-icon"></i>
+                <span class="search-icon" aria-hidden="true">⌕</span>
                 <input type="text" id="searchInput" class="search-input" placeholder="Buscar productos..." autocomplete="off" data-i18n-attr="placeholder:nav.search_ph">
                 <div id="searchResults" class="search-results"></div>
             </div>
@@ -1910,7 +1920,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 <h1 class="visually-hidden"><?= htmlspecialchars($config['tienda_nombre'] ?? 'Tienda') ?> — Catálogo de productos</h1>
 
 <div class="container">
-    <div id="promoCarousel" class="carousel slide promo-carousel" data-bs-ride="carousel">
+    <div id="promoCarousel" class="carousel slide promo-carousel">
         <div class="carousel-inner">
             <?php
             $shopBanners = $config['banners'] ?? [
@@ -1950,7 +1960,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         <div class="row align-items-center">
             <div class="col-md-6">
                 <p class="mb-3 mb-md-0 fw-bold fs-5">
-                    <i class="fas fa-filter me-2" aria-hidden="true"></i><span data-i18n="filter.categories">Categorías</span>
+                    <span class="me-2" aria-hidden="true">▦</span><span data-i18n="filter.categories">Categorías</span>
                 </p>
             </div>
             <div class="col-md-6 text-md-end">
@@ -1966,7 +1976,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         
         <div class="category-pills" id="categoryPills">
             <button class="cat-pill <?= empty($catFilter)?'active':'' ?>" onclick="filterByCategory('')">
-                <i class="fas fa-th me-1"></i> <span data-i18n="filter.all">Todas</span>
+                <span class="me-1" aria-hidden="true">▥</span> <span data-i18n="filter.all">Todas</span>
             </button>
             <?php foreach($cats as $c): ?>
                 <button class="cat-pill <?= $c===$catFilter?'active':'' ?>" onclick="filterByCategory(<?= json_encode($c) ?>)">
@@ -2017,7 +2027,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             </div>
         <?php endif; ?>
         
-        <?php foreach($productos as $p):
+        <?php foreach($productos as $idx => $p):
             [$hasImg, $mtimeMain] = shop_image_meta((string)$p['codigo']);
             $imgV = $mtimeMain ? '&v=' . $mtimeMain : '';
             $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
@@ -2030,6 +2040,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             $esReservable = intval($p['es_reservable'] ?? 0) === 1;
             $bg = "#" . substr(md5($p['nombre']), 0, 6);
             $initials = mb_strtoupper(mb_substr($p['nombre'], 0, 2));
+            $isPriorityCard = $idx < 4;
         ?>
         <div class="product-card" data-cat="<?= htmlspecialchars($p['categoria'] ?? '', ENT_QUOTES) ?>" onclick='openProductDetail(<?= json_encode([
             "id"          => $p['codigo'],
@@ -2072,19 +2083,21 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                 $umbralBajo = ($p['stock_minimo'] > 0) ? ($p['stock_minimo'] * 1.5) : 5;
                 if($hasStock && $stock <= $umbralBajo): ?>
                     <div class="stock-alert-badge">
-                        <i class="fas fa-fire-alt me-1"></i> ¡Solo <?php echo $stock; ?> disponibles!
+                        <span class="me-1" aria-hidden="true">🔥</span> ¡Solo <?php echo $stock; ?> disponibles!
                     </div>
                 <?php endif; ?>
 
                 <?php if($hasImg): ?>
                     <picture>
-                        <source type="image/avif" srcset="<?= $imgUrl ?>&amp;fmt=avif">
-                        <source type="image/webp" srcset="<?= $imgUrl ?>&amp;fmt=webp">
-                        <img src="<?= $imgUrl ?>&amp;fmt=jpg"
-                             class="product-image lazy-img"
+                        <source type="image/avif" srcset="<?= $imgUrl ?>&amp;fmt=avif&amp;w=200 200w, <?= $imgUrl ?>&amp;fmt=avif&amp;w=400 400w" sizes="(max-width: 767px) 45vw, (max-width: 1399px) 22vw, 178px">
+                        <source type="image/webp" srcset="<?= $imgUrl ?>&amp;fmt=webp&amp;w=200 200w, <?= $imgUrl ?>&amp;fmt=webp&amp;w=400 400w" sizes="(max-width: 767px) 45vw, (max-width: 1399px) 22vw, 178px">
+                        <img src="<?= $imgUrl ?>&amp;fmt=jpg&amp;w=200"
+                             class="product-image <?= $isPriorityCard ? 'priority-image' : 'lazy-img' ?>"
                              alt="<?= htmlspecialchars($p['nombre']) ?>"
                              width="400" height="400"
-                             loading="lazy"
+                             sizes="(max-width: 767px) 45vw, (max-width: 1399px) 22vw, 178px"
+                             loading="<?= $isPriorityCard ? 'eager' : 'lazy' ?>"
+                             fetchpriority="<?= $isPriorityCard ? 'high' : 'auto' ?>"
                              decoding="async"
                              onload="this.classList.add('loaded')"
                              onerror="this.closest('picture').replaceWith(Object.assign(document.createElement('div'),{className:'product-placeholder',textContent:'<?= addslashes($initials) ?>',style:'background:<?= $bg ?>cc'}))">
@@ -2111,9 +2124,9 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                     <?php
                     $avg = floatval($p['avg_rating']);
                     for ($s = 1; $s <= 5; $s++) {
-                        if ($s <= floor($avg)) echo '<i class="fas fa-star"></i>';
-                        elseif ($s - $avg < 1) echo '<i class="fas fa-star-half-alt"></i>';
-                        else echo '<i class="far fa-star"></i>';
+                        if ($s <= floor($avg)) echo '<span aria-hidden="true">★</span>';
+                        elseif ($s - $avg < 1) echo '<span aria-hidden="true">★</span>';
+                        else echo '<span aria-hidden="true">☆</span>';
                     }
                     ?>
                     <span class="stars-count">(<?= intval($p['total_resenas']) ?>)</span>
@@ -2155,20 +2168,20 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 </div>
 
 <button class="cart-float" onclick="openCart()" aria-label="Ver carrito de compras">
-    <i class="fas fa-shopping-cart" aria-hidden="true"></i>
+    <span aria-hidden="true">🛒</span>
     <span id="cartBadge" class="cart-badge d-none" aria-live="polite">0</span>
 </button>
 
 <div class="floating-container">
     <div class="float-btn btn-chat" onclick="toggleChat()" role="button" tabindex="0"
          aria-label="Abrir chat de soporte" onkeydown="if(event.key==='Enter'||event.key===' ')toggleChat()">
-        <i class="fas fa-comments" aria-hidden="true"></i>
+        <span aria-hidden="true">💬</span>
         <div class="chat-badge-notify" id="clientChatBadge" aria-live="polite"></div>
     </div>
 
     <a href="https://wa.me/5352783083?text=deseo%20mas%20informacion%20web" target="_blank"
        class="float-btn btn-whatsapp" aria-label="Contactar por WhatsApp" rel="noopener noreferrer">
-        <i class="fab fa-whatsapp" aria-hidden="true"></i>
+        <span aria-hidden="true" style="font-weight:700;font-size:.95rem;">WA</span>
     </a>
 </div>
 
@@ -2954,8 +2967,6 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 <!-- ── /i18n Engine ─────────────────────────────────────────────────── -->
 
-<script src="assets/js/bootstrap.bundle.min.js" defer></script>
-
 <!-- Toast de notificación -->
 <div id="shopToastContainer" aria-live="polite" aria-atomic="true"
      style="position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;min-width:240px;"></div>
@@ -3040,8 +3051,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return getProductsFromCache();
     }
 
-    // Iniciar carga del catálogo en background inmediatamente
-    ensureCatalog();
+    function warmCatalogWhenIdle() {
+        const run = () => ensureCatalog().catch(() => {});
+        if ('requestIdleCallback' in window) {
+            requestIdleCallback(run, { timeout: 2500 });
+        } else {
+            setTimeout(run, 1800);
+        }
+    }
 
     // Variable para el producto actualmente mostrado en modal (Feature 15)
     let _currentDetailProduct = null;
@@ -3093,14 +3110,106 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Bootstrap se carga con defer: los modales se instancian cuando Bootstrap está listo
+    // Bootstrap y FontAwesome se cargan bajo demanda para no penalizar el arranque
     let modalDetail, modalCart, trackingModal, authModal, profileModal;
-    document.addEventListener('DOMContentLoaded', () => {
-        modalDetail   = new bootstrap.Modal(document.getElementById('modalDetail'));
-        modalCart     = new bootstrap.Modal(document.getElementById('modalCart'));
-        trackingModal = new bootstrap.Modal(document.getElementById('trackingModal'));
-        authModal     = new bootstrap.Modal(document.getElementById('authModal'));
-        profileModal  = new bootstrap.Modal(document.getElementById('profileModal'));
+    let bootstrapRuntimePromise = null;
+    let bootstrapStylesPromise = null;
+    let fontAwesomePromise = null;
+
+    function loadScriptOnce(src) {
+        return new Promise((resolve, reject) => {
+            const existing = document.querySelector(`script[src="${src}"]`);
+            if (existing) {
+                if (existing.dataset.loaded === '1') return resolve();
+                existing.addEventListener('load', () => resolve(), { once: true });
+                existing.addEventListener('error', reject, { once: true });
+                return;
+            }
+            const s = document.createElement('script');
+            s.src = src;
+            s.defer = true;
+            s.addEventListener('load', () => {
+                s.dataset.loaded = '1';
+                resolve();
+            }, { once: true });
+            s.addEventListener('error', reject, { once: true });
+            document.head.appendChild(s);
+        });
+    }
+
+    function loadStylesheetOnce(href) {
+        return new Promise((resolve, reject) => {
+            const existing = document.querySelector(`link[href="${href}"]`);
+            if (existing) {
+                if (existing.dataset.loaded === '1' || existing.sheet) return resolve();
+                existing.addEventListener('load', () => resolve(), { once: true });
+                existing.addEventListener('error', reject, { once: true });
+                return;
+            }
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = href;
+            link.addEventListener('load', () => {
+                link.dataset.loaded = '1';
+                resolve();
+            }, { once: true });
+            link.addEventListener('error', reject, { once: true });
+            document.head.appendChild(link);
+        });
+    }
+
+    function ensureBootstrapStyles() {
+        if (document.querySelector('link[href="assets/css/bootstrap.min.css"]')) return Promise.resolve();
+        if (!bootstrapStylesPromise) {
+            bootstrapStylesPromise = loadStylesheetOnce('assets/css/bootstrap.min.css');
+        }
+        return bootstrapStylesPromise;
+    }
+
+    function ensureBootstrapRuntime() {
+        if (window.bootstrap?.Modal && window.bootstrap?.Tab) return Promise.resolve(window.bootstrap);
+        if (!bootstrapRuntimePromise) {
+            bootstrapRuntimePromise = Promise.all([
+                ensureBootstrapStyles(),
+                loadScriptOnce('assets/js/bootstrap.bundle.min.js')
+            ])
+                .then(() => window.bootstrap);
+        }
+        return bootstrapRuntimePromise;
+    }
+
+    function ensureFontAwesome() {
+        if (document.querySelector('link[href="assets/css/all.min.css"]')) return Promise.resolve();
+        if (!fontAwesomePromise) {
+            fontAwesomePromise = loadStylesheetOnce('assets/css/all.min.css');
+        }
+        return fontAwesomePromise;
+    }
+
+    function getModalInstance(currentInstance, elementId) {
+        if (window.bootstrap?.Modal == null) return null;
+        if (currentInstance) return currentInstance;
+        const el = document.getElementById(elementId);
+        return el ? bootstrap.Modal.getOrCreateInstance(el) : null;
+    }
+
+    window.addEventListener('load', warmCatalogWhenIdle, { once: true });
+
+    // Carrusel: cargar Bootstrap en cuanto la página esté lista y arrancar auto-rotación
+    window.addEventListener('load', () => {
+        ensureBootstrapRuntime().then(() => {
+            const el = document.getElementById('promoCarousel');
+            if (el && window.bootstrap?.Carousel) {
+                new bootstrap.Carousel(el, { interval: 4000, ride: 'carousel', wrap: true });
+            }
+        }).catch(() => {});
+    }, { once: true });
+
+    ['pointerdown', 'keydown'].forEach((evtName) => {
+        window.addEventListener(evtName, () => { ensureFontAwesome().catch(() => {}); }, {
+            once: true,
+            passive: true
+        });
     });
 
     // ========================================================
@@ -3162,9 +3271,17 @@ document.addEventListener('DOMContentLoaded', () => {
                     currentVariant = { nombre: v.nombre, precio_extra: extra };
                     priceEl.innerText = '$' + (basePrice + extra).toFixed(2);
                     if (hasStock) {
-                        btn.onclick = () => { addToCart(codigo, document.getElementById('detailName').innerText, basePrice, false, currentVariant); modalDetail.hide(); };
+                        btn.onclick = () => {
+                            modalDetail = getModalInstance(modalDetail, 'modalDetail');
+                            addToCart(codigo, document.getElementById('detailName').innerText, basePrice, false, currentVariant);
+                            modalDetail?.hide();
+                        };
                     } else if (esReservable) {
-                        btn.onclick = () => { addToCart(codigo, document.getElementById('detailName').innerText, basePrice, true, currentVariant); modalDetail.hide(); };
+                        btn.onclick = () => {
+                            modalDetail = getModalInstance(modalDetail, 'modalDetail');
+                            addToCart(codigo, document.getElementById('detailName').innerText, basePrice, true, currentVariant);
+                            modalDetail?.hide();
+                        };
                     }
                 };
                 if (i === 0) setTimeout(() => b.click(), 0); // auto-seleccionar primera
@@ -3298,7 +3415,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // ========================================================
     // PERFIL Y HISTORIAL
     // ========================================================
-    function openProfileModal() { profileModal.show(); loadProfileData(); }
+    async function openProfileModal() {
+        await ensureBootstrapRuntime().catch(() => {});
+        profileModal = getModalInstance(profileModal, 'profileModal');
+        profileModal?.show();
+        loadProfileData();
+    }
 
     async function loadProfileData() {
         try {
@@ -3415,8 +3537,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let ordenUUID = null; // para polling de estado de pago
     let pollInterval = null;
     
-    function toggleTrackingModal() { trackingModal.show(); }
-    function toggleAuthModal() { authModal.show(); }
+    async function toggleTrackingModal() {
+        await ensureBootstrapRuntime().catch(() => {});
+        trackingModal = getModalInstance(trackingModal, 'trackingModal');
+        trackingModal?.show();
+    }
+    async function toggleAuthModal() {
+        await ensureBootstrapRuntime().catch(() => {});
+        authModal = getModalInstance(authModal, 'authModal');
+        authModal?.show();
+    }
     
     // ===== BUSCADOR (Feature 11: usa caché local si disponible, AJAX como fallback) =====
     const searchInput = document.getElementById('searchInput');
@@ -3480,9 +3610,9 @@ document.addEventListener('DOMContentLoaded', () => {
         div.className = 'search-item';
         const imgHTML = item.hasImg
             ? `<picture>
-                <source type="image/avif" srcset="${item.imgUrl}&fmt=avif">
-                <source type="image/webp" srcset="${item.imgUrl}&fmt=webp">
-                <img src="${item.imgUrl}&fmt=jpg" class="search-thumb" loading="lazy">
+                <source type="image/avif" srcset="${item.imgUrl}&fmt=avif&w=96 96w, ${item.imgUrl}&fmt=avif&w=192 192w" sizes="56px">
+                <source type="image/webp" srcset="${item.imgUrl}&fmt=webp&w=96 96w, ${item.imgUrl}&fmt=webp&w=192 192w" sizes="56px">
+                <img src="${item.imgUrl}&fmt=jpg&w=96" class="search-thumb" loading="lazy" sizes="56px">
                </picture>`
             : `<div class="search-placeholder" style="background:${item.bg}">${item.initials}</div>`;
         const priceDisplay = (item.precioOferta > 0 && item.precioOferta < item.precio)
@@ -3533,6 +3663,8 @@ document.addEventListener('DOMContentLoaded', () => {
     searchInput.addEventListener('input', function() {
         const query = this.value.trim();
         clearTimeout(searchTimeout);
+
+        if (query.length >= 2 && !_catalogReady) warmCatalogWhenIdle();
 
         if (query.length < 1) {
             searchResults.style.display = 'none';
@@ -3709,7 +3841,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    function openProductDetail(data) {
+    async function openProductDetail(data) {
+        await Promise.all([
+            ensureBootstrapRuntime().catch(() => {}),
+            ensureFontAwesome().catch(() => {})
+        ]);
+        modalDetail = getModalInstance(modalDetail, 'modalDetail');
         // Guardar referencia para compartir (Feature 15)
         _currentDetailProduct = data;
 
@@ -3761,7 +3898,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.innerHTML = `<i class="fas fa-cart-plus me-2"></i> ${t('modal.add_to_cart')}`;
             btn.onclick = () => {
                 addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, false);
-                modalDetail.hide();
+                modalDetail?.hide();
             };
         } else if (data.esReservable) {
             stockBadge.innerText = t('stock.reservable');
@@ -3771,7 +3908,7 @@ document.addEventListener('DOMContentLoaded', () => {
             btn.innerHTML = t('modal.reserve_product');
             btn.onclick = () => {
                 addToCart(data.id, data.name, po > 0 && po < bp ? po : bp, true);
-                modalDetail.hide();
+                modalDetail?.hide();
             };
         } else {
             // Feature 1: mostrar form de aviso restock
@@ -3842,13 +3979,18 @@ document.addEventListener('DOMContentLoaded', () => {
         loadVariants(data.id, parseFloat(data.price), data.hasStock, data.esReservable);
         loadReviews(data.id);
 
-        modalDetail.show();
+        modalDetail?.show();
     }
 
-    function openCart() {
+    async function openCart() {
+        await Promise.all([
+            ensureBootstrapRuntime().catch(() => {}),
+            ensureFontAwesome().catch(() => {})
+        ]);
+        modalCart = getModalInstance(modalCart, 'modalCart');
         showCartView(); 
         renderCart(); 
-        modalCart.show(); 
+        modalCart?.show(); 
     }
     
     function showCartView() {
@@ -4616,7 +4758,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 alert("Cuenta creada con éxito. Ya puedes iniciar sesión.");
                 // Cambiar a tab de login
                 const triggerEl = document.querySelector('#authTabs a[href="#loginTab"]');
-                bootstrap.Tab.getInstance(triggerEl).show();
+                await ensureBootstrapRuntime().catch(() => {});
+                if (triggerEl && window.bootstrap?.Tab) {
+                    bootstrap.Tab.getOrCreateInstance(triggerEl).show();
+                }
             } else {
                 alert(data.msg);
                 generateCaptcha();

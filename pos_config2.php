@@ -10,6 +10,7 @@ require_once 'db.php';
 require_once 'runtime_context.php';
 require_once 'inventory_suite_layout.php';
 require_once 'shop_skins.php';
+require_once 'product_image_pipeline.php';
 
 function poscfg_table_has_column(PDO $pdo, string $table, string $column): bool
 {
@@ -166,6 +167,36 @@ function poscfg_validate_location(PDO $pdo, int $empresaId, int $sucursalId, int
     if ($realSucursal !== $sucursalId) {
         throw new RuntimeException('El almacén no pertenece a la sucursal seleccionada.');
     }
+}
+
+function poscfg_rebuild_shop_product_images(PDO $pdo, int $empresaId): array
+{
+    $stmt = $pdo->prepare("SELECT codigo, nombre FROM productos WHERE id_empresa = ? AND es_web = 1 ORDER BY codigo ASC");
+    $stmt->execute([$empresaId]);
+    $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $summary = [
+        'total' => 0,
+        'rebuilt' => 0,
+        'placeholder' => 0,
+        'failed' => 0,
+        'invalid' => 0,
+    ];
+
+    foreach ($products as $product) {
+        $summary['total']++;
+        $status = product_image_pipeline_rebuild_existing(
+            (string)($product['codigo'] ?? ''),
+            (string)($product['nombre'] ?? '')
+        );
+        if (isset($summary[$status])) {
+            $summary[$status]++;
+        } else {
+            $summary['failed']++;
+        }
+    }
+
+    return $summary;
 }
 
 function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, array $currentConfig): string
@@ -575,6 +606,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $currentConfig = array_merge($defaultConfig, $savedConfig);
             $msg = 'Configuración web/shop guardada.';
+        }
+
+        if ($formAction === 'rebuild_shop_product_images') {
+            $activeTab = 'shop';
+            $empresaId = (int)($currentConfig['id_empresa'] ?? 1);
+            $summary = poscfg_rebuild_shop_product_images($pdo, $empresaId);
+            $msg = sprintf(
+                'Reconstrucción terminada. Total: %d, regeneradas: %d, placeholders: %d, inválidas: %d, fallidas: %d.',
+                $summary['total'],
+                $summary['rebuilt'],
+                $summary['placeholder'],
+                $summary['invalid'],
+                $summary['failed']
+            );
         }
 
         if ($formAction === 'save_factura_config') {
@@ -1366,6 +1411,15 @@ unset($treeCompany);
                             <?php endforeach; ?>
                         </select>
                     </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header fw-bold text-dark">🛠️ Mantenimiento de imágenes web</div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">Reconstruye las variantes necesarias para <code>shop.php</code> en productos existentes. Si un producto no tiene imagen base, se le genera un placeholder compatible con la tienda web.</p>
+                    <button type="button" class="btn btn-outline-dark w-100" onclick="submitShopImageRebuild()">
+                        Reconstruir imágenes de productos para shop
+                    </button>
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar configuración web/shop</button>
@@ -3255,6 +3309,30 @@ function bannerRemoveToggle(i, checked) {
         const gradClass = 'gradient-' + (i + 1);
         p.className = 'banner-preview ' + gradClass;
     }
+}
+
+function submitShopImageRebuild() {
+    if (!confirm('Esto recorrerá todos los productos de la empresa web actual y regenerará sus imágenes para la shop. ¿Continuar?')) {
+        return;
+    }
+    const form = document.createElement('form');
+    form.method = 'post';
+    form.style.display = 'none';
+
+    const action = document.createElement('input');
+    action.type = 'hidden';
+    action.name = 'form_action';
+    action.value = 'rebuild_shop_product_images';
+    form.appendChild(action);
+
+    const tab = document.createElement('input');
+    tab.type = 'hidden';
+    tab.name = 'active_tab';
+    tab.value = 'shop';
+    form.appendChild(tab);
+
+    document.body.appendChild(form);
+    form.submit();
 }
 
 document.addEventListener('DOMContentLoaded', () => {

@@ -38,6 +38,7 @@ elseif ($fmt === 'jpg' || $fmt === 'jpeg') { $supAvif = false; $supWebp = false;
 // ── Selección de formato óptimo (busca en sucursal y raíz compartida) ───────
 $path = null;
 $mime = null;
+$prebuiltVariantWidth = 0;
 $tryExts = [];
 if ($supAvif) $tryExts[] = ['.avif', 'image/avif'];
 if ($supWebp) $tryExts[] = ['.webp', 'image/webp'];
@@ -45,13 +46,35 @@ $tryExts[] = ['.jpg', 'image/jpeg'];
 $tryExts[] = ['.jpeg', 'image/jpeg'];
 $tryExts[] = ['.png', 'image/png'];
 
+$requestedPresetWidth = 0;
+if ($reqW > 0) {
+    foreach ([96, 192, 200, 400, 800] as $candidateWidth) {
+        if ($candidateWidth >= $reqW) {
+            $requestedPresetWidth = $candidateWidth;
+            break;
+        }
+    }
+    if ($requestedPresetWidth === 0) {
+        $requestedPresetWidth = 800;
+    }
+}
+
 foreach ($bases as $base) {
-    foreach ($tryExts as [$ext, $extMime]) {
-        $candidate = $base . $ext;
-        if (file_exists($candidate)) {
-            $path = $candidate;
-            $mime = $extMime;
-            break 2;
+    $candidateBases = [$base];
+    if ($requestedPresetWidth > 0 && $requestedPresetWidth < 800) {
+        array_unshift($candidateBases, $base . '_w' . $requestedPresetWidth);
+    }
+    foreach ($candidateBases as $candidateBase) {
+        foreach ($tryExts as [$ext, $extMime]) {
+            $candidate = $candidateBase . $ext;
+            if (file_exists($candidate)) {
+                $path = $candidate;
+                $mime = $extMime;
+                if ($candidateBase !== $base && preg_match('/_w(\d+)$/', $candidateBase, $m)) {
+                    $prebuiltVariantWidth = (int)$m[1];
+                }
+                break 3;
+            }
         }
     }
 }
@@ -72,10 +95,10 @@ SVG;
     exit;
 }
 
-function sendConditionalCacheHeaders(string $path, string $mime): bool {
+function sendConditionalCacheHeaders(string $path, string $mime, string $variantKey = ''): bool {
     $mtime = filemtime($path) ?: time();
     $size = filesize($path) ?: 0;
-    $etag = '"' . sha1($path . '|' . $mtime . '|' . $size . '|' . $mime) . '"';
+    $etag = '"' . sha1($path . '|' . $mtime . '|' . $size . '|' . $mime . '|' . $variantKey) . '"';
     $lastMod = gmdate('D, d M Y H:i:s', $mtime) . ' GMT';
 
     header('Content-Type: ' . $mime);
@@ -93,10 +116,28 @@ function sendConditionalCacheHeaders(string $path, string $mime): bool {
     return false;
 }
 
+function canDecodeImageMime(string $mime): bool {
+    return match($mime) {
+        'image/avif' => function_exists('imagecreatefromavif'),
+        'image/webp' => function_exists('imagecreatefromwebp'),
+        'image/png'  => function_exists('imagecreatefrompng'),
+        default      => function_exists('imagecreatefromjpeg'),
+    };
+}
+
+function canEncodeImageMime(string $mime): bool {
+    return match($mime) {
+        'image/avif' => function_exists('imageavif'),
+        'image/webp' => function_exists('imagewebp'),
+        'image/png'  => function_exists('imagepng'),
+        default      => function_exists('imagejpeg'),
+    };
+}
+
 // ── Thumbnail (redimensionado a 200 px de ancho) ──────────────────────────────
-if ($thumb) {
-    if (!function_exists('imagecreatetruecolor')) {
-        if (sendConditionalCacheHeaders($path, $mime)) {
+if ($thumb && $prebuiltVariantWidth === 0) {
+    if (!function_exists('imagecreatetruecolor') || !canDecodeImageMime($mime) || !canEncodeImageMime($mime)) {
+        if (sendConditionalCacheHeaders($path, $mime, 'orig-fallback')) {
             exit;
         }
         header('Content-Length: ' . filesize($path));
@@ -111,15 +152,30 @@ if ($thumb) {
         default      => imagecreatefromjpeg($path),
     };
 
+    if (!$image) {
+        if (sendConditionalCacheHeaders($path, $mime, 'orig-fallback')) {
+            exit;
+        }
+        header('Content-Length: ' . filesize($path));
+        readfile($path);
+        exit;
+    }
+
     $w = imagesx($image);
     $h = imagesy($image);
     $newW = $reqW > 0 ? $reqW : 200;
     $newH = (int) floor($h * ($newW / $w));
 
     $thumb_img = imagecreatetruecolor($newW, $newH);
+    if (in_array($mime, ['image/png', 'image/webp', 'image/avif'], true)) {
+        imagealphablending($thumb_img, false);
+        imagesavealpha($thumb_img, true);
+        $transparent = imagecolorallocatealpha($thumb_img, 0, 0, 0, 127);
+        imagefilledrectangle($thumb_img, 0, 0, $newW, $newH, $transparent);
+    }
     imagecopyresampled($thumb_img, $image, 0, 0, 0, 0, $newW, $newH, $w, $h);
 
-    if (sendConditionalCacheHeaders($path, $mime)) {
+    if (sendConditionalCacheHeaders($path, $mime, 'w=' . $newW)) {
         imagedestroy($thumb_img);
         imagedestroy($image);
         exit;
@@ -138,7 +194,7 @@ if ($thumb) {
 }
 
 // ── Servir archivo completo ───────────────────────────────────────────────────
-if (sendConditionalCacheHeaders($path, $mime)) {
+if (sendConditionalCacheHeaders($path, $mime, 'orig')) {
     exit;
 }
 header('Content-Length: ' . filesize($path));

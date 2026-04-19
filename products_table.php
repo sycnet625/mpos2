@@ -14,6 +14,7 @@ if (isset($_GET['ajax_load'])) {
 
 require_once 'db.php';
 require_once 'pos_audit.php'; 
+require_once 'product_image_pipeline.php';
 
 // ---------------------------------------------------------
 // 1. CARGAR CONFIGURACIÓN
@@ -503,73 +504,17 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 throw new Exception("La carpeta de imágenes no tiene permisos de escritura. Ruta: " . $localPath);
             }
 
-            $base = $localPath . $code;
-
-            // Eliminar archivos anteriores para evitar que formatos de mayor
-            // prioridad (avif > webp > jpg) en image.php sirvan versiones viejas.
-            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
-                if (file_exists($base . $ext)) @unlink($base . $ext);
-            }
-
-            if (!function_exists('imagecreatefromstring') || !function_exists('imagecreatetruecolor')) {
+            if (!product_image_pipeline_store_upload($file['tmp_name'], $code)) {
                 $ext = ptable_detect_upload_image_extension($file['tmp_name'], (string)($file['name'] ?? ''));
                 if (!in_array($ext, ['.jpg', '.png', '.webp', '.avif'], true)) {
                     throw new Exception("Formato no soportado sin GD. Instale php-gd o suba JPG, PNG o WebP.");
                 }
-                if (@file_put_contents($base . $ext, $imgData) === false) {
+                product_image_pipeline_cleanup($code);
+                if (@file_put_contents(product_image_pipeline_base_path($code) . $ext, $imgData) === false) {
                     throw new Exception("No se pudo guardar la imagen en disco.");
                 }
                 ptable_json_exit(['status' => 'success', 'mode' => 'original']);
             }
-
-            $src = @imagecreatefromstring($imgData);
-            if (!$src) throw new Exception("Imagen inválida o formato no soportado.");
-
-            // Recorte cuadrado centrado → 800×800 (master) y 200×200 (thumb)
-            $width  = imagesx($src);
-            $height = imagesy($src);
-            $size   = min($width, $height);
-            $x      = (int)(($width  - $size) / 2);
-            $y      = (int)(($height - $size) / 2);
-
-            // ── Master 800 px ─────────────────────────────────────────────────
-            $master = imagecreatetruecolor(800, 800);
-            imagefill($master, 0, 0, imagecolorallocate($master, 255, 255, 255));
-            imagecopyresampled($master, $src, 0, 0, $x, $y, 800, 800, $size, $size);
-
-            // ── Thumb 200 px ──────────────────────────────────────────────────
-            $thumb = imagecreatetruecolor(200, 200);
-            imagefill($thumb, 0, 0, imagecolorallocate($thumb, 255, 255, 255));
-            imagecopyresampled($thumb, $src, 0, 0, $x, $y, 200, 200, $size, $size);
-            imagedestroy($src);
-
-            if (!imagejpeg($master, $base . '.jpg', 85)) {
-                throw new Exception("No se pudo guardar el .jpg.");
-            }
-
-            if (function_exists('imagewebp')) {
-                if (!imagewebp($master, $base . '.webp', 82)) {
-                    throw new Exception("No se pudo guardar el .webp.");
-                }
-            }
-
-            if (function_exists('imageavif')) {
-                if (!imageavif($master, $base . '.avif', 60, 6)) {
-                    throw new Exception("No se pudo guardar el .avif.");
-                }
-            }
-
-            if (!imagejpeg($thumb,  $base . '_thumb.jpg',  80)) {
-                throw new Exception("No se pudo guardar el thumbnail .jpg.");
-            }
-            if (function_exists('imagewebp')) {
-                if (!imagewebp($thumb, $base . '_thumb.webp', 78)) {
-                    throw new Exception("No se pudo guardar el thumbnail .webp.");
-                }
-            }
-
-            imagedestroy($master);
-            imagedestroy($thumb);
 
             ptable_json_exit(['status' => 'success', 'mode' => 'processed']);
         } catch (Throwable $e) {
@@ -634,9 +579,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             if (!$sku) throw new Exception("SKU ausente.");
             if (!in_array($slot, ['extra1', 'extra2'])) throw new Exception("Slot inválido.");
             $base = $localPath . $sku . '_' . $slot;
-            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
-                if (file_exists($base . $ext)) @unlink($base . $ext);
-            }
+            product_image_pipeline_cleanup($sku . '_' . $slot);
             echo json_encode(['status' => 'success']);
         } catch (Exception $e) {
             echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
@@ -651,11 +594,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 throw new Exception("SKU inválido.");
             }
             $base = $localPath . $sku;
-            foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.png'] as $ext) {
-                if (file_exists($base . $ext)) {
-                    @unlink($base . $ext);
-                }
-            }
+            product_image_pipeline_cleanup($sku);
             echo json_encode(['status' => 'success']);
         } catch (Exception $e) {
             echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);

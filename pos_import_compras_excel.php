@@ -15,6 +15,7 @@ ini_set('memory_limit', '1024M');
 require_once __DIR__ . '/vendor/autoload.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
+require_once __DIR__ . '/product_image_pipeline.php';
 require_once __DIR__ . '/kardex_engine.php';
 require_once __DIR__ . '/inventory_suite_layout.php';
 
@@ -787,6 +788,7 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
                 } else {
                     $stmtInsert = $pdo->prepare("INSERT INTO productos (codigo, nombre, precio, costo, precio_mayorista, categoria, activo, id_empresa, version_row) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)");
                     $stmtInsert->execute([$targetSku, $row['nombre'], $row['precio_venta'], $row['precio_compra'], $row['precio_mayorista'], $row['categoria'], $row['empresa_id'], time()]);
+                    product_image_pipeline_ensure_placeholder($targetSku, (string)$row['nombre']);
                     $createdProducts++;
                 }
 
