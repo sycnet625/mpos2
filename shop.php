@@ -1174,6 +1174,9 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             padding: 1rem;
             text-align: center;
             color: white;
+            background-repeat: no-repeat;
+            background-position: center center;
+            background-size: 100% 100%;
         }
         
         .promo-slide h2, .promo-slide-title {
@@ -1975,8 +1978,10 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                 $sbImg   = trim((string)($sb['imagen'] ?? ''));
                 $sbHasImg = $sbImg !== '' && file_exists(__DIR__ . '/' . $sbImg);
                 $sbSize  = trim((string)($sb['bg_size'] ?? 'cover')) ?: 'cover';
+                // 'cover' → 100% 100%: llena ancho y alto sin recortar ni repetir
+                $sbSizeCss = ($sbSize === 'cover') ? '100% 100%' : $sbSize;
                 $sbBg    = $sbHasImg
-                    ? 'background-image:url(\'' . htmlspecialchars($sbImg, ENT_QUOTES) . '?v=' . filemtime(__DIR__ . '/' . $sbImg) . '\');background-size:' . htmlspecialchars($sbSize, ENT_QUOTES) . ';background-position:center;'
+                    ? 'background-image:url(\'' . htmlspecialchars($sbImg, ENT_QUOTES) . '?v=' . filemtime(__DIR__ . '/' . $sbImg) . '\');background-size:' . htmlspecialchars($sbSizeCss, ENT_QUOTES) . ';background-position:center center;background-repeat:no-repeat;'
                     : '';
                 $sbClass = $sbHasImg ? '' : htmlspecialchars($sb['color_clase'] ?? 'gradient-' . ($bi + 1), ENT_QUOTES);
             ?>
