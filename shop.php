@@ -4941,6 +4941,7 @@ document.addEventListener('DOMContentLoaded', () => {
 <!-- =========================================================
      TESTIMONIOS — lazy-loaded al hacer scroll
      ========================================================= -->
+<div id="testimonialsSentinel" style="height:1px;"></div>
 <section id="testimonialsSection" aria-label="Testimonios de clientes"
     style="background:linear-gradient(135deg,#f0f4ff 0%,#fdf4ff 100%);padding:3rem 0;display:none;">
   <div class="container">
@@ -5072,16 +5073,17 @@ document.addEventListener('DOMContentLoaded', () => {
     window._tPrev = function()  { _tIdx = (_tIdx - 1 + TOTAL) % TOTAL; _tRender(); _tResetTimer(); };
     function _tResetTimer() { clearInterval(_tTimer); _tTimer = setInterval(window._tNext, 6000); }
 
-    // Lazy-load: mostrar la sección solo cuando entre en el viewport
-    const section = document.getElementById('testimonialsSection');
-    if (section && 'IntersectionObserver' in window) {
+    // Lazy-load: observar el sentinel (visible) en lugar de la sección oculta
+    const section  = document.getElementById('testimonialsSection');
+    const sentinel = document.getElementById('testimonialsSentinel');
+    if (section && sentinel && 'IntersectionObserver' in window) {
         new IntersectionObserver(function(entries, obs) {
             if (entries[0].isIntersecting) {
                 section.style.display = '';
                 _tResetTimer();
                 obs.disconnect();
             }
-        }, { rootMargin: '200px' }).observe(section);
+        }, { rootMargin: '300px' }).observe(sentinel);
     } else if (section) {
         section.style.display = '';
         _tResetTimer();
