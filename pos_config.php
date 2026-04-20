@@ -17,6 +17,42 @@ error_reporting(E_ALL);
 require_once 'db.php';
 require_once 'config_loader.php';
 
+function poscfg_legacy_optimize_uploaded_web_image(string $tmpFile, string $targetPath, int $maxWidth, int $maxHeight, int $targetBytes, int $startQuality = 82): void
+{
+    if (!extension_loaded('gd') || !function_exists('imagecreatefromstring') || !function_exists('imagewebp')) {
+        throw new RuntimeException('El servidor no tiene soporte GD/WebP para optimizar imágenes.');
+    }
+    $bytes = @file_get_contents($tmpFile);
+    $src = $bytes !== false ? @imagecreatefromstring($bytes) : false;
+    if (!$src) {
+        throw new RuntimeException('No se pudo procesar la imagen subida.');
+    }
+    $srcW = imagesx($src);
+    $srcH = imagesy($src);
+    $scale = min(1, $maxWidth / max(1, $srcW), $maxHeight / max(1, $srcH));
+    $dstW = max(1, (int)round($srcW * $scale));
+    $dstH = max(1, (int)round($srcH * $scale));
+    $canvas = imagecreatetruecolor($dstW, $dstH);
+    imagealphablending($canvas, false);
+    imagesavealpha($canvas, true);
+    $transparent = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+    imagefill($canvas, 0, 0, $transparent);
+    imagecopyresampled($canvas, $src, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+    foreach ([$startQuality, 76, 70, 64, 58] as $quality) {
+        if (@imagewebp($canvas, $targetPath, $quality)) {
+            clearstatcache(true, $targetPath);
+            if ((int)@filesize($targetPath) <= $targetBytes || $quality === 58) {
+                imagedestroy($canvas);
+                imagedestroy($src);
+                return;
+            }
+        }
+    }
+    imagedestroy($canvas);
+    imagedestroy($src);
+    throw new RuntimeException('No se pudo generar la imagen optimizada.');
+}
+
 // ARCHIVO DE CONFIGURACIÓN (estricto por sucursal/carpeta actual)
 $configFile = __DIR__ . '/pos.cfg';
 
@@ -228,9 +264,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (file_exists($f)) unlink($f);
                     }
                 }
-                $dest = __DIR__ . '/assets/img/ticket_logo.' . $ext;
-                if (move_uploaded_file($_FILES['ticket_logo']['tmp_name'], $dest)) {
-                    $newConfig['ticket_logo'] = 'assets/img/ticket_logo.' . $ext;
+                $dest = __DIR__ . '/assets/img/ticket_logo.webp';
+                poscfg_legacy_optimize_uploaded_web_image($_FILES['ticket_logo']['tmp_name'], $dest, 900, 320, 180 * 1024, 80);
+                if (file_exists($dest)) {
+                    $newConfig['ticket_logo'] = 'assets/img/ticket_logo.webp';
                 } else {
                     throw new Exception("No se pudo guardar el logo. Verifique permisos en assets/img/.");
                 }
@@ -842,7 +879,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <?php endif; ?>
                                 <input type="file" name="ticket_logo" class="form-control" accept="image/jpeg,image/png,image/webp"
                                        onchange="onLogoFileChange(this)">
-                                <div class="form-text">JPG, PNG o WebP · Máx 2 MB · Recomendado: 280 × 80 px</div>
+                                <div class="form-text">JPG, PNG o WebP · Máx 2 MB · Se optimiza automáticamente a WebP liviano · Recomendado: 280 × 80 px</div>
                             </div>
 
                             <!-- Textos -->

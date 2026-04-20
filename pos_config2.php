@@ -229,13 +229,9 @@ function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, a
             }
         }
 
-        $ext = $allowed[$mime];
-        $dest = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
-        if (!@move_uploaded_file($_FILES[$fieldName]['tmp_name'], $dest)) {
-            throw new RuntimeException('No se pudo guardar uno de los logos. Verifique permisos en assets/img/.');
-        }
-
-        return 'assets/img/' . $baseName . '.' . $ext;
+        $dest = __DIR__ . '/assets/img/' . $baseName . '.webp';
+        poscfg_optimize_uploaded_web_image($_FILES[$fieldName]['tmp_name'], $dest, 720, 320, 160 * 1024, 80);
+        return 'assets/img/' . $baseName . '.webp';
     }
 
     return $currentPath;
@@ -628,12 +624,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                 }
-                $ext = $allowed[$mime];
-                $dest = __DIR__ . '/assets/img/ticket_logo.' . $ext;
-                if (!@move_uploaded_file($_FILES['ticket_logo']['tmp_name'], $dest)) {
-                    throw new RuntimeException('No se pudo guardar el logo. Verifique permisos en assets/img/.');
-                }
-                $newConfig['ticket_logo'] = 'assets/img/ticket_logo.' . $ext;
+                $dest = __DIR__ . '/assets/img/ticket_logo.webp';
+                poscfg_optimize_uploaded_web_image($_FILES['ticket_logo']['tmp_name'], $dest, 900, 320, 180 * 1024, 80);
+                $newConfig['ticket_logo'] = 'assets/img/ticket_logo.webp';
             }
 
             $newConfig['marca_sistema_logo'] = poscfg_process_brand_logo_upload('marca_sistema_logo', 'branding_system_logo', $currentConfig);
@@ -1736,7 +1729,7 @@ unset($treeCompany);
                                     </div>
                                 <?php endif; ?>
                                 <input type="file" name="ticket_logo" class="form-control" accept="image/jpeg,image/png,image/webp" onchange="onLogoFileChange(this)">
-                                <div class="form-text">JPG, PNG o WebP. Máximo 2MB. Recomendado: 280 × 80 px.</div>
+                                <div class="form-text">JPG, PNG o WebP. Máximo 2MB. Se optimiza automáticamente a WebP liviano. Recomendado: 280 × 80 px.</div>
                             </div>
 
                             <div class="mb-4 pb-3 border-bottom">
@@ -2690,7 +2683,7 @@ unset($treeCompany);
                                 <div class="col-12">
                                     <label class="form-label">Logo del sistema</label>
                                     <input type="file" name="marca_sistema_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
-                                    <div class="form-text">Sube JPG, PNG o WebP. Máximo 2MB.</div>
+                                    <div class="form-text">Sube JPG, PNG o WebP. Máximo 2MB. Se convierte automáticamente a WebP optimizado.</div>
                                 </div>
                                 <?php if (!empty($currentConfig['marca_sistema_logo'])): ?>
                                     <div class="col-12">
@@ -2727,7 +2720,7 @@ unset($treeCompany);
                                 <div class="col-12">
                                     <label class="form-label">Logo de la empresa</label>
                                     <input type="file" name="marca_empresa_logo" class="form-control" accept="image/jpeg,image/png,image/webp">
-                                    <div class="form-text">Úsalo para encabezados, splash o materiales de marca.</div>
+                                    <div class="form-text">Úsalo para encabezados, splash o materiales de marca. Se convierte automáticamente a WebP optimizado.</div>
                                 </div>
                                 <?php if (!empty($currentConfig['marca_empresa_logo'])): ?>
                                     <div class="col-12">
