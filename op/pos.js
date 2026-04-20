@@ -173,6 +173,7 @@ window.renderCart = function() {
     const tot = sub * (1 - globalDiscountPct/100);
     const te = document.getElementById('totalAmount'); if(te) te.innerText = '$' + tot.toFixed(2);
     const ti = document.getElementById('totalItems'); if(ti) ti.innerText = items;
+    const tp = document.getElementById('totalProds'); if(tp) tp.innerText = cart.length;
 };
 window.modifyQty = function(d) { if(selectedIndex < 0) return; const item = cart[selectedIndex]; const prod = productsDB.find(p=>p.codigo == item.id); if(d>0 && prod && prod.es_servicio==0 && (item.qty+d)>parseFloat(prod.stock)) { Synth.error(); return showToast("Sin stock", "error"); } item.qty += d; if(item.qty <= 0) { cart.splice(selectedIndex, 1); selectedIndex = -1; Synth.removeCart(); } else { d>0 ? Synth.increment() : Synth.decrement(); } renderCart(); saveCartState(); };
 window.removeItem = function() { if(selectedIndex>=0 && confirm('Eliminar?')) { cart.splice(selectedIndex,1); selectedIndex=-1; Synth.removeCart(); renderCart(); saveCartState(); } };

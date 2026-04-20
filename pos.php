@@ -1235,7 +1235,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
         <div class="px-3 py-2 bg-light border-top totals-area">
             <div class="d-flex justify-content-between align-items-end">
-                <div class="small text-muted">Items: <span id="totalItems">0</span></div>
+                <div class="small text-muted">Items: <span id="totalItems">0</span> &nbsp;Prod: <span id="totalProds">0</span></div>
                 <div class="fs-3 fw-bold text-dark text-end" id="totalAmount">$0.00</div>
             </div>
         </div>
