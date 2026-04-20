@@ -38,9 +38,10 @@ if (!empty($venta['id_caja'])) {
 }
 
 // ── Cálculos ──────────────────────────────────────────────────────────────────
-$subtotal   = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
-$total      = floatval($venta['total']);
-$costoEnvio = round($total - $subtotal, 2);
+$subtotal      = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
+$totalCantidad = array_sum(array_column($items, 'cantidad'));
+$total         = floatval($venta['total']);
+$costoEnvio    = round($total - $subtotal, 2);
 $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
 $hayEnvio   = $costoEnvio > 0.01 && in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio);
 
@@ -285,7 +286,7 @@ if (empty($logoUrl)) {
 
             <tr>
                 <td colspan="3" class="right" style="border:none; font-weight:bold;">TOTAL&gt;&gt;</td>
-                <td class="center" style="font-weight:bold;"><?= count($items) ?></td>
+                <td class="center" style="font-weight:bold;"><?= number_format($totalCantidad, 2) ?></td>
                 <td colspan="2" style="border:none;"></td>
             </tr>
         </tbody>
