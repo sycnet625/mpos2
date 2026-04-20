@@ -338,17 +338,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (isset($_FILES['sucursal_banner']) && $_FILES['sucursal_banner']['error'] === UPLOAD_ERR_OK) {
-                $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-                $type = $_FILES['sucursal_banner']['type'];
-                if (!isset($allowed[$type])) throw new Exception("Formato de imagen no permitido para el banner.");
+                $allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+                $mime = mime_content_type($_FILES['sucursal_banner']['tmp_name']);
+                if (!in_array($mime, $allowed)) throw new Exception("Formato de imagen no permitido para el banner.");
 
-                $ext = $allowed[$type];
-                $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.' . $ext;
+                $tmp = $_FILES['sucursal_banner']['tmp_name'];
+                $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.webp';
                 $target = __DIR__ . '/assets/img/' . $newBannerName;
 
-                if (move_uploaded_file($_FILES['sucursal_banner']['tmp_name'], $target)) {
-                    $bannerPath = 'assets/img/' . $newBannerName;
+                // Cargar imagen fuente según MIME real
+                $src = match($mime) {
+                    'image/jpeg'  => @imagecreatefromjpeg($tmp),
+                    'image/png'   => @imagecreatefrompng($tmp),
+                    'image/webp'  => @imagecreatefromwebp($tmp),
+                    'image/gif'   => @imagecreatefromgif($tmp),
+                    default       => false,
+                };
+                if (!$src) throw new Exception("No se pudo procesar la imagen del banner.");
+
+                // Convertir a WebP calidad 82 (buen balance tamaño/calidad para banners)
+                if (!imagewebp($src, $target, 82)) {
+                    imagedestroy($src);
+                    throw new Exception("Error al convertir el banner a WebP.");
                 }
+                imagedestroy($src);
+                $bannerPath = 'assets/img/' . $newBannerName;
             }
 
             // Opciones de presentación del hero banner

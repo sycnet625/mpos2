@@ -1166,7 +1166,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         }
         
         .promo-slide {
-            height: 93px;
+            height: 124px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1526,7 +1526,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         
         @media (max-width: 768px) {
             .products-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-            .promo-slide { height: 80px; }
+            .promo-slide { height: 107px; }
             .promo-slide h2, .promo-slide-title { font-size: 1rem; }
             .promo-slide p { font-size: 0.65rem; }
         }
