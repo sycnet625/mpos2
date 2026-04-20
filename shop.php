@@ -202,9 +202,13 @@ $siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $baseDir . '/sho
 
 $metaTitle = $storeName . " | Tienda Online en La Habana – Productos Frescos y Entrega a Domicilio";
 $metaDesc  = "Bienvenido a " . $storeName . ", tu tienda online en La Habana. Compra productos de calidad con entrega a domicilio en toda La Habana. Pedido fácil, rápido y seguro. ¡Haz tu pedido ahora!";
-$metaImg   = $companyBrandLogo !== ''
-    ? $scheme . '://' . $host . $baseDir . '/' . ltrim($companyBrandLogo, '/')
-    : $scheme . '://' . $host . $baseDir . '/icon-shop-512.png';
+// Imagen OG 1200×630 para WhatsApp/redes — fallback al logo de empresa
+$ogImgLocal = __DIR__ . '/assets/img/og-social.png';
+$metaImg    = file_exists($ogImgLocal)
+    ? $scheme . '://' . $host . $baseDir . '/assets/img/og-social.png'
+    : ($companyBrandLogo !== ''
+        ? $scheme . '://' . $host . $baseDir . '/' . ltrim($companyBrandLogo, '/')
+        : $scheme . '://' . $host . $baseDir . '/icon-shop-512.png');
 
 
 // =========================================================
@@ -870,22 +874,27 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
     <meta name="description" content="<?php echo htmlspecialchars($metaDesc); ?>">
     <link rel="canonical" href="<?php echo htmlspecialchars($siteUrl); ?>">
 
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type"        content="website">
-    <meta property="og:url"         content="<?php echo htmlspecialchars($siteUrl); ?>">
-    <meta property="og:site_name"   content="<?php echo htmlspecialchars($storeName); ?>">
-    <meta property="og:title"       content="<?php echo htmlspecialchars($metaTitle); ?>">
-    <meta property="og:description" content="<?php echo htmlspecialchars($metaDesc); ?>">
-    <meta property="og:image"       content="<?php echo htmlspecialchars($metaImg); ?>">
-    <meta property="og:image:width"  content="512">
-    <meta property="og:image:height" content="512">
+    <!-- Open Graph / WhatsApp / Facebook -->
+    <meta property="og:type"         content="website">
+    <meta property="og:url"          content="<?php echo htmlspecialchars($siteUrl); ?>">
+    <meta property="og:site_name"    content="<?php echo htmlspecialchars($storeName); ?>">
+    <meta property="og:title"        content="<?php echo htmlspecialchars($metaTitle); ?>">
+    <meta property="og:description"  content="<?php echo htmlspecialchars($metaDesc); ?>">
+    <meta property="og:locale"       content="es_CU">
+    <meta property="og:image"        content="<?php echo htmlspecialchars($metaImg); ?>">
+    <meta property="og:image:secure_url" content="<?php echo htmlspecialchars($metaImg); ?>">
+    <meta property="og:image:type"   content="image/png">
+    <meta property="og:image:width"  content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt"    content="<?php echo htmlspecialchars($storeName . ' — Tienda Online La Habana'); ?>">
     <?php if ($fbUrl): ?><meta property="og:see_also" content="<?php echo htmlspecialchars($fbUrl); ?>"><?php endif; ?>
 
     <!-- Twitter / X Card -->
-    <meta name="twitter:card"        content="summary_large_image">
-    <meta name="twitter:title"       content="<?php echo htmlspecialchars($metaTitle); ?>">
-    <meta name="twitter:description" content="<?php echo htmlspecialchars($metaDesc); ?>">
-    <meta name="twitter:image"       content="<?php echo htmlspecialchars($metaImg); ?>">
+    <meta name="twitter:card"         content="summary_large_image">
+    <meta name="twitter:title"        content="<?php echo htmlspecialchars($metaTitle); ?>">
+    <meta name="twitter:description"  content="<?php echo htmlspecialchars($metaDesc); ?>">
+    <meta name="twitter:image"        content="<?php echo htmlspecialchars($metaImg); ?>">
+    <meta name="twitter:image:alt"    content="<?php echo htmlspecialchars($storeName); ?>">
 
     <!-- Structured Data: LocalBusiness -->
     <script type="application/ld+json">
@@ -1180,14 +1189,14 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         }
         
         .promo-slide h2, .promo-slide-title {
-            font-size: 1.25rem;
+            font-size: 1.7rem;
             font-weight: 800;
             margin-bottom: 0.25rem;
             text-shadow: 0 1px 4px rgba(0,0,0,.45);
         }
 
         .promo-slide p {
-            font-size: 0.75rem;
+            font-size: 1rem;
             font-weight: 500;
             text-shadow: 0 1px 3px rgba(0,0,0,.4);
         }
@@ -1530,8 +1539,8 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         @media (max-width: 768px) {
             .products-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
             .promo-slide { height: 107px; }
-            .promo-slide h2, .promo-slide-title { font-size: 1rem; }
-            .promo-slide p { font-size: 0.65rem; }
+            .promo-slide h2, .promo-slide-title { font-size: 1.25rem; }
+            .promo-slide p { font-size: 0.85rem; }
         }
 
         /* ======================================================= */
@@ -4927,6 +4936,157 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000); 
     }
 
+</script>
+
+<!-- =========================================================
+     TESTIMONIOS — lazy-loaded al hacer scroll
+     ========================================================= -->
+<section id="testimonialsSection" aria-label="Testimonios de clientes"
+    style="background:linear-gradient(135deg,#f0f4ff 0%,#fdf4ff 100%);padding:3rem 0;display:none;">
+  <div class="container">
+    <h2 style="text-align:center;font-size:1.5rem;font-weight:800;color:#4f46e5;margin-bottom:.4rem;">
+      Lo que dicen nuestros clientes
+    </h2>
+    <p style="text-align:center;color:#6b7280;font-size:.9rem;margin-bottom:2rem;">Experiencias reales de personas que confían en nosotros</p>
+
+    <div id="testimonialsCarousel" style="position:relative;overflow:hidden;">
+      <div id="testimonialsTrack" style="display:flex;transition:transform .45s ease;will-change:transform;">
+
+        <!-- Testimonio 1 -->
+        <div class="testimonial-card">
+          <div class="t-stars">★★★★★</div>
+          <p class="t-text">"Mira, yo tenía una cafeterita aquí en el Vedado y los productos llegaban tarde y malos. Desde que empecé a pedir con PalWeb, me llega fresquito y a tiempo. Mi negocio mejoró un montón, los clientes se quedaron contentos y yo también. ¡No hay comparación, mi socio!"</p>
+          <div class="t-author">
+            <div class="t-avatar" style="background:linear-gradient(135deg,#667eea,#764ba2);">YR</div>
+            <div>
+              <strong>Yosvany Reyes</strong>
+              <span>Cafetería El Rincón · Vedado, La Habana</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Testimonio 2 -->
+        <div class="testimonial-card">
+          <div class="t-stars">★★★★★</div>
+          <p class="t-text">"Yo buscaba dónde conseguir todo junto sin andar de un lado pa' otro. Aquí encuentro lo que necesito pa' mi paladarcito y me lo mandan sin tardanza. El servicio es el mejor que he visto en La Habana, y eso que yo soy exigente, ¿eh? ¡100% recomendado!"</p>
+          <div class="t-author">
+            <div class="t-avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">MC</div>
+            <div>
+              <strong>Marlenis Cruz</strong>
+              <span>Paladar La Casona · Centro Habana</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Testimonio 3 -->
+        <div class="testimonial-card">
+          <div class="t-stars">★★★★★</div>
+          <p class="t-text">"Al principio no me fiaba mucho de pedir por internet, normal... pero una amiga me recomendó PalWeb y me animé. Hice el pedido por WhatsApp, me respondieron al momento y llegó en menos de lo que esperaba. Ahora soy clienta fija, ¡qué va, no hay quien me quite esto!"</p>
+          <div class="t-author">
+            <div class="t-avatar" style="background:linear-gradient(135deg,#10b981,#0d6efd);">DV</div>
+            <div>
+              <strong>Dailenis Valdés</strong>
+              <span>Emprendedora · Playa, La Habana</span>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- /track -->
+
+      <!-- Controles -->
+      <button class="t-btn t-btn-prev" onclick="_tPrev()" aria-label="Testimonio anterior">&#8249;</button>
+      <button class="t-btn t-btn-next" onclick="_tNext()" aria-label="Testimonio siguiente">&#8250;</button>
+    </div>
+
+    <!-- Dots -->
+    <div style="text-align:center;margin-top:1.2rem;display:flex;justify-content:center;gap:8px;" id="tDots">
+      <button class="t-dot active" onclick="_tGo(0)" aria-label="Testimonio 1"></button>
+      <button class="t-dot"        onclick="_tGo(1)" aria-label="Testimonio 2"></button>
+      <button class="t-dot"        onclick="_tGo(2)" aria-label="Testimonio 3"></button>
+    </div>
+  </div>
+</section>
+
+<style>
+.testimonial-card {
+    min-width: 100%;
+    box-sizing: border-box;
+    padding: 0 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.testimonial-card > * { max-width: 680px; width: 100%; }
+.t-stars { color: #f59e0b; font-size: 1.3rem; margin-bottom: .6rem; }
+.t-text {
+    font-size: 1rem; line-height: 1.7; color: #374151;
+    background: #fff; border-radius: 16px;
+    padding: 1.4rem 1.6rem;
+    box-shadow: 0 4px 18px rgba(79,70,229,.09);
+    border-left: 4px solid #667eea;
+    margin-bottom: 1.2rem;
+    font-style: italic;
+    position: relative;
+}
+.t-text::before { content: '\201C'; font-size: 3rem; color: #c7d2fe; line-height: 0; vertical-align: -.5em; margin-right: .2em; }
+.t-author { display: flex; align-items: center; gap: .9rem; }
+.t-avatar {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-weight: 800; font-size: 1rem; flex-shrink: 0;
+}
+.t-author strong { display: block; color: #1f2937; font-size: .95rem; }
+.t-author span   { display: block; color: #6b7280; font-size: .8rem; }
+.t-btn {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    background: #fff; border: none; border-radius: 50%;
+    width: 40px; height: 40px; font-size: 1.5rem; line-height: 1;
+    box-shadow: 0 2px 10px rgba(0,0,0,.12); cursor: pointer; color: #4f46e5;
+    display: flex; align-items: center; justify-content: center;
+    padding: 0; z-index: 2;
+}
+.t-btn-prev { left: 0; }
+.t-btn-next { right: 0; }
+.t-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #c7d2fe; border: none; cursor: pointer; padding: 0; transition: background .2s;
+}
+.t-dot.active { background: #4f46e5; }
+@media (max-width: 576px) {
+    .t-text { font-size: .9rem; padding: 1rem 1.1rem; }
+    .t-btn  { width: 32px; height: 32px; font-size: 1.2rem; }
+}
+</style>
+
+<script>
+(function() {
+    const TOTAL = 3;
+    let _tIdx = 0, _tTimer;
+    function _tRender() {
+        const track = document.getElementById('testimonialsTrack');
+        if (track) track.style.transform = 'translateX(-' + (_tIdx * 100) + '%)';
+        document.querySelectorAll('.t-dot').forEach((d, i) => d.classList.toggle('active', i === _tIdx));
+    }
+    window._tGo   = function(i) { _tIdx = i; _tRender(); _tResetTimer(); };
+    window._tNext = function()  { _tIdx = (_tIdx + 1) % TOTAL; _tRender(); _tResetTimer(); };
+    window._tPrev = function()  { _tIdx = (_tIdx - 1 + TOTAL) % TOTAL; _tRender(); _tResetTimer(); };
+    function _tResetTimer() { clearInterval(_tTimer); _tTimer = setInterval(window._tNext, 6000); }
+
+    // Lazy-load: mostrar la sección solo cuando entre en el viewport
+    const section = document.getElementById('testimonialsSection');
+    if (section && 'IntersectionObserver' in window) {
+        new IntersectionObserver(function(entries, obs) {
+            if (entries[0].isIntersecting) {
+                section.style.display = '';
+                _tResetTimer();
+                obs.disconnect();
+            }
+        }, { rootMargin: '200px' }).observe(section);
+    } else if (section) {
+        section.style.display = '';
+        _tResetTimer();
+    }
+})();
 </script>
 
 <!-- =========================================================
