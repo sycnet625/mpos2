@@ -2376,78 +2376,230 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
     <img id="imgZoomSrc" src="" alt="Imagen ampliada del producto">
 </div>
 
+<style>
+/* ══ CART MODAL PREMIUM ═══════════════════════════════════════════════════ */
+#modalCart .modal-content {
+    border-radius: 24px !important;
+    border: none !important;
+    overflow: hidden;
+    box-shadow: 0 32px 80px rgba(0,0,0,.22);
+}
+#modalCart .cart-header {
+    background: linear-gradient(135deg, var(--nav-grad-1,#667eea) 0%, var(--nav-grad-2,#764ba2) 100%);
+    padding: 1.25rem 1.5rem;
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+}
+#modalCart .cart-header-title {
+    color: #fff; font-size: 1.15rem; font-weight: 800;
+    display: flex; align-items: center; gap: .6rem; margin: 0;
+}
+#modalCart .cart-header-title i { opacity: .85; font-size: 1rem; }
+#modalCart .cart-header-badge {
+    background: rgba(255,255,255,.22); color: #fff;
+    border-radius: 999px; font-size: .72rem; font-weight: 700;
+    padding: 2px 10px; margin-left: 6px;
+}
+#modalCart .btn-close-cart {
+    background: rgba(255,255,255,.18); border: none; border-radius: 50%;
+    width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 1rem; cursor: pointer; transition: background .15s;
+    flex-shrink: 0;
+}
+#modalCart .btn-close-cart:hover { background: rgba(255,255,255,.35); }
+/* Tabla del carrito */
+#cartTableBody tr { border-bottom: 1px solid #f1f3f5; }
+#cartTableBody tr:last-child { border-bottom: none; }
+#cartTableBody td { padding: .75rem .5rem; vertical-align: middle; }
+#cartTableBody .cart-prod-name { font-weight: 600; font-size: .92rem; color: #1f2937; }
+#cartTableBody .cart-prod-price { font-size: .78rem; color: #6b7280; }
+#cartTableBody .cart-qty-ctrl { display: flex; align-items: center; gap: 6px; justify-content: center; }
+#cartTableBody .cart-qty-ctrl button {
+    width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid #e5e7eb;
+    background: #f9fafb; color: #374151; font-size: .9rem;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all .15s; padding: 0;
+}
+#cartTableBody .cart-qty-ctrl button:hover { background: var(--primary,#0d6efd); color: #fff; border-color: var(--primary,#0d6efd); }
+#cartTableBody .cart-qty-num { font-weight: 700; min-width: 22px; text-align: center; }
+/* Fila de total */
+#cartItemsView .cart-total-row {
+    background: linear-gradient(135deg,#f0f4ff,#fdf4ff);
+    border-radius: 16px; padding: 1rem 1.25rem;
+    display: flex; align-items: center; justify-content: space-between;
+    margin: .5rem 1.25rem 0;
+}
+#cartItemsView .cart-total-label { font-size: .85rem; color: #6b7280; font-weight: 600; }
+#cartItemsView .cart-total-amount {
+    font-size: 1.75rem; font-weight: 900; color: var(--primary,#0d6efd);
+    letter-spacing: -.03em;
+}
+/* Botones acción carrito */
+.cart-action-bar {
+    padding: 1rem 1.25rem 1.25rem;
+    display: flex; gap: .6rem;
+}
+.cart-btn-trash {
+    border: 1.5px solid #fca5a5; background: #fff5f5; color: #ef4444;
+    border-radius: 12px; padding: .55rem .9rem; font-size: .85rem;
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.cart-btn-trash:hover { background: #ef4444; color: #fff; border-color: #ef4444; }
+.cart-btn-reserve {
+    flex: 1; border: 1.5px solid #a5b4fc; background: #eef2ff; color: #4f46e5;
+    border-radius: 12px; padding: .6rem; font-size: .88rem; font-weight: 700;
+    cursor: pointer; transition: all .15s; text-align: center;
+}
+.cart-btn-reserve:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+.cart-btn-pay {
+    flex: 1.4; background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff; border: none; border-radius: 12px; padding: .6rem;
+    font-size: .95rem; font-weight: 800; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(16,185,129,.35);
+    transition: all .15s; text-align: center;
+}
+.cart-btn-pay:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16,185,129,.45); }
+/* Checkout premium */
+#checkoutView .checkout-section {
+    background: #f8faff; border-radius: 16px; padding: 1.2rem 1.25rem;
+    margin-bottom: 1rem; border: 1px solid #e8edff;
+}
+#checkoutView .checkout-section-title {
+    font-size: .78rem; font-weight: 700; color: #4f46e5;
+    text-transform: uppercase; letter-spacing: .07em; margin-bottom: .9rem;
+    display: flex; align-items: center; gap: .4rem;
+}
+#checkoutView .form-control, #checkoutView .form-select {
+    border-radius: 10px; border-color: #e5e7eb;
+    font-size: .9rem; padding: .55rem .85rem;
+}
+#checkoutView .form-control:focus, #checkoutView .form-select:focus {
+    border-color: #818cf8; box-shadow: 0 0 0 3px rgba(99,102,241,.12);
+}
+#checkoutView .form-label { font-size: .8rem; font-weight: 600; color: #374151; margin-bottom: .3rem; }
+/* Resumen total checkout */
+.checkout-total-box {
+    background: linear-gradient(135deg, var(--nav-grad-1,#667eea), var(--nav-grad-2,#764ba2));
+    border-radius: 16px; padding: 1.1rem 1.3rem; color: #fff; margin-top: .5rem;
+}
+.checkout-total-box .row-line { display: flex; justify-content: space-between; font-size: .85rem; opacity: .88; margin-bottom: .3rem; }
+.checkout-total-box .row-total { display: flex; justify-content: space-between; font-size: 1.5rem; font-weight: 900; margin-top: .5rem; }
+/* Botón confirmar */
+.btn-confirmar-pedido {
+    background: linear-gradient(135deg,#10b981,#059669) !important;
+    border: none !important; border-radius: 14px !important;
+    font-weight: 800 !important; font-size: 1rem !important;
+    box-shadow: 0 4px 16px rgba(16,185,129,.4) !important;
+    padding: .75rem 2rem !important;
+}
+.btn-confirmar-pedido:hover { transform: translateY(-1px); box-shadow: 0 6px 22px rgba(16,185,129,.5) !important; }
+/* Vista éxito */
+.cart-success-icon {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: linear-gradient(135deg,#10b981,#059669);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 1.2rem; font-size: 2.2rem;
+    box-shadow: 0 8px 24px rgba(16,185,129,.35);
+}
+.cart-order-badge {
+    background: linear-gradient(135deg,#f0fdf4,#dcfce7);
+    border: 1.5px solid #86efac; border-radius: 16px;
+    padding: 1rem 2rem; display: inline-block; margin: .8rem 0;
+}
+.cart-order-badge .order-num { font-size: 2.2rem; font-weight: 900; color: #059669; letter-spacing: 2px; }
+</style>
+
 <div class="modal fade" id="modalCart" tabindex="-1">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content" style="border-radius: 20px; border: none;">
-            <div class="modal-header border-0">
-                <h5 class="modal-title fw-bold"><i class="fas fa-shopping-cart me-2"></i><span data-i18n="cart.title">Tu Carrito</span></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar carrito"></button>
+    <div class="modal-dialog modal-xl modal-dialog-scrollable" style="--bs-modal-border-radius:24px;">
+        <div class="modal-content" style="border-radius:24px;border:none;">
+
+            <!-- Header premium -->
+            <div class="cart-header">
+                <h5 class="cart-header-title">
+                    <i class="fas fa-shopping-bag"></i>
+                    <span data-i18n="cart.title">Tu Carrito</span>
+                    <span class="cart-header-badge" id="cartHeaderCount">0 items</span>
+                </h5>
+                <button class="btn-close-cart" data-bs-dismiss="modal" aria-label="Cerrar carrito">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
 
+            <!-- ── Vista: lista de productos ── -->
             <div id="cartItemsView">
-                <div class="modal-body">
-                    <table class="table table-hover">
-                        <thead class="table-light">
-                            <tr>
-                                <th data-i18n="cart.product_col">Producto</th>
-                                <th class="text-center" data-i18n="cart.qty_col">Cantidad</th>
-                                <th class="text-end" data-i18n="cart.subtotal_col">Subtotal</th>
-                                <th class="text-end"></th>
+                <div class="modal-body" style="padding:1rem 1.25rem .5rem;">
+                    <table class="table mb-0" style="border:none;">
+                        <thead>
+                            <tr style="border-bottom:2px solid #f1f3f5;">
+                                <th style="font-size:.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;border:none;padding:.5rem .5rem .75rem;" data-i18n="cart.product_col">Producto</th>
+                                <th class="text-center" style="font-size:.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;border:none;padding:.5rem .5rem .75rem;" data-i18n="cart.qty_col">Cant.</th>
+                                <th class="text-end" style="font-size:.75rem;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;border:none;padding:.5rem .5rem .75rem;" data-i18n="cart.subtotal_col">Subtotal</th>
+                                <th style="border:none;width:32px;"></th>
                             </tr>
                         </thead>
                         <tbody id="cartTableBody"></tbody>
                     </table>
-                    <div class="text-end fs-3 fw-bold">Total: $<span id="cartTotal">0.00</span></div>
                 </div>
-                <div class="modal-footer border-0 flex-column gap-2">
-                    <div id="reservaCartNotice" class="alert alert-warning py-2 px-3 w-100 mb-0 small" style="display:none;" data-i18n-html="cart.reserva_notice">
-                        📅 Tu carrito incluye productos <strong>de reserva</strong> (sin stock). Usa <strong>Reservar</strong> para procesarlos.
+
+                <!-- Total -->
+                <div class="cart-total-row">
+                    <div>
+                        <div class="cart-total-label">Total a pagar</div>
+                        <div style="font-size:.72rem;color:#9ca3af;" id="cartItemCount">0 productos</div>
                     </div>
-                    <div class="d-flex w-100 gap-2">
-                        <button class="btn btn-outline-danger" onclick="clearCart()">
-                            <i class="fas fa-trash me-1"></i> <span data-i18n="cart.empty_btn">Vaciar</span>
-                        </button>
-                        <button class="btn btn-outline-primary flex-fill" onclick="iniciarFlujo('reserva')">
-                            <span data-i18n="cart.reserve_btn">📅 Reservar</span>
-                            <small class="d-block" style="font-size:.7rem;opacity:.8" data-i18n="cart.no_stock_ok">Sin stock OK</small>
-                        </button>
-                        <button class="btn btn-success flex-fill" onclick="iniciarFlujo('compra')">
-                            <span data-i18n="cart.pay_btn">💳 Pagar Ahora</span>
-                            <small class="d-block" style="font-size:.7rem;opacity:.8" data-i18n="cart.only_stock">Solo con stock</small>
-                        </button>
-                    </div>
+                    <div class="cart-total-amount">$<span id="cartTotal">0.00</span></div>
+                </div>
+
+                <!-- Aviso reserva -->
+                <div id="reservaCartNotice" class="alert alert-warning py-2 px-3 mx-3 mt-2 mb-0 small" style="display:none;border-radius:12px;" data-i18n-html="cart.reserva_notice">
+                    📅 Tu carrito incluye productos <strong>de reserva</strong> (sin stock). Usa <strong>Reservar</strong> para procesarlos.
+                </div>
+
+                <!-- Botones acción -->
+                <div class="cart-action-bar">
+                    <button class="cart-btn-trash" onclick="clearCart()" title="Vaciar carrito">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <button class="cart-btn-reserve" onclick="iniciarFlujo('reserva')">
+                        📅 <span data-i18n="cart.reserve_btn">Reservar</span>
+                        <div style="font-size:.68rem;opacity:.75;font-weight:400;" data-i18n="cart.no_stock_ok">Sin stock OK</div>
+                    </button>
+                    <button class="cart-btn-pay" onclick="iniciarFlujo('compra')">
+                        <i class="fas fa-bolt me-1"></i> <span data-i18n="cart.pay_btn">Pagar Ahora</span>
+                        <div style="font-size:.7rem;opacity:.8;font-weight:500;" data-i18n="cart.only_stock">Solo con stock</div>
+                    </button>
                 </div>
             </div>
-            
+
+            <!-- ── Vista: checkout ── -->
             <div id="checkoutView" style="display:none;">
                 <form onsubmit="submitOrder(event)">
-                    <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">
-                        <h5 class="fw-bold mb-4"><i class="fas fa-user me-2"></i><span data-i18n="checkout.title">Datos del Cliente</span></h5>
+                    <div class="modal-body" style="max-height:70vh;overflow-y:auto;padding:1.25rem;">
 
-                        <div class="mb-3">
-                            <label class="form-label fw-bold" data-i18n="checkout.name">Nombre Completo *</label>
-                            <input type="text" id="cliName" class="form-control" placeholder="Ej: Juan Pérez" required data-i18n-attr="placeholder:checkout.name_ph">
+                        <!-- Datos personales -->
+                        <div class="checkout-section">
+                            <div class="checkout-section-title"><i class="fas fa-user-circle"></i> <span data-i18n="checkout.title">Datos del Cliente</span></div>
+                            <div class="mb-3">
+                                <label class="form-label" data-i18n="checkout.name">Nombre Completo *</label>
+                                <input type="text" id="cliName" class="form-control" placeholder="Ej: Juan Pérez" required data-i18n-attr="placeholder:checkout.name_ph">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label" data-i18n="checkout.phone">Teléfono *</label>
+                                <input type="tel" id="cliTel" class="form-control" placeholder="Ej: +53 5555-5555" required data-i18n-attr="placeholder:checkout.phone_ph">
+                            </div>
+                            <div class="mb-0">
+                                <label class="form-label" data-i18n="checkout.address">Dirección *</label>
+                                <textarea id="cliDir" class="form-control" rows="2" placeholder="Calle, número, entre calles..." required data-i18n-attr="placeholder:checkout.address_ph"></textarea>
+                            </div>
                         </div>
 
-                        <div class="mb-3">
-                            <label class="form-label fw-bold" data-i18n="checkout.phone">Teléfono *</label>
-                            <input type="tel" id="cliTel" class="form-control" placeholder="Ej: +53 5555-5555" required data-i18n-attr="placeholder:checkout.phone_ph">
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold" data-i18n="checkout.address">Dirección *</label>
-                            <textarea id="cliDir" class="form-control" rows="2" placeholder="Calle, número, entre calles..." required data-i18n-attr="placeholder:checkout.address_ph"></textarea>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold" data-i18n="checkout.date">Fecha de Entrega/Recogida *</label>
-                            <input type="date" id="cliDate" class="form-control" required onchange="updateSlotsAvailability()">
-                        </div>
-
-                        <div class="mb-4">
-                            <label class="form-label fw-bold">
-                                <i class="fas fa-clock me-1 text-primary"></i><span data-i18n="checkout.time_slot">Horario de Entrega *</span>
-                            </label>
+                        <!-- Fecha y horario -->
+                        <div class="checkout-section">
+                            <div class="checkout-section-title"><i class="fas fa-calendar-alt"></i> <span data-i18n="checkout.date">Fecha y Horario de Entrega</span></div>
+                            <div class="mb-3">
+                                <label class="form-label" data-i18n="checkout.date">Fecha *</label>
+                                <input type="date" id="cliDate" class="form-control" required onchange="updateSlotsAvailability()">
+                            </div>
                             <div class="row g-2" id="timeSlotGrid">
                                 <div class="col-6">
                                     <div class="slot-card" data-slot="manana" data-label="Mañana (9am–12pm)" onclick="selectSlot(this)">
@@ -2478,123 +2630,121 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                                     </div>
                                 </div>
                             </div>
-                            <div id="slotErrorMsg" class="text-danger small mt-1" style="display:none;">
+                            <div id="slotErrorMsg" class="text-danger small mt-2" style="display:none;">
                                 <i class="fas fa-exclamation-circle me-1"></i><span data-i18n="checkout.slot_required">Selecciona un horario de entrega.</span>
                             </div>
                         </div>
 
-                        <div class="mb-3">
-                            <label class="form-label fw-bold" data-i18n="checkout.notes">Notas Adicionales</label>
+                        <!-- Notas -->
+                        <div class="checkout-section">
+                            <div class="checkout-section-title"><i class="fas fa-sticky-note"></i> <span data-i18n="checkout.notes">Notas Adicionales</span></div>
                             <textarea id="cliNotes" class="form-control" rows="3" placeholder="Ej: El cake de relleno chocolate y color rosado el merengue. Entregar antes de las 3 PM." data-i18n-attr="placeholder:checkout.notes_ph"></textarea>
-                            <small class="text-muted" data-i18n="checkout.notes_hint">Especifica detalles importantes como colores, sabores, horarios, etc.</small>
+                            <small class="text-muted mt-1 d-block" style="font-size:.75rem;" data-i18n="checkout.notes_hint">Especifica detalles importantes como colores, sabores, horarios, etc.</small>
                         </div>
-                        
-                        <div class="form-check mb-3" style="padding: 1rem; background: #f8f9fa; border-radius: 12px;">
-                            <input class="form-check-input" type="checkbox" id="delHome" onchange="toggleDelivery()">
-                            <label class="form-check-label fw-bold" for="delHome" data-i18n="checkout.home_delivery">
-                                <i class="fas fa-truck me-2"></i>Entrega a domicilio
-                            </label>
-                        </div>
-                        
-                        <div id="deliveryBox" style="display:none; background: #f8f9fa; padding: 1.5rem; border-radius: 12px; margin-bottom: 1rem;">
-                            <h6 class="fw-bold mb-3"><i class="fas fa-map-marker-alt me-2"></i>Ubicación de Entrega</h6>
-                            <div class="row g-3">
-                                <div class="col-md-6">
-                                    <label class="form-label" for="cMun" data-i18n="checkout.municipality">Municipio</label>
-                                    <select id="cMun" class="form-control" onchange="loadBarrios()">
-                                        <option value="" data-i18n="checkout.municipality_ph">Seleccione municipio...</option>
-                                    </select>
+
+                        <!-- Entrega a domicilio -->
+                        <div class="checkout-section" style="cursor:pointer;" onclick="document.getElementById('delHome').click()">
+                            <div class="d-flex align-items: center; gap:.75rem; align-items:center;">
+                                <input class="form-check-input mt-0 me-2" type="checkbox" id="delHome" onclick="event.stopPropagation()" onchange="toggleDelivery()" style="width:20px;height:20px;border-radius:6px;">
+                                <div>
+                                    <div style="font-weight:700;font-size:.9rem;"><i class="fas fa-truck me-2 text-primary"></i><span data-i18n="checkout.home_delivery">Entrega a domicilio</span></div>
+                                    <div style="font-size:.75rem;color:#6b7280;">Se calculará el costo de envío según tu barrio</div>
                                 </div>
-                                <div class="col-md-6">
-                                    <label class="form-label" for="cBar" data-i18n="checkout.neighborhood">Barrio</label>
-                                    <select id="cBar" class="form-control" onchange="calcShip()">
-                                        <option value="" data-i18n="checkout.neighborhood_ph">Seleccione barrio...</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="mt-4 p-4" style="background: #f8f9fa; border-radius: 12px;">
-                            <h6 class="fw-bold mb-3" data-i18n="checkout.summary">Resumen del Pedido</h6>
-                            <div class="d-flex justify-content-between py-2">
-                                <span data-i18n="checkout.subtotal">Subtotal Productos:</span>
-                                <span class="fw-bold">$<span id="cartTotal2">0.00</span></span>
-                            </div>
-                            <div class="d-flex justify-content-between py-2">
-                                <span data-i18n="checkout.shipping">Costo de Envío:</span>
-                                <span class="fw-bold">$<span id="shipCost">0.00</span></span>
-                            </div>
-                            <hr>
-                            <div class="d-flex justify-content-between fs-4">
-                                <span class="fw-bold" data-i18n="checkout.total">TOTAL A PAGAR:</span>
-                                <span class="fw-bold" style="color: var(--primary);">$<span id="grandTotal">0.00</span></span>
                             </div>
                         </div>
 
-                        <!-- SECCIÓN DE PAGO (solo para flujo 'compra') -->
-                        <div id="paymentSection" style="display:none; margin-top:1rem;">
-                            <div class="p-3 border rounded-3">
-                                <h6 class="fw-bold mb-3"><i class="fas fa-credit-card me-2 text-primary"></i><span data-i18n="checkout.payment_method">Método de Pago</span></h6>
-                                <div id="shopPaymentMethodsContainer">
-                                    <!-- Renderizado dinámico por renderShopPaymentMethods() -->
+                        <div id="deliveryBox" style="display:none;">
+                            <div class="checkout-section">
+                                <div class="checkout-section-title"><i class="fas fa-map-marker-alt"></i> Ubicación de Entrega</div>
+                                <div class="row g-3">
+                                    <div class="col-md-6">
+                                        <label class="form-label" for="cMun" data-i18n="checkout.municipality">Municipio</label>
+                                        <select id="cMun" class="form-control" onchange="loadBarrios()">
+                                            <option value="" data-i18n="checkout.municipality_ph">Seleccione municipio...</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label class="form-label" for="cBar" data-i18n="checkout.neighborhood">Barrio</label>
+                                        <select id="cBar" class="form-control" onchange="calcShip()">
+                                            <option value="" data-i18n="checkout.neighborhood_ph">Seleccione barrio...</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Resumen total -->
+                        <div class="checkout-total-box">
+                            <div class="row-line"><span data-i18n="checkout.subtotal">Subtotal Productos</span><span>$<span id="cartTotal2">0.00</span></span></div>
+                            <div class="row-line"><span data-i18n="checkout.shipping">Costo de Envío</span><span>$<span id="shipCost">0.00</span></span></div>
+                            <div style="border-top:1px solid rgba(255,255,255,.25);margin:.6rem 0;"></div>
+                            <div class="row-total"><span data-i18n="checkout.total">TOTAL</span><span>$<span id="grandTotal">0.00</span></span></div>
+                        </div>
+
+                        <!-- Método de pago -->
+                        <div id="paymentSection" style="display:none;margin-top:1rem;">
+                            <div class="checkout-section">
+                                <div class="checkout-section-title"><i class="fas fa-credit-card"></i> <span data-i18n="checkout.payment_method">Método de Pago</span></div>
+                                <div id="shopPaymentMethodsContainer"></div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="modal-footer border-0">
-                        <button type="button" class="btn btn-secondary" onclick="showCartView()">
+
+                    <div class="modal-footer border-0 gap-2 px-4 pb-4 pt-2">
+                        <button type="button" class="btn btn-outline-secondary rounded-pill px-4" onclick="showCartView()">
                             <i class="fas fa-arrow-left me-1"></i> <span data-i18n="checkout.back">Volver</span>
                         </button>
-                        <button type="submit" id="btnConfirmarPedido" class="btn btn-success btn-lg px-4">
+                        <button type="submit" id="btnConfirmarPedido" class="btn btn-confirmar-pedido flex-fill">
                             <i class="fas fa-check-circle me-2"></i> <span data-i18n="checkout.confirm">Confirmar Pedido</span>
                         </button>
                     </div>
                 </form>
             </div>
-            
+
+            <!-- ── Vista: pedido recibido ── -->
             <div id="successView" style="display:none;">
-                <div class="modal-body text-center py-5">
-                    <div style="font-size: 5rem; margin-bottom: 1rem;">✅</div>
-                    <h3 class="fw-bold mb-3" data-i18n="order.received">¡Pedido Recibido!</h3>
-                    <p class="text-muted fs-5" data-i18n="order.thanks">Gracias por tu compra. Te contactaremos pronto para confirmar tu orden.</p>
+                <div class="modal-body text-center py-5 px-4">
+                    <div class="cart-success-icon">✅</div>
+                    <h3 class="fw-bold mb-2" data-i18n="order.received">¡Pedido Recibido!</h3>
+                    <p class="text-muted" data-i18n="order.thanks">Gracias por tu compra. Te contactaremos pronto para confirmar tu orden.</p>
                 </div>
-                <div class="modal-footer border-0 justify-content-center">
-                    <button class="btn btn-primary btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
+                <div class="modal-footer border-0 justify-content-center pb-4">
+                    <button class="btn btn-primary rounded-pill px-5 py-2 fw-bold" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
                 </div>
             </div>
 
-            <!-- Vista: esperando confirmación de transferencia -->
+            <!-- ── Vista: verificando pago ── -->
             <div id="waitingPaymentView" style="display:none;">
-                <div class="modal-body text-center py-5">
-                    <div style="font-size: 4rem; margin-bottom: 1rem; animation: spin 2s linear infinite; display:inline-block;">⏳</div>
+                <div class="modal-body text-center py-5 px-4">
+                    <div style="font-size:4rem;margin-bottom:1rem;animation:spin 2s linear infinite;display:inline-block;">⏳</div>
                     <h4 class="fw-bold mb-3" data-i18n="payment.verifying">Verificando tu transferencia...</h4>
                     <p class="text-muted" data-i18n="payment.verifying_sub">El operador confirmará tu pago en breve.<br>Esta pantalla se actualizará automáticamente.</p>
-                    <div class="mt-3 p-3 bg-light rounded">
+                    <div class="mt-3 p-3 rounded-3" style="background:#f8faff;border:1px solid #e8edff;">
                         <small class="text-muted"><span data-i18n="payment.sent_code">Código enviado:</span> <strong id="codigoPagoDisplay"></strong></small>
                     </div>
                 </div>
             </div>
 
-            <!-- Vista: pago confirmado -->
+            <!-- ── Vista: pago confirmado ── -->
             <div id="pagoConfirmadoView" style="display:none;">
-                <div class="modal-body text-center py-4">
-                    <div style="font-size: 4.5rem; margin-bottom: 0.5rem;">🎉</div>
+                <div class="modal-body text-center py-5 px-4">
+                    <div class="cart-success-icon" style="background:linear-gradient(135deg,#10b981,#059669);">🎉</div>
                     <h3 class="fw-bold mb-1 text-success" data-i18n="payment.confirmed">¡Pago Confirmado!</h3>
                     <p class="text-muted mb-3" data-i18n="payment.confirmed_sub">Tu transferencia fue verificada exitosamente.</p>
-                    <div class="bg-success bg-opacity-10 border border-success rounded-3 px-4 py-3 mb-3 mx-auto" style="max-width:320px;">
-                        <div class="text-muted small mb-1" data-i18n="order.number">Número de pedido</div>
-                        <div class="fw-bold text-success" style="font-size:2rem; letter-spacing:2px;">#<span id="confirmadoPedido">—</span></div>
-                        <div class="text-muted small mt-2" data-i18n="order.save_number">Guarda este número para consultar el estado de tu pedido.</div>
+                    <div class="cart-order-badge">
+                        <div style="font-size:.75rem;color:#6b7280;margin-bottom:.25rem;" data-i18n="order.number">Número de pedido</div>
+                        <div class="order-num">#<span id="confirmadoPedido">—</span></div>
+                        <div style="font-size:.75rem;color:#6b7280;margin-top:.25rem;" data-i18n="order.save_number">Guarda este número para consultar el estado.</div>
                     </div>
-                    <p class="fs-5 fw-bold text-dark mb-0">¡<span data-i18n="payment.thanks">Gracias,</span> <span id="confirmadoNombre">Cliente</span>!</p>
+                    <p class="fw-bold text-dark mt-3 mb-0">¡<span data-i18n="payment.thanks">Gracias,</span> <span id="confirmadoNombre">Cliente</span>!</p>
                     <p class="text-muted small" data-i18n="order.in_process">Tu pedido está en proceso. Te avisaremos cuando esté listo.</p>
                 </div>
-                <div class="modal-footer border-0 justify-content-center">
-                    <button class="btn btn-success btn-lg px-5" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
+                <div class="modal-footer border-0 justify-content-center pb-4">
+                    <button class="btn btn-success rounded-pill px-5 py-2 fw-bold" data-bs-dismiss="modal" onclick="location.reload()" data-i18n="btn.close">Cerrar</button>
                 </div>
             </div>
 
-            <!-- Vista: pago rechazado -->
+            <!-- ── Vista: pago rechazado ── -->
             <div id="pagoRechazadoView" style="display:none;">
                 <div class="modal-body text-center py-5">
                     <div style="font-size: 5rem; margin-bottom: 1rem;">❌</div>
