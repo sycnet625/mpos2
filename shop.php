@@ -3955,14 +3955,16 @@ document.addEventListener('DOMContentLoaded', () => {
             btnZoom.classList.remove('visible');
         }
 
-        // Thumbnails — siempre limpiar; mostrar si hay ≥1 imagen (incluye principal)
+        // Thumbnails — siempre limpiar; mostrar si hay >1 imagen
         thumbsWrap.innerHTML = '';
+        thumbsWrap.style.display = '';
         if (allImgs.length > 1) {
             allImgs.forEach((src, i) => {
                 const t = document.createElement('img');
-                t.src       = src;
+                t.src       = src + '&w=128';
                 t.className = 'detail-thumb' + (i === 0 ? ' active' : '');
                 t.alt       = 'Vista ' + (i + 1);
+                t.loading   = 'lazy';
                 t.onclick   = () => {
                     img.src = src;
                     document.getElementById('imgZoomSrc').src = src;
@@ -3971,8 +3973,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 thumbsWrap.appendChild(t);
             });
-        } else {
-            thumbsWrap.style.display = 'none';
         }
 
         // Cargar variantes y reseñas para este producto
