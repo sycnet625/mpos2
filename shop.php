@@ -4958,7 +4958,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="t-stars">★★★★★</div>
           <p class="t-text">"Mira, yo tenía una cafeterita aquí en el Vedado y los productos llegaban tarde y malos. Desde que empecé a pedir con PalWeb, me llega fresquito y a tiempo. Mi negocio mejoró un montón, los clientes se quedaron contentos y yo también. ¡No hay comparación, mi socio!"</p>
           <div class="t-author">
-            <div class="t-avatar" style="background:linear-gradient(135deg,#667eea,#764ba2);">YR</div>
+            <img src="assets/img/testimonial_1.jpg" alt="Yosvany Reyes" class="t-avatar-img">
             <div>
               <strong>Yosvany Reyes</strong>
               <span>Cafetería El Rincón · Vedado, La Habana</span>
@@ -4971,7 +4971,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="t-stars">★★★★★</div>
           <p class="t-text">"Yo buscaba dónde conseguir todo junto sin andar de un lado pa' otro. Aquí encuentro lo que necesito pa' mi paladarcito y me lo mandan sin tardanza. El servicio es el mejor que he visto en La Habana, y eso que yo soy exigente, ¿eh? ¡100% recomendado!"</p>
           <div class="t-author">
-            <div class="t-avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444);">MC</div>
+            <img src="assets/img/testimonial_2.jpg" alt="Marlenis Cruz" class="t-avatar-img">
             <div>
               <strong>Marlenis Cruz</strong>
               <span>Paladar La Casona · Centro Habana</span>
@@ -4984,7 +4984,7 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="t-stars">★★★★★</div>
           <p class="t-text">"Al principio no me fiaba mucho de pedir por internet, normal... pero una amiga me recomendó PalWeb y me animé. Hice el pedido por WhatsApp, me respondieron al momento y llegó en menos de lo que esperaba. Ahora soy clienta fija, ¡qué va, no hay quien me quite esto!"</p>
           <div class="t-author">
-            <div class="t-avatar" style="background:linear-gradient(135deg,#10b981,#0d6efd);">DV</div>
+            <img src="assets/img/testimonial_3.jpg" alt="Dailenis Valdés" class="t-avatar-img">
             <div>
               <strong>Dailenis Valdés</strong>
               <span>Emprendedora · Playa, La Habana</span>
@@ -5031,10 +5031,11 @@ document.addEventListener('DOMContentLoaded', () => {
 }
 .t-text::before { content: '\201C'; font-size: 3rem; color: #c7d2fe; line-height: 0; vertical-align: -.5em; margin-right: .2em; }
 .t-author { display: flex; align-items: center; gap: .9rem; }
-.t-avatar {
-    width: 48px; height: 48px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    color: #fff; font-weight: 800; font-size: 1rem; flex-shrink: 0;
+.t-avatar-img {
+    width: 52px; height: 52px; border-radius: 50%;
+    object-fit: cover; flex-shrink: 0;
+    border: 3px solid #fff;
+    box-shadow: 0 2px 10px rgba(79,70,229,.25);
 }
 .t-author strong { display: block; color: #1f2937; font-size: .95rem; }
 .t-author span   { display: block; color: #6b7280; font-size: .8rem; }
