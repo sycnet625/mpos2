@@ -241,6 +241,64 @@ function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, a
     return $currentPath;
 }
 
+function poscfg_optimize_uploaded_web_image(string $tmpFile, string $targetPath, int $maxWidth, int $maxHeight, int $targetBytes, int $startQuality = 82): void
+{
+    if (!extension_loaded('gd') || !function_exists('imagecreatefromstring') || !function_exists('imagewebp')) {
+        throw new RuntimeException('El servidor no tiene soporte GD/WebP para optimizar imágenes.');
+    }
+    if (!is_file($tmpFile)) {
+        throw new RuntimeException('No se encontró el archivo temporal de imagen.');
+    }
+
+    $bytes = @file_get_contents($tmpFile);
+    $src = $bytes !== false ? @imagecreatefromstring($bytes) : false;
+    if (!$src) {
+        throw new RuntimeException('No se pudo procesar la imagen subida.');
+    }
+
+    $srcW = imagesx($src);
+    $srcH = imagesy($src);
+    if ($srcW < 1 || $srcH < 1) {
+        imagedestroy($src);
+        throw new RuntimeException('La imagen subida es inválida.');
+    }
+
+    $scale = min(1, $maxWidth / $srcW, $maxHeight / $srcH);
+    $dstW = max(1, (int)round($srcW * $scale));
+    $dstH = max(1, (int)round($srcH * $scale));
+    $canvas = imagecreatetruecolor($dstW, $dstH);
+    if (!$canvas) {
+        imagedestroy($src);
+        throw new RuntimeException('No se pudo preparar la optimización de la imagen.');
+    }
+
+    imagealphablending($canvas, false);
+    imagesavealpha($canvas, true);
+    $transparent = imagecolorallocatealpha($canvas, 0, 0, 0, 127);
+    imagefill($canvas, 0, 0, $transparent);
+    imagecopyresampled($canvas, $src, 0, 0, 0, 0, $dstW, $dstH, $srcW, $srcH);
+
+    $qualities = [$startQuality, 76, 70, 64, 58];
+    $written = false;
+    foreach ($qualities as $quality) {
+        if (!@imagewebp($canvas, $targetPath, $quality)) {
+            continue;
+        }
+        clearstatcache(true, $targetPath);
+        if ((int)@filesize($targetPath) <= $targetBytes || $quality === 58) {
+            $written = true;
+            break;
+        }
+    }
+
+    imagedestroy($canvas);
+    imagedestroy($src);
+
+    if (!$written || !is_file($targetPath)) {
+        throw new RuntimeException('No se pudo generar la imagen optimizada.');
+    }
+}
+
 function poscfg_current_or_post(array $currentConfig, string $key, string $fallback = ''): string
 {
     if (array_key_exists($key, $_POST)) {
@@ -345,23 +403,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $tmp = $_FILES['sucursal_banner']['tmp_name'];
                 $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.webp';
                 $target = __DIR__ . '/assets/img/' . $newBannerName;
-
-                // Cargar imagen fuente según MIME real
-                $src = match($mime) {
-                    'image/jpeg'  => @imagecreatefromjpeg($tmp),
-                    'image/png'   => @imagecreatefrompng($tmp),
-                    'image/webp'  => @imagecreatefromwebp($tmp),
-                    'image/gif'   => @imagecreatefromgif($tmp),
-                    default       => false,
-                };
-                if (!$src) throw new Exception("No se pudo procesar la imagen del banner.");
-
-                // Convertir a WebP calidad 82 (buen balance tamaño/calidad para banners)
-                if (!imagewebp($src, $target, 82)) {
-                    imagedestroy($src);
-                    throw new Exception("Error al convertir el banner a WebP.");
-                }
-                imagedestroy($src);
+                poscfg_optimize_uploaded_web_image($tmp, $target, 1920, 720, 450 * 1024, 80);
                 $bannerPath = 'assets/img/' . $newBannerName;
             }
 
@@ -818,11 +860,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!isset($allowedMimes[$mime]) || (int)$_FILES['banner_file_' . $i]['size'] > 10 * 1024 * 1024) {
                         throw new RuntimeException('Las imágenes de banner deben ser JPG, PNG o WebP y no superar 10MB.');
                     }
-                    $ext  = $allowedMimes[$mime];
-                    $dest = __DIR__ . '/assets/img/banner_custom_' . $i . '.' . $ext;
-                    if (@move_uploaded_file($_FILES['banner_file_' . $i]['tmp_name'], $dest)) {
-                        $newConfig['banners'][$i]['imagen'] = 'assets/img/banner_custom_' . $i . '.' . $ext;
+                    foreach (['jpg', 'jpeg', 'png', 'webp'] as $oldExt) {
+                        $oldPath = __DIR__ . '/assets/img/banner_custom_' . $i . '.' . $oldExt;
+                        if (is_file($oldPath)) {
+                            @unlink($oldPath);
+                        }
                     }
+                    $dest = __DIR__ . '/assets/img/banner_custom_' . $i . '.webp';
+                    poscfg_optimize_uploaded_web_image($_FILES['banner_file_' . $i]['tmp_name'], $dest, 1600, 900, 350 * 1024, 78);
+                    $newConfig['banners'][$i]['imagen'] = 'assets/img/banner_custom_' . $i . '.webp';
                 }
             }
             $encodedConfig = json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
@@ -1988,7 +2034,7 @@ unset($treeCompany);
                                     <input type="hidden" name="banner_scale" value="100">
                                 <?php endif; ?>
                                 <input type="file" name="sucursal_banner" class="form-control form-control-sm" accept="image/*">
-                                <div class="form-text small">Imagen panorámica para el fondo del banner superior en el POS.</div>
+                                <div class="form-text small">Imagen panorámica para el fondo del banner superior en el POS. Se convierte automáticamente a WebP optimizado para carga rápida.</div>
                             </div>
                             <div class="col-12 form-check ms-2">                                <input class="form-check-input" type="checkbox" id="sucursal_activo" name="sucursal_activo" <?php echo !empty($editSucursalData['activo']) ? 'checked' : ''; ?>>
                                 <label class="form-check-label" for="sucursal_activo">Sucursal activa</label>
@@ -2883,7 +2929,7 @@ unset($treeCompany);
                                 <div class="mt-3">
                                     <label class="form-label small fw-semibold">
                                         <?php echo $bHasImg ? 'Reemplazar imagen' : 'Subir imagen de fondo'; ?>
-                                        <span class="text-muted fw-normal">(JPG/PNG/WebP, máx 10MB)</span>
+                                        <span class="text-muted fw-normal">(JPG/PNG/WebP, máx 10MB, se optimiza a WebP)</span>
                                     </label>
                                     <input type="file" name="banner_file_<?php echo $i; ?>" class="form-control form-control-sm"
                                            accept="image/jpeg,image/png,image/webp"
