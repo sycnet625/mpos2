@@ -557,6 +557,11 @@ window.RAC = window.RAC || {};
             ns.toast('No fue posible importar el extracto.', 'error');
         }
     };
+    ns.isStrongPassword = function (password) {
+        var value = String(password || '');
+        return value.length >= 8 && /[A-Z]/.test(value) && /\d/.test(value);
+    };
+
     ns.autoReconcilePayments = async function () {
         try {
             await ns.api('payment_auto_reconcile', 'POST', {});

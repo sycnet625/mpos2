@@ -791,12 +791,13 @@ window.sendAdminMsg = async function() {
                     </div>
                     <div class="mb-3">
                         <label class="small fw-bold text-muted">Nueva Contraseña</label>
-                        <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="4" autocomplete="new-password">
+                        <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" placeholder="Mín. 8, 1 mayúscula y 1 número">
                     </div>
                     <div class="mb-0">
                         <label class="small fw-bold text-muted">Confirmar Nueva</label>
-                        <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="4" autocomplete="new-password">
+                        <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" placeholder="Repite la nueva contraseña">
                     </div>
+                    <div class="form-text mt-2">Usa al menos 8 caracteres, una mayúscula y un número.</div>
                 </form>
             </div>
             <div class="modal-footer bg-light p-2 border-0">
@@ -833,6 +834,12 @@ async function submitChangePass() {
     if (newP !== confirmP) {
         alertEl.className = 'alert alert-danger py-2 small';
         alertEl.innerText = 'Las contraseñas no coinciden.';
+        alertEl.classList.remove('d-none');
+        return;
+    }
+    if (newP.length < 8 || !/[A-Z]/.test(newP) || !/\d/.test(newP)) {
+        alertEl.className = 'alert alert-danger py-2 small';
+        alertEl.innerText = 'La nueva contraseña debe tener al menos 8 caracteres, una mayúscula y un número.';
         alertEl.classList.remove('d-none');
         return;
     }

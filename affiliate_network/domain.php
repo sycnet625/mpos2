@@ -2567,6 +2567,9 @@ function aff_upsert_user(PDO $pdo, array $input): array {
     if ($role !== 'gestor') {
         $gestorId = null;
     }
+    if ($password !== '' && (strlen($password) < 8 || !preg_match('/[A-Z]/', $password) || !preg_match('/\d/', $password))) {
+        throw new InvalidArgumentException('password_policy');
+    }
     if ($id > 0) {
         $st = $pdo->prepare("UPDATE affiliate_users SET username=?, role=?, display_name=?, owner_id=?, gestor_id=?, status=? WHERE id=?");
         $st->execute([$username, $role, $displayName, $ownerId, $gestorId, $status, $id]);
@@ -2600,7 +2603,7 @@ function aff_upsert_user(PDO $pdo, array $input): array {
 
 function aff_admin_reset_user_password(PDO $pdo, int $id, string $newPassword): array {
     $newPassword = trim($newPassword);
-    if ($id <= 0 || strlen($newPassword) < 6) {
+    if ($id <= 0 || strlen($newPassword) < 8 || !preg_match('/[A-Z]/', $newPassword) || !preg_match('/\d/', $newPassword)) {
         throw new InvalidArgumentException('invalid_password_reset');
     }
     $hash = password_hash($newPassword, PASSWORD_DEFAULT);
@@ -2620,8 +2623,9 @@ function aff_change_password(PDO $pdo, string $currentPassword, string $newPassw
     if (!$userId) {
         throw new RuntimeException('not_authenticated');
     }
-    if (strlen(trim($newPassword)) < 6) {
-        throw new InvalidArgumentException('new_password_too_short');
+    $newPassword = trim($newPassword);
+    if (strlen($newPassword) < 8 || !preg_match('/[A-Z]/', $newPassword) || !preg_match('/\d/', $newPassword)) {
+        throw new InvalidArgumentException('password_policy');
     }
     $st = $pdo->prepare("SELECT id, username, password_hash FROM affiliate_users WHERE id=? LIMIT 1");
     $st->execute([$userId]);

@@ -161,7 +161,12 @@
         }
 
         var saveUserBtn = event.target.closest('[data-save-user]');
-        if (saveUserBtn) return ns.saveUser(state.userDraft);
+        if (saveUserBtn) {
+            if ((state.userDraft.password || '') !== '' && !ns.isStrongPassword(state.userDraft.password || '')) {
+                return ns.toast('La contraseña debe tener 8 caracteres o más, una mayúscula y un número.', 'error');
+            }
+            return ns.saveUser(state.userDraft);
+        }
 
         var newGestorBtn = event.target.closest('[data-open-gestor-new]');
         if (newGestorBtn) {
@@ -248,6 +253,9 @@
             if ((state.passwordDraft.new_password || '') !== (state.passwordDraft.confirm_password || '')) {
                 return ns.toast('La confirmación de contraseña no coincide.', 'error');
             }
+            if (!ns.isStrongPassword(state.passwordDraft.new_password || '')) {
+                return ns.toast('La contraseña debe tener 8 caracteres o más, una mayúscula y un número.', 'error');
+            }
             return ns.changeOwnPassword({
                 current_password: state.passwordDraft.current_password || '',
                 new_password: state.passwordDraft.new_password || ''
@@ -256,6 +264,9 @@
 
         var resetPasswordConfirmBtn = event.target.closest('[data-user-password-reset]');
         if (resetPasswordConfirmBtn) {
+            if (!ns.isStrongPassword(state.passwordDraft.reset_password || '')) {
+                return ns.toast('La contraseña debe tener 8 caracteres o más, una mayúscula y un número.', 'error');
+            }
             return ns.resetUserPassword(state.passwordDraft.target_user_id || 0, state.passwordDraft.reset_password || '');
         }
 

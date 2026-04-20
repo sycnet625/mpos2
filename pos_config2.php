@@ -658,6 +658,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($userId <= 0 && trim($password) === '') {
                 throw new RuntimeException('La contraseña es obligatoria al crear un usuario.');
             }
+            if (trim($password) !== '' && (strlen($password) < 8 || !preg_match('/[A-Z]/', $password) || !preg_match('/\d/', $password))) {
+                throw new RuntimeException('La contraseña debe tener al menos 8 caracteres, una mayúscula y un número.');
+            }
             poscfg_validate_location($pdo, $empresaId, $sucursalId, $almacenId);
 
             if ($userId > 0) {
@@ -798,8 +801,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $newConfig['banners'][$i]['imagen'] = '';
                 } elseif (isset($_FILES['banner_file_' . $i]) && (int)$_FILES['banner_file_' . $i]['error'] === UPLOAD_ERR_OK) {
                     $mime = mime_content_type($_FILES['banner_file_' . $i]['tmp_name']);
-                    if (!isset($allowedMimes[$mime]) || (int)$_FILES['banner_file_' . $i]['size'] > 2 * 1024 * 1024) {
-                        throw new RuntimeException('Las imágenes de banner deben ser JPG, PNG o WebP y no superar 2MB.');
+                    if (!isset($allowedMimes[$mime]) || (int)$_FILES['banner_file_' . $i]['size'] > 10 * 1024 * 1024) {
+                        throw new RuntimeException('Las imágenes de banner deben ser JPG, PNG o WebP y no superar 10MB.');
                     }
                     $ext  = $allowedMimes[$mime];
                     $dest = __DIR__ . '/assets/img/banner_custom_' . $i . '.' . $ext;
@@ -2136,7 +2139,8 @@ unset($treeCompany);
                     </div>
                     <div class="col-md-3">
                         <label class="form-label"><?php echo $editUserData['id'] > 0 ? 'Nueva contraseña' : 'Contraseña'; ?></label>
-                        <input type="password" class="form-control" name="user_password" autocomplete="<?php echo $editUserData['id'] > 0 ? 'new-password' : 'current-password'; ?>" <?php echo $editUserData['id'] > 0 ? '' : 'required'; ?> placeholder="<?php echo $editUserData['id'] > 0 ? 'Dejar vacía para mantener' : ''; ?>">
+                        <input type="password" class="form-control" name="user_password" minlength="8" autocomplete="<?php echo $editUserData['id'] > 0 ? 'new-password' : 'current-password'; ?>" <?php echo $editUserData['id'] > 0 ? '' : 'required'; ?> placeholder="<?php echo $editUserData['id'] > 0 ? 'Dejar vacía para mantener o usar 8+, 1 mayúscula y 1 número' : 'Mín. 8, 1 mayúscula y 1 número'; ?>">
+                        <div class="form-text">Mínimo 8 caracteres, una mayúscula y un número.</div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Rol</label>
@@ -2865,7 +2869,7 @@ unset($treeCompany);
                                 <div class="mt-3">
                                     <label class="form-label small fw-semibold">
                                         <?php echo $bHasImg ? 'Reemplazar imagen' : 'Subir imagen de fondo'; ?>
-                                        <span class="text-muted fw-normal">(JPG/PNG/WebP, máx 2MB)</span>
+                                        <span class="text-muted fw-normal">(JPG/PNG/WebP, máx 10MB)</span>
                                     </label>
                                     <input type="file" name="banner_file_<?php echo $i; ?>" class="form-control form-control-sm"
                                            accept="image/jpeg,image/png,image/webp"

@@ -30,6 +30,10 @@ if ($action === 'change_password') {
         echo json_encode(['status' => 'error', 'msg' => 'Por favor complete ambos campos.']);
         exit;
     }
+    if (strlen($new_pass) < 8 || !preg_match('/[A-Z]/', $new_pass) || !preg_match('/\d/', $new_pass)) {
+        echo json_encode(['status' => 'error', 'msg' => 'La nueva contraseña debe tener al menos 8 caracteres, una mayúscula y un número.']);
+        exit;
+    }
 
     try {
         // 1. Obtener contraseña actual de la BD

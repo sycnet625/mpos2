@@ -138,7 +138,7 @@ window.RAC = window.RAC || {};
                 return '<option value="' + ns.esc(gestor.id) + '"' + (String(d.gestor_id || '') === String(gestor.id) ? ' selected' : '') + '>' + ns.esc((gestor.id || '') + ' · ' + (gestor.name || '')) + '</option>';
             }).join('') + '</select></div>'
             + '<div class="field"><label>Estado</label><select class="select" data-user-field="status"><option value="active"' + (d.status === 'active' ? ' selected' : '') + '>active</option><option value="suspended"' + (d.status === 'suspended' ? ' selected' : '') + '>suspended</option></select></div>'
-            + '<div class="field"><label>' + (d.id ? 'Nueva contraseña opcional' : 'Contraseña inicial') + '</label><input class="input" type="password" data-user-field="password" value=""></div>'
+            + '<div class="field"><label>' + (d.id ? 'Nueva contraseña opcional' : 'Contraseña inicial') + '</label><input class="input" type="password" data-user-field="password" value="" placeholder="Mín. 8, 1 mayúscula y 1 número"></div><div class="sub">Mínimo 8 caracteres, una mayúscula y un número.</div>'
             + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-save-user>💾 Guardar usuario</button></div></div>';
         ns.$('entityModalWrap').classList.add('active');
     };
@@ -147,13 +147,13 @@ window.RAC = window.RAC || {};
         if (mode === 'reset') {
             state.passwordDraft = { current_password: '', new_password: '', confirm_password: '', target_user_id: targetUserId || 0, reset_password: '' };
             ns.$('authModalWrap').innerHTML = '<div class="modal active"><header><h3>🔐 Resetear contraseña</h3><button class="close" data-close-modal="authModalWrap">×</button></header>'
-                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="reset_password" value=""></div>'
+                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="reset_password" value="" placeholder="Mín. 8, 1 mayúscula y 1 número"></div><div class="sub">Mínimo 8 caracteres, una mayúscula y un número.</div>'
                 + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-user-password-reset>🔁 Resetear contraseña</button></div></div>';
         } else {
             state.passwordDraft = { current_password: '', new_password: '', confirm_password: '', target_user_id: 0, reset_password: '' };
             ns.$('authModalWrap').innerHTML = '<div class="modal active"><header><h3>🔑 Cambiar contraseña</h3><button class="close" data-close-modal="authModalWrap">×</button></header>'
                 + '<div class="field"><label>Contraseña actual</label><input class="input" type="password" data-password-field="current_password" value=""></div>'
-                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="new_password" value=""></div>'
+                + '<div class="field"><label>Nueva contraseña</label><input class="input" type="password" data-password-field="new_password" value="" placeholder="Mín. 8, 1 mayúscula y 1 número"></div><div class="sub">Mínimo 8 caracteres, una mayúscula y un número.</div>'
                 + '<div class="field"><label>Confirmar nueva contraseña</label><input class="input" type="password" data-password-field="confirm_password" value=""></div>'
                 + '<div class="footer-actions"><button class="btn primary" style="width:100%" data-change-password>💾 Cambiar contraseña</button></div></div>';
         }
