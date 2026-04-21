@@ -250,6 +250,16 @@ if (isset($_GET['render_mode'])) {
                         <td><span class="badge <?php echo $badgeClass; ?> badge-pago" style="font-size:0.7rem"><?php echo $metodosDisplay; ?></span></td>
                         <td class="text-end" onclick="event.stopPropagation()">
                             <?php if (!$isRef): ?>
+                                <button class="btn btn-sm btn-success py-0 px-2 shadow-sm me-1"
+                                        onclick="loadSaleToCart(<?php echo $t['id']; ?>)"
+                                        title="Cargar pedido al carrito">
+                                    <i class="fas fa-cart-plus"></i>
+                                </button>
+                                <button class="btn btn-sm btn-secondary py-0 px-2 shadow-sm me-1"
+                                        onclick="saveSaleAsTemplate(<?php echo $t['id']; ?>, '<?php echo addslashes($t['cliente_nombre'] ?: ('Ticket #' . $t['id'])); ?>')"
+                                        title="Guardar como plantilla">
+                                    <i class="fas fa-bookmark"></i>
+                                </button>
                                 <button class="btn btn-sm btn-warning py-0 px-2 shadow-sm me-1"
                                         onclick="voidTicket(<?php echo $t['id']; ?>)"
                                         title="Anular con motivo (sesión activa)">

@@ -19,14 +19,17 @@ if (file_exists(__DIR__ . '/kardex_engine.php')) {
 header('Content-Type: application/json; charset=utf-8');
 session_start();
 
-if (!isset($_SESSION['admin_logged_in']) && !isset($_SESSION['cashier'])) {
+$isAdmin  = !empty($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
+$isCashier = !empty($_SESSION['cajero']);
+
+if (!$isAdmin && !$isCashier) {
     http_response_code(403);
     die(json_encode(['status' => 'error', 'msg' => 'No autorizado']));
 }
 
 $idAlmacen  = intval($config['id_almacen']  ?? 1);
 $idSucursal = intval($config['id_sucursal'] ?? 1);
-$usuario    = $_SESSION['admin_user'] ?? $_SESSION['cashier_name'] ?? 'usuario';
+$usuario    = $_SESSION['admin_user'] ?? $_SESSION['admin_user_name'] ?? $_SESSION['cajero'] ?? 'usuario';
 
 $action = $_GET['action'] ?? '';
 

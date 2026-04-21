@@ -1266,6 +1266,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <button class="btn-ctrl c-orange" onclick="parkOrder()"><i class="fas fa-pause"></i></button>
                         <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
                         <button class="btn-ctrl c-teal" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
+                        <button class="btn-ctrl c-blue" onclick="openOrderTemplatesModal()"><i class="fas fa-bookmark"></i> PLANT</button>
                         <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
                     </div>
                 </div>
@@ -1512,10 +1513,16 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         if(!opt.value) {
             document.getElementById('cliPhone').value = '';
             document.getElementById('cliAddr').value = '';
+            if (typeof window.afterClientSelected === 'function') {
+                window.afterClientSelected(select);
+            }
             return;
         }
         document.getElementById('cliPhone').value = opt.getAttribute('data-tel') || '';
         document.getElementById('cliAddr').value = opt.getAttribute('data-dir') || '';
+        if (typeof window.afterClientSelected === 'function') {
+            window.afterClientSelected(select);
+        }
     }
 
     function openNewClientModal() {
@@ -1567,7 +1574,15 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     opt.setAttribute('data-dir', res.client.direccion);
                     list.add(opt);
                     list.value = res.client.nombre;
+                    if (typeof window.setSuppressClientAutoLoad === 'function') {
+                        window.setSuppressClientAutoLoad(true);
+                    }
                     fillClientData(list);
+                    setTimeout(() => {
+                        if (typeof window.setSuppressClientAutoLoad === 'function') {
+                            window.setSuppressClientAutoLoad(false);
+                        }
+                    }, 150);
                 }
                 bootstrap.Modal.getInstance(document.getElementById('newClientModal')).hide();
                 showToast('Cliente guardado');
@@ -1866,6 +1881,43 @@ window.updateCartBackground = function (sucursalId) {
 
 <?php include_once 'modal_payment.php'; ?>
 <?php include_once 'modal_edit_sale.php'; ?>
+<div class="modal fade" id="orderTemplatesModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-secondary text-white py-2">
+                <h5 class="modal-title fw-bold"><i class="fas fa-bookmark me-2"></i>Plantillas y Pedidos Regulares</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="small fw-bold text-muted mb-1">Cargar último pedido por cliente</label>
+                        <select id="regularClientSelect" class="form-select form-select-sm mb-2" onchange="loadLastOrderForSelectedClient(this)">
+                            <option value="">Selecciona un cliente...</option>
+                        </select>
+                        <div class="small text-muted">
+                            Al escoger un cliente, se intentará cargar al carrito exactamente lo que pidió la última vez.
+                        </div>
+                    </div>
+                    <div class="col-md-7">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="small fw-bold text-muted mb-0">Plantillas guardadas</label>
+                            <button class="btn btn-sm btn-outline-secondary" type="button" onclick="refreshOrderTemplatesList()">
+                                <i class="fas fa-sync-alt me-1"></i>Actualizar
+                            </button>
+                        </div>
+                        <div id="orderTemplatesList" class="list-group" style="max-height:360px; overflow-y:auto;">
+                            <div class="list-group-item text-muted small">Cargando plantillas...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- MODAL AUTOPEDIDOS -->
 <div class="modal fade" id="selfOrdersModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered">

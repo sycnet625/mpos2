@@ -1799,6 +1799,311 @@ window.showHistorialModal = async function() {
 
 // --- FUNCIONES GLOBALES PARA EL HISTORIAL (AJAX COMPATIBLE) ---
 
+let suppressClientAutoLoad = false;
+window.setSuppressClientAutoLoad = function(value) {
+    suppressClientAutoLoad = !!value;
+};
+
+function setClientSelectionValue(clienteNombre) {
+    const cliSelect = document.getElementById('cliName');
+    if (!cliSelect) return;
+
+    const safeName = String(clienteNombre || '').trim();
+    suppressClientAutoLoad = true;
+    try {
+        if (!safeName) {
+            cliSelect.value = '';
+            if (typeof fillClientData === 'function') fillClientData(cliSelect);
+            return;
+        }
+
+        let option = Array.from(cliSelect.options).find(opt => opt.value === safeName);
+        if (!option) {
+            option = document.createElement('option');
+            option.value = safeName;
+            option.textContent = safeName;
+            cliSelect.appendChild(option);
+        }
+        cliSelect.value = safeName;
+        if (typeof fillClientData === 'function') fillClientData(cliSelect);
+    } finally {
+        setTimeout(() => { suppressClientAutoLoad = false; }, 150);
+    }
+}
+
+function setOrderAuxFields(order) {
+    window.pendingRepeatedOrderConfig = {
+        cliente_nombre: order.cliente_nombre || '',
+        tipo_servicio: order.tipo_servicio || 'mostrador',
+        mensajero_nombre: order.mensajero_nombre || '',
+        delivery_cost: parseFloat(order.delivery_cost || 0) || 0
+    };
+
+    setClientSelectionValue(order.cliente_nombre || '');
+
+    const serviceType = document.getElementById('serviceType');
+    if (serviceType && order.tipo_servicio) {
+        serviceType.value = order.tipo_servicio;
+        if (typeof toggleServiceOptions === 'function') toggleServiceOptions();
+    }
+
+    const driver = document.getElementById('deliveryDriver');
+    if (driver) driver.value = order.mensajero_nombre || '';
+
+    const deliveryCostInput = document.getElementById('deliveryCostInput');
+    if (deliveryCostInput) {
+        deliveryCostInput.value = (parseFloat(order.delivery_cost || 0) || 0).toFixed(2);
+        if (typeof recalcDeliveryCost === 'function') recalcDeliveryCost();
+    }
+}
+
+function buildCartFromOrder(order) {
+    const missing = [];
+    const lowStock = [];
+    const nextCart = [];
+
+    (order.items || []).forEach(item => {
+        const codigo = String(item.codigo || item.id || '').trim();
+        if (!codigo) return;
+
+        const product = (window.productsDB || []).find(p => String(p.codigo) === codigo);
+        const qty = parseFloat(item.qty || 0);
+        if (!(qty > 0)) return;
+
+        if (!product) {
+            missing.push(item.name || codigo);
+        }
+
+        if (product && parseInt(product.es_servicio || 0, 10) !== 1) {
+            const stock = parseFloat(product.stock || 0) || 0;
+            if (qty > stock) {
+                lowStock.push(`${item.name || product.nombre || codigo} (${qty} / disp ${stock})`);
+            }
+        }
+
+        nextCart.push({
+            id: codigo,
+            name: item.name || (product ? product.nombre : codigo),
+            price: parseFloat(item.price || (product ? getPrice(product) : 0)) || 0,
+            qty: qty,
+            discountPct: 0,
+            note: item.note || ''
+        });
+    });
+
+    return { nextCart, missing, lowStock };
+}
+
+window.loadOrderIntoCart = function(order, opts = {}) {
+    if (!order || !Array.isArray(order.items) || order.items.length === 0) {
+        showToast('Ese pedido no tiene productos', 'error');
+        return false;
+    }
+
+    const replace = opts.replace !== false;
+    const silent = opts.silent === true;
+
+    if (replace && cart.length > 0 && !silent) {
+        if (!confirm('¿Reemplazar el carrito actual con este pedido?')) {
+            return false;
+        }
+    }
+
+    const { nextCart, missing, lowStock } = buildCartFromOrder(order);
+    if (nextCart.length === 0) {
+        showToast('No se pudieron cargar productos válidos', 'error');
+        return false;
+    }
+
+    cart = replace ? nextCart : cart.concat(nextCart);
+    selectedIndex = cart.length > 0 ? 0 : -1;
+    globalDiscountPct = 0;
+    renderCart();
+    saveCartState();
+    updateStockBadges();
+    setOrderAuxFields(order);
+
+    if (missing.length) {
+        showToast('Faltan productos del catálogo: ' + missing.slice(0, 2).join(', '), 'warning');
+    } else if (lowStock.length) {
+        showToast('Pedido cargado con alertas de stock', 'warning');
+    } else {
+        showToast((order.source_label || 'Pedido') + ' cargado al carrito', 'success');
+    }
+
+    return true;
+};
+
+async function fetchOrderPayload(url) {
+    const resp = await fetch(url, { cache: 'no-store' });
+    const data = await resp.json();
+    if (data.status !== 'success' || !data.order) {
+        throw new Error(data.msg || 'No se pudo cargar el pedido');
+    }
+    return data.order;
+}
+
+window.loadSaleToCart = async function(saleId) {
+    try {
+        const order = await fetchOrderPayload(`pos_order_templates.php?action=sale_payload&id=${saleId}`);
+        window.loadOrderIntoCart(order);
+    } catch (error) {
+        showToast(error.message || 'Error cargando venta', 'error');
+    }
+};
+
+window.saveSaleAsTemplate = async function(saleId, defaultName) {
+    const tplName = prompt('Nombre de la plantilla:', (defaultName || `Pedido #${saleId}`).trim());
+    if (!tplName) return;
+
+    try {
+        const resp = await fetch('pos_order_templates.php?action=save_template_from_sale', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sale_id: saleId, name: tplName.trim() })
+        });
+        const data = await resp.json();
+        if (data.status !== 'success') throw new Error(data.msg || 'No se pudo guardar la plantilla');
+        showToast('Plantilla guardada', 'success');
+    } catch (error) {
+        showToast(error.message || 'Error guardando plantilla', 'error');
+    }
+};
+
+function renderOrderTemplatesList(rows) {
+    const list = document.getElementById('orderTemplatesList');
+    if (!list) return;
+
+    if (!rows.length) {
+        list.innerHTML = '<div class="list-group-item text-muted small">No hay plantillas guardadas.</div>';
+        return;
+    }
+
+    list.innerHTML = rows.map(row => {
+        const cliente = escHtml(row.cliente_nombre || 'Sin cliente');
+        const nombre = escHtml(row.nombre || `Plantilla #${row.id}`);
+        const meta = `${row.items_count || 0} productos`;
+        const saleTag = row.source_sale_id ? ` · base #${row.source_sale_id}` : '';
+        return `
+            <div class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div>
+                        <div class="fw-bold">${nombre}</div>
+                        <div class="small text-muted">${cliente} · ${meta}${saleTag}</div>
+                    </div>
+                    <div class="d-flex gap-1">
+                        <button class="btn btn-sm btn-success" onclick="loadTemplateToCart(${row.id})" title="Cargar al carrito">
+                            <i class="fas fa-cart-plus"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteOrderTemplate(${row.id})" title="Eliminar plantilla">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+};
+
+window.refreshOrderTemplatesList = async function() {
+    const list = document.getElementById('orderTemplatesList');
+    if (list) list.innerHTML = '<div class="list-group-item text-muted small">Cargando plantillas...</div>';
+
+    try {
+        const resp = await fetch('pos_order_templates.php?action=list_templates', { cache: 'no-store' });
+        const data = await resp.json();
+        if (data.status !== 'success') throw new Error(data.msg || 'No se pudieron cargar las plantillas');
+        renderOrderTemplatesList(Array.isArray(data.templates) ? data.templates : []);
+    } catch (error) {
+        if (list) list.innerHTML = `<div class="list-group-item text-danger small">${escHtml(error.message || 'Error cargando plantillas')}</div>`;
+    }
+};
+
+window.loadTemplateToCart = async function(templateId) {
+    try {
+        const order = await fetchOrderPayload(`pos_order_templates.php?action=template_payload&id=${templateId}`);
+        window.loadOrderIntoCart(order);
+    } catch (error) {
+        showToast(error.message || 'Error cargando plantilla', 'error');
+    }
+};
+
+window.deleteOrderTemplate = async function(templateId) {
+    if (!confirm('¿Eliminar esta plantilla?')) return;
+
+    try {
+        const resp = await fetch('pos_order_templates.php?action=delete_template', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: templateId })
+        });
+        const data = await resp.json();
+        if (data.status !== 'success') throw new Error(data.msg || 'No se pudo eliminar');
+        showToast('Plantilla eliminada', 'success');
+        refreshOrderTemplatesList();
+    } catch (error) {
+        showToast(error.message || 'Error eliminando plantilla', 'error');
+    }
+};
+
+function populateRegularClientSelect() {
+    const select = document.getElementById('regularClientSelect');
+    if (!select) return;
+
+    const current = select.value;
+    const seen = new Set();
+    const options = ['<option value="">Selecciona un cliente...</option>'];
+    (window.CLIENTS_DATA || []).forEach(client => {
+        const name = String(client.nombre || '').trim();
+        if (!name || seen.has(name)) return;
+        seen.add(name);
+        options.push(`<option value="${escHtml(name)}">${escHtml(name)}</option>`);
+    });
+    select.innerHTML = options.join('');
+    select.value = current && seen.has(current) ? current : '';
+}
+
+window.openOrderTemplatesModal = function() {
+    populateRegularClientSelect();
+    refreshOrderTemplatesList();
+    const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('orderTemplatesModal'));
+    modal.show();
+};
+
+window.loadLastOrderForClient = async function(clientName, opts = {}) {
+    const safeName = String(clientName || '').trim();
+    if (!safeName) return false;
+
+    try {
+        const order = await fetchOrderPayload(`pos_order_templates.php?action=last_client&client_name=${encodeURIComponent(safeName)}`);
+        return window.loadOrderIntoCart(order, opts);
+    } catch (error) {
+        showToast(error.message || 'Ese cliente no tiene pedido previo', 'warning');
+        return false;
+    }
+};
+
+window.loadLastOrderForSelectedClient = function(select) {
+    const clientName = String(select?.value || '').trim();
+    if (!clientName) return;
+    window.loadLastOrderForClient(clientName, { replace: true, silent: false });
+};
+
+window.afterClientSelected = function(select) {
+    if (suppressClientAutoLoad) return;
+
+    const clientName = String(select?.value || '').trim();
+    if (!clientName) return;
+
+    if (cart.length === 0) {
+        window.loadLastOrderForClient(clientName, { replace: true, silent: true });
+        return;
+    }
+
+    if (confirm(`¿Cargar al carrito el último pedido de ${clientName}?`)) {
+        window.loadLastOrderForClient(clientName, { replace: true, silent: true });
+    }
+};
+
 window.toggleDetail = function(id) {
     const row = document.getElementById(`det-row-${id}`);
     const icon = document.querySelector(`.icon-collapse-${id}`);

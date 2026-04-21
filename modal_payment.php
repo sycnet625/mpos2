@@ -354,6 +354,21 @@ window.openPaymentModal = function() {
     const si = document.getElementById('singleAmountInput');
     if (si) si.value = '';
 
+    const repeatedPreset = window.pendingRepeatedOrderConfig || null;
+    if (repeatedPreset) {
+        const cli = document.getElementById('cliName');
+        if (cli && repeatedPreset.cliente_nombre) {
+            let opt = Array.from(cli.options).find(o => o.value === repeatedPreset.cliente_nombre);
+            if (!opt) {
+                opt = document.createElement('option');
+                opt.value = repeatedPreset.cliente_nombre;
+                opt.textContent = repeatedPreset.cliente_nombre;
+                cli.appendChild(opt);
+            }
+            cli.value = repeatedPreset.cliente_nombre;
+        }
+    }
+
     // Renderizar métodos dinámicos
     renderPaymentMethodsPOS();
     renderMixedInputsPOS();
@@ -371,7 +386,27 @@ window.openPaymentModal = function() {
         if (firstMethod) setPaymentMode(firstMethod.id);
     }
 
-    toggleServiceOptions();
+    if (repeatedPreset) {
+        const serviceType = document.getElementById('serviceType');
+        const driver = document.getElementById('deliveryDriver');
+        const dciPreset = document.getElementById('deliveryCostInput');
+        if (serviceType) serviceType.value = repeatedPreset.tipo_servicio || 'mostrador';
+        toggleServiceOptions();
+        if (driver) driver.value = repeatedPreset.mensajero_nombre || '';
+        if (dciPreset && (repeatedPreset.tipo_servicio === 'mensajeria' || repeatedPreset.tipo_servicio === 'delivery')) {
+            dciPreset.value = (parseFloat(repeatedPreset.delivery_cost || 0) || 0).toFixed(2);
+            recalcDeliveryCost();
+        }
+        if (typeof fillClientData === 'function' && document.getElementById('cliName')) {
+            if (typeof window.setSuppressClientAutoLoad === 'function') window.setSuppressClientAutoLoad(true);
+            fillClientData(document.getElementById('cliName'));
+            setTimeout(() => {
+                if (typeof window.setSuppressClientAutoLoad === 'function') window.setSuppressClientAutoLoad(false);
+            }, 150);
+        }
+    } else {
+        toggleServiceOptions();
+    }
     new bootstrap.Modal(document.getElementById('paymentModal')).show();
     setTimeout(() => { if (si) si.select(); }, 500);
 };
