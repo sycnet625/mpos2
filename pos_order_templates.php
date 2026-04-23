@@ -205,6 +205,39 @@ function pos_template_payload(PDO $pdo, int $templateId, array $ctx): array
     ];
 }
 
+function pos_recent_clients(PDO $pdo, array $ctx, int $limit = 50): array
+{
+    $limit = max(1, min(200, $limit));
+
+    $stmt = $pdo->prepare(
+        "SELECT vc.cliente_nombre,
+                MAX(vc.id) AS last_sale_id,
+                MAX(vc.fecha) AS last_sale_date,
+                COALESCE(MAX(NULLIF(vc.cliente_telefono, '')), '') AS cliente_telefono,
+                COALESCE(MAX(NULLIF(vc.cliente_direccion, '')), '') AS cliente_direccion
+         FROM ventas_cabecera vc
+         WHERE vc.id_empresa = ?
+           AND vc.id_sucursal = ?
+           AND COALESCE(TRIM(vc.cliente_nombre), '') <> ''
+           AND vc.total > 0
+           AND (vc.metodo_pago IS NULL OR vc.metodo_pago NOT LIKE '%ANULADO%')
+         GROUP BY vc.cliente_nombre
+         ORDER BY last_sale_id DESC
+         LIMIT {$limit}"
+    );
+    $stmt->execute([$ctx['empresa'], $ctx['sucursal']]);
+
+    return array_map(static function (array $row): array {
+        return [
+            'nombre' => (string)($row['cliente_nombre'] ?? ''),
+            'telefono' => (string)($row['cliente_telefono'] ?? ''),
+            'direccion' => (string)($row['cliente_direccion'] ?? ''),
+            'last_sale_id' => (int)($row['last_sale_id'] ?? 0),
+            'last_sale_date' => (string)($row['last_sale_date'] ?? ''),
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
 if (!pos_order_auth_ok()) {
     http_response_code(403);
     echo json_encode(['status' => 'error', 'msg' => 'No autorizado']);
@@ -255,6 +288,14 @@ try {
             ];
         }
         echo json_encode(['status' => 'success', 'templates' => $rows]);
+        exit;
+    }
+
+    if ($method === 'GET' && $action === 'recent_clients') {
+        echo json_encode([
+            'status' => 'success',
+            'clients' => pos_recent_clients($pdo, $ctx, (int)($_GET['limit'] ?? 50)),
+        ]);
         exit;
     }
 

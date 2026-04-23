@@ -35,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'product_image_pipeline.php';
+require_once 'combo_helper.php';
         $EMP_ID = intval($config['id_empresa']);
         $SUC_ID = intval($config['id_sucursal']); // Obtenemos sucursal para prefijo
     } else {
@@ -87,11 +88,22 @@ require_once 'product_image_pipeline.php';
         exit;
     }
 
+    if (isset($_GET['action']) && $_GET['action'] === 'get_combo_products') {
+        header('Content-Type: application/json');
+        try {
+            echo json_encode(['status' => 'success', 'products' => combo_component_catalog($pdo, $EMP_ID)]);
+        } catch (Exception $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        }
+        exit;
+    }
+
     // B. GUARDAR NUEVO PRODUCTO
     if (isset($_POST['save_new_product'])) {
         header('Content-Type: application/json');
         try {
             pos_newprod_ensure_barcode_columns($pdo);
+            combo_ensure_schema($pdo);
             // Recoger datos del POST
             $codigo = $_POST['codigo'];
             if (empty($codigo)) throw new Exception("El código es obligatorio");
@@ -106,7 +118,7 @@ require_once 'product_image_pipeline.php';
                 codigo, id_empresa, nombre, descripcion, categoria,
                 codigo_barra_1, codigo_barra_2,
                 precio, costo, precio_mayorista, impuesto, activo, stock_minimo,
-                es_materia_prima, es_servicio, unidad_medida, peso, color,
+                es_materia_prima, es_servicio, es_combo, unidad_medida, peso, color,
                 es_web, es_reservable, sucursales_web, es_pos,
                 es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6,
                 id_sucursal_origen
@@ -114,7 +126,7 @@ require_once 'product_image_pipeline.php';
                 ?, ?, ?, ?, ?,
                 ?, ?,
                 ?, ?, ?, ?, 1,
-                ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?
             )";
@@ -159,6 +171,7 @@ require_once 'product_image_pipeline.php';
                 floatval($_POST['stock_minimo'] ?? 0),
                 isset($_POST['es_materia_prima']) ? 1 : 0,
                 isset($_POST['es_servicio']) ? 1 : 0,
+                isset($_POST['es_combo']) ? 1 : 0,
                 $_POST['unidad_medida'] ?? 'U',
                 floatval($_POST['peso'] ?? 0),
                 $_POST['color'] ?? '#cccccc',
@@ -198,8 +211,13 @@ require_once 'product_image_pipeline.php';
                 }
             }
 
+            if (isset($_POST['es_combo'])) {
+                $comboItems = json_decode($_POST['combo_items_json'] ?? '[]', true);
+                combo_save_definition($pdo, $EMP_ID, $codigo, is_array($comboItems) ? $comboItems : []);
+            }
+
             echo json_encode(['status' => 'success', 'msg' => 'Producto creado', 'data' => [
-                'codigo' => $codigo, 'nombre' => $_POST['nombre']
+                'codigo' => $codigo, 'nombre' => $_POST['nombre'], 'es_combo' => isset($_POST['es_combo']) ? 1 : 0
             ]]);
 
         } catch (Exception $e) {
@@ -315,6 +333,7 @@ if ($is_direct_access) {
 
                     <ul class="nav nav-tabs nav-fill small mb-3" id="qpTabs" role="tablist">
                         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab_detalles">Detalles</a></li>
+                        <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_combo">Combo</a></li>
                         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_visibilidad">Visibilidad & Sucursales</a></li>
                         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_precios_suc">Precios x Suc.</a></li>
                         <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab_web">Web Info</a></li>
@@ -356,6 +375,29 @@ if ($is_direct_access) {
                                         <input class="form-check-input" type="checkbox" name="es_servicio" id="qp_serv">
                                         <label class="form-check-label small" for="qp_serv">Es Servicio (No Stock)</label>
                                     </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="tab-pane fade" id="tab_combo">
+                            <input type="hidden" name="combo_items_json" id="qp_combo_items_json" value="[]">
+                            <div class="form-check form-switch mb-3 p-2 rounded border" style="background:#f8fafc;">
+                                <input class="form-check-input" type="checkbox" name="es_combo" id="qp_es_combo">
+                                <label class="form-check-label fw-bold" for="qp_es_combo">Este producto es un combo</label>
+                                <div class="form-text mb-0">El combo se vende como un solo producto, pero el inventario se descuenta de sus componentes.</div>
+                            </div>
+                            <div id="comboConfigBox" style="display:none;">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div class="small text-muted">Componentes del combo</div>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" onclick="addComboRow()">
+                                        <i class="fas fa-plus me-1"></i>Agregar componente
+                                    </button>
+                                </div>
+                                <datalist id="combo_product_list"></datalist>
+                                <div id="comboRows" class="d-grid gap-2"></div>
+                                <div class="alert alert-light border mt-3 mb-0 small">
+                                    <strong>Costo calculado:</strong> <span id="comboAutoCost">$0.00</span><br>
+                                    <span class="text-muted">El costo del producto combo se sincroniza con la suma de sus componentes.</span>
                                 </div>
                             </div>
                         </div>
@@ -468,6 +510,8 @@ if ($is_direct_access) {
 <script>
     // Variable para almacenar el callback (función que se ejecuta al terminar)
     let productCreatedCallback = null;
+    let comboCatalog = [];
+    let comboCatalogMap = {};
 
     function openProductCreator(callback = null) {
         productCreatedCallback = callback;
@@ -480,6 +524,8 @@ if ($is_direct_access) {
 
         // Cargar categorías desde la tabla
         loadCategoriesQP();
+        loadComboCatalog();
+        resetComboBuilder();
         
         // Mostrar Modal (solo si no es directo)
         const modalEl = document.getElementById('modalQuickProd');
@@ -523,10 +569,105 @@ if ($is_direct_access) {
         }
     }
 
+    async function loadComboCatalog() {
+        if (comboCatalog.length > 0) return;
+        try {
+            const res = await fetch('pos_newprod.php?action=get_combo_products');
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            comboCatalog = data.products || [];
+            comboCatalogMap = {};
+            const datalist = document.getElementById('combo_product_list');
+            datalist.innerHTML = '';
+            comboCatalog.forEach(prod => {
+                comboCatalogMap[prod.codigo] = prod;
+                const opt = document.createElement('option');
+                opt.value = prod.codigo;
+                opt.label = `${prod.nombre} (${prod.categoria || 'General'})`;
+                datalist.appendChild(opt);
+            });
+        } catch (e) {
+            console.error('Error cargando catálogo de combos', e);
+        }
+    }
+
+    function resetComboBuilder() {
+        const holder = document.getElementById('comboRows');
+        if (holder) holder.innerHTML = '';
+        const hidden = document.getElementById('qp_combo_items_json');
+        if (hidden) hidden.value = '[]';
+        const toggle = document.getElementById('qp_es_combo');
+        const box = document.getElementById('comboConfigBox');
+        if (toggle) toggle.checked = false;
+        if (box) box.style.display = 'none';
+        updateComboCost();
+    }
+
+    function addComboRow(item = {}) {
+        const holder = document.getElementById('comboRows');
+        if (!holder) return;
+        const row = document.createElement('div');
+        row.className = 'row g-2 align-items-center combo-row border rounded p-2 bg-light';
+        row.innerHTML = `
+            <div class="col-md-5">
+                <input type="text" class="form-control form-control-sm combo-code" list="combo_product_list" placeholder="Código del producto" value="${item.codigo || ''}">
+            </div>
+            <div class="col-md-5">
+                <div class="small text-muted combo-name">${item.nombre || 'Seleccione un producto existente'}</div>
+            </div>
+            <div class="col-md-2">
+                <div class="input-group input-group-sm">
+                    <input type="number" min="0.001" step="0.001" class="form-control text-end combo-qty" value="${item.cantidad || 1}">
+                    <button type="button" class="btn btn-outline-danger" title="Eliminar" onclick="this.closest('.combo-row').remove(); syncComboRows();">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        holder.appendChild(row);
+
+        const codeInput = row.querySelector('.combo-code');
+        const qtyInput = row.querySelector('.combo-qty');
+        codeInput.addEventListener('input', () => syncComboRows());
+        codeInput.addEventListener('change', () => syncComboRows());
+        qtyInput.addEventListener('input', () => syncComboRows());
+        syncComboRows();
+    }
+
+    function syncComboRows() {
+        const sku = document.getElementById('qp_codigo')?.value || '';
+        const rows = [];
+        document.querySelectorAll('#comboRows .combo-row').forEach(row => {
+            const code = row.querySelector('.combo-code').value.trim();
+            const qty = parseFloat(row.querySelector('.combo-qty').value || '0');
+            const nameEl = row.querySelector('.combo-name');
+            const prod = comboCatalogMap[code];
+            nameEl.textContent = prod ? `${prod.nombre}${prod.es_servicio == 1 ? ' · Servicio' : ''}` : 'Producto no encontrado';
+            if (!code || !prod || code === sku || qty <= 0) return;
+            rows.push({ codigo: code, cantidad: qty, nombre: prod.nombre, costo: parseFloat(prod.costo || 0) });
+        });
+        document.getElementById('qp_combo_items_json').value = JSON.stringify(rows);
+        updateComboCost(rows);
+    }
+
+    function updateComboCost(rows = null) {
+        const data = rows || JSON.parse(document.getElementById('qp_combo_items_json')?.value || '[]');
+        const total = data.reduce((sum, item) => sum + ((parseFloat(item.costo || 0) || 0) * (parseFloat(item.cantidad || 0) || 0)), 0);
+        const costEl = document.getElementById('comboAutoCost');
+        if (costEl) costEl.textContent = '$' + total.toFixed(2);
+    }
+
     async function submitNewProduct() {
         const form = document.getElementById('formQuickProd');
+        syncComboRows();
+        const comboEnabled = document.getElementById('qp_es_combo')?.checked;
+        const comboItems = JSON.parse(document.getElementById('qp_combo_items_json')?.value || '[]');
         if (!form.checkValidity()) {
             form.reportValidity();
+            return;
+        }
+        if (comboEnabled && comboItems.length === 0) {
+            alert('Agregue al menos un componente válido al combo.');
             return;
         }
 
@@ -582,6 +723,27 @@ if ($is_direct_access) {
             btn.innerHTML = originalText;
         }
     }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const comboToggle = document.getElementById('qp_es_combo');
+        if (!comboToggle) return;
+        comboToggle.addEventListener('change', async function() {
+            document.getElementById('comboConfigBox').style.display = this.checked ? 'block' : 'none';
+            if (this.checked) {
+                await loadComboCatalog();
+                if (document.querySelectorAll('#comboRows .combo-row').length === 0) {
+                    addComboRow();
+                }
+                const svc = document.getElementById('qp_serv');
+                const mp = document.getElementById('qp_mp');
+                if (svc) svc.checked = false;
+                if (mp) mp.checked = false;
+            } else {
+                document.getElementById('comboRows').innerHTML = '';
+                syncComboRows();
+            }
+        });
+    });
 </script>
 
 <?php if ($is_direct_access): ?>

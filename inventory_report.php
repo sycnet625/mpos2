@@ -10,6 +10,7 @@ require_once 'db.php';
 
 // 1. CARGAR CONFIGURACIÓN
 require_once 'config_loader.php';
+require_once 'combo_helper.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $ALM_ID = intval($config['id_almacen']);
@@ -21,7 +22,8 @@ $orderBy     = $_GET['orderby'] ?? 'nombre';      // 'nombre', 'codigo', 'precio
 
 // Construcción de la Query
 // IMPORTANTE: El JOIN filtra por id_almacen Y id_sucursal para asegurar integridad
-$sql = "SELECT p.codigo, p.nombre, p.categoria, 
+$sql = "SELECT p.codigo, p.nombre, p.categoria,
+               COALESCE(p.es_combo, 0) AS es_combo,
                COALESCE(ps.precio_costo, p.costo) as costo, 
                COALESCE(ps.precio_venta, p.precio) as precio, 
                p.stock_minimo,
@@ -52,6 +54,7 @@ switch ($orderBy) {
 $stmt = $pdo->prepare($sql);
 $stmt->execute([':alm' => $ALM_ID, ':suc' => $SUC_ID, ':emp' => $EMP_ID]);
 $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
 
 // 3. CÁLCULOS Y PROCESAMIENTO
 $resumenGeneral = [
@@ -70,6 +73,7 @@ foreach ($productos as $p) {
     $stock = floatval($p['stock_actual']);
     $costo = floatval($p['costo']);
     $precio = floatval($p['precio']);
+    $esCombo = intval($p['es_combo'] ?? 0) === 1;
     
     // Cálculos por Item
     $gananciaUnit = $precio - $costo;
@@ -79,7 +83,7 @@ foreach ($productos as $p) {
     $valorVentaItem = $stock * $precio;
 
     // Acumuladores Generales (Solo suman si hay stock, excepto conteo de alertas)
-    if ($stock > 0) {
+    if ($stock > 0 && !$esCombo) {
         $resumenGeneral['total_items_fisicos'] += $stock;
         $resumenGeneral['valor_costo_total']   += $valorCostoItem;
         $resumenGeneral['valor_venta_total']   += $valorVentaItem;
@@ -99,7 +103,7 @@ foreach ($productos as $p) {
     }
     
     // Sumar a la categoría
-    if ($stock > 0) {
+    if ($stock > 0 && !$esCombo) {
         $resumenCategorias[$cat]['stock'] += $stock;
         $resumenCategorias[$cat]['valor_costo'] += $valorCostoItem;
         $resumenCategorias[$cat]['valor_venta'] += $valorVentaItem;
@@ -314,4 +318,3 @@ foreach ($productos as $p) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

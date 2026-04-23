@@ -357,7 +357,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_template_delete') {
 
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_list') {
     $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
-    $jobs = array_slice(array_reverse($queue['jobs'] ?? []), 0, 25);
+    $jobs = array_map('bot_promo_job_defaults', array_slice(array_reverse($queue['jobs'] ?? []), 0, 25));
     echo json_encode(['status' => 'success', 'rows' => $jobs]); exit;
 }
 
@@ -368,7 +368,7 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_detail') {
     $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
     foreach ($jobs as $job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
-        echo json_encode(['status' => 'success', 'row' => $job]); exit;
+        echo json_encode(['status' => 'success', 'row' => bot_promo_job_defaults($job)]); exit;
     }
     echo json_encode(['status'=>'error','msg'=>'Campaña no encontrada']); exit;
 }
@@ -384,6 +384,13 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
     foreach ($jobs as &$job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
         $found = true;
+        foreach ($jobs as $otherJob) {
+            if ((string)($otherJob['id'] ?? '') === $jobId) continue;
+            $otherStatus = (string)($otherJob['status'] ?? '');
+            if (in_array($otherStatus, ['queued', 'running', 'waiting'], true)) {
+                echo json_encode(['status'=>'error','msg'=>'Ya hay otra campaña en cola o ejecución. Espera a que termine antes de forzar otra.']); exit;
+            }
+        }
         if (($job['status'] ?? '') === 'paused') {
             echo json_encode(['status'=>'error','msg'=>'La campaña está en pausa. Reanúdala antes de enviarla.']); exit;
         }
@@ -393,6 +400,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
         $job['next_run_at'] = $now;
         $job['forced_at'] = date('c', $now);
         $job['last_schedule_key'] = '';
+        $job['queue_note'] = 'Lanzada manualmente';
         if ($wasDone || $reachedEnd) {
             $job['current_index'] = 0;
         }
@@ -459,7 +467,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_update') {
         }
         if (array_key_exists('status', $in)) {
             $status = strtolower(trim((string)$in['status']));
-            if (in_array($status, ['scheduled','queued','running','paused','done','error'], true)) {
+            if (in_array($status, ['scheduled','queued','running','waiting','paused','done','error'], true)) {
                 $job['status'] = $status;
             }
         }
@@ -661,7 +669,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
     $jobId = 'promo_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3));
     $now = time();
-    $queue['jobs'][] = [
+    $queue['jobs'][] = bot_promo_job_defaults([
         'id' => $jobId,
         'status' => $scheduleEnabled ? 'scheduled' : 'queued',
         'created_at' => date('c', $now),
@@ -683,7 +691,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         'next_run_at' => $scheduleEnabled ? ($now + 30) : $now,
         'current_index' => 0,
         'log' => []
-    ];
+    ]);
     if (!bot_repo_write('promo_queue_file', $queue)) {
         echo json_encode(['status'=>'error','msg'=>'No se pudo guardar cola de promoción']); exit;
     }

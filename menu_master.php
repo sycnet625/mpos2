@@ -22,9 +22,6 @@ $menuCategories = [
         ["icon" => "fa-sync", "name" => "SYNC GUI", "url" => "sync_panel.php"],
 
     ],
-    "🤖 Inteligencia Artificial" => [
-        ["icon" => "fa-terminal", "name" => "Terminal IA", "url" => "palweb_ai.php"],
-    ],
     "🛒 POS & Venta" => [
         ["icon" => "fa-desktop", "name" => "Terminal POS", "url" => "pos.php"],
         ["icon" => "fa-store", "name" => "Tienda Online", "url" => "shop.php"],

@@ -48,6 +48,7 @@ $CSRF_TOKEN = $_SESSION['csrf_token'];
 require_once 'config_loader.php';
 require_once 'push_notify.php';
 require_once 'shop_skins.php';
+require_once 'combo_helper.php';
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
@@ -265,6 +266,7 @@ if (isset($_GET['ajax_search'])) {
         $sql = "SELECT p.codigo, p.nombre,
                 COALESCE(ps.precio_venta, p.precio) AS precio,
                 p.descripcion, p.categoria, p.unidad_medida, p.color, p.es_reservable,
+                COALESCE(p.es_combo, 0) AS es_combo,
                 COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s
                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?), 0) as stock
                 FROM productos p
@@ -292,6 +294,7 @@ if (isset($_GET['ajax_search'])) {
             $q, $q, $searchStart
         ]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $results = combo_apply_product_rows($pdo, $results, $EMP_ID, $ALM_ID);
         
         foreach ($results as &$r) {
             $r['precio'] = floatval($r['precio']);
@@ -333,6 +336,7 @@ try {
 
 try {
     $sql = "SELECT p.*,
+            COALESCE(p.es_combo, 0) AS es_combo,
             COALESCE(ps.precio_venta, p.precio) AS precio,
             (SELECT COALESCE(SUM(s.cantidad), 0)
              FROM stock_almacen s
@@ -367,6 +371,7 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
     
     // Obtener Wishlist si está logueado
     $userWishlist = [];
@@ -796,6 +801,8 @@ foreach ($productos as $_p) {
         'unidad_medida'=> $_p['unidad_medida'] ?? '',
         'color'        => $_p['color'] ?? '',
         'esReservable' => intval($_p['es_reservable'] ?? 0) === 1,
+        'esCombo'      => intval($_p['es_combo'] ?? 0) === 1,
+        'comboResumen' => $_p['combo_resumen'] ?? '',
     ];
 }
 
@@ -2117,6 +2124,8 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             "color"       => $p['color'] ?? '',
             "esReservable"  => $esReservable,
             "precioOferta"  => floatval($p['precio_oferta'] ?? 0),
+            "esCombo"       => intval($p['es_combo'] ?? 0) === 1,
+            "comboResumen"  => $p['combo_resumen'] ?? '',
         ], JSON_UNESCAPED_UNICODE) ?>)'>
             <div class="product-image-wrapper">
                 <?php if(isset($_SESSION['client_id'])): 
@@ -2132,6 +2141,12 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                 <?php if(!empty($p['etiqueta_web'])): ?>
                     <div class="product-ribbon <?php echo $p['etiqueta_color'] ?: 'bg-danger'; ?>">
                         <?php echo htmlspecialchars($p['etiqueta_web']); ?>
+                    </div>
+                <?php endif; ?>
+
+                <?php if (intval($p['es_combo'] ?? 0) === 1): ?>
+                    <div class="product-ribbon bg-dark" style="top:10px;left:10px;right:auto;">
+                        Combo
                     </div>
                 <?php endif; ?>
 

@@ -156,7 +156,16 @@ window.renderCart = function() {
         c.appendChild(d);
     });
     const tot = sub * (1 - globalDiscountPct/100);
-    const te = document.getElementById('totalAmount'); if(te) te.innerText = '$' + tot.toFixed(2);
+    const te = document.getElementById('totalAmount');
+    if(te) {
+        if (globalDiscountPct > 0) {
+            te.innerHTML = `<small class="text-muted fs-6"><s>$${sub.toFixed(2)}</s> -${globalDiscountPct}%</small><br>$${tot.toFixed(2)}`;
+        } else if (globalDiscountPct < 0) {
+            te.innerHTML = `<small class="text-muted fs-6"><s>$${sub.toFixed(2)}</s> +${Math.abs(globalDiscountPct)}%</small><br>$${tot.toFixed(2)}`;
+        } else {
+            te.innerText = '$' + tot.toFixed(2);
+        }
+    }
     const ti = document.getElementById('totalItems'); if(ti) ti.innerText = items;
 };
 window.modifyQty = function(d) { if(selectedIndex < 0) return; const item = cart[selectedIndex]; const prod = productsDB.find(p=>p.codigo == item.id); if(d>0 && prod && prod.es_servicio==0 && (item.qty+d)>parseFloat(prod.stock)) { Synth.error(); return showToast("Sin stock", "error"); } item.qty += d; if(item.qty <= 0) { cart.splice(selectedIndex, 1); selectedIndex = -1; Synth.removeCart(); } else { d>0 ? Synth.increment() : Synth.decrement(); } renderCart(); saveCartState(); };
@@ -164,7 +173,7 @@ window.removeItem = function() { if(selectedIndex>=0 && confirm('Eliminar?')) { 
 window.clearCart = function() { if(cart.length>0 && confirm('Vaciar?')) { cart=[]; globalDiscountPct=0; selectedIndex=-1; Synth.clear(); renderCart(); saveCartState(); } };
 window.askQty = function() { if(selectedIndex<0) return showToast("Seleccione item","warning"); let q=prompt("Cantidad:",cart[selectedIndex].qty); if(q&&!isNaN(q)&&q>0){ cart[selectedIndex].qty=Number(q); Synth.increment(); renderCart(); saveCartState(); } };
 window.applyDiscount = function() { if(selectedIndex<0) return showToast("Seleccione item","warning"); let p=prompt("Desc %:",cart[selectedIndex].discountPct); if(p!==null){ let v=parseFloat(p)||0; if(v>=0&&v<=100){ cart[selectedIndex].discountPct=v; renderCart(); Synth.discount(); saveCartState(); } } };
-window.applyGlobalDiscount = function() { if(cart.length===0) return; let p=prompt("Desc Global %:",globalDiscountPct); if(p!==null){ let v=parseFloat(p)||0; if(v>=0&&v<=100){ globalDiscountPct=v; renderCart(); Synth.discount(); saveCartState(); } } };
+window.applyGlobalDiscount = function() { if(cart.length===0) return; let p=prompt("% Total (negativo = recargo):",globalDiscountPct); if(p!==null){ let v=parseFloat(p); if(Number.isFinite(v) && v<=100){ globalDiscountPct=v; renderCart(); Synth.discount(); saveCartState(); } } };
 window.addNote = function() { if(selectedIndex<0) return showToast("Seleccione item","warning"); let n=prompt("Nota:",cart[selectedIndex].note); if(n!==null){ cart[selectedIndex].note=n; renderCart(); saveCartState(); } };
 
 // Utilidades Extra
@@ -188,4 +197,3 @@ window.syncAllPending = function() { syncOfflineQueue(); };
 window.parkOrder = function() { if(cart.length===0) return showToast('Carrito vacío','warning'); const n=prompt('Nombre orden:','Mesa '+new Date().toTimeString().substring(0,5)); if(!n) return; const o=JSON.parse(localStorage.getItem(PARKED_ORDERS_KEY)||'[]'); o.push({id:Date.now(),name:n,items:[...cart],globalDiscount:globalDiscountPct}); localStorage.setItem(PARKED_ORDERS_KEY,JSON.stringify(o)); Synth.click(); showToast('Orden pausada','success'); cart=[]; globalDiscountPct=0; selectedIndex=-1; renderCart(); saveCartState(); };
 window.showParkedOrders = function() { const o=JSON.parse(localStorage.getItem(PARKED_ORDERS_KEY)||'[]'); if(o.length===0) return showToast('No hay ordenes','warning'); let h=''; o.forEach((x,i)=>{ h+=`<button class="list-group-item list-group-item-action d-flex justify-content-between" onclick="loadParkedOrder(${i})"><div><strong>${x.name}</strong><br><small>${x.items.length} items</small></div><span class="badge bg-primary">Recuperar</span></button>`; }); document.getElementById('parkList').innerHTML=h; new bootstrap.Modal(document.getElementById('parkModal')).show(); };
 window.loadParkedOrder = function(i) { const o=JSON.parse(localStorage.getItem(PARKED_ORDERS_KEY)||'[]'); const ord=o[i]; if(cart.length>0 && !confirm('Reemplazar actual?')) return; cart=[...ord.items]; globalDiscountPct=ord.globalDiscount||0; selectedIndex=-1; o.splice(i,1); localStorage.setItem(PARKED_ORDERS_KEY,JSON.stringify(o)); renderCart(); Synth.addCart(); bootstrap.Modal.getInstance(document.getElementById('parkModal')).hide(); };
-

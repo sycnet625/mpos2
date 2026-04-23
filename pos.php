@@ -18,6 +18,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'combo_helper.php';
 
 function pos_image_meta(string $code): array {
     $safe = trim($code);
@@ -175,7 +176,7 @@ if (isset($_GET['load_products'])) {
                     COALESCE(ps.precio_venta,    p.precio)                           AS precio_suc,
                     COALESCE(ps.precio_mayorista, p.precio_mayorista, p.precio)      AS precio_mayorista_suc,
                     COALESCE(ps.precio_venta,    p.precio)                           AS precio,
-                    p.categoria, p.es_elaborado, p.es_servicio,
+                    p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                     p.codigo_barra_1, p.codigo_barra_2,
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
@@ -190,6 +191,7 @@ if (isset($_GET['load_products'])) {
         $stmtProd = $pdo->prepare($sqlProd);
         $stmtProd->execute(array_merge([$almacenID, $sucursalID], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
+        $prods = combo_apply_product_rows($pdo, $prods, (int)$ctxConfig['id_empresa'], $almacenID);
 
         // Procesar para incluir colores e imágenes
         foreach ($prods as &$p) {
@@ -601,7 +603,7 @@ try {
     $catsData = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
     // Productos
-    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
+    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                 p.codigo_barra_1, p.codigo_barra_2,
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
@@ -614,6 +616,7 @@ try {
     $stmtProd = $pdo->prepare($sqlProd);
     $stmtProd->execute(array_merge([$almacenID], $params));
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
+    $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa'] ?? 1), $almacenID);
 
     // CARGA DE CLIENTES (NUEVO - YA ORDENADO)
     $stmtCli = $pdo->query("SELECT id, nombre, telefono, direccion, nit_ci FROM clientes WHERE activo = 1 ORDER BY nombre ASC");

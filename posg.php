@@ -5,6 +5,7 @@ require_once 'db.php';
 
 // --- CONFIGURACIÓN ---
 require_once 'config_loader.php';
+require_once 'combo_helper.php';
 
 $almacenID = intval($config['id_almacen']);
 $sucursalID = intval($config['id_sucursal']);
@@ -34,7 +35,7 @@ try {
     $stmtCat->execute($params);
     $cats = $stmtCat->fetchAll(PDO::FETCH_COLUMN);
 
-    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio,
+    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                 (SELECT COALESCE(SUM(s.cantidad), 0) 
                  FROM stock_almacen s 
                  WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
@@ -45,6 +46,7 @@ try {
     $stmtProd = $pdo->prepare($sqlProd);
     $stmtProd->execute($params);
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
+    $prods = combo_apply_product_rows($pdo, $prods, $empresaID, $almacenID);
 
 } catch (Exception $e) { 
     error_log("POS DB Error: " . $e->getMessage());
@@ -1074,4 +1076,3 @@ foreach ($prods as &$p) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

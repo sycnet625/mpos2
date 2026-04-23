@@ -36,7 +36,6 @@ Disallow: /update_*.php
 Disallow: /sync_*.php
 Disallow: /api_*.php
 Disallow: /chequear_*.php
-Disallow: /palweb_ai.py
 Disallow: /venv/
 
 # Sitemap

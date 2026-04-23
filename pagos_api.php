@@ -9,8 +9,10 @@ header('Content-Type: application/json; charset=utf-8');
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'push_notify.php';
+require_once 'combo_helper.php';
 
 $idAlmacen = intval($config['id_almacen']);
+$idEmpresa = intval($config['id_empresa'] ?? 1);
 
 // ──────────────────────────────────────────────────────────────────
 // Determinar acción
@@ -34,38 +36,8 @@ if ($method === 'GET') {
 // ──────────────────────────────────────────────────────────────────
 if ($action === 'check_stock') {
     $items  = $input['items'] ?? [];
-    $out    = [];
-    $allOk  = true;
-
-    foreach ($items as $item) {
-        $sku = $item['id'] ?? '';
-        $qty = floatval($item['qty'] ?? 1);
-        if (!$sku) continue;
-
-        // Verificar si el producto es servicio (no tiene stock físico)
-        $stmtProd = $pdo->prepare("SELECT nombre, es_servicio FROM productos WHERE codigo = ?");
-        $stmtProd->execute([$sku]);
-        $prod = $stmtProd->fetch(PDO::FETCH_ASSOC);
-        if (!$prod || intval($prod['es_servicio']) === 1) continue; // servicios siempre OK
-
-        $stmtStock = $pdo->prepare(
-            "SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?"
-        );
-        $stmtStock->execute([$sku, $idAlmacen]);
-        $stock = floatval($stmtStock->fetchColumn());
-
-        if ($stock < $qty) {
-            $allOk = false;
-            $out[] = [
-                'id'      => $sku,
-                'nombre'  => $prod['nombre'],
-                'stock'   => $stock,
-                'needed'  => $qty,
-            ];
-        }
-    }
-
-    echo json_encode(['all_ok' => $allOk, 'out' => $out]);
+    $stockCheck = combo_check_stock($pdo, $idEmpresa, $idAlmacen, $items);
+    echo json_encode(['all_ok' => $stockCheck['all_ok'], 'out' => $stockCheck['out']]);
     exit;
 }
 

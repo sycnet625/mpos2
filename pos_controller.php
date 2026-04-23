@@ -5,6 +5,7 @@ ini_set('display_errors', 0);
 require_once 'db.php';
 
 require_once 'config_loader.php';
+require_once 'combo_helper.php';
 
 // Carga de Datos (Optimizado y Seguro)
 try {
@@ -33,7 +34,7 @@ try {
     $categorias = $stmtCat->fetchAll(PDO::FETCH_COLUMN);
 
     // Productos con precio específico por sucursal (fallback al precio principal)
-    $sqlProd = "SELECT p.codigo, p.nombre, p.categoria, p.es_elaborado, p.es_servicio,
+    $sqlProd = "SELECT p.codigo, p.nombre, p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                 COALESCE(ps.precio_venta,    p.precio)            AS precio,
                 COALESCE(ps.precio_mayorista, p.precio_mayorista) AS precio_mayorista,
                 COALESCE(ps.precio_costo,    p.costo)             AS costo,
@@ -48,6 +49,7 @@ try {
     $stmtProd = $pdo->prepare($sqlProd);
     $stmtProd->execute($params);
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
+    $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa']), $almacenID);
 
 } catch (Exception $e) { 
     die("Error Crítico BD: " . $e->getMessage()); 

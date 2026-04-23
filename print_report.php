@@ -22,6 +22,14 @@ if (file_exists($configFile)) {
 $fecha_inicio = $_GET['fecha_inicio'] ?? date('Y-m-d');
 $fecha_fin = $_GET['fecha_fin'] ?? date('Y-m-d');
 
+function print_report_ticket_session_id(array $ticket): int {
+    $sessionId = intval($ticket['id_sesion_caja'] ?? 0);
+    if ($sessionId > 0) {
+        return $sessionId;
+    }
+    return intval($ticket['id_caja'] ?? 0);
+}
+
 // --- LÓGICA DE DATOS (Copia simplificada para solo lectura) ---
 try {
     // 1. Desglose
@@ -57,6 +65,78 @@ try {
     $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
     $payments = $stmt->fetchAll();
 
+    $sessionSummary = [];
+    $ticketDetailsBySale = [];
+
+    $stmt = $pdo->prepare("SELECT *
+                           FROM ventas_cabecera
+                           WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
+                           ORDER BY fecha ASC, id ASC");
+    $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $sessionTickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!empty($sessionTickets)) {
+        $saleIds = array_map(static function ($ticket) {
+            return intval($ticket['id']);
+        }, $sessionTickets);
+        $placeholders = implode(',', array_fill(0, count($saleIds), '?'));
+
+        $stmt = $pdo->prepare("SELECT id_venta_cabecera, nombre_producto, cantidad, precio
+                               FROM ventas_detalle
+                               WHERE id_venta_cabecera IN ($placeholders)
+                               ORDER BY id_venta_cabecera ASC, id ASC");
+        $stmt->execute($saleIds);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $detail) {
+            $saleId = intval($detail['id_venta_cabecera']);
+            if (!isset($ticketDetailsBySale[$saleId])) {
+                $ticketDetailsBySale[$saleId] = [];
+            }
+            $ticketDetailsBySale[$saleId][] = $detail;
+        }
+
+        foreach ($sessionTickets as $ticket) {
+            $sessionId = print_report_ticket_session_id($ticket);
+            if ($sessionId <= 0) {
+                continue;
+            }
+            if (!isset($sessionSummary[$sessionId])) {
+                $sessionSummary[$sessionId] = [
+                    'id' => $sessionId,
+                    'nombre_cajero' => '',
+                    'fecha_apertura' => null,
+                    'fecha_cierre' => null,
+                    'fecha_contable' => null,
+                    'estado' => '',
+                    'tickets' => [],
+                    'total' => 0.0,
+                ];
+            }
+            $sessionSummary[$sessionId]['tickets'][] = $ticket;
+            $sessionSummary[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+        }
+
+        if (!empty($sessionSummary)) {
+            $sessionIds = array_keys($sessionSummary);
+            $sessionPlaceholders = implode(',', array_fill(0, count($sessionIds), '?'));
+            $stmt = $pdo->prepare("SELECT id, nombre_cajero, fecha_apertura, fecha_cierre, fecha_contable, estado
+                                   FROM caja_sesiones
+                                   WHERE id IN ($sessionPlaceholders)
+                                   ORDER BY fecha_apertura ASC, id ASC");
+            $stmt->execute($sessionIds);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $sessionId = intval($row['id']);
+                if (!isset($sessionSummary[$sessionId])) {
+                    continue;
+                }
+                $sessionSummary[$sessionId]['nombre_cajero'] = $row['nombre_cajero'] ?? '';
+                $sessionSummary[$sessionId]['fecha_apertura'] = $row['fecha_apertura'] ?? null;
+                $sessionSummary[$sessionId]['fecha_cierre'] = $row['fecha_cierre'] ?? null;
+                $sessionSummary[$sessionId]['fecha_contable'] = $row['fecha_contable'] ?? null;
+                $sessionSummary[$sessionId]['estado'] = $row['estado'] ?? '';
+            }
+        }
+    }
+
 } catch (Exception $e) { die("Error DB: " . $e->getMessage()); }
 ?>
 <!DOCTYPE html>
@@ -79,6 +159,10 @@ try {
         }
         body { font-family: 'Segoe UI', sans-serif; background: #fff; }
         .header-box { border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; }
+        .session-block { border: 1px solid #d9dee5; border-radius: 8px; overflow: hidden; margin-top: 18px; page-break-inside: avoid; }
+        .session-block-head { background: #f8f9fa; padding: 10px 14px; border-bottom: 1px solid #d9dee5; }
+        .session-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82rem; color: #6c757d; margin-top: 4px; }
+        .ticket-items-list { font-size: 0.8rem; color: #495057; line-height: 1.45; }
     </style>
 </head>
 <body onload="window.print()">
@@ -169,6 +253,93 @@ try {
                 <span class="h5 fw-bold">$<?php echo number_format($reserva_monto, 2); ?></span>
             </div>
         </div>
+    </div>
+
+    <div class="mt-4">
+        <h5 class="fw-bold border-bottom pb-2">Resumen por Sesiones de Caja</h5>
+        <?php if (!empty($sessionSummary)): ?>
+            <?php foreach ($sessionSummary as $session): ?>
+                <div class="session-block">
+                    <div class="session-block-head">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            <div>
+                                <div class="fw-bold">Sesión #<?php echo intval($session['id']); ?><?php if (!empty($session['nombre_cajero'])): ?> - <?php echo htmlspecialchars($session['nombre_cajero']); ?><?php endif; ?></div>
+                                <div class="session-meta">
+                                    <span>Fecha contable: <?php echo !empty($session['fecha_contable']) ? date('d/m/Y', strtotime($session['fecha_contable'])) : 'N/D'; ?></span>
+                                    <span>Apertura: <?php echo !empty($session['fecha_apertura']) ? date('d/m/Y H:i', strtotime($session['fecha_apertura'])) : 'N/D'; ?></span>
+                                    <span>Cierre: <?php echo !empty($session['fecha_cierre']) ? date('d/m/Y H:i', strtotime($session['fecha_cierre'])) : 'Abierta'; ?></span>
+                                    <span>Estado: <?php echo htmlspecialchars($session['estado'] ?: 'N/D'); ?></span>
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <small class="text-muted d-block">Total sesión</small>
+                                <div class="fw-bold">$<?php echo number_format($session['total'], 2); ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th># Ticket</th>
+                                <th>Hora</th>
+                                <th>Cliente</th>
+                                <th>Detalle agrupado</th>
+                                <th class="text-end">Valor</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($session['tickets'] as $ticket): ?>
+                                <?php
+                                $details = $ticketDetailsBySale[intval($ticket['id'])] ?? [];
+                                $groupedItems = [];
+                                foreach ($details as $detail) {
+                                    $name = trim((string)($detail['nombre_producto'] ?? 'Producto'));
+                                    $qty = floatval($detail['cantidad'] ?? 0);
+                                    $price = floatval($detail['precio'] ?? 0);
+                                    $key = $name . '|' . number_format($price, 2, '.', '');
+                                    if (!isset($groupedItems[$key])) {
+                                        $groupedItems[$key] = [
+                                            'name' => $name,
+                                            'qty' => 0.0,
+                                            'price' => $price,
+                                        ];
+                                    }
+                                    $groupedItems[$key]['qty'] += $qty;
+                                }
+                                ?>
+                                <tr>
+                                    <td>#<?php echo intval($ticket['id']); ?></td>
+                                    <td><?php echo date('d/m H:i', strtotime($ticket['fecha'])); ?></td>
+                                    <td><?php echo htmlspecialchars($ticket['cliente_nombre'] ?: 'Cliente general'); ?></td>
+                                    <td class="ticket-items-list">
+                                        <?php if (empty($groupedItems)): ?>
+                                            Sin detalle
+                                        <?php else: ?>
+                                            <?php
+                                            $lines = [];
+                                            foreach ($groupedItems as $item) {
+                                                $lines[] = htmlspecialchars($item['name']) . ' x' . number_format($item['qty'], 2) . ' @ $' . number_format($item['price'], 2);
+                                            }
+                                            echo implode('<br>', $lines);
+                                            ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="text-end fw-bold">$<?php echo number_format($ticket['total'], 2); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <th colspan="4">Total sesión #<?php echo intval($session['id']); ?></th>
+                                <th class="text-end">$<?php echo number_format($session['total'], 2); ?></th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <div class="alert alert-light border">No hay tickets asociados a sesiones de caja en este periodo.</div>
+        <?php endif; ?>
     </div>
 
     <div class="fixed-bottom p-3 text-center no-print">

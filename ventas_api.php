@@ -10,6 +10,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once 'db.php';
 require_once 'push_notify.php';
+require_once 'combo_helper.php';
 
 if (file_exists('kardex_engine.php')) {
     require_once 'kardex_engine.php';
@@ -141,6 +142,8 @@ try {
     $sinExistencia = 0;
     $itemsCocina   = [];
 
+    $resolvedSale = combo_expand_sale_items($pdo, $idEmpresa, $input['items'] ?? []);
+
     foreach ($input['items'] as $item) {
         // shop.php envía 'id' como clave del SKU
         $sku   = vapi_str($item['id'] ?? $item['codigo'] ?? '', 50);
@@ -149,31 +152,40 @@ try {
         $name  = vapi_str($item['name'] ?? $sku, 150);
 
         $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku]);
+    }
 
-        $stmtProd->execute([$sku]);
-        $prodData    = $stmtProd->fetch(PDO::FETCH_ASSOC);
-        $esServicio  = $prodData ? intval($prodData['es_servicio'])  : 0;
-        $esElaborado = $prodData ? intval($prodData['es_elaborado']) : 0;
+    foreach ($resolvedSale['inventory_items'] as $resolvedItem) {
+        $sku = vapi_str($resolvedItem['id'] ?? '', 50);
+        $qty = floatval($resolvedItem['qty'] ?? 0);
+        $name = vapi_str($resolvedItem['nombre'] ?? $sku, 150);
+        if ($sku === '' || $qty <= 0) {
+            continue;
+        }
 
-        if ($esServicio === 0) {
-            $stmtStock->execute([$sku, $idAlmacen]);
-            $stockActual = floatval($stmtStock->fetchColumn());
+        $stmtStock->execute([$sku, $idAlmacen]);
+        $stockActual = floatval($stmtStock->fetchColumn());
 
-            if ($esReserva) {
-                if ($stockActual < $qty) $sinExistencia = 1;
-            } else {
-                if ($stockActual < $qty) {
-                    throw new Exception("Stock insuficiente para '{$name}'. Disponible: {$stockActual}. Requerido: {$qty}");
-                }
-                if ($kardex) {
-                    $kardex->registrarVenta($sku, $qty, $idVenta, 'Web', $fechaVenta, $idAlmacen);
-                }
+        if ($esReserva) {
+            if ($stockActual < $qty) {
+                $sinExistencia = 1;
             }
+            continue;
         }
 
-        if ($esElaborado === 1) {
-            $itemsCocina[] = ['qty' => $qty, 'name' => $name, 'note' => vapi_str($item['note'] ?? '', 100)];
+        if ($stockActual < $qty) {
+            throw new Exception("Stock insuficiente para '{$name}'. Disponible: {$stockActual}. Requerido: {$qty}");
         }
+        if ($kardex) {
+            $kardex->registrarVenta($sku, $qty, $idVenta, 'Web', $fechaVenta, $idAlmacen);
+        }
+    }
+
+    foreach ($resolvedSale['kitchen_items'] as $kitchenItem) {
+        $itemsCocina[] = [
+            'qty' => floatval($kitchenItem['qty'] ?? 0),
+            'name' => vapi_str($kitchenItem['name'] ?? '', 150),
+            'note' => vapi_str($kitchenItem['note'] ?? '', 100),
+        ];
     }
 
     // Comanda para cocina

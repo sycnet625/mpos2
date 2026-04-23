@@ -1,9 +1,34 @@
 <?php
+function bot_promo_job_defaults(array $job = []): array {
+    return array_merge([
+        'status' => 'scheduled',
+        'last_schedule_key' => '',
+        'next_run_at' => time() + 30,
+        'current_index' => 0,
+        'log' => [],
+        'last_success_at' => '',
+        'last_success_summary' => '',
+        'last_error_at' => '',
+        'last_error' => '',
+        'last_error_verbose' => '',
+        'last_run_started_at' => '',
+        'last_run_finished_at' => '',
+        'last_run_status' => '',
+        'last_run_summary' => '',
+        'current_run_started_at' => '',
+        'current_run_success_count' => 0,
+        'current_run_error_count' => 0,
+        'total_success_runs' => 0,
+        'total_failed_runs' => 0,
+        'queue_note' => '',
+    ], $job);
+}
+
 function bot_clone_promo_job(array $job): array {
     $now = time();
     $baseName = trim((string)($job['name'] ?? 'Campaña'));
     $newName = $baseName !== '' ? ($baseName . ' (Copia)') : ('Campaña ' . date('d/m H:i', $now) . ' (Copia)');
-    return [
+    return bot_promo_job_defaults([
         'id' => 'promo_' . date('Ymd_His', $now) . '_' . bin2hex(random_bytes(3)),
         'status' => !empty($job['schedule_enabled']) ? 'scheduled' : 'queued',
         'created_at' => date('c', $now),
@@ -25,7 +50,7 @@ function bot_clone_promo_job(array $job): array {
         'next_run_at' => !empty($job['schedule_enabled']) ? ($now + 30) : $now,
         'current_index' => 0,
         'log' => []
-    ];
+    ]);
 }
 
 function bot_require_admin_session(): void {

@@ -19,6 +19,31 @@ let conversationFilter='all';
 let promoChatsSearchTimer=null;
 let promoChatsSearchTerm='';
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+const escPre=s=>esc(String(s??'')).replace(/\n/g,'<br>');
+function fmtDt(v){
+  const raw=String(v||'').trim();
+  if(!raw) return '-';
+  const d=new Date(raw);
+  if(Number.isNaN(d.getTime())) return esc(raw);
+  return esc(d.toLocaleString('es-CU',{dateStyle:'short',timeStyle:'short'}));
+}
+function campaignLastOkHtml(r){
+  const at=String(r.last_success_at||'').trim();
+  if(!at) return '<span class="text-muted small">Sin ejecución buena</span>';
+  const summary=String(r.last_success_summary||'').trim();
+  return `<div class="small">${fmtDt(at)}</div>${summary?`<div class="text-muted small">${esc(summary)}</div>`:''}`;
+}
+function campaignLastErrorHtml(r){
+  const at=String(r.last_error_at||'').trim();
+  const verbose=String(r.last_error_verbose||r.last_error||'').trim();
+  if(!at || !verbose) return '<span class="text-muted small">Sin errores</span>';
+  const short=String(r.last_error||verbose.split('\n')[0]||'Error').trim();
+  return `<div class="small text-danger">${fmtDt(at)}</div>
+    <details class="small">
+      <summary class="text-danger">${esc(short.slice(0,160))}</summary>
+      <div class="text-muted mt-1">${escPre(verbose)}</div>
+    </details>`;
+}
 let toastTimer=null;
 const hideToast=()=>{const e=document.getElementById('alertBox'); if(e) e.innerHTML='';};
 function closeToastWithAnim(){
@@ -1092,16 +1117,18 @@ async function loadPromoList(){
   const d=await g(API+'?action=promo_list');
   const tb=document.getElementById('promoRows');
   if(!tb) return;
-  if(d.status!=='success'){tb.innerHTML='<tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr>';promoCampaigns=[];renderProgrammingTab();return;}
+  if(d.status!=='success'){tb.innerHTML='<tr><td colspan="9" class="text-center text-muted p-3">Sin campañas</td></tr>';promoCampaigns=[];renderProgrammingTab();return;}
   promoCampaigns=Array.isArray(d.rows)?d.rows:[];
-  if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr>';renderProgrammingTab();return;}
+  if(!promoCampaigns.length){tb.innerHTML='<tr><td colspan="9" class="text-center text-muted p-3">Sin campañas</td></tr>';renderProgrammingTab();return;}
   tb.innerHTML=promoCampaigns.map(r=>`<tr>
     <td class="small">${esc(r.created_at||'')}</td>
     <td class="small">${esc(r.name||r.id||'')}</td>
     <td class="small">${esc(r.campaign_group||'General')}</td>
     <td class="small">${esc(r.schedule_time||'-')} (${esc(daysToText(r.schedule_days||[]))})<br><span class="text-muted">${esc(targetsToText(r.targets||[]))}</span></td>
-    <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':(r.status==='scheduled'?'bg-info text-dark':'bg-warning text-dark')))}">${esc(r.status||'')}</span></td>
+    <td><span class="badge ${r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':(r.status==='scheduled'?'bg-info text-dark':(r.status==='waiting'?'bg-secondary':'bg-warning text-dark'))))}">${esc(r.status||'')}</span>${r.queue_note?`<div class="text-muted small mt-1">${esc(r.queue_note)}</div>`:''}</td>
     <td class="small">${Number(r.current_index||0)}/${(r.targets||[]).length}</td>
+    <td style="min-width:160px">${campaignLastOkHtml(r)}</td>
+    <td style="min-width:260px">${campaignLastErrorHtml(r)}</td>
     <td class="small">
       <div class="d-flex gap-1">
         <button class="btn btn-sm btn-outline-secondary" type="button" title="Clonar" onclick="cloneScheduledCampaign('${esc(r.id||'')}')"><i class="fas fa-clone"></i></button>
@@ -1179,7 +1206,7 @@ function renderCampaignLogsModal(job){
   const fail=logs.filter(x=>x && x.ok===false).length;
   const sent=logs.reduce((acc,x)=>acc + Number((x&&x.messages_sent)||0),0);
   const targets=(Array.isArray(job.targets)?job.targets:[]).map(t=>String(t.name||t.id||'')).join(' | ');
-  summary.textContent=`Campaña: ${job.name||job.id||'-'} | Grupo: ${job.campaign_group||'General'} | Estado: ${job.status||'-'} | Mensajes enviados: ${sent} | OK: ${ok} | Fallos: ${fail} | Destinos: ${targets||'-'}`;
+  summary.textContent=`Campaña: ${job.name||job.id||'-'} | Grupo: ${job.campaign_group||'General'} | Estado: ${job.status||'-'} | Mensajes enviados: ${sent} | OK: ${ok} | Fallos: ${fail} | Último OK: ${job.last_success_at||'-'} | Último error: ${job.last_error_at||'-'} | Destinos: ${targets||'-'}`;
   if(!logs.length){
     rowsEl.innerHTML='<tr><td colspan="5" class="text-center text-muted p-3">Sin logs aún</td></tr>';
     return;
@@ -1189,7 +1216,7 @@ function renderCampaignLogsModal(job){
     <td class="small">${esc(l.target_name||l.target_id||'-')}</td>
     <td class="small">${Number(l.messages_sent||0)}</td>
     <td>${l.ok===true?'<span class="badge bg-success">OK</span>':'<span class="badge bg-danger">Fallo</span>'}</td>
-    <td class="small text-danger">${esc(l.error||'')}</td>
+    <td class="small text-danger">${esc(l.error||'')}${l.error_verbose?`<details class="mt-1"><summary>verbose</summary><div class="text-muted">${escPre(l.error_verbose||'')}</div></details>`:''}</td>
   </tr>`).join('');
 }
 async function refreshCampaignLogs(){
@@ -1257,7 +1284,7 @@ function renderProgrammingTab(){
             <td class="small">${esc(r.name||r.id||'-')}</td>
             <td class="small">${esc(r.schedule_time||'-')}</td>
             <td class="small">${esc(daysToText(r.schedule_days||[]))}</td>
-            <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':'bg-secondary'))))}">${esc(r.status||'-')}</span></td>
+            <td><span class="badge ${r.status==='scheduled'?'bg-info text-dark':(r.status==='running'?'bg-warning text-dark':(r.status==='done'?'bg-success':(r.status==='error'?'bg-danger':(r.status==='paused'?'bg-secondary':(r.status==='waiting'?'bg-secondary':'bg-secondary')))))}">${esc(r.status||'-')}</span></td>
             <td class="small">${Array.isArray(r.targets)?r.targets.length:0}</td>
             <td class="small text-muted">${esc(targetsToText(r.targets||[]))}</td>
 	            <td class="small">

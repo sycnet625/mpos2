@@ -122,6 +122,9 @@ let currentStateMeta = {};
 const processedMessageIds = new Map();
 let controlCommandBusy = false;
 let autoreplyStateCache = { expiresAt: 0, data: null };
+let promoTickRunning = false;
+let lastBrowserLockRecoveryAt = 0;
+let runtimeLoopsStarted = false;
 
 function normalizeWaUserId(rawFrom) {
   const base = String(rawFrom || '').split('@')[0] || '';
@@ -259,6 +262,69 @@ function writeJsonFile(file, data) {
   }
 }
 
+function getAuthSessionPaths() {
+  const sessionDir = path.join(AUTH_PATH, `session-${SESSION_NAME}`);
+  return [
+    sessionDir,
+    path.join(sessionDir, 'Default')
+  ];
+}
+
+function clearChromeSingletonLocks() {
+  const removed = [];
+  const lockNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+  for (const dir of getAuthSessionPaths()) {
+    for (const lockName of lockNames) {
+      const file = path.join(dir, lockName);
+      try {
+        if (fs.existsSync(file)) {
+          fs.rmSync(file, { force: true });
+          removed.push(file);
+        }
+      } catch (err) {
+        console.error('[bridge] No se pudo limpiar lock de Chromium:', file, err.message);
+      }
+    }
+  }
+  return removed;
+}
+
+function shouldRecoverBrowserLock(message) {
+  const text = String(message || '').toLowerCase();
+  return text.includes('browser is already running');
+}
+
+function scheduleInitRetry(delayMs) {
+  if (initRetryTimer) return;
+  initRetryTimer = setTimeout(() => {
+    initRetryTimer = null;
+    safeInit();
+  }, delayMs);
+}
+
+async function tryRecoverBrowserLock(message) {
+  if (!shouldRecoverBrowserLock(message)) return false;
+  const now = Date.now();
+  if ((now - lastBrowserLockRecoveryAt) < 60000) {
+    return false;
+  }
+  lastBrowserLockRecoveryAt = now;
+  try {
+    await client.destroy();
+  } catch (_) {}
+  const removed = clearChromeSingletonLocks();
+  setBridgeState('starting', {
+    reason: 'browser_lock_recovery',
+    message: String(message || ''),
+    recovered_lock_files: removed,
+    qr: '',
+    session_ok: false
+  });
+  console.error('[bridge] Recuperando sesion bloqueada de Chromium. Locks limpiados:', removed);
+  scheduleInitRetry(3000);
+  return true;
+}
+
 async function apiFetch(url, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (POS_BOT_HOST && !headers.Host) headers.Host = POS_BOT_HOST;
@@ -391,6 +457,12 @@ async function processControlFileTick() {
   } finally {
     controlCommandBusy = false;
   }
+}
+
+function ensureRuntimeLoopsStarted() {
+  if (runtimeLoopsStarted) return;
+  runtimeLoopsStarted = true;
+  setInterval(() => { processControlFileTick().catch(() => {}); }, 1500);
 }
 
 async function refreshChatsCache() {
@@ -624,111 +696,256 @@ async function sendProductCards(targetId, text, products, outroText, bannerImage
   return sentCount;
 }
 
-async function processPromoQueueTick() {
-  if (!client.info) return;
-  const queue = readJsonFile(PROMO_QUEUE_FILE, { jobs: [] });
-  const jobs = Array.isArray(queue.jobs) ? queue.jobs : [];
-  if (!jobs.length) return;
+function promoJobEnsureMeta(job) {
+  if (!job || typeof job !== 'object') return;
+  if (!Array.isArray(job.log)) job.log = [];
+  if (typeof job.last_success_at !== 'string') job.last_success_at = '';
+  if (typeof job.last_success_summary !== 'string') job.last_success_summary = '';
+  if (typeof job.last_error_at !== 'string') job.last_error_at = '';
+  if (typeof job.last_error !== 'string') job.last_error = '';
+  if (typeof job.last_error_verbose !== 'string') job.last_error_verbose = '';
+  if (typeof job.error !== 'string') job.error = '';
+  if (typeof job.last_run_started_at !== 'string') job.last_run_started_at = '';
+  if (typeof job.last_run_finished_at !== 'string') job.last_run_finished_at = '';
+  if (typeof job.last_run_status !== 'string') job.last_run_status = '';
+  if (typeof job.last_run_summary !== 'string') job.last_run_summary = '';
+  if (typeof job.current_run_started_at !== 'string') job.current_run_started_at = '';
+  if (!Number.isFinite(Number(job.current_run_success_count))) job.current_run_success_count = 0;
+  if (!Number.isFinite(Number(job.current_run_error_count))) job.current_run_error_count = 0;
+  if (!Number.isFinite(Number(job.total_success_runs))) job.total_success_runs = 0;
+  if (!Number.isFinite(Number(job.total_failed_runs))) job.total_failed_runs = 0;
+  if (typeof job.queue_note !== 'string') job.queue_note = '';
+}
 
-  let changed = false;
-  const now = Math.floor(Date.now() / 1000);
-  const nowInfo = localDateInfo();
+function promoFormatVerboseError(err) {
+  if (!err) return 'Error desconocido';
+  const parts = [];
+  const name = String(err?.name || '').trim();
+  const message = String(err?.message || err || '').trim();
+  if (name) parts.push(`name: ${name}`);
+  if (message) parts.push(`message: ${message}`);
+  const cause = err?.cause ? String(err.cause?.message || err.cause).trim() : '';
+  if (cause) parts.push(`cause: ${cause}`);
+  const stack = String(err?.stack || '').trim();
+  if (stack) parts.push(`stack:\n${stack}`);
+  return parts.filter(Boolean).join('\n');
+}
 
-  for (const job of jobs) {
-    if (!job || typeof job !== 'object') continue;
-    if (job.status === 'done' || job.status === 'error' || job.status === 'paused') continue;
-    if ((job.next_run_at || 0) > now) continue;
-
-    const scheduled = Number(job.schedule_enabled || 0) === 1;
-    if (scheduled && Number(job.current_index || 0) === 0 && job.status !== 'running' && job.status !== 'queued') {
-      const timeOk = String(job.schedule_time || '') === nowInfo.hm;
-      const days = Array.isArray(job.schedule_days) ? job.schedule_days.map((x) => Number(x)) : [];
-      const dayOk = days.includes(nowInfo.day);
-      if (!(timeOk && dayOk)) {
-        job.status = 'scheduled';
-        job.next_run_at = now + 20;
-        changed = true;
-        continue;
-      }
-      if (String(job.last_schedule_key || '') === nowInfo.key) {
-        job.status = 'scheduled';
-        job.next_run_at = now + 20;
-        changed = true;
-        continue;
-      }
-      job.last_schedule_key = nowInfo.key;
-      job.status = 'queued';
-      job.next_run_at = now;
-      changed = true;
-    }
-
-    const targets = Array.isArray(job.targets) ? job.targets : [];
-    const products = Array.isArray(job.products) ? job.products : [];
-    const idx = Number(job.current_index || 0);
-
-    if (idx >= targets.length) {
-      if (scheduled) {
-        job.status = 'scheduled';
-        job.current_index = 0;
-        job.next_run_at = now + 20;
-      } else {
-        job.status = 'done';
-        job.done_at = new Date().toISOString();
-      }
-      changed = true;
-      continue;
-    }
-
-    const target = targets[idx] || {};
-    const targetId = String(target.id || '').trim();
-    const targetName = String(target.name || targetId).trim();
-    if (!targetId) {
-      job.log = Array.isArray(job.log) ? job.log : [];
-      job.log.push({ at: new Date().toISOString(), target_id: '', target_name: '', ok: false, messages_sent: 0, error: 'target_id vacío' });
-      job.current_index = idx + 1;
-      job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
-      changed = true;
-      continue;
-    }
-
-    try {
-      const sentCount = await sendProductCards(targetId, job.text || '', products, job.outro_text || '', job.banner_images || []);
-      job.log = Array.isArray(job.log) ? job.log : [];
-      job.log.push({
-        at: new Date().toISOString(),
-        target_id: targetId,
-        target_name: targetName,
-        ok: true,
-        messages_sent: sentCount,
-        error: ''
-      });
-      job.current_index = idx + 1;
-      if (job.current_index >= targets.length) {
-        job.status = 'done';
-        job.done_at = new Date().toISOString();
-      } else {
-        job.status = 'running';
-        job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
-      }
-      changed = true;
-    } catch (err) {
-      job.log = Array.isArray(job.log) ? job.log : [];
-      job.log.push({
-        at: new Date().toISOString(),
-        target_id: targetId,
-        target_name: targetName,
-        ok: false,
-        messages_sent: 0,
-        error: String(err.message || err)
-      });
-      job.status = 'error';
-      job.error = String(err.message || err);
-      changed = true;
-    }
+function promoBeginRun(job, nowIso) {
+  promoJobEnsureMeta(job);
+  if (!job.current_run_started_at) {
+    job.current_run_started_at = nowIso;
+    job.current_run_success_count = 0;
+    job.current_run_error_count = 0;
+    job.last_run_started_at = nowIso;
   }
+}
 
-  if (changed) {
-    writeJsonFile(PROMO_QUEUE_FILE, { jobs });
+function promoFinalizeRun(job, now, scheduled) {
+  promoJobEnsureMeta(job);
+  const nowIso = new Date(now * 1000).toISOString();
+  const okCount = Number(job.current_run_success_count || 0);
+  const failCount = Number(job.current_run_error_count || 0);
+  const totalTargets = Array.isArray(job.targets) ? job.targets.length : 0;
+  const summary = `${okCount} OK / ${failCount} fallo(s) / ${totalTargets} destino(s)`;
+  job.last_run_finished_at = nowIso;
+  job.last_run_status = failCount > 0 ? 'error' : 'success';
+  job.last_run_summary = summary;
+  if (failCount > 0) {
+    job.total_failed_runs = Number(job.total_failed_runs || 0) + 1;
+  } else {
+    job.total_success_runs = Number(job.total_success_runs || 0) + 1;
+    job.last_success_at = nowIso;
+    job.last_success_summary = summary;
+    job.error = '';
+  }
+  job.current_run_started_at = '';
+  job.current_run_success_count = 0;
+  job.current_run_error_count = 0;
+  job.queue_note = '';
+
+  if (scheduled) {
+    job.status = 'scheduled';
+    job.current_index = 0;
+    job.next_run_at = now + 20;
+  } else if (failCount > 0) {
+    job.status = 'error';
+    job.done_at = nowIso;
+  } else {
+    job.status = 'done';
+    job.done_at = nowIso;
+  }
+}
+
+async function processPromoQueueTick() {
+  if (promoTickRunning || !client.info) return;
+  promoTickRunning = true;
+  try {
+    const queue = readJsonFile(PROMO_QUEUE_FILE, { jobs: [] });
+    const jobs = Array.isArray(queue.jobs) ? queue.jobs : [];
+    if (!jobs.length) return;
+
+    let changed = false;
+    const now = Math.floor(Date.now() / 1000);
+    const nowIso = new Date(now * 1000).toISOString();
+    const nowInfo = localDateInfo();
+
+    jobs.forEach((job) => promoJobEnsureMeta(job));
+
+    const activeCandidates = jobs.filter((job) => job && typeof job === 'object' && ['queued', 'running'].includes(String(job.status || '')));
+    activeCandidates.sort((a, b) => Number(a.next_run_at || 0) - Number(b.next_run_at || 0));
+    let activeJobId = activeCandidates[0] ? String(activeCandidates[0].id || '') : '';
+    if (activeCandidates.length > 1) {
+      for (let i = 1; i < activeCandidates.length; i += 1) {
+        const extra = activeCandidates[i];
+        extra.status = 'waiting';
+        extra.queue_note = `En espera; campaña activa: ${activeCandidates[0]?.name || activeJobId || 'otra campaña'}`;
+        extra.next_run_at = now + 20;
+        changed = true;
+      }
+    }
+
+    for (const job of jobs) {
+      if (!job || typeof job !== 'object') continue;
+      if (job.status === 'done' || job.status === 'error' || job.status === 'paused') continue;
+      if ((job.next_run_at || 0) > now) continue;
+
+      const scheduled = Number(job.schedule_enabled || 0) === 1;
+      const isCycleStart = Number(job.current_index || 0) === 0;
+      if (scheduled && isCycleStart && !['running', 'queued', 'waiting'].includes(String(job.status || ''))) {
+        const timeOk = String(job.schedule_time || '') === nowInfo.hm;
+        const days = Array.isArray(job.schedule_days) ? job.schedule_days.map((x) => Number(x)) : [];
+        const dayOk = days.includes(nowInfo.day);
+        if (!(timeOk && dayOk)) {
+          job.status = 'scheduled';
+          job.next_run_at = now + 20;
+          changed = true;
+          continue;
+        }
+        if (String(job.last_schedule_key || '') === nowInfo.key) {
+          job.status = 'scheduled';
+          job.next_run_at = now + 20;
+          changed = true;
+          continue;
+        }
+        job.last_schedule_key = nowInfo.key;
+        if (activeJobId && activeJobId !== String(job.id || '')) {
+          job.status = 'waiting';
+          job.queue_note = `Aplazada: ${activeCandidates[0]?.name || activeJobId} está en ejecución`;
+          job.next_run_at = now + 20;
+        } else {
+          job.status = 'queued';
+          job.queue_note = 'Lista para ejecutar';
+          job.next_run_at = now;
+          activeJobId = String(job.id || '');
+        }
+        changed = true;
+      }
+
+      const jobId = String(job.id || '');
+      if (activeJobId && activeJobId !== jobId) {
+        if (String(job.status || '') === 'waiting') {
+          job.queue_note = `En espera; campaña activa: ${activeCandidates[0]?.name || activeJobId || 'otra campaña'}`;
+          job.next_run_at = now + 20;
+          changed = true;
+        }
+        continue;
+      }
+
+      const targets = Array.isArray(job.targets) ? job.targets : [];
+      const products = Array.isArray(job.products) ? job.products : [];
+      const idx = Number(job.current_index || 0);
+
+      if (idx >= targets.length) {
+        promoFinalizeRun(job, now, scheduled);
+        changed = true;
+        activeJobId = '';
+        continue;
+      }
+
+      promoBeginRun(job, nowIso);
+
+      const target = targets[idx] || {};
+      const targetId = String(target.id || '').trim();
+      const targetName = String(target.name || targetId).trim();
+      if (!targetId) {
+        job.log.push({ at: nowIso, target_id: '', target_name: '', ok: false, messages_sent: 0, error: 'target_id vacío', error_verbose: 'target_id vacío en el destino actual' });
+        job.current_run_error_count = Number(job.current_run_error_count || 0) + 1;
+        job.last_error_at = nowIso;
+        job.last_error = 'target_id vacío';
+        job.last_error_verbose = 'target_id vacío en el destino actual';
+        job.error = 'target_id vacío';
+        job.current_index = idx + 1;
+        if (job.current_index >= targets.length) {
+          promoFinalizeRun(job, now, scheduled);
+          activeJobId = '';
+        } else {
+          job.status = 'running';
+          job.queue_note = `Continuando ${job.current_index}/${targets.length}`;
+          job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
+        }
+        changed = true;
+        break;
+      }
+
+      try {
+        const sentCount = await sendProductCards(targetId, job.text || '', products, job.outro_text || '', job.banner_images || []);
+        job.log.push({
+          at: nowIso,
+          target_id: targetId,
+          target_name: targetName,
+          ok: true,
+          messages_sent: sentCount,
+          error: '',
+          error_verbose: ''
+        });
+        job.current_run_success_count = Number(job.current_run_success_count || 0) + 1;
+        job.current_index = idx + 1;
+        if (job.current_index >= targets.length) {
+          promoFinalizeRun(job, now, scheduled);
+          activeJobId = '';
+        } else {
+          job.status = 'running';
+          job.queue_note = `Continuando ${job.current_index}/${targets.length}`;
+          job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
+        }
+        changed = true;
+      } catch (err) {
+        const shortError = String(err?.message || err || 'error').trim();
+        const verboseError = promoFormatVerboseError(err);
+        job.log.push({
+          at: nowIso,
+          target_id: targetId,
+          target_name: targetName,
+          ok: false,
+          messages_sent: 0,
+          error: shortError,
+          error_verbose: verboseError
+        });
+        job.current_run_error_count = Number(job.current_run_error_count || 0) + 1;
+        job.last_error_at = nowIso;
+        job.last_error = shortError;
+        job.last_error_verbose = verboseError;
+        job.error = shortError;
+        job.current_index = idx + 1;
+        if (job.current_index >= targets.length) {
+          promoFinalizeRun(job, now, scheduled);
+          activeJobId = '';
+        } else {
+          job.status = 'running';
+          job.queue_note = `Continuando tras error ${job.current_index}/${targets.length}`;
+          job.next_run_at = now + randomInt(job.min_seconds || 60, job.max_seconds || 120);
+        }
+        changed = true;
+      }
+      break;
+    }
+
+    if (changed) {
+      writeJsonFile(PROMO_QUEUE_FILE, { jobs });
+    }
+  } finally {
+    promoTickRunning = false;
   }
 }
 
@@ -908,6 +1125,7 @@ client.on('qr', (qr) => {
 client.on('ready', () => {
   setBridgeState('ready', { qr: '', session_ok: true, ...getClientIdentity() });
   console.log('[bridge] WhatsApp Web conectado y listo.');
+  ensureRuntimeLoopsStarted();
   if (!bgLoopsStarted) {
     bgLoopsStarted = true;
     refreshChatsCache();
@@ -915,7 +1133,6 @@ client.on('ready', () => {
     setInterval(() => { processPromoQueueTick().catch(() => {}); }, 5000);
     setInterval(() => { processOutboundQueueTick().catch(() => {}); }, 3000);
     setInterval(() => { scanDueJobs().catch(() => {}); }, 60000);
-    setInterval(() => { processControlFileTick().catch(() => {}); }, 1500);
     setInterval(() => {
       const connected = !!client.info;
       if (connected) {
@@ -1003,6 +1220,7 @@ process.on('uncaughtException', (err) => {
   }
 });
 
+ensureRuntimeLoopsStarted();
 async function safeInit() {
   setBridgeState('starting', { session_ok: false });
   try {
@@ -1010,6 +1228,9 @@ async function safeInit() {
   } catch (err) {
     const msg = String(err?.message || err || 'init_error');
     console.error('[bridge] initialize error:', msg);
+    if (await tryRecoverBrowserLock(msg)) {
+      return;
+    }
     setBridgeState('disconnected', { reason: 'init_error', message: msg, qr: '', session_ok: false });
     if (!initRetryTimer) {
       initRetryTimer = setTimeout(() => {

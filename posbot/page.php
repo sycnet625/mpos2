@@ -441,8 +441,8 @@
                 </div>
                 <div class="table-responsive" style="max-height:260px">
                     <table class="table table-sm mb-0">
-                        <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th><th>Acciones</th></tr></thead>
-                        <tbody id="promoRows"><tr><td colspan="7" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
+                        <thead class="table-light"><tr><th>Fecha</th><th>Campaña</th><th>Grupo</th><th>Horario</th><th>Estado</th><th>Progreso</th><th>Último OK</th><th>Último error</th><th>Acciones</th></tr></thead>
+                        <tbody id="promoRows"><tr><td colspan="9" class="text-center text-muted p-3">Sin campañas</td></tr></tbody>
                     </table>
                 </div>
             </div>

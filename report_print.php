@@ -11,11 +11,20 @@ $title = "";
 $tickets = [];
 $summaryCats = [];
 $finanzas = ['venta'=>0, 'costo'=>0];
+$cashSessions = [];
 
 // Variables para Devoluciones
 $refundItems = [];
 $totalRefundQty = 0;
 $totalRefundVal = 0;
+
+function ticket_session_id(array $ticket): int {
+    $sessionId = intval($ticket['id_sesion_caja'] ?? 0);
+    if ($sessionId > 0) {
+        return $sessionId;
+    }
+    return intval($ticket['id_caja'] ?? 0);
+}
 
 // LOGICA SEGUN MODO
 if ($mode === 'session') {
@@ -25,12 +34,12 @@ if ($mode === 'session') {
     $sesion = $stmtS->fetch(PDO::FETCH_ASSOC);
     $title = "Cierre Caja #" . $id . " - " . ($sesion['nombre_cajero'] ?? 'Cajero');
 
-    $stmtT = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id_caja = ? ORDER BY id ASC");
-    $stmtT->execute([$id]);
+    $stmtT = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE (id_sesion_caja = ? OR id_caja = ?) ORDER BY id ASC");
+    $stmtT->execute([$id, $id]);
     $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 
-    $whereClause = "v.id_caja = ?";
-    $params = [$id];
+    $whereClause = "(v.id_sesion_caja = ? OR v.id_caja = ?)";
+    $params = [$id, $id];
 
 } else {
     $start = $_GET['start']; $end = $_GET['end'];
@@ -96,6 +105,81 @@ $sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.c
 $stmtProds = $pdo->prepare($sqlProds);
 $stmtProds->execute($params);
 $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
+
+$ticketDetailsBySale = [];
+if (!empty($tickets)) {
+    $saleIds = array_map(static function ($ticket) {
+        return intval($ticket['id']);
+    }, $tickets);
+    $placeholders = implode(',', array_fill(0, count($saleIds), '?'));
+    $stmtTicketDetails = $pdo->prepare(
+        "SELECT id_venta_cabecera, nombre_producto, cantidad, precio
+         FROM ventas_detalle
+         WHERE id_venta_cabecera IN ($placeholders)
+         ORDER BY id_venta_cabecera ASC, id ASC"
+    );
+    $stmtTicketDetails->execute($saleIds);
+    foreach ($stmtTicketDetails->fetchAll(PDO::FETCH_ASSOC) as $detail) {
+        $saleId = intval($detail['id_venta_cabecera']);
+        if (!isset($ticketDetailsBySale[$saleId])) {
+            $ticketDetailsBySale[$saleId] = [];
+        }
+        $ticketDetailsBySale[$saleId][] = $detail;
+    }
+
+    foreach ($tickets as $ticket) {
+        $sessionId = ticket_session_id($ticket);
+        if ($sessionId <= 0) {
+            continue;
+        }
+        if (!isset($cashSessions[$sessionId])) {
+            $cashSessions[$sessionId] = [
+                'id' => $sessionId,
+                'nombre_cajero' => $ticket['nombre_cajero'] ?? '',
+                'fecha_apertura' => null,
+                'fecha_cierre' => null,
+                'fecha_contable' => null,
+                'estado' => '',
+                'tickets' => [],
+                'total' => 0.0,
+            ];
+        }
+        $cashSessions[$sessionId]['tickets'][] = $ticket;
+        $cashSessions[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+    }
+
+    if (!empty($cashSessions)) {
+        $sessionIds = array_keys($cashSessions);
+        $sessionPlaceholders = implode(',', array_fill(0, count($sessionIds), '?'));
+        $stmtSessions = $pdo->prepare(
+            "SELECT id, nombre_cajero, fecha_apertura, fecha_cierre, fecha_contable, estado
+             FROM caja_sesiones
+             WHERE id IN ($sessionPlaceholders)
+             ORDER BY fecha_apertura ASC, id ASC"
+        );
+        $stmtSessions->execute($sessionIds);
+        foreach ($stmtSessions->fetchAll(PDO::FETCH_ASSOC) as $sessionRow) {
+            $sessionId = intval($sessionRow['id']);
+            if (!isset($cashSessions[$sessionId])) {
+                continue;
+            }
+            $cashSessions[$sessionId]['nombre_cajero'] = $sessionRow['nombre_cajero'] ?? $cashSessions[$sessionId]['nombre_cajero'];
+            $cashSessions[$sessionId]['fecha_apertura'] = $sessionRow['fecha_apertura'] ?? null;
+            $cashSessions[$sessionId]['fecha_cierre'] = $sessionRow['fecha_cierre'] ?? null;
+            $cashSessions[$sessionId]['fecha_contable'] = $sessionRow['fecha_contable'] ?? null;
+            $cashSessions[$sessionId]['estado'] = $sessionRow['estado'] ?? '';
+        }
+
+        uasort($cashSessions, static function ($a, $b) {
+            $left = strtotime($a['fecha_apertura'] ?? '') ?: 0;
+            $right = strtotime($b['fecha_apertura'] ?? '') ?: 0;
+            if ($left === $right) {
+                return $a['id'] <=> $b['id'];
+            }
+            return $left <=> $right;
+        });
+    }
+}
 ?>
 
 <!DOCTYPE html>
@@ -128,6 +212,12 @@ $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
         .btn { padding: 10px 20px; background: #333; color: white; border: none; cursor: pointer; border-radius: 5px; }
 
         .cat-header { background-color: #e9ecef; font-weight: bold; text-transform: uppercase; font-size: 0.8rem; padding-top: 10px; padding-bottom: 5px; }
+        .session-card { border: 1px solid #dbe4f0; border-radius: 8px; margin-bottom: 18px; overflow: hidden; page-break-inside: avoid; }
+        .session-head { background: #edf4ff; padding: 10px 12px; border-bottom: 1px solid #dbe4f0; }
+        .session-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.8rem; color: #4b5563; margin-top: 4px; }
+        .ticket-detail-table { margin-bottom: 0; font-size: 0.82rem; }
+        .ticket-items { color: #555; font-size: 0.78rem; line-height: 1.45; }
+        .session-total-row td { background: #f8fafc; font-weight: bold; }
 
         @media print { body { background: white; padding: 0; } .page { box-shadow: none; margin: 0; padding: 0; width: 100%; } .actions { display: none; } }
     </style>
@@ -254,6 +344,87 @@ $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
             <?php endforeach; ?>
         </tbody>
     </table>
+
+    <?php if (!empty($cashSessions)): ?>
+    <h4 style="margin-top: 30px;">🗂️ Resumen por Sesión de Caja</h4>
+    <?php foreach ($cashSessions as $session): ?>
+    <div class="session-card">
+        <div class="session-head">
+            <div class="fw-bold">
+                Sesión #<?php echo intval($session['id']); ?>
+                <?php if (!empty($session['nombre_cajero'])): ?>
+                    - <?php echo htmlspecialchars($session['nombre_cajero']); ?>
+                <?php endif; ?>
+            </div>
+            <div class="session-meta">
+                <span>Fecha contable: <?php echo !empty($session['fecha_contable']) ? date('d/m/Y', strtotime($session['fecha_contable'])) : 'N/D'; ?></span>
+                <span>Apertura: <?php echo !empty($session['fecha_apertura']) ? date('d/m/Y H:i', strtotime($session['fecha_apertura'])) : 'N/D'; ?></span>
+                <span>Cierre: <?php echo !empty($session['fecha_cierre']) ? date('d/m/Y H:i', strtotime($session['fecha_cierre'])) : 'Abierta'; ?></span>
+                <span>Estado: <?php echo htmlspecialchars($session['estado'] ?: 'N/D'); ?></span>
+                <span>Tickets: <?php echo count($session['tickets']); ?></span>
+                <span>Total: $<?php echo number_format($session['total'], 2); ?></span>
+            </div>
+        </div>
+        <table class="ticket-detail-table">
+            <thead>
+                <tr>
+                    <th>#Ticket</th>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Detalle agrupado</th>
+                    <th class="text-end">Valor</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($session['tickets'] as $ticket): ?>
+                <?php
+                    $ticketId = intval($ticket['id']);
+                    $details = $ticketDetailsBySale[$ticketId] ?? [];
+                    $groupedItems = [];
+                    foreach ($details as $detail) {
+                        $name = trim((string)($detail['nombre_producto'] ?? 'Producto'));
+                        $qty = floatval($detail['cantidad'] ?? 0);
+                        $price = floatval($detail['precio'] ?? 0);
+                        $key = $name . '|' . number_format($price, 2, '.', '');
+                        if (!isset($groupedItems[$key])) {
+                            $groupedItems[$key] = [
+                                'name' => $name,
+                                'qty' => 0.0,
+                                'price' => $price,
+                            ];
+                        }
+                        $groupedItems[$key]['qty'] += $qty;
+                    }
+                ?>
+                <tr>
+                    <td><?php echo $ticketId; ?></td>
+                    <td><?php echo date('d/m H:i', strtotime($ticket['fecha'])); ?></td>
+                    <td><?php echo htmlspecialchars($ticket['cliente_nombre'] ?: 'Cliente general'); ?></td>
+                    <td class="ticket-items">
+                        <?php if (empty($groupedItems)): ?>
+                            Sin detalle
+                        <?php else: ?>
+                            <?php
+                            $chunks = [];
+                            foreach ($groupedItems as $item) {
+                                $chunks[] = htmlspecialchars($item['name']) . ' x' . number_format($item['qty'], 2) . ' @ $' . number_format($item['price'], 2);
+                            }
+                            echo implode('<br>', $chunks);
+                            ?>
+                        <?php endif; ?>
+                    </td>
+                    <td class="text-end fw-bold">$<?php echo number_format($ticket['total'], 2); ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <tr class="session-total-row">
+                    <td colspan="4">Total sesión #<?php echo intval($session['id']); ?></td>
+                    <td class="text-end">$<?php echo number_format($session['total'], 2); ?></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <?php endforeach; ?>
+    <?php endif; ?>
 
     <h4 style="margin-top: 30px;">🛒 Resumen Detallado de Productos Vendidos</h4>
     <table>

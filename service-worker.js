@@ -311,27 +311,6 @@ self.addEventListener('notificationclick', event => {
 
     notification.close();
 
-    if (action === 'approve' || action === 'deny') {
-        const response = (action === 'approve') ? 'y' : 'n';
-        
-        event.waitUntil(
-            fetch(BASE + 'palweb_ai_api.php?action=approve_action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    chat_id: data.chat_id,
-                    agente: data.agente,
-                    response: response
-                })
-            }).then(r => {
-                console.log('[SW Action] Respuesta enviada:', response);
-            }).catch(err => {
-                console.error('[SW Action] Error enviando respuesta:', err);
-            })
-        );
-        return;
-    }
-
     // Comportamiento normal: abrir/enfocar app
     const target = data.url || BASE;
     event.waitUntil(

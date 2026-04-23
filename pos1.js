@@ -1224,6 +1224,8 @@ function renderCart() {
     if (lbl) {
         if (globalDiscountPct > 0) {
             lbl.innerHTML = '<small class="text-muted fs-6"><s>$' + sub.toFixed(2) + '</s> -' + globalDiscountPct + '%</small><br>$' + total.toFixed(2);
+        } else if (globalDiscountPct < 0) {
+            lbl.innerHTML = '<small class="text-muted fs-6"><s>$' + sub.toFixed(2) + '</s> +' + Math.abs(globalDiscountPct) + '%</small><br>$' + total.toFixed(2);
         } else {
             lbl.innerText = '$' + total.toFixed(2);
         }
@@ -1367,10 +1369,10 @@ function applyDiscount() {
 
 function applyGlobalDiscount() { 
     if(cart.length === 0) return; 
-    let p = prompt("% Descuento GLOBAL:", globalDiscountPct); 
+    let p = prompt("% Total (negativo = recargo):", globalDiscountPct); 
     if(p !== null) { 
-        let v = parseFloat(p)||0; 
-        if(v<0||v>100) return; 
+        let v = parseFloat(p);
+        if(!Number.isFinite(v) || v > 100) return;
         globalDiscountPct = v; 
         renderCart(); 
         Synth.discount();
@@ -2045,21 +2047,57 @@ window.deleteOrderTemplate = async function(templateId) {
     }
 };
 
-function populateRegularClientSelect() {
+async function populateRegularClientSelect() {
     const select = document.getElementById('regularClientSelect');
     if (!select) return;
 
     const current = select.value;
+    select.innerHTML = '<option value="">Cargando clientes...</option>';
+
     const seen = new Set();
+    const mergedClients = [];
+    const addClient = (client) => {
+        const name = String(client?.nombre || '').trim();
+        if (!name) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        mergedClients.push({
+            nombre: name,
+            telefono: String(client?.telefono || '').trim(),
+            direccion: String(client?.direccion || '').trim(),
+            last_sale_id: Number(client?.last_sale_id || 0),
+            last_sale_date: String(client?.last_sale_date || '').trim(),
+        });
+    };
+
+    try {
+        const resp = await fetch('pos_order_templates.php?action=recent_clients&limit=50', { cache: 'no-store' });
+        const data = await resp.json();
+        if (data.status === 'success' && Array.isArray(data.clients)) {
+            data.clients.forEach(addClient);
+        }
+    } catch (error) {
+        console.warn('No se pudieron cargar clientes recientes', error);
+    }
+
+    (window.CLIENTS_DATA || []).forEach(addClient);
+
     const options = ['<option value="">Selecciona un cliente...</option>'];
-    (window.CLIENTS_DATA || []).forEach(client => {
-        const name = String(client.nombre || '').trim();
-        if (!name || seen.has(name)) return;
-        seen.add(name);
-        options.push(`<option value="${escHtml(name)}">${escHtml(name)}</option>`);
+    mergedClients.forEach(client => {
+        let dateLabel = '';
+        if (client.last_sale_date) {
+            const rawDate = client.last_sale_date.substring(0, 10);
+            const parts = rawDate.split('-');
+            dateLabel = parts.length === 3 ? ` · ${parts[2]}/${parts[1]}/${parts[0]}` : ` · ${rawDate}`;
+        }
+        const saleLabel = client.last_sale_id > 0 ? ` · Últ. #${client.last_sale_id}${dateLabel}` : '';
+        options.push(
+            `<option value="${escHtml(client.nombre)}" data-tel="${escHtml(client.telefono)}" data-dir="${escHtml(client.direccion)}">${escHtml(client.nombre)}${escHtml(saleLabel)}</option>`
+        );
     });
     select.innerHTML = options.join('');
-    select.value = current && seen.has(current) ? current : '';
+    select.value = current && seen.has(String(current).trim().toLowerCase()) ? current : '';
 }
 
 window.openOrderTemplatesModal = function() {

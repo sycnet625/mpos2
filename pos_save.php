@@ -15,6 +15,7 @@ require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'push_notify.php';
 require_once 'pos_audit.php';
+require_once 'combo_helper.php';
 
 // Verificar motor de inventario
 $kardexAvailable = false;
@@ -191,6 +192,8 @@ try {
 
     $itemsCocina = [];
 
+    $resolvedSale = combo_expand_sale_items($pdo, $idEmpresa, $input['items'] ?? []);
+
     foreach ($input['items'] as $item) {
         $sku = $item['id'];
         $qty = floatval($item['qty']);
@@ -200,40 +203,41 @@ try {
         // Insertar Detalle
         $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku]);
 
-        // Verificar Tipo Producto
-        $stmtProd = $pdo->prepare("SELECT es_servicio, es_elaborado FROM productos WHERE codigo = ?");
-        $stmtProd->execute([$sku]);
-        $prodData = $stmtProd->fetch(PDO::FETCH_ASSOC);
-        
-        $esServicio = $prodData ? intval($prodData['es_servicio']) : 0;
-        $esElaborado = $prodData ? intval($prodData['es_elaborado']) : 0;
+    }
 
-        // Mover Inventario (Solo productos físicos)
-        if ($esServicio === 0) {
-            $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
-            $stmtStock->execute([$sku, $idAlmacen]);
-            $stockActual = floatval($stmtStock->fetchColumn());
+    $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+    foreach ($resolvedSale['inventory_items'] as $resolvedItem) {
+        $realSku = $resolvedItem['id'];
+        $realQty = floatval($resolvedItem['qty'] ?? 0);
+        $realName = safe_str($resolvedItem['nombre'] ?? $realSku, 150);
+        if ($realQty <= 0) {
+            continue;
+        }
 
-            if ($esReserva) {
-                // En reservas NO se deduce kardex; solo se marca si hay déficit
-                if ($stockActual < $qty) {
-                    $sinExistencia = 1;
-                }
-            } else {
-                // Venta normal: verificar stock y registrar movimiento
-                if ($stockActual < $qty) {
-                    throw new Exception("Stock insuficiente para '" . $name . "'. Disponible: " . $stockActual . ". Requerido: " . $qty);
-                }
-                if ($kardexAvailable) {
-                    $kardex->registrarVenta($sku, $qty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
-                }
+        $stmtStock->execute([$realSku, $idAlmacen]);
+        $stockActual = floatval($stmtStock->fetchColumn());
+
+        if ($esReserva) {
+            if ($stockActual < $realQty) {
+                $sinExistencia = 1;
             }
+            continue;
         }
 
-        // Comanda (Elaborados)
-        if ($esElaborado === 1) {
-            $itemsCocina[] = ['qty' => $qty, 'name' => $name, 'note' => safe_str($item['note'] ?? '', 100)];
+        if ($stockActual < $realQty) {
+            throw new Exception("Stock insuficiente para '" . $realName . "'. Disponible: " . $stockActual . ". Requerido: " . $realQty);
         }
+        if ($kardexAvailable) {
+            $kardex->registrarVenta($realSku, $realQty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
+        }
+    }
+
+    foreach ($resolvedSale['kitchen_items'] as $kitchenItem) {
+        $itemsCocina[] = [
+            'qty' => floatval($kitchenItem['qty'] ?? 0),
+            'name' => safe_str($kitchenItem['name'] ?? '', 150),
+            'note' => safe_str($kitchenItem['note'] ?? '', 100),
+        ];
     }
 
     // E. Guardar Comanda
