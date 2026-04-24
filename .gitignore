@@ -1,5 +1,30 @@
 .aider*
 
+# Configuration and sensitive files
+pos.cfg
+.env
+
+# Logs and runtime data
+*.log
+weather_cache.json
+production_debug.log
+debug.log
+
+# Temporary and backup files
+*.bak
+*.save
+*.save.*
+backup_*.sql
+palweb_central*.sql
+
+# System and environment folders
+.npm/
+.local/
+.config/
+.bun/
+snap/
+node_modules/
+
 # Build/runtime caches
 wa_web_bridge/.cache/
 **/.cache/puppeteer/
