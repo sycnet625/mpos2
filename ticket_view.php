@@ -8,6 +8,10 @@ require_once 'config_loader.php';
 
 $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die("ID inválido.");
+$markupPct = isset($_GET['markup_pct']) ? round(floatval($_GET['markup_pct']), 2) : 0.0;
+if ($markupPct < 0) $markupPct = 0.0;
+$markupFactor = 1 + ($markupPct / 100);
+$autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
 
 try {
     $stmtHead = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
@@ -57,6 +61,22 @@ try {
         $paymentBreakdown = [];
     }
 } catch (Exception $e) { die("Error DB."); }
+
+$subtotalItemsOriginal = $subtotalItems;
+$subtotalItemsDisplay = 0.0;
+foreach ($items as &$item) {
+    $precioOriginal = floatval($item['precio']);
+    $precioDisplay = round($precioOriginal * $markupFactor, 2);
+    $item['precio_original'] = $precioOriginal;
+    $item['precio_display'] = $precioDisplay;
+    $item['subtotal_display'] = round(floatval($item['cantidad']) * $precioDisplay, 2);
+    $subtotalItemsDisplay += $item['subtotal_display'];
+}
+unset($item);
+
+$totalDisplay = round($subtotalItemsDisplay + $costoEnvio, 2);
+$abonoDisplay = floatval($venta['abono'] ?? 0);
+$pendienteDisplay = round($totalDisplay - $abonoDisplay, 2);
 
 $viaQr = ($_GET['source'] ?? '') === 'qr';
 
@@ -218,6 +238,9 @@ $canalMap = [
             <button onclick="printWithFormat('a4')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #198754; border-radius:5px; background:#198754; color:#fff; font-family:monospace;">
                 📄 A4 Deskjet
             </button>
+            <button onclick="printWithMarkup(20)" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #dc3545; border-radius:5px; background:#dc3545; color:#fff; font-weight:700; font-family:monospace;">
+                🧾 Imprimir +20%
+            </button>
             <a href="ticket_to_invoice.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6f42c1; border-radius:5px; background:#6f42c1; color:#fff; font-family:monospace; text-decoration:none; display:inline-block;">
                 📋 Ver como Factura
             </a>
@@ -248,6 +271,12 @@ $canalMap = [
         <?php endif; ?>
         <small><?php echo htmlspecialchars($config['direccion']); ?></small><br>
         <small>Tel: <?php echo htmlspecialchars($config['telefono']); ?></small>
+        <?php if ($markupPct > 0): ?>
+        <div style="margin-top:6px; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">
+            IMPRESIÓN ESPECIAL: PRECIOS CON +<?php echo number_format($markupPct, 0); ?>%<br>
+            <span style="font-weight:normal;">Solo visual. La venta y la contabilidad conservan el precio original.</span>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="border-top border-bottom mt-2">
@@ -319,13 +348,13 @@ $canalMap = [
             <?php 
             $itemCount = 0;
             foreach($items as $item): 
-                $sub = $item['cantidad'] * $item['precio']; 
+                $sub = $item['subtotal_display'];
                 $itemCount++;
             ?>
             <tr>
                 <td><?php echo number_format($item['cantidad'], 2); ?></td>
                 <td><?php echo htmlspecialchars($item['nombre_producto']); ?></td>
-                <td align="right">$<?php echo number_format($item['precio'], 2); ?></td>
+                <td align="right">$<?php echo number_format($item['precio_display'], 2); ?></td>
                 <td align="right" class="fw-bold">$<?php echo number_format($sub, 2); ?></td>
             </tr>
             <?php endforeach; ?>
@@ -344,23 +373,23 @@ $canalMap = [
         <table>
             <?php if($venta['tipo_servicio'] === 'reserva' && !empty($venta['abono'])): ?>
                 <?php if ($hayEnvio): ?>
-                    <tr><td>Subtotal productos:</td><td class="text-right">$<?php echo number_format($subtotalItems, 2); ?></td></tr>
+                    <tr><td>Subtotal productos:</td><td class="text-right">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td></tr>
                     <tr><td>Costo mensajería:</td><td class="text-right fw-bold">$<?php echo number_format($costoEnvio, 2); ?></td></tr>
                     <tr style="border-top: 1px dashed #000;"><td colspan="2"></td></tr>
                 <?php endif; ?>
-                <tr><td><?php echo $hayEnvio ? 'Total pedido:' : 'Subtotal:'; ?></td><td class="text-right">$<?php echo number_format($venta['total'], 2); ?></td></tr>
-                <tr><td>Abono Recibido:</td><td class="text-right fw-bold" style="color: #28a745;">-$<?php echo number_format($venta['abono'] ?? 0, 2); ?></td></tr>
+                <tr><td><?php echo $hayEnvio ? 'Total pedido:' : 'Subtotal:'; ?></td><td class="text-right">$<?php echo number_format($totalDisplay, 2); ?></td></tr>
+                <tr><td>Abono Recibido:</td><td class="text-right fw-bold" style="color: #28a745;">-$<?php echo number_format($abonoDisplay, 2); ?></td></tr>
                 <tr style="border-top: 2px solid #000; padding-top: 5px;">
                     <td class="fw-bold" style="font-size:14px;">PENDIENTE:</td>
                     <td class="text-right fw-bold" style="font-size:18px; color: #dc3545;">
-                        $<?php echo number_format($venta['total'] - ($venta['abono'] ?? 0), 2); ?>
+                        $<?php echo number_format($pendienteDisplay, 2); ?>
                     </td>
                 </tr>
             <?php else: ?>
                 <?php if ($hayEnvio): ?>
                     <tr>
                         <td>Subtotal productos:</td>
-                        <td class="text-right">$<?php echo number_format($subtotalItems, 2); ?></td>
+                        <td class="text-right">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td>
                     </tr>
                     <tr>
                         <td>Costo mensajería:</td>
@@ -371,9 +400,14 @@ $canalMap = [
                 <tr>
                     <td class="fw-bold" style="font-size:14px;">TOTAL A PAGAR:</td>
                     <td class="text-right fw-bold" style="font-size:20px;">
-                        $<?php echo number_format($venta['total'], 2); ?>
+                        $<?php echo number_format($totalDisplay, 2); ?>
                     </td>
                 </tr>
+                <?php if ($markupPct > 0): ?>
+                    <tr><td colspan="2" class="text-center" style="font-size:10px; padding-top: 4px; border-top: 1px dashed #000;">
+                        Total original POS: <strong>$<?php echo number_format($venta['total'], 2); ?></strong>
+                    </td></tr>
+                <?php endif; ?>
                 <?php if (!empty($venta['metodo_pago'])): ?>
                     <tr><td colspan="2" class="text-center" style="font-size:11px; padding-top: 5px; border-top: 1px dashed #000;">
                         💳 Pagado con: <strong><?php echo htmlspecialchars($venta['metodo_pago']); ?></strong>
@@ -508,6 +542,21 @@ function printWithFormat(fmt) {
     document.head.appendChild(s);
     window.print();
 }
+
+function printWithMarkup(pct) {
+    const url = new URL(window.location.href);
+    url.searchParams.set('markup_pct', String(pct));
+    url.searchParams.set('autoprint', '1');
+    window.open(url.toString(), '_blank', 'width=420,height=800');
+}
+
+<?php if ($autoPrint): ?>
+window.addEventListener('load', function () {
+    setTimeout(function () {
+        printWithFormat('80mm');
+    }, 250);
+});
+<?php endif; ?>
 
 // ===== WHATSAPP MODAL =====
 function openWhatsAppModal(idVenta) {

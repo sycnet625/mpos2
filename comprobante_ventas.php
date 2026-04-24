@@ -21,6 +21,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 }
 
 $idVenta = isset($_GET['id']) ? intval($_GET['id']) : null;
+$markupPct = isset($_GET['markup_pct']) ? max(0, round(floatval($_GET['markup_pct']), 2)) : 0.0;
 
 if (!$idVenta) {
     die("<h2>❌ Error</h2><p>No se especificó ID de venta.</p><p><a href='dashboard.php'>Volver al dashboard</a></p>");
@@ -40,7 +41,7 @@ try {
     }
 
     // Mostrar HTML (default)
-    echo $generator->generarHTML($idVenta);
+    echo $generator->generarHTML($idVenta, $markupPct);
 
 } catch (Throwable $e) {
     echo "<h2>❌ Error al generar comprobante</h2>";

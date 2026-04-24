@@ -683,6 +683,7 @@ try {
         .cart-item.selected { background: #e8f0fe; border-left: 4px solid #0d6efd; }
         .cart-note { font-size: 0.75rem; color: #d63384; font-style: italic; display: block; }
         .discount-tag { font-size: 0.7rem; background: #dc3545; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 5px; }
+        .price-origin-tag { font-size: 0.68rem; background: #d9f7ff; color: #0b7285; padding: 1px 5px; border-radius: 999px; margin-left: 5px; font-weight: 700; border: 1px solid #9eeaf9; }
         .pin-brand-logo {
             width: 203px; height: 76px; object-fit: cover; border-radius: 18px; padding: 6px;
             background: rgba(255,255,255,0.95); border: 1px solid #dbe3ee; box-shadow: 0 12px 28px rgba(15,23,42,.12);
@@ -1787,19 +1788,24 @@ window.updateCartBackground = function (sucursalId) {
                 <div class="d-flex flex-column gap-2">
                     <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="sucursal"
                         style="border-radius:12px; border:2px solid #0dcaf0; background:#e0f9fd">
-                        <i class="fas fa-store me-2 text-info"></i>Precio de esta Sucursal
+                        <i class="fas fa-store me-2 text-info"></i>Precio de Venta Normal
                         <div class="small fw-normal text-muted mt-1">Usa el precio específico de la sucursal. Si no hay uno definido, usa el precio global.</div>
                     </button>
                     <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="mayorista_suc"
                         style="border-radius:12px; border:2px solid #ffc107; background:#fffbe6">
-                        <i class="fas fa-tags me-2 text-warning"></i>Mayorista de esta Sucursal
+                        <i class="fas fa-tags me-2 text-warning"></i>Precio Mayorista
                         <div class="small fw-normal text-muted mt-1">Precio mayorista de la sucursal. Si no hay uno, usa el mayorista global y si tampoco, el precio general.</div>
                     </button>
-                    <button class="btn fw-bold text-start px-4 py-3 price-mode-opt" data-mode="global"
-                        style="border-radius:12px; border:2px solid #6c757d; background:#f8f9fa">
-                        <i class="fas fa-globe me-2 text-secondary"></i>Precio Global
-                        <div class="small fw-normal text-muted mt-1">Precio principal del catálogo, igual para todas las sucursales.</div>
-                    </button>
+                    <div class="px-4 py-3" style="border-radius:12px; border:2px solid #dc3545; background:#fff5f5;">
+                        <div class="fw-bold mb-2"><i class="fas fa-percent me-2 text-danger"></i>Porcentaje sobre precio base</div>
+                        <div class="small text-muted mb-2">Aplica un porcentaje al precio de venta normal. Puede ser negativo o positivo.</div>
+                        <div class="input-group input-group-sm mb-2">
+                            <span class="input-group-text">%</span>
+                            <input type="number" class="form-control" id="priceAdjustPct" step="0.01" min="-99.99" max="999.99" value="0">
+                            <button type="button" class="btn btn-danger fw-bold" id="btnApplyCustomPriceMode">Usar %</button>
+                        </div>
+                        <div class="small fw-semibold text-danger" id="priceAdjustHint">Se aplicará 0% sobre el precio de venta normal.</div>
+                    </div>
                 </div>
             </div>
         </div>

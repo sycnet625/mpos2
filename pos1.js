@@ -9,34 +9,80 @@ const PARKED_ORDERS_KEY = 'pos_parked_orders';
 // ==========================================
 // MODO DE PRECIO
 // ==========================================
-// 'global'       → p.precio_global  (precio principal del producto)
-// 'sucursal'     → p.precio_suc     (precio venta de la sucursal, con fallback a global)
-// 'mayorista_suc'→ p.precio_mayorista_suc (mayorista de la sucursal, con fallback a global)
+// 'sucursal'      → precio venta normal de la sucursal, con fallback a global
+// 'mayorista_suc' → precio mayorista de la sucursal, con fallback
+// 'custom_pct'    → porcentaje manual aplicado al precio base normal
 let priceMode = localStorage.getItem('pos_price_mode') || 'sucursal';
+let priceAdjustPct = parseFloat(localStorage.getItem('pos_price_adjust_pct') || '0');
+if (!Number.isFinite(priceAdjustPct)) priceAdjustPct = 0;
 
-function getPrice(p) {
-    if (priceMode === 'global')        return parseFloat(p.precio_global        || p.precio || 0);
-    if (priceMode === 'mayorista_suc') return parseFloat(p.precio_mayorista_suc || p.precio_suc || p.precio_global || p.precio || 0);
-    return parseFloat(p.precio_suc || p.precio_global || p.precio || 0); // 'sucursal' (default)
+function getBaseSalePrice(p) {
+    return parseFloat(p.precio_suc || p.precio_global || p.precio || 0);
 }
 
-const PRICE_MODE_LABELS = {
-    sucursal:      'Suc.',
-    mayorista_suc: 'Mayor.',
-    global:        'Global'
-};
+function getWholesalePrice(p) {
+    return parseFloat(p.precio_mayorista_suc || p.precio_suc || p.precio_global || p.precio || 0);
+}
 
-function setPriceMode(mode) {
+function getPrice(p) {
+    if (priceMode === 'mayorista_suc') return getWholesalePrice(p);
+    if (priceMode === 'custom_pct') {
+        const base = getBaseSalePrice(p);
+        return +(base * (1 + (priceAdjustPct / 100))).toFixed(2);
+    }
+    return getBaseSalePrice(p);
+}
+
+function getPriceModeLabel() {
+    if (priceMode === 'mayorista_suc') return 'Mayor.';
+    if (priceMode === 'custom_pct') {
+        const pct = Number.isFinite(priceAdjustPct) ? priceAdjustPct : 0;
+        const sign = pct > 0 ? '+' : '';
+        return sign + pct + '%';
+    }
+    return 'Venta';
+}
+
+function getCartPriceOriginBadge() {
+    if (priceMode === 'mayorista_suc') {
+        return '<span class="price-origin-tag">Mayorista</span>';
+    }
+    if (priceMode === 'custom_pct') {
+        const pct = Number.isFinite(priceAdjustPct) ? priceAdjustPct : 0;
+        const sign = pct > 0 ? '+' : '';
+        return '<span class="price-origin-tag">' + sign + pct + '%</span>';
+    }
+    return '<span class="price-origin-tag">Venta</span>';
+}
+
+function setPriceMode(mode, pctOverride) {
     priceMode = mode;
+    if (mode === 'custom_pct' && Number.isFinite(pctOverride)) {
+        priceAdjustPct = pctOverride;
+    }
     localStorage.setItem('pos_price_mode', mode);
+    localStorage.setItem('pos_price_adjust_pct', String(priceAdjustPct));
+    recalculateCartPrices();
     _applyPriceModeUI();
     renderProducts();
+    renderCart();
+}
+
+function recalculateCartPrices() {
+    if (!Array.isArray(cart) || cart.length === 0) return;
+    cart.forEach(item => {
+        const prod = productsDB.find(p => p.codigo == item.id);
+        if (prod) {
+            item.price = getPrice(prod);
+        }
+    });
+    saveCartState();
 }
 
 function _applyPriceModeUI() {
     // Actualiza label del botón en el menú de inventario
     const lbl = document.getElementById('priceModeLabel');
-    if (lbl) lbl.textContent = PRICE_MODE_LABELS[priceMode] || 'Precio';
+    if (lbl) lbl.textContent = getPriceModeLabel();
 
     // Resalta la opción activa en el modal
     document.querySelectorAll('.price-mode-opt').forEach(btn => {
@@ -45,6 +91,13 @@ function _applyPriceModeUI() {
         btn.style.boxShadow   = active ? '0 0 0 3px currentColor' : 'none';
         btn.style.fontWeight  = active ? '800' : '600';
     });
+    const pctInput = document.getElementById('priceAdjustPct');
+    if (pctInput) pctInput.value = String(priceAdjustPct);
+    const pctHint = document.getElementById('priceAdjustHint');
+    if (pctHint) {
+        const sign = priceAdjustPct > 0 ? '+' : '';
+        pctHint.textContent = 'Se aplicará ' + sign + priceAdjustPct + '% sobre el precio de venta normal.';
+    }
 }
 
 function openPriceModeModal() {
@@ -63,6 +116,16 @@ function openPriceModeModal() {
                 m.hide();
             });
         });
+        const applyBtn = document.getElementById('btnApplyCustomPriceMode');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', () => {
+                const pctInput = document.getElementById('priceAdjustPct');
+                const pct = parseFloat((pctInput && pctInput.value) || '0');
+                if (!Number.isFinite(pct)) return showToast('Porcentaje inválido', 'warning');
+                setPriceMode('custom_pct', pct);
+                m.hide();
+            });
+        }
     }
 }
 
@@ -188,6 +251,7 @@ document.addEventListener('DOMContentLoaded', () => {
         window.productsDB = PRODUCTS_DATA;
         productsDB = window.productsDB;
         saveToCache(productsDB);
+        recalculateCartPrices();
         renderProducts('all');
         renderFavoritesBar();
     } else {
@@ -1210,9 +1274,10 @@ function renderCart() {
         d.onclick = () => { selectedIndex = idx; renderCart(); };
         
         let bdg = i.discountPct > 0 ? '<span class="discount-tag">-' + i.discountPct + '%</span>' : '';
+        let src = getCartPriceOriginBadge();
         let nt = i.note ? '<span class="cart-note">📝 ' + i.note + '</span>' : '';
         
-        d.innerHTML = '<div class="d-flex justify-content-between fw-bold"><span>' + i.qty + ' x ' + i.name + bdg + '</span><span>$' + lineT.toFixed(2) + '</span></div><div class="small text-muted">$' + (i.price*(1-i.discountPct/100)).toFixed(2) + '</div>' + nt;
+        d.innerHTML = '<div class="d-flex justify-content-between fw-bold"><span>' + i.qty + ' x ' + i.name + bdg + src + '</span><span>$' + lineT.toFixed(2) + '</span></div><div class="small text-muted">$' + (i.price*(1-i.discountPct/100)).toFixed(2) + '</div>' + nt;
         c.appendChild(d);
     });
     
@@ -1449,6 +1514,7 @@ async function restoreCartState() {
         cart = state.cart;
         globalDiscountPct = state.globalDiscountPct || 0;
         selectedIndex = state.selectedIndex ?? -1;
+        recalculateCartPrices();
         renderCart();
         showToast('Carrito restaurado (' + cart.length + ' ítem' + (cart.length > 1 ? 's' : '') + ')', 'info');
     }

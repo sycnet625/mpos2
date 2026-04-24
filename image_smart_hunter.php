@@ -12,6 +12,7 @@ header('Content-Type: text/html; charset=utf-8');
 
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'product_image_pipeline.php';
 $EMP_ID = intval($config['id_empresa'] ?? 1);
 const PRIMARY_IMAGE_DIR = __DIR__ . '/assets/product_images/';
 const TEMP_IMAGE_DIR = '/tmp/palweb_product_images/';
@@ -248,6 +249,84 @@ function hasAnyVariant(string $base): bool {
         if (file_exists($base . $ext)) return true;
     }
     return false;
+}
+
+function imagePlaceholderSignature($img): ?array {
+    if (!$img instanceof GdImage) {
+        return null;
+    }
+    $sample = imagecreatetruecolor(16, 16);
+    if (!$sample) {
+        return null;
+    }
+    imagecopyresampled($sample, $img, 0, 0, 0, 0, 16, 16, imagesx($img), imagesy($img));
+    $pixels = [];
+    for ($y = 0; $y < 16; $y++) {
+        for ($x = 0; $x < 16; $x++) {
+            $rgb = imagecolorat($sample, $x, $y);
+            $pixels[] = ($rgb >> 16) & 0xFF;
+            $pixels[] = ($rgb >> 8) & 0xFF;
+            $pixels[] = $rgb & 0xFF;
+        }
+    }
+    imagedestroy($sample);
+    return $pixels;
+}
+
+function placeholderSignatureDistance(array $left, array $right): float {
+    $count = min(count($left), count($right));
+    if ($count === 0) {
+        return INF;
+    }
+    $diff = 0.0;
+    for ($i = 0; $i < $count; $i++) {
+        $diff += abs($left[$i] - $right[$i]);
+    }
+    return $diff / $count;
+}
+
+function looksLikeGeneratedPlaceholder(string $code, string $label): bool {
+    if (!function_exists('imagecreatefromstring') || !function_exists('imagesx')) {
+        return false;
+    }
+
+    $safe = product_image_pipeline_safe_code($code);
+    if ($safe === '') {
+        return false;
+    }
+
+    $existingPath = product_image_pipeline_find_existing_path($safe);
+    if ($existingPath === null || !is_file($existingPath)) {
+        return false;
+    }
+
+    $bytes = @file_get_contents($existingPath);
+    if ($bytes === false || $bytes === '') {
+        return false;
+    }
+
+    $existing = @imagecreatefromstring($bytes);
+    if (!$existing) {
+        return false;
+    }
+
+    $placeholder = product_image_pipeline_placeholder_source($safe, $label !== '' ? $label : $safe);
+    if (!$placeholder) {
+        imagedestroy($existing);
+        return false;
+    }
+
+    try {
+        $existingFp = imagePlaceholderSignature($existing);
+        $placeholderFp = imagePlaceholderSignature($placeholder);
+        if ($existingFp === null || $placeholderFp === null) {
+            return false;
+        }
+        return placeholderSignatureDistance($existingFp, $placeholderFp) <= 8.5;
+    } finally {
+        imagedestroy($existing);
+        imagedestroy($placeholder);
+    }
 }
 
 function toSafeQuery(string $term): string {
@@ -663,12 +742,14 @@ $sinImagen = [];
 foreach ($productos as $p) {
     $safeId = safeProductId((string)$p['codigo']);
     if ($safeId === '') continue;
+    $nombreProducto = trim((string)($p['nombre'] ?? ''));
     $matchesFocus = $FOCUS_CODE !== '' && ($safeId === $FOCUS_CODE || (string)$p['codigo'] === $FOCUS_CODE);
-    if ($matchesFocus || !hasAnyVariant($IMAGE_DIR . $safeId)) {
+    $sinFotoReal = !hasAnyVariant($IMAGE_DIR . $safeId) || looksLikeGeneratedPlaceholder($safeId, $nombreProducto);
+    if ($matchesFocus || $sinFotoReal) {
         $sinImagen[] = [
             'codigo' => (string)$p['codigo'],
             'safe' => $safeId,
-            'nombre' => (string)$p['nombre'],
+            'nombre' => $nombreProducto,
             'categoria' => (string)($p['categoria'] ?? ''),
             'descripcion' => (string)($p['descripcion'] ?? ''),
         ];

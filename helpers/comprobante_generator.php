@@ -17,8 +17,10 @@ class ComprobanteGenerator {
     /**
      * Generar HTML del comprobante (Voucher Premium)
      */
-    public function generarHTML($idVenta) {
+    public function generarHTML($idVenta, float $markupPct = 0.0) {
         $baseDir = dirname(__DIR__); // /var/www
+        $markupPct = max(0, round($markupPct, 2));
+        $markupFactor = 1 + ($markupPct / 100);
 
         // Obtener datos de la venta
         $stmtVenta = $this->pdo->prepare("
@@ -48,16 +50,20 @@ class ComprobanteGenerator {
         $fecha = date('d/m/Y', strtotime($venta['fecha']));
         $noFactura = $venta['uuid'] ?? 'N/A';
         $cliente = $venta['cliente_nombre'] ?? 'Mostrador';
-        $total = number_format($venta['total'], 2, '.', ',');
+        $totalOriginal = floatval($venta['total']);
+        $totalCalculado = 0.0;
 
         // Generar tabla de detalles
         $detallesHTML = '';
         $contador = 1;
         foreach ($detalles as $det) {
             if (floatval($det['cantidad']) < 0) continue; // Skip devoluciones
-            $subtotal = number_format(floatval($det['cantidad']) * floatval($det['precio']), 2, '.', ',');
+            $precioCalculado = round(floatval($det['precio']) * $markupFactor, 2);
+            $subtotalValor = round(floatval($det['cantidad']) * $precioCalculado, 2);
+            $totalCalculado += $subtotalValor;
+            $subtotal = number_format($subtotalValor, 2, '.', ',');
             $cantidad = number_format($det['cantidad'], 2, '.', ',');
-            $precio = number_format($det['precio'], 2, '.', ',');
+            $precio = number_format($precioCalculado, 2, '.', ',');
 
             $detallesHTML .= "
             <tr>
@@ -69,6 +75,16 @@ class ComprobanteGenerator {
             </tr>
             ";
             $contador++;
+        }
+
+        $total = number_format($totalCalculado, 2, '.', ',');
+        $notaMarkup = '';
+        if ($markupPct > 0) {
+            $notaMarkup = "
+            <div style=\"margin: 0 auto 18px; max-width: 850px; background: #fff3cd; color: #664d03; border: 1px dashed #856404; border-radius: 8px; padding: 10px 12px; font-size: 13px; text-align: center;\">
+                <strong>Impresión especial con +{$markupPct}% por producto.</strong>
+                Solo visual. La venta real y la contabilidad conservan el precio POS.
+            </div>";
         }
 
         $metodo = $venta['metodo_pago'] ?? 'Efectivo';
@@ -121,6 +137,7 @@ class ComprobanteGenerator {
         .barra-acciones button { padding: 8px 18px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
         .btn-imprimir { background: #2c3e50; color: #fff; }
         .btn-cerrar   { background: #e0e0e0; color: #333; }
+        .btn-recargo  { background: #dc3545; color: #fff; }
         .container { max-width: 850px; margin: 0 auto; padding: 30px; border: 1px solid #ddd; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
         .encabezado { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
         .logo-section { flex: 0 0 150px; }
@@ -147,8 +164,10 @@ class ComprobanteGenerator {
 <body>
     <div class=\"barra-acciones\">
         <button class=\"btn-imprimir\" onclick=\"window.print()\">&#128438; Imprimir</button>
+        <button class=\"btn-recargo\" onclick=\"printWithMarkup(20)\">&#129534; Imprimir +20%</button>
         <button class=\"btn-cerrar\" onclick=\"window.close()\">&#10006; Cerrar</button>
     </div>
+    $notaMarkup
     <div class=\"container\">
         <div class=\"encabezado\">
             <div class=\"logo-section\">$logoTag</div>
@@ -184,6 +203,11 @@ class ComprobanteGenerator {
                     <span>TOTAL</span>
                     <span>\$$total</span>
                 </div>
+                " . ($markupPct > 0 ? "
+                <div class=\"total-fila\">
+                    <span>Total POS:</span>
+                    <span>$" . number_format($totalOriginal, 2, '.', ',') . "</span>
+                </div>" : "") . "
                 <div class=\"total-fila\">
                     <span>Método:</span>
                     <span>$metodo</span>
@@ -195,6 +219,13 @@ class ComprobanteGenerator {
             <p>Generado el " . date('d/m/Y H:i:s') . "</p>
         </div>
     </div>
+    <script>
+        function printWithMarkup(pct) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('markup_pct', String(pct));
+            window.location.href = url.toString();
+        }
+    </script>
 </body>
 </html>";
         return $html;
