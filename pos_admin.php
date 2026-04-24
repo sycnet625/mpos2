@@ -192,6 +192,21 @@ $msgType = "";
 $restoreReport = null;
 $currentHost = $_SERVER['HTTP_HOST'] ?? '';
 
+// ── GET: descarga directa de un .tar.gz local ─────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['action'] ?? '') === 'download_backup') {
+    $file = basename($_GET['file'] ?? '');
+    $fullPath = $backupDir . '/' . $file;
+    if (!$file || !preg_match('/\.tar\.gz$/i', $file) || !file_exists($fullPath)) {
+        http_response_code(404); die('Archivo no encontrado.');
+    }
+    header('Content-Type: application/octet-stream');
+    header('Content-Disposition: attachment; filename="' . $file . '"');
+    header('Content-Length: ' . filesize($fullPath));
+    header('Cache-Control: no-cache');
+    readfile($fullPath);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
@@ -253,6 +268,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $file = $_POST['filename'];
             if (file_exists("$backupDir/$file")) unlink("$backupDir/$file");
             $msg = "Archivo eliminado."; $msgType = "info";
+        }
+
+        if ($action === 'upload_backup') {
+            $f = $_FILES['backup_file'] ?? [];
+            if (($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) throw new Exception('Error al subir archivo.');
+            $origName = $f['name'] ?? 'backup.tar.gz';
+            if (!preg_match('/\.(tar\.gz|tgz)$/i', $origName)) throw new Exception('Solo se aceptan archivos .tar.gz o .tgz');
+            // Verificar que el tar.gz contiene al menos un .sql
+            $tmpDir = sys_get_temp_dir() . '/verify_upload_' . uniqid();
+            mkdir($tmpDir, 0777, true);
+            shell_exec("tar -tzf " . escapeshellarg($f['tmp_name']) . " 2>&1");
+            $listed = shell_exec("tar -tzf " . escapeshellarg($f['tmp_name']) . " 2>/dev/null");
+            @rmdir($tmpDir);
+            if (!preg_match('/\.sql/i', (string)$listed)) throw new Exception('El archivo no contiene un .sql válido.');
+            // Nombre destino: conservar o renombrar con timestamp si ya existe
+            $safeName = preg_replace('/[^a-zA-Z0-9_\-\.]/', '_', $origName);
+            $dest = $backupDir . '/' . $safeName;
+            if (file_exists($dest)) $dest = $backupDir . '/upload_' . date('Y-m-d_His') . '.tar.gz';
+            if (!move_uploaded_file($f['tmp_name'], $dest)) throw new Exception('No se pudo guardar el archivo.');
+            $msg = "Backup subido: <b>" . htmlspecialchars(basename($dest)) . "</b>. Ya aparece en la lista de copias locales.";
+            $msgType = "success";
         }
 
         if ($action === 'recalc_kardex') {
@@ -478,7 +514,8 @@ rsort($backups);
                                 <tr>
                                     <td class="fw-bold"><i class="fas fa-file-archive text-warning me-1"></i> <?php echo $name; ?></td>
                                     <td><?php echo round(filesize($bk)/1024, 2)." KB"; ?></td>
-                                    <td class="text-end">
+                                    <td class="text-end text-nowrap">
+                                        <a href="pos_admin.php?action=download_backup&file=<?php echo urlencode($name); ?>" class="btn btn-sm btn-success" title="Descargar .tar.gz"><i class="fas fa-download"></i></a>
                                         <form method="POST" class="d-inline ajax-local-restore-form">
                                             <input type="hidden" name="action" value="restore_local_dry_run">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
@@ -487,12 +524,12 @@ rsort($backups);
                                         <form method="POST" class="d-inline ajax-local-restore-form" onsubmit="return confirm('Restaurar?');">
                                             <input type="hidden" name="action" value="restore_local">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
-                                            <button class="btn btn-sm btn-warning"><i class="fas fa-undo"></i></button>
+                                            <button class="btn btn-sm btn-warning" title="Restaurar"><i class="fas fa-undo"></i></button>
                                         </form>
                                         <form method="POST" class="d-inline" onsubmit="return confirm('Eliminar?');">
                                             <input type="hidden" name="action" value="delete_local">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
-                                            <button class="btn btn-sm btn-outline-danger"><i class="fas fa-trash"></i></button>
+                                            <button class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
                                         </form>
                                     </td>
                                 </tr>
@@ -500,6 +537,16 @@ rsort($backups);
                             </tbody>
                         </table>
                     </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="section-title mb-2">Subir copia al servidor</div>
+                    <form method="POST" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
+                        <input type="hidden" name="action" value="upload_backup">
+                        <input type="file" name="backup_file" class="form-control" accept=".tar.gz,.tgz" required style="flex:1;">
+                        <button class="btn btn-outline-success fw-bold"><i class="fas fa-cloud-upload-alt me-1"></i> Subir</button>
+                    </form>
+                    <div class="tiny text-muted mt-2">Sube un <code>.tar.gz</code> al servidor. Aparecerá en la lista de copias locales para restaurar cuando quieras.</div>
                 </div>
 
                 <div>
