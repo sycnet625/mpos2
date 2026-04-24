@@ -17,10 +17,11 @@ class ComprobanteGenerator {
     /**
      * Generar HTML del comprobante (Voucher Premium)
      */
-    public function generarHTML($idVenta, float $markupPct = 0.0) {
+    public function generarHTML($idVenta, float $markupPct = 0.0, string $priceView = 'venta', bool $autoPrint = false) {
         $baseDir = dirname(__DIR__); // /var/www
-        $markupPct = max(0, round($markupPct, 2));
+        $markupPct = max(-99.99, round($markupPct, 2));
         $markupFactor = 1 + ($markupPct / 100);
+        $priceView = in_array($priceView, ['venta', 'mayorista'], true) ? $priceView : 'venta';
 
         // Obtener datos de la venta
         $stmtVenta = $this->pdo->prepare("
@@ -39,10 +40,16 @@ class ComprobanteGenerator {
 
         // Obtener detalles de la venta
         $stmtDetalles = $this->pdo->prepare("
-            SELECT * FROM ventas_detalle WHERE id_venta_cabecera = ?
+            SELECT d.*,
+                   COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual
+            FROM ventas_detalle d
+            LEFT JOIN productos p ON d.id_producto = p.codigo
+            LEFT JOIN productos_precios_sucursal ps
+                   ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
+            WHERE d.id_venta_cabecera = ?
             ORDER BY id ASC
         ");
-        $stmtDetalles->execute([$idVenta]);
+        $stmtDetalles->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
         $detalles = $stmtDetalles->fetchAll(PDO::FETCH_ASSOC);
 
         // Datos de la empresa
@@ -58,7 +65,11 @@ class ComprobanteGenerator {
         $contador = 1;
         foreach ($detalles as $det) {
             if (floatval($det['cantidad']) < 0) continue; // Skip devoluciones
-            $precioCalculado = round(floatval($det['precio']) * $markupFactor, 2);
+            $precioBase = floatval($det['precio']);
+            $precioMayorista = floatval($det['precio_mayorista_visual'] ?? $precioBase);
+            $precioCalculado = $priceView === 'mayorista'
+                ? round($precioMayorista, 2)
+                : round($precioBase * $markupFactor, 2);
             $subtotalValor = round(floatval($det['cantidad']) * $precioCalculado, 2);
             $totalCalculado += $subtotalValor;
             $subtotal = number_format($subtotalValor, 2, '.', ',');
@@ -83,6 +94,18 @@ class ComprobanteGenerator {
             $notaMarkup = "
             <div style=\"margin: 0 auto 18px; max-width: 850px; background: #fff3cd; color: #664d03; border: 1px dashed #856404; border-radius: 8px; padding: 10px 12px; font-size: 13px; text-align: center;\">
                 <strong>Impresión especial con +{$markupPct}% por producto.</strong>
+                Solo visual. La venta real y la contabilidad conservan el precio POS.
+            </div>";
+        } elseif ($markupPct < 0) {
+            $notaMarkup = "
+            <div style=\"margin: 0 auto 18px; max-width: 850px; background: #fff3cd; color: #664d03; border: 1px dashed #856404; border-radius: 8px; padding: 10px 12px; font-size: 13px; text-align: center;\">
+                <strong>Impresión especial con {$markupPct}% por producto.</strong>
+                Solo visual. La venta real y la contabilidad conservan el precio POS.
+            </div>";
+        } elseif ($priceView === 'mayorista') {
+            $notaMarkup = "
+            <div style=\"margin: 0 auto 18px; max-width: 850px; background: #fff3cd; color: #664d03; border: 1px dashed #856404; border-radius: 8px; padding: 10px 12px; font-size: 13px; text-align: center;\">
+                <strong>Impresión especial con precio mayorista.</strong>
                 Solo visual. La venta real y la contabilidad conservan el precio POS.
             </div>";
         }
@@ -203,7 +226,7 @@ class ComprobanteGenerator {
                     <span>TOTAL</span>
                     <span>\$$total</span>
                 </div>
-                " . ($markupPct > 0 ? "
+                " . (($markupPct != 0.0 || $priceView === 'mayorista') ? "
                 <div class=\"total-fila\">
                     <span>Total POS:</span>
                     <span>$" . number_format($totalOriginal, 2, '.', ',') . "</span>
@@ -223,9 +246,17 @@ class ComprobanteGenerator {
         function printWithMarkup(pct) {
             const url = new URL(window.location.href);
             url.searchParams.set('markup_pct', String(pct));
+            url.searchParams.delete('price_view');
+            window.location.href = url.toString();
+        }
+        function printWholesale() {
+            const url = new URL(window.location.href);
+            url.searchParams.delete('markup_pct');
+            url.searchParams.set('price_view', 'mayorista');
             window.location.href = url.toString();
         }
     </script>
+    " . ($autoPrint ? "<script>window.addEventListener('load',function(){setTimeout(function(){window.print();},250);});</script>" : "") . "
 </body>
 </html>";
         return $html;
@@ -234,15 +265,18 @@ class ComprobanteGenerator {
     /**
      * Generar HTML del Ticket (Formato Térmico)
      */
-    public function generarTicketHTML($idVenta) {
+    public function generarTicketHTML($idVenta, float $markupPct = 0.0, string $priceView = 'venta') {
         $baseDir = dirname(__DIR__);
+        $markupPct = max(-99.99, round($markupPct, 2));
+        $markupFactor = 1 + ($markupPct / 100);
+        $priceView = in_array($priceView, ['venta', 'mayorista'], true) ? $priceView : 'venta';
         $stmtVenta = $this->pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
         $stmtVenta->execute([$idVenta]);
         $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
         if (!$venta) throw new Exception("Venta no encontrada");
 
-        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?");
-        $stmtDet->execute([$idVenta]);
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
+        $stmtDet->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
         $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
         $logoUrl2 = '';
@@ -265,13 +299,31 @@ class ComprobanteGenerator {
         }
         $logoTag = $logoUrl2 ? "<img src=\"" . htmlspecialchars($logoUrl2) . "\" style=\"max-width:200px; max-height:80px; margin-bottom:10px;\">" : '';
 
+        $subtotalOriginal = 0.0;
+        $subtotalDisplay = 0.0;
         $itemsHTML = "";
         foreach ($items as $it) {
             $n = htmlspecialchars($it['nombre'] ?? $it['nombre_producto']);
             $c = number_format($it['cantidad'], 2);
-            $p = number_format($it['precio'], 2);
-            $t = number_format($it['cantidad'] * $it['precio'], 2);
+            $precioBase = floatval($it['precio']);
+            $subtotalOriginal += floatval($it['cantidad']) * $precioBase;
+            $precioCalc = $priceView === 'mayorista'
+                ? round(floatval($it['precio_mayorista_visual'] ?? $precioBase), 2)
+                : round($precioBase * $markupFactor, 2);
+            $lineaCalc = round(floatval($it['cantidad']) * $precioCalc, 2);
+            $subtotalDisplay += $lineaCalc;
+            $p = number_format($precioCalc, 2);
+            $t = number_format($lineaCalc, 2);
             $itemsHTML .= "<tr><td>$c</td><td>$n</td><td align='right'>\$$t</td></tr>";
+        }
+        $costoEnvio = round(floatval($venta['total']) - $subtotalOriginal, 2);
+        $totalDisplay = round($subtotalDisplay + ($costoEnvio > 0 ? $costoEnvio : 0), 2);
+        $priceNote = '';
+        if ($priceView === 'mayorista') {
+            $priceNote = "<div style='margin-top:8px;font-size:10px;font-weight:bold;background:#fff3cd;border:1px dashed #856404;padding:6px;'>PRECIO MAYORISTA SOLO VISUAL<br><span style=\"font-weight:normal\">Total POS: $" . number_format($venta['total'], 2) . "</span></div>";
+        } elseif (abs($markupPct) > 0.001) {
+            $sign = $markupPct > 0 ? '+' : '';
+            $priceNote = "<div style='margin-top:8px;font-size:10px;font-weight:bold;background:#fff3cd;border:1px dashed #856404;padding:6px;'>AJUSTE VISUAL {$sign}" . number_format($markupPct, 0) . "%<br><span style=\"font-weight:normal\">Total POS: $" . number_format($venta['total'], 2) . "</span></div>";
         }
 
         $html = "<html><head><style>
@@ -288,6 +340,7 @@ class ComprobanteGenerator {
                 <small>".htmlspecialchars($this->config['direccion'])."</small><br>
                 <small>Tel: ".htmlspecialchars($this->config['telefono'])."</small>
             </div>
+            $priceNote
             <div class='border-top'>
                 <table>
                     <tr><td>Ticket:</td><td class='right'>#".str_pad($idVenta, 6, '0', STR_PAD_LEFT)."</td></tr>
@@ -300,7 +353,7 @@ class ComprobanteGenerator {
                 <tbody>$itemsHTML</tbody>
             </table>
             <div class='border-top right' style='font-size:16px;'>
-                <span class='bold'>TOTAL: \$".number_format($venta['total'], 2)."</span>
+                <span class='bold'>TOTAL: \$".number_format($totalDisplay, 2)."</span>
             </div>
             <div class='center border-top' style='margin-top:10px'>
                 <p>".htmlspecialchars($this->config['mensaje_final'])."</p>
@@ -312,14 +365,17 @@ class ComprobanteGenerator {
     /**
      * Generar HTML de Factura (Formato A4 Profesional)
      */
-    public function generarFacturaHTML($idVenta) {
+    public function generarFacturaHTML($idVenta, float $markupPct = 0.0, string $priceView = 'venta') {
         $baseDir = dirname(__DIR__);
+        $markupPct = max(-99.99, round($markupPct, 2));
+        $markupFactor = 1 + ($markupPct / 100);
+        $priceView = in_array($priceView, ['venta', 'mayorista'], true) ? $priceView : 'venta';
         $stmtVenta = $this->pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
         $stmtVenta->execute([$idVenta]);
         $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
         
-        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, p.unidad_medida FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?");
-        $stmtDet->execute([$idVenta]);
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, p.unidad_medida, COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
+        $stmtDet->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
         $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
         $logoUrl3 = '';
@@ -343,16 +399,34 @@ class ComprobanteGenerator {
 
         $numFactura = date('Ymd', strtotime($venta['fecha'])) . str_pad($idVenta, 3, '0', STR_PAD_LEFT);
         
+        $subtotalOriginal = 0.0;
+        $subtotalDisplay = 0.0;
         $rowsHTML = "";
         foreach ($items as $it) {
-            $st = number_format($it['cantidad'] * $it['precio'], 2);
+            $precioBase = floatval($it['precio']);
+            $subtotalOriginal += floatval($it['cantidad']) * $precioBase;
+            $precioCalc = $priceView === 'mayorista'
+                ? round(floatval($it['precio_mayorista_visual'] ?? $precioBase), 2)
+                : round($precioBase * $markupFactor, 2);
+            $lineaCalc = round(floatval($it['cantidad']) * $precioCalc, 2);
+            $subtotalDisplay += $lineaCalc;
+            $st = number_format($lineaCalc, 2);
             $rowsHTML .= "<tr>
                 <td style='border:1px solid #aaa;padding:5px;text-align:center;'>".number_format($it['cantidad'], 2)."</td>
                 <td style='border:1px solid #aaa;padding:5px;'>".htmlspecialchars($it['unidad_medida'] ?? 'UND')."</td>
                 <td style='border:1px solid #aaa;padding:5px;'>".htmlspecialchars($it['nombre'] ?? $it['nombre_producto'])."</td>
-                <td style='border:1px solid #aaa;padding:5px;text-align:right;'>$".number_format($it['precio'], 2)."</td>
+                <td style='border:1px solid #aaa;padding:5px;text-align:right;'>$".number_format($precioCalc, 2)."</td>
                 <td style='border:1px solid #aaa;padding:5px;text-align:right;'>$$st</td>
             </tr>";
+        }
+        $costoEnvio = round(floatval($venta['total']) - $subtotalOriginal, 2);
+        $totalDisplay = round($subtotalDisplay + ($costoEnvio > 0 ? $costoEnvio : 0), 2);
+        $priceNote = '';
+        if ($priceView === 'mayorista') {
+            $priceNote = "<div style='margin:12px 0;background:#fff3cd;border:1px dashed #856404;padding:8px 10px;font-size:12px;'><b>Precio mayorista solo visual.</b> Total POS: $" . number_format($venta['total'], 2) . "</div>";
+        } elseif (abs($markupPct) > 0.001) {
+            $sign = $markupPct > 0 ? '+' : '';
+            $priceNote = "<div style='margin:12px 0;background:#fff3cd;border:1px dashed #856404;padding:8px 10px;font-size:12px;'><b>Ajuste visual {$sign}" . number_format($markupPct, 0) . "%.</b> Total POS: $" . number_format($venta['total'], 2) . "</div>";
         }
 
         $html = "<html><head><style>
@@ -375,6 +449,7 @@ class ComprobanteGenerator {
                     <p><b>Nº: $numFactura</b></p>
                 </div>
             </div>
+            $priceNote
             <div class='blue-bar'>DATOS DEL CLIENTE</div>
             <p><b>Cliente:</b> ".htmlspecialchars($venta['cliente_nombre'])."</p>
             <p><b>Fecha:</b> ".date('d/m/Y', strtotime($venta['fecha']))."</p>
@@ -384,7 +459,7 @@ class ComprobanteGenerator {
             </table>
             <div style='margin-top:20px; text-align:right;'>
                 <div style='display:inline-block; width:200px; background:#D9E1F2; padding:10px; border:1px solid #2F75B5;'>
-                    <b>TOTAL CUP: $".number_format($venta['total'], 2)."</b>
+                    <b>TOTAL CUP: $".number_format($totalDisplay, 2)."</b>
                 </div>
             </div>
         </body></html>";
@@ -394,13 +469,13 @@ class ComprobanteGenerator {
     /**
      * Convertir a PDF
      */
-    public function generarPDF($idVenta, $rutaSalida = null, $tipo = 'comprobante') {
+    public function generarPDF($idVenta, $rutaSalida = null, $tipo = 'comprobante', float $markupPct = 0.0, string $priceView = 'venta') {
         if ($tipo === 'ticket') {
-            $html = $this->generarTicketHTML($idVenta);
+            $html = $this->generarTicketHTML($idVenta, $markupPct, $priceView);
         } elseif ($tipo === 'factura') {
-            $html = $this->generarFacturaHTML($idVenta);
+            $html = $this->generarFacturaHTML($idVenta, $markupPct, $priceView);
         } else {
-            $html = $this->generarHTML($idVenta);
+            $html = $this->generarHTML($idVenta, $markupPct, $priceView, false);
         }
 
         if (!$rutaSalida) {

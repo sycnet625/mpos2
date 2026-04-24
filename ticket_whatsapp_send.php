@@ -78,6 +78,14 @@ if ($action === 'send') {
         $tipoDoc = $_POST['tipo_doc'] ?? 'comprobante'; // comprobante, ticket, factura
         $telefonoWhatsapp = trim($_POST['whatsapp'] ?? '');
         $mensaje = trim($_POST['mensaje'] ?? '');
+        $markupPct = isset($_POST['markup_pct']) ? round(floatval($_POST['markup_pct']), 2) : 0.0;
+        if ($markupPct < -99.99) {
+            $markupPct = -99.99;
+        }
+        $priceView = strtolower(trim((string)($_POST['price_view'] ?? 'venta')));
+        if (!in_array($priceView, ['venta', 'mayorista'], true)) {
+            $priceView = 'venta';
+        }
 
         if (!$idVenta || !$telefonoWhatsapp) {
             throw new Exception('Datos incompletos');
@@ -93,14 +101,14 @@ if ($action === 'send') {
         $generator = new ComprobanteGenerator($pdo, $config);
 
         if ($tipoDoc === 'comprobante') {
-            $rutaPDF = $generator->generarPDF($idVenta, null, 'comprobante');
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'comprobante', $markupPct, $priceView);
             $nombreDoc = "comprobante_$idVenta.pdf";
         } elseif ($tipoDoc === 'factura') {
-            $rutaPDF = $generator->generarPDF($idVenta, null, 'factura');
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'factura', $markupPct, $priceView);
             $nombreDoc = "factura_$idVenta.pdf";
         } else {
             // Formato ticket térmico
-            $rutaPDF = $generator->generarPDF($idVenta, null, 'ticket');
+            $rutaPDF = $generator->generarPDF($idVenta, null, 'ticket', $markupPct, $priceView);
             $nombreDoc = "ticket_$idVenta.pdf";
         }
 

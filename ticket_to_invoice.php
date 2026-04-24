@@ -11,6 +11,14 @@ $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die('ID de venta inválido.');
 
 $duplex = !empty($_GET['duplex']); // modo 2 facturas por hoja
+$priceView = strtolower(trim((string)($_GET['price_view'] ?? 'venta')));
+if (!in_array($priceView, ['venta', 'mayorista'], true)) {
+    $priceView = 'venta';
+}
+$markupPct = isset($_GET['markup_pct']) ? round(floatval($_GET['markup_pct']), 2) : 0.0;
+if ($markupPct < -99.99) $markupPct = -99.99;
+$markupFactor = 1 + ($markupPct / 100);
+$autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
 
 // ── Cabecera de venta ─────────────────────────────────────────────────────────
 $stmtH = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
@@ -21,14 +29,17 @@ if (!$venta) die('Venta no encontrada.');
 // ── Ítems ─────────────────────────────────────────────────────────────────────
 $stmtD = $pdo->prepare("
     SELECT d.cantidad, d.precio,
+           COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual,
            COALESCE(p.nombre, CONCAT('Artículo: ', d.id_producto)) AS descripcion,
            COALESCE(p.unidad_medida, 'UND') AS um
     FROM ventas_detalle d
     LEFT JOIN productos p ON d.id_producto = p.codigo
+    LEFT JOIN productos_precios_sucursal ps
+           ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
     WHERE d.id_venta_cabecera = ?
     ORDER BY d.id
 ");
-$stmtD->execute([$idVenta]);
+$stmtD->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
 $items = $stmtD->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Cajero ────────────────────────────────────────────────────────────────────
@@ -56,12 +67,25 @@ $cliNit       = $clienteCrm['nit_ci']              ?? $clienteCrm['ruc']        
 $cliEmail     = $clienteCrm['email']               ?? '';
 
 // ── Cálculos ──────────────────────────────────────────────────────────────────
-$subtotal      = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
+$subtotalOriginal = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
 $totalCantidad = array_sum(array_column($items, 'cantidad'));
-$total         = floatval($venta['total']);
-$costoEnvio    = round($total - $subtotal, 2);
+$totalOriginal = floatval($venta['total']);
+$costoEnvio    = round($totalOriginal - $subtotalOriginal, 2);
 $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
 $hayEnvio   = $costoEnvio > 0.01 && in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio);
+$subtotalDisplay = 0.0;
+foreach ($items as &$item) {
+    $precioBase = floatval($item['precio']);
+    $precioMayorista = floatval($item['precio_mayorista_visual'] ?? $precioBase);
+    $precioDisplay = $priceView === 'mayorista'
+        ? round($precioMayorista, 2)
+        : round($precioBase * $markupFactor, 2);
+    $item['precio_display'] = $precioDisplay;
+    $item['subtotal_display'] = round(floatval($item['cantidad']) * $precioDisplay, 2);
+    $subtotalDisplay += $item['subtotal_display'];
+}
+unset($item);
+$totalDisplay = round($subtotalDisplay + $costoEnvio, 2);
 
 // Número de factura: fecha del ticket + ID de venta
 $numFactura = date('Ymd', strtotime($venta['fecha'])) . str_pad($idVenta, 3, '0', STR_PAD_LEFT);
@@ -134,6 +158,7 @@ if (empty($logoUrl)) {
     .btn-p2 { background: #16a34a; color: #fff; }
     .btn-p2:hover { background: #15803d; }
     .btn-c  { background: #475569; color: #fff; }
+    .price-note { background:#fff3cd; border:1px dashed #856404; color:#664d03; padding:8px 10px; border-radius:8px; margin:10px 0 14px; font-size:11px; }
 
     /* ══ MODO NORMAL ═══════════════════════════════════════════════════════════ */
     .page-container {
@@ -256,15 +281,30 @@ if (empty($logoUrl)) {
     <button class="btn-c" onclick="window.close()">✕ Cerrar</button>
 </div>
 
+<?php if ($priceView === 'mayorista' || abs($markupPct) > 0.001): ?>
+<div class="page-container" style="min-height:auto; padding:0.5cm 1.5cm; margin-bottom:0; border-bottom:none;">
+    <div class="price-note">
+        <strong>
+            <?php if ($priceView === 'mayorista'): ?>
+                Impresión visual con precio mayorista.
+            <?php else: ?>
+                Impresión visual con ajuste de <?php echo ($markupPct > 0 ? '+' : '') . number_format($markupPct, 0); ?>%.
+            <?php endif; ?>
+        </strong>
+        La venta y la contabilidad conservan el precio original del POS.
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($duplex): ?>
 <!-- ══════════════════════ MODO DUPLEX ══════════════════════════════════════ -->
 <?php
 // Helper: renderiza una factura compacta (media A4)
 function render_half_invoice(array $venta, array $items, array $cfg): void {
-    $subtotal      = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
+    $subtotal      = array_sum(array_map(fn($i) => floatval($i['subtotal_display'] ?? ($i['cantidad'] * $i['precio'])), $items));
     $totalCantidad = array_sum(array_column($items, 'cantidad'));
-    $total         = floatval($venta['total']);
-    $costoEnvio    = round($total - $subtotal, 2);
+    $total         = floatval($cfg['totalDisplay'] ?? $venta['total']);
+    $costoEnvio    = round($cfg['costoEnvio'] ?? ($total - $subtotal), 2);
     $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
     $hayEnvio      = $costoEnvio > 0.01 && in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio);
     $numFactura    = date('Ymd', strtotime($venta['fecha'])) . str_pad($venta['id'] ?? 0, 3, '0', STR_PAD_LEFT);
@@ -378,13 +418,13 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
             <?php
             $duplex_rows = 4;
             foreach ($items as $it):
-                $importe = $it['cantidad'] * $it['precio'];
+                $importe = floatval($it['subtotal_display'] ?? ($it['cantidad'] * $it['precio']));
             ?>
             <tr>
                 <td class="left"><?= htmlspecialchars($it['descripcion']) ?></td>
                 <td class="center"><?= htmlspecialchars($it['um']) ?></td>
                 <td class="center"><?= rtrim(rtrim(number_format($it['cantidad'], 2), '0'), '.') ?></td>
-                <td class="right">$<?= number_format($it['precio'], 2) ?></td>
+                <td class="right">$<?= number_format($it['precio_display'] ?? $it['precio'], 2) ?></td>
                 <td class="right">$<?= number_format($importe, 2) ?></td>
             </tr>
             <?php endforeach; ?>
@@ -468,6 +508,8 @@ $cfg = [
     'cliDireccion' => $cliDireccion,
     'cliNit'       => $cliNit,
     'cliEmail'     => $cliEmail,
+    'totalDisplay' => $totalDisplay,
+    'costoEnvio'   => $costoEnvio,
 ];
 ?>
 <div class="duplex-page">
@@ -584,14 +626,14 @@ $cfg = [
         </thead>
         <tbody>
             <?php foreach ($items as $it):
-                $importe = $it['cantidad'] * $it['precio'];
+                $importe = $it['subtotal_display'] ?? ($it['cantidad'] * $it['precio']);
             ?>
             <tr>
                 <td class="left"><?= htmlspecialchars($it['descripcion']) ?></td>
                 <td class="center"></td>
                 <td class="center"><?= htmlspecialchars($it['um']) ?></td>
                 <td class="center"><?= rtrim(rtrim(number_format($it['cantidad'], 2), '0'), '.') ?></td>
-                <td class="right"><?= number_format($it['precio'], 2) ?></td>
+                <td class="right"><?= number_format($it['precio_display'] ?? $it['precio'], 2) ?></td>
                 <td class="right"><?= number_format($importe, 2) ?></td>
             </tr>
             <?php endforeach; ?>
@@ -630,7 +672,7 @@ $cfg = [
                         <tbody>
                             <tr style="background-color:#D9E1F2;">
                                 <td class="left">SUBTOTAL</td>
-                                <td class="right">$<?= number_format($subtotal, 2) ?></td>
+                                <td class="right">$<?= number_format($subtotalDisplay, 2) ?></td>
                             </tr>
                             <?php if ($hayEnvio): ?>
                             <tr style="background-color:#D9E1F2;">
@@ -645,8 +687,14 @@ $cfg = [
                             <?php endif; ?>
                             <tr>
                                 <td class="left total-final" style="color:#2F75B5;">TOTAL</td>
-                                <td class="right total-final">$<?= number_format($total, 2) ?></td>
+                                <td class="right total-final">$<?= number_format($totalDisplay, 2) ?></td>
                             </tr>
+                            <?php if ($priceView === 'mayorista' || abs($markupPct) > 0.001): ?>
+                            <tr style="background-color:#f8f9fa;">
+                                <td class="left">Total POS</td>
+                                <td class="right">$<?= number_format($totalOriginal, 2) ?></td>
+                            </tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </td>
@@ -664,6 +712,13 @@ $cfg = [
     </div>
 
 </div>
+<?php endif; ?>
+<?php if ($autoPrint): ?>
+<script>
+window.addEventListener('load', function () {
+    setTimeout(function () { window.print(); }, 250);
+});
+</script>
 <?php endif; ?>
 </body>
 </html>

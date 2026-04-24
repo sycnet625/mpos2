@@ -8,10 +8,18 @@ require_once 'config_loader.php';
 
 $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die("ID inválido.");
+$priceView = strtolower(trim((string)($_GET['price_view'] ?? 'venta')));
+if (!in_array($priceView, ['venta', 'mayorista'], true)) {
+    $priceView = 'venta';
+}
 $markupPct = isset($_GET['markup_pct']) ? round(floatval($_GET['markup_pct']), 2) : 0.0;
-if ($markupPct < 0) $markupPct = 0.0;
+if ($markupPct < -99.99) $markupPct = -99.99;
 $markupFactor = 1 + ($markupPct / 100);
 $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
+$printFormat = strtolower(trim((string)($_GET['format'] ?? '80mm')));
+if (!in_array($printFormat, ['58mm', '80mm', 'a4'], true)) {
+    $printFormat = '80mm';
+}
 
 try {
     $stmtHead = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
@@ -27,8 +35,15 @@ try {
         $branchBanner = $stmtS->fetchColumn();
     }
 
-    $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto, COALESCE(p.nombre, 'Art: ' || d.id_producto) as nombre_producto FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?";
-    $stmtDet = $pdo->prepare($sqlDet); $stmtDet->execute([$idVenta]);
+    $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto,
+                      COALESCE(p.nombre, CONCAT('Art: ', d.id_producto)) AS nombre_producto,
+                      COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual
+               FROM ventas_detalle d
+               LEFT JOIN productos p ON d.id_producto = p.codigo
+               LEFT JOIN productos_precios_sucursal ps
+                      ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
+               WHERE d.id_venta_cabecera = ?";
+    $stmtDet = $pdo->prepare($sqlDet); $stmtDet->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
     $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
     $subtotalItems = 0;
@@ -66,8 +81,14 @@ $subtotalItemsOriginal = $subtotalItems;
 $subtotalItemsDisplay = 0.0;
 foreach ($items as &$item) {
     $precioOriginal = floatval($item['precio']);
-    $precioDisplay = round($precioOriginal * $markupFactor, 2);
+    $precioMayorista = floatval($item['precio_mayorista_visual'] ?? $precioOriginal);
+    if ($priceView === 'mayorista') {
+        $precioDisplay = round($precioMayorista, 2);
+    } else {
+        $precioDisplay = round($precioOriginal * $markupFactor, 2);
+    }
     $item['precio_original'] = $precioOriginal;
+    $item['precio_mayorista'] = $precioMayorista;
     $item['precio_display'] = $precioDisplay;
     $item['subtotal_display'] = round(floatval($item['cantidad']) * $precioDisplay, 2);
     $subtotalItemsDisplay += $item['subtotal_display'];
@@ -95,6 +116,28 @@ $canalMap = [
     'Otro'       => ['#94a3b8', '❓', 'Otro'],
 ];
 [$canalColor, $canalEmoji, $canalLabel] = $canalMap[$canalOrigen] ?? $canalMap['Otro'];
+$pricePreset = 'normal';
+if ($priceView === 'mayorista') {
+    $pricePreset = 'mayorista';
+} elseif (abs($markupPct + 10) < 0.001) {
+    $pricePreset = 'minus10';
+} elseif (abs($markupPct - 10) < 0.001) {
+    $pricePreset = 'plus10';
+} elseif (abs($markupPct - 20) < 0.001) {
+    $pricePreset = 'plus20';
+} elseif (abs($markupPct - 50) < 0.001) {
+    $pricePreset = 'plus50';
+}
+$priceNoticeTitle = '';
+$priceNoticeBody = '';
+if ($priceView === 'mayorista') {
+    $priceNoticeTitle = 'IMPRESION ESPECIAL: PRECIO MAYORISTA';
+    $priceNoticeBody = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+} elseif (abs($markupPct) > 0.001) {
+    $sign = $markupPct > 0 ? '+' : '';
+    $priceNoticeTitle = 'IMPRESION ESPECIAL: PRECIOS CON ' . $sign . number_format($markupPct, 0) . '%';
+    $priceNoticeBody = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -148,6 +191,17 @@ $canalMap = [
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
         }
+        .toolbar-shell { padding: 8px 10px; background:#f8f9fa; text-align:center; border-bottom:1px solid #e5e7eb; }
+        .toolbar-grid { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; align-items:end; }
+        .toolbar-group { display:flex; flex-direction:column; gap:4px; min-width: 150px; text-align:left; }
+        .toolbar-group label { font-size:10px; color:#6b7280; font-weight:700; text-transform:uppercase; letter-spacing:.04em; }
+        .toolbar-group select, .toolbar-actions button {
+            padding:7px 10px; font-size:11px; border-radius:6px; border:1px solid #cbd5e1; background:#fff; font-family:monospace;
+        }
+        .toolbar-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; }
+        .btn-print-main { background:#0d6efd !important; color:#fff; border-color:#0d6efd !important; font-weight:700; }
+        .btn-wa { background:#25d366 !important; color:#fff; border-color:#25d366 !important; font-weight:700; }
+        .btn-close-mini { background:#fff !important; color:#333; }
         @media print {
             .no-print { display: none; }
             body { padding: 0; width: 100%; }
@@ -227,32 +281,40 @@ $canalMap = [
 <body<?php echo $viaQr ? ' class="qr-mode"' : ''; ?>>
 <div class="ticket-paper">
     <div class="no-print border-bottom mb-2" style="padding:8px 10px; background:#f8f9fa; text-align:center;">
-        <div style="font-size:10px; color:#888; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Formato de impresión</div>
-        <div style="display:flex; gap:5px; justify-content:center; flex-wrap:wrap;">
-            <button onclick="printWithFormat('58mm')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6c757d; border-radius:5px; background:#fff; font-family:monospace;">
-                🖨️ Térmica 58mm
-            </button>
-            <button onclick="printWithFormat('80mm')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #0d6efd; border-radius:5px; background:#0d6efd; color:#fff; font-weight:700; font-family:monospace;">
-                🖨️ Térmica 80mm
-            </button>
-            <button onclick="printWithFormat('a4')" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #198754; border-radius:5px; background:#198754; color:#fff; font-family:monospace;">
-                📄 A4 Deskjet
-            </button>
-            <button onclick="printWithMarkup(20)" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #dc3545; border-radius:5px; background:#dc3545; color:#fff; font-weight:700; font-family:monospace;">
-                🧾 Imprimir +20%
-            </button>
-            <a href="ticket_to_invoice.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #6f42c1; border-radius:5px; background:#6f42c1; color:#fff; font-family:monospace; text-decoration:none; display:inline-block;">
-                📋 Ver como Factura
-            </a>
-            <a href="comprobante_ventas.php?id=<?= $idVenta ?>" target="_blank" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #17a2b8; border-radius:5px; background:#17a2b8; color:#fff; font-family:monospace; text-decoration:none; display:inline-block; font-weight:700;">
-                📄 Comprobante Premium
-            </a>
-            <button onclick="openWhatsAppModal(<?= $idVenta ?>)" style="padding:6px 11px; font-size:11px; cursor:pointer; border:2px solid #25d366; border-radius:5px; background:#25d366; color:#fff; font-family:monospace; font-weight:700;">
-                💬 Enviar por WhatsApp
-            </button>
-            <button onclick="window.close()" style="padding:6px 11px; font-size:11px; cursor:pointer; border:1px solid #dee2e6; border-radius:5px; background:#fff; font-family:monospace;">
-                ✕ Cerrar
-            </button>
+        <div style="font-size:10px; color:#888; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Opciones de impresión</div>
+        <div class="toolbar-grid">
+            <div class="toolbar-group">
+                <label for="printFormatSelect">Tipo de impresora</label>
+                <select id="printFormatSelect">
+                    <option value="58mm" <?php echo $printFormat === '58mm' ? 'selected' : ''; ?>>Térmica 58mm</option>
+                    <option value="80mm" <?php echo $printFormat === '80mm' ? 'selected' : ''; ?>>Térmica 80mm</option>
+                    <option value="a4" <?php echo $printFormat === 'a4' ? 'selected' : ''; ?>>A4 Deskjet</option>
+                </select>
+            </div>
+            <div class="toolbar-group">
+                <label for="printDocumentSelect">Documento</label>
+                <select id="printDocumentSelect">
+                    <option value="ticket" selected>Ticket</option>
+                    <option value="factura">Factura</option>
+                    <option value="comprobante">Comprobante Premium</option>
+                </select>
+            </div>
+            <div class="toolbar-group">
+                <label for="printPriceSelect">Precio visual</label>
+                <select id="printPriceSelect">
+                    <option value="normal" <?php echo $pricePreset === 'normal' ? 'selected' : ''; ?>>Precio normal</option>
+                    <option value="minus10" <?php echo $pricePreset === 'minus10' ? 'selected' : ''; ?>>Bajar 10%</option>
+                    <option value="plus10" <?php echo $pricePreset === 'plus10' ? 'selected' : ''; ?>>Subir 10%</option>
+                    <option value="plus20" <?php echo $pricePreset === 'plus20' ? 'selected' : ''; ?>>Subir 20%</option>
+                    <option value="plus50" <?php echo $pricePreset === 'plus50' ? 'selected' : ''; ?>>Subir 50%</option>
+                    <option value="mayorista" <?php echo $pricePreset === 'mayorista' ? 'selected' : ''; ?>>Precio mayorista</option>
+                </select>
+            </div>
+            <div class="toolbar-actions">
+                <button class="btn-print-main" onclick="printSelectedDocument()">🖨️ Imprimir</button>
+                <button class="btn-wa" onclick="openWhatsAppModal(<?= $idVenta ?>)">💬 Enviar por WhatsApp</button>
+                <button class="btn-close-mini" onclick="window.close()">✕ Cerrar</button>
+            </div>
         </div>
     </div>
 
@@ -271,10 +333,10 @@ $canalMap = [
         <?php endif; ?>
         <small><?php echo htmlspecialchars($config['direccion']); ?></small><br>
         <small>Tel: <?php echo htmlspecialchars($config['telefono']); ?></small>
-        <?php if ($markupPct > 0): ?>
+        <?php if ($priceNoticeTitle !== ''): ?>
         <div style="margin-top:6px; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">
-            IMPRESIÓN ESPECIAL: PRECIOS CON +<?php echo number_format($markupPct, 0); ?>%<br>
-            <span style="font-weight:normal;">Solo visual. La venta y la contabilidad conservan el precio original.</span>
+            <?php echo htmlspecialchars($priceNoticeTitle); ?><br>
+            <span style="font-weight:normal;"><?php echo htmlspecialchars($priceNoticeBody); ?></span>
         </div>
         <?php endif; ?>
     </div>
@@ -403,7 +465,7 @@ $canalMap = [
                         $<?php echo number_format($totalDisplay, 2); ?>
                     </td>
                 </tr>
-                <?php if ($markupPct > 0): ?>
+                <?php if ($priceNoticeTitle !== ''): ?>
                     <tr><td colspan="2" class="text-center" style="font-size:10px; padding-top: 4px; border-top: 1px dashed #000;">
                         Total original POS: <strong>$<?php echo number_format($venta['total'], 2); ?></strong>
                     </td></tr>
@@ -550,16 +612,70 @@ function printWithMarkup(pct) {
     window.open(url.toString(), '_blank', 'width=420,height=800');
 }
 
+function applyPriceSelectionToUrl(url) {
+    const sel = document.getElementById('printPriceSelect');
+    const value = sel ? sel.value : 'normal';
+    url.searchParams.delete('markup_pct');
+    url.searchParams.delete('price_view');
+    if (value === 'minus10') {
+        url.searchParams.set('markup_pct', '-10');
+    } else if (value === 'plus10') {
+        url.searchParams.set('markup_pct', '10');
+    } else if (value === 'plus20') {
+        url.searchParams.set('markup_pct', '20');
+    } else if (value === 'plus50') {
+        url.searchParams.set('markup_pct', '50');
+    } else if (value === 'mayorista') {
+        url.searchParams.set('price_view', 'mayorista');
+    }
+    return url;
+}
+
+function printSelectedDocument() {
+    const formatSel = document.getElementById('printFormatSelect');
+    const docSel = document.getElementById('printDocumentSelect');
+    const format = formatSel ? formatSel.value : '80mm';
+    const doc = docSel ? docSel.value : 'ticket';
+
+    if (doc === 'ticket') {
+        const url = applyPriceSelectionToUrl(new URL(window.location.href));
+        url.searchParams.set('autoprint', '1');
+        url.searchParams.set('format', format);
+        window.open(url.toString(), '_blank', 'width=420,height=800');
+        return;
+    }
+
+    if (doc === 'factura') {
+        const url = new URL('ticket_to_invoice.php', window.location.href);
+        url.searchParams.set('id', '<?php echo $idVenta; ?>');
+        url.searchParams.set('autoprint', '1');
+        url.searchParams.set('format', format);
+        applyPriceSelectionToUrl(url);
+        window.open(url.toString(), '_blank', 'width=960,height=900');
+        return;
+    }
+
+    const url = new URL('comprobante_ventas.php', window.location.href);
+    url.searchParams.set('id', '<?php echo $idVenta; ?>');
+    url.searchParams.set('autoprint', '1');
+    url.searchParams.set('format', format);
+    applyPriceSelectionToUrl(url);
+    window.open(url.toString(), '_blank', 'width=960,height=900');
+}
+
 <?php if ($autoPrint): ?>
 window.addEventListener('load', function () {
     setTimeout(function () {
-        printWithFormat('80mm');
+        const fmt = new URL(window.location.href).searchParams.get('format') || '80mm';
+        printWithFormat(fmt);
     }, 250);
 });
 <?php endif; ?>
 
 // ===== WHATSAPP MODAL =====
 function openWhatsAppModal(idVenta) {
+    const currentDoc = (document.getElementById('printDocumentSelect') || {}).value || 'ticket';
+    const currentPrice = (document.getElementById('printPriceSelect') || {}).value || 'normal';
     const modal = document.createElement('div');
     modal.id = 'whatsappModal';
     modal.style.cssText = `
@@ -594,6 +710,14 @@ function openWhatsAppModal(idVenta) {
 
         <div style="margin-bottom: 20px;">
             <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
+                Precio visual:
+            </label>
+            <input id="precioVisualWhatsApp" type="text" readonly value="" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px; background: #f8f9fa; color: #495057;">
+            <small style="color: #666; margin-top: 5px; display: block;">Se enviará con el mismo ajuste visual seleccionado arriba</small>
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label style="display: block; font-weight: 600; margin-bottom: 8px; color: #333;">
                 Enviar a:
             </label>
             <select id="contactoWhatsApp" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px; font-size: 14px;">
@@ -623,6 +747,16 @@ function openWhatsAppModal(idVenta) {
 
     modal.appendChild(content);
     document.body.appendChild(modal);
+
+    const tipoDocumento = document.getElementById('tipoDocumento');
+    if (tipoDocumento) {
+        tipoDocumento.value = currentDoc;
+    }
+
+    const precioVisual = document.getElementById('precioVisualWhatsApp');
+    if (precioVisual) {
+        precioVisual.value = getPriceSelectionLabel(currentPrice);
+    }
 
     // Cargar contactos
     cargarContactosWhatsApp();
@@ -661,6 +795,7 @@ function enviarPorWhatsApp(idVenta) {
     const whatsapp = document.getElementById('contactoWhatsApp').value;
     const mensaje = document.getElementById('mensajeWhatsApp').value;
     const status = document.getElementById('whatsappStatus');
+    const priceSelection = (document.getElementById('printPriceSelect') || {}).value || 'normal';
 
     if (!whatsapp) {
         status.style.display = 'block';
@@ -680,6 +815,11 @@ function enviarPorWhatsApp(idVenta) {
     formData.append('tipo_doc', tipoDoc);
     formData.append('whatsapp', whatsapp);
     formData.append('mensaje', mensaje);
+    if (priceSelection === 'mayorista') {
+        formData.append('price_view', 'mayorista');
+    } else {
+        formData.append('markup_pct', String(mapPriceSelectionToMarkup(priceSelection)));
+    }
 
     fetch('ticket_whatsapp_send.php?action=send', {
         method: 'POST',
@@ -704,6 +844,38 @@ function enviarPorWhatsApp(idVenta) {
         status.textContent = '❌ Error: ' + e.message;
         console.error('Error:', e);
     });
+}
+
+function mapPriceSelectionToMarkup(selection) {
+    switch (selection) {
+        case 'minus10':
+            return -10;
+        case 'plus10':
+            return 10;
+        case 'plus20':
+            return 20;
+        case 'plus50':
+            return 50;
+        default:
+            return 0;
+    }
+}
+
+function getPriceSelectionLabel(selection) {
+    switch (selection) {
+        case 'minus10':
+            return 'Bajar 10%';
+        case 'plus10':
+            return 'Subir 10%';
+        case 'plus20':
+            return 'Subir 20%';
+        case 'plus50':
+            return 'Subir 50%';
+        case 'mayorista':
+            return 'Precio mayorista';
+        default:
+            return 'Precio normal';
+    }
 }
 </script>
 </body>
