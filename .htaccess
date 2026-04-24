@@ -1,3 +1,11 @@
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^([a-z0-9]+(?:-[a-z0-9]+)*)/?$ shop.php?slug=$1 [QSA,L,NC]
+</IfModule>
+
 <IfModule mod_expires.c>
     ExpiresActive On
 

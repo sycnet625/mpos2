@@ -107,6 +107,23 @@ function shop_image_meta(string $code): array {
     return $cache[$safe] ?? [false, 0];
 }
 
+function shop_slugify(string $text): string {
+    $text = trim(mb_strtolower($text, 'UTF-8'));
+    if ($text === '') {
+        return 'producto';
+    }
+
+    $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $text);
+    if ($ascii !== false) {
+        $text = $ascii;
+    }
+
+    $text = preg_replace('/[^a-z0-9]+/', '-', $text) ?? '';
+    $text = trim($text, '-');
+
+    return $text !== '' ? $text : 'producto';
+}
+
 try {
     require_once 'db.php';
     date_default_timezone_set('America/Havana');
@@ -199,7 +216,22 @@ $scheme    = $https ? 'https' : 'http';
 $host      = $_SERVER['HTTP_HOST'] ?? 'palweb.net';
 $baseDir   = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/shop.php')), '/');
 $baseDir   = $baseDir === '.' ? '' : $baseDir;
-$siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $baseDir . '/shop.php');
+$shopBasePath = ($baseDir !== '' ? $baseDir : '') . '/shop.php';
+$shopPrettyBasePath = $baseDir !== '' ? $baseDir : '';
+$shopDocumentBase = $scheme . '://' . $host . ($baseDir !== '' ? $baseDir . '/' : '/');
+$shopAssetPrefix = ($baseDir !== '' ? $baseDir : '') . '/';
+$siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $shopBasePath);
+$requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$requestPathTrimmed = trim($requestPath, '/');
+$scriptPathTrimmed = trim($_SERVER['SCRIPT_NAME'] ?? '/shop.php', '/');
+$requestedSlug = '';
+if ($requestPathTrimmed !== ''
+    && $requestPathTrimmed !== $scriptPathTrimmed
+    && $requestPathTrimmed !== 'shop.php'
+    && !str_contains($requestPathTrimmed, '/')
+) {
+    $requestedSlug = strtolower(rawurldecode($requestPathTrimmed));
+}
 
 $metaTitle = $storeName . " | Tienda Online en La Habana – Productos Frescos y Entrega a Domicilio";
 $metaDesc  = "Bienvenido a " . $storeName . ", tu tienda online en La Habana. Compra productos de calidad con entrega a domicilio en toda La Habana. Pedido fácil, rápido y seguro. ¡Haz tu pedido ahora!";
@@ -301,8 +333,9 @@ if (isset($_GET['ajax_search'])) {
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
+            $r['slug'] = shop_slugify((string)($r['nombre'] ?? 'producto'));
             [$r['hasImg'], $imgV] = shop_image_meta((string)$r['codigo']);
-            $r['imgUrl'] = $r['hasImg'] ? "image.php?code=" . urlencode($r['codigo']) : null;
+            $r['imgUrl'] = $r['hasImg'] ? $shopAssetPrefix . "image.php?code=" . urlencode($r['codigo']) : null;
             $r['bg'] = "#" . substr(md5($r['nombre']), 0, 6);
             $r['initials'] = mb_strtoupper(mb_substr($r['nombre'], 0, 2));
         }
@@ -372,6 +405,16 @@ try {
     $stmt->execute($params);
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
+
+    $slugCounts = [];
+    foreach ($productos as &$productoRow) {
+        $baseSlug = shop_slugify((string)($productoRow['nombre'] ?? 'producto'));
+        $slugCounts[$baseSlug] = ($slugCounts[$baseSlug] ?? 0) + 1;
+        $productoRow['slug'] = $slugCounts[$baseSlug] === 1
+            ? $baseSlug
+            : ($baseSlug . '-' . shop_slugify((string)($productoRow['codigo'] ?? 'item')));
+    }
+    unset($productoRow);
     
     // Obtener Wishlist si está logueado
     $userWishlist = [];
@@ -388,6 +431,51 @@ try {
     
 } catch (Exception $e) {
     $productos = [];
+    $userWishlist = [];
+    $clienteProfile = null;
+}
+
+$productByCode = [];
+$productBySlug = [];
+foreach ($productos as $productoItem) {
+    $codigoProducto = (string)($productoItem['codigo'] ?? '');
+    $slugProducto = (string)($productoItem['slug'] ?? '');
+    if ($codigoProducto !== '') {
+        $productByCode[$codigoProducto] = $productoItem;
+    }
+    if ($slugProducto !== '') {
+        $productBySlug[$slugProducto] = $productoItem;
+    }
+}
+
+if ($requestedSlug !== '' && isset($productBySlug[$requestedSlug])) {
+    $_GET['producto'] = $productBySlug[$requestedSlug]['codigo'];
+}
+
+$selectedProductCode = trim((string)($_GET['producto'] ?? ''));
+$selectedProduct = $selectedProductCode !== '' && isset($productByCode[$selectedProductCode])
+    ? $productByCode[$selectedProductCode]
+    : null;
+
+if ($selectedProduct) {
+    $selectedSlug = (string)($selectedProduct['slug'] ?? shop_slugify((string)($selectedProduct['nombre'] ?? 'producto')));
+    $siteUrl = $scheme . '://' . $host . $shopPrettyBasePath . '/' . rawurlencode($selectedSlug) . '/';
+    $metaTitle = trim((string)($selectedProduct['nombre'] ?? 'Producto')) . ' | ' . $storeName;
+
+    $selectedDescription = trim((string)($selectedProduct['descripcion'] ?? ''));
+    if ($selectedDescription !== '') {
+        $metaDesc = mb_substr($selectedDescription, 0, 155, 'UTF-8');
+    } else {
+        $metaDesc = 'Compra ' . trim((string)($selectedProduct['nombre'] ?? 'este producto')) . ' en ' . $storeName . '. Disponible para pedido online y entrega a domicilio en La Habana.';
+    }
+
+    [$selectedHasImg, $selectedImgVersion] = shop_image_meta((string)($selectedProduct['codigo'] ?? ''));
+    if ($selectedHasImg) {
+        $metaImg = $scheme . '://' . $host . $baseDir . '/image.php?code=' . rawurlencode((string)$selectedProduct['codigo']);
+        if ($selectedImgVersion) {
+            $metaImg .= '&v=' . $selectedImgVersion;
+        }
+    }
 }
 
 // =========================================================
@@ -784,10 +872,11 @@ if (isset($_GET['action_variants'])) {
 $productsJs = [];
 foreach ($productos as $_p) {
     [$_hasImg, $_imgV] = shop_image_meta((string)$_p['codigo']);
-    $_pImgUrl = $_hasImg ? 'image.php?code=' . urlencode($_p['codigo']) : null;
+    $_pImgUrl = $_hasImg ? $shopAssetPrefix . 'image.php?code=' . urlencode($_p['codigo']) : null;
     $productsJs[] = [
         'codigo'       => $_p['codigo'],
         'nombre'       => $_p['nombre'],
+        'slug'         => $_p['slug'] ?? shop_slugify((string)($_p['nombre'] ?? 'producto')),
         'precio'       => floatval($_p['precio']),
         'precioOferta' => floatval($_p['precio_oferta'] ?? 0),
         'descripcion'  => $_p['descripcion'] ?? '',
@@ -876,6 +965,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 </script>
 
     <meta charset="UTF-8">
+    <base href="<?php echo htmlspecialchars($shopDocumentBase); ?>">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <title><?php echo htmlspecialchars($metaTitle); ?></title>
     <meta name="description" content="<?php echo htmlspecialchars($metaDesc); ?>">
@@ -2093,7 +2183,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
         <?php foreach($productos as $idx => $p):
             [$hasImg, $mtimeMain] = shop_image_meta((string)$p['codigo']);
             $imgV = $mtimeMain ? '&v=' . $mtimeMain : '';
-            $imgUrl = $hasImg ? 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
+            $imgUrl = $hasImg ? $shopAssetPrefix . 'image.php?code=' . urlencode($p['codigo']) . $imgV : null;
             [$hasExtra1, $mtime1] = shop_image_meta((string)$p['codigo'] . '_extra1');
             $imgV1 = $mtime1 ? '&v=' . $mtime1 : '';
             [$hasExtra2, $mtime2] = shop_image_meta((string)$p['codigo'] . '_extra2');
@@ -2111,14 +2201,15 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             "price"       => floatval($p['precio']),
             "desc"        => $p['descripcion'] ?? '',
             "img"         => $imgUrl,
-            "imgExtra1"   => $hasExtra1 ? 'image.php?code=' . urlencode($p['codigo'] . '_extra1') . $imgV1 : null,
-            "imgExtra2"   => $hasExtra2 ? 'image.php?code=' . urlencode($p['codigo'] . '_extra2') . $imgV2 : null,
+            "imgExtra1"   => $hasExtra1 ? $shopAssetPrefix . 'image.php?code=' . urlencode($p['codigo'] . '_extra1') . $imgV1 : null,
+            "imgExtra2"   => $hasExtra2 ? $shopAssetPrefix . 'image.php?code=' . urlencode($p['codigo'] . '_extra2') . $imgV2 : null,
             "bg"          => $bg,
             "initials"    => $initials,
             "hasImg"      => $hasImg,
             "hasStock"    => $hasStock,
             "stock"       => $stock,
             "code"        => $p['codigo'],
+            "slug"        => $p['slug'] ?? shop_slugify((string)($p['nombre'] ?? 'producto')),
             "cat"         => $p['categoria'],
             "unit"        => $p['unidad_medida'] ?? '',
             "color"       => $p['color'] ?? '',
@@ -2292,7 +2383,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                         <img id="detailImg" class="d-none" alt="" draggable="false"
                              onerror="this.classList.add('d-none');document.getElementById('detailPlaceholder').classList.remove('d-none');document.getElementById('btnZoomImg').classList.remove('visible')">
                         <div id="detailPlaceholder" class="d-none text-white fw-bold"></div>
-                        <button id="btnZoomImg" onclick="openImgZoom()" title="Ampliar imagen" aria-label="Ampliar imagen">
+                        <button type="button" id="btnZoomImg" onclick="openImgZoom()" title="Ampliar imagen" aria-label="Ampliar imagen">
                             <i class="fas fa-search-plus" aria-hidden="true"></i>
                         </button>
                     </div>
@@ -3832,6 +3923,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Perfil del cliente logueado (null si no hay sesión)
     const CLIENT_PROFILE = <?= json_encode($clienteProfile) ?>;
+    const SHOP_BASE_PATH = <?= json_encode($shopBasePath) ?>;
+    const SHOP_PRETTY_BASE_PATH = <?= json_encode($shopPrettyBasePath) ?>;
+    const INITIAL_PRODUCT_CODE = <?= json_encode($selectedProductCode) ?>;
 
     let cart = JSON.parse(localStorage.getItem('palweb_cart') || '[]');
     let cartSyncTimeout = null;
@@ -3934,7 +4028,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 desc: item.descripcion || '',
                 img: item.imgUrl, bg: item.bg, initials: item.initials,
                 hasImg: item.hasImg, hasStock: item.hasStock, stock: item.stock,
-                code: item.codigo, cat: item.categoria,
+                code: item.codigo, slug: item.slug || '',
+                cat: item.categoria,
                 unit: item.unidad_medida, color: item.color,
                 esReservable: item.esReservable || false
             });
@@ -4151,6 +4246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         modalDetail = getModalInstance(modalDetail, 'modalDetail');
         // Guardar referencia para compartir (Feature 15)
         _currentDetailProduct = data;
+        syncProductUrl(data);
 
         // Registrar vista en el servidor para estadísticas
         fetch(`shop.php?action_view_product&code=${data.id}`).catch(e => {});
@@ -5339,8 +5435,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
 // ── Service Worker Tienda (scope exclusivo shop.php) ──
-const SHOP_SCOPE_PATH = new URL('./', window.location.href).pathname;
-const SHOP_SW_URL = new URL('sw-shop.js', window.location.href).toString();
+const SHOP_SCOPE_PATH = new URL('./', document.baseURI).pathname;
+const SHOP_SW_URL = new URL('sw-shop.js', document.baseURI).toString();
 
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH })
@@ -5632,10 +5728,50 @@ function closeImgZoom() {
 
 function _zoomKeyClose(e) { if (e.key === 'Escape') closeImgZoom(); }
 
+function slugifyProductName(name) {
+    return String(name || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'producto';
+}
+
+function buildShopListingUrl() {
+    const url = new URL(location.origin + SHOP_BASE_PATH);
+    const params = new URLSearchParams(location.search);
+    params.delete('producto');
+    const qs = params.toString();
+    if (qs) {
+        url.search = qs;
+    }
+    return url.toString();
+}
+
+function buildProductUrl(prod) {
+    const slug = prod?.slug || slugifyProductName(prod?.name || prod?.nombre || prod?.code || prod?.codigo || 'producto');
+    return location.origin + SHOP_PRETTY_BASE_PATH + '/' + encodeURIComponent(slug) + '/';
+}
+
+function syncProductUrl(prod) {
+    if (!prod) return;
+    const targetUrl = buildProductUrl(prod);
+    if (location.href !== targetUrl) {
+        history.replaceState({ product: prod.code || prod.id || '' }, '', targetUrl);
+    }
+}
+
+function resetShopUrl() {
+    const targetUrl = buildShopListingUrl();
+    if (location.href !== targetUrl) {
+        history.replaceState({}, '', targetUrl);
+    }
+}
+
 function shareCurrentProduct() {
     if (!_currentDetailProduct) return;
     const prod = _currentDetailProduct;
-    const url  = location.origin + location.pathname + '?producto=' + encodeURIComponent(prod.id || prod.code);
+    const url  = buildProductUrl(prod);
     const text = prod.name + ' — $' + parseFloat(prod.price || 0).toFixed(2);
     if (navigator.share) {
         navigator.share({ title: prod.name, text, url }).catch(() => {});
@@ -5646,10 +5782,20 @@ function shareCurrentProduct() {
     }
 }
 
-// Abrir producto desde URL ?producto=CODE
+document.addEventListener('DOMContentLoaded', () => {
+    const detailModalEl = document.getElementById('modalDetail');
+    if (detailModalEl) {
+        detailModalEl.addEventListener('hidden.bs.modal', () => {
+            _currentDetailProduct = null;
+            resetShopUrl();
+        });
+    }
+});
+
+// Abrir producto desde URL bonita o desde ?producto=CODE
 (function() {
     const params = new URLSearchParams(location.search);
-    const code = params.get('producto');
+    const code = INITIAL_PRODUCT_CODE || params.get('producto');
     if (!code) return;
     const list = getProductsFromCache() || [];
     const prod = list.find(p => p.codigo === code);
@@ -5662,6 +5808,7 @@ function shareCurrentProduct() {
                 desc: prod.descripcion || '', img: prod.imgUrl,
                 bg: prod.bg, initials: prod.initials, hasImg: prod.hasImg,
                 hasStock: prod.hasStock, stock: prod.stock, code: prod.codigo,
+                slug: prod.slug || '',
                 cat: prod.categoria, unit: prod.unidad_medida, color: prod.color,
                 esReservable: prod.esReservable || false
             }), 600);
