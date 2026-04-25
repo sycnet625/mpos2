@@ -32,22 +32,28 @@ if (!function_exists('pos_security_is_authenticated')) {
 if (!function_exists('pos_security_client_ip_fragment')) {
     function pos_security_client_ip_fragment(): string
     {
-        $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
-        if ($ip === '') {
-            $ip = '0.0.0.0';
+        // CRITICAL: debe coincidir EXACTAMENTE con pos_client_ip_fragment() en pos.php
+        // y poscash_client_ip_fragment() en pos_cash.php — distinto algoritmo provoca
+        // "Sesion invalida. Vuelva a autenticarse." al cobrar.
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $parts = explode('.', $ip);
+            return implode('.', array_slice($parts, 0, 3));
         }
-        return substr(hash('sha256', $ip), 0, 16);
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $parts = explode(':', $ip);
+            return implode(':', array_slice($parts, 0, 4));
+        }
+        return $ip;
     }
 }
 
 if (!function_exists('pos_security_session_fingerprint')) {
     function pos_security_session_fingerprint(): string
     {
-        $agent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? 'unknown-agent'));
-        if ($agent === '') {
-            $agent = 'unknown-agent';
-        }
-        return hash('sha256', pos_security_client_ip_fragment() . '|' . $agent);
+        // CRITICAL: debe coincidir EXACTAMENTE con pos_session_fingerprint() en pos.php
+        $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
+        return hash('sha256', pos_security_client_ip_fragment() . '|' . $ua);
     }
 }
 
@@ -88,7 +94,8 @@ if (!function_exists('pos_security_enforce_session')) {
 
         $lastRegeneratedAt = (int)($_SESSION['pos_session_regenerated_at'] ?? 0);
         if ($lastRegeneratedAt <= 0 || (time() - $lastRegeneratedAt) > 1800) {
-            session_regenerate_id(true);
+            // false: no destruir la sesión antigua para evitar matar requests paralelos
+            session_regenerate_id(false);
             $_SESSION['pos_session_regenerated_at'] = time();
             $_SESSION['pos_session_fingerprint'] = $current;
         }
