@@ -103,6 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         $_SESSION['id_almacen'] = $config['id_almacen'];
         $_SESSION['id_caja'] = $idCaja;
         $_SESSION['pos_session_regenerated_at'] = time();
+        session_write_close();
 
         // Redirigir al POS
         header('Location: pos.php');
