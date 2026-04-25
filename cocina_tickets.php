@@ -316,6 +316,9 @@ if ($idSesion > 0) {
             <button class="kds-btn" onclick="resetDone()" title="Limpia todos los marcados como hechos">
                 <i class="fas fa-rotate-left"></i> Reiniciar
             </button>
+            <button class="kds-btn" onclick="printSummary()" title="Imprime un resumen en papel con cada producto y sus cantidades">
+                <i class="fas fa-print"></i> Imprimir resumen
+            </button>
             <button class="kds-btn primary" onclick="location.reload()" title="Refrescar ahora">
                 <i class="fas fa-sync"></i> Refrescar
             </button>
@@ -445,6 +448,81 @@ function resetDone() {
     saveDone(doneSet);
     renderProdBar();
     renderTickets();
+}
+
+function printSummary() {
+    const agg = computeAggregates();
+    const arr = Object.values(agg).sort((a, b) =>
+        a.name.localeCompare(b.name, 'es', { sensitivity: 'base' })
+    );
+    if (!arr.length) {
+        alert('No hay productos en la sesión para imprimir.');
+        return;
+    }
+
+    const totalUnidades = arr.reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
+    const fecha = new Date().toLocaleString('es-CU', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+    });
+
+    const filas = arr.map(p => `
+        <tr>
+            <td>${escapeHtml(p.name)}</td>
+            <td class="num">${fmtQty(p.total)}</td>
+        </tr>
+    `).join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Resumen de cocina — Sesión #${SESSION_ID}</title>
+<style>
+    @page { size: auto; margin: 8mm 10mm; }
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #000; margin: 0; padding: 0; }
+    h1 { font-size: 18px; margin: 0 0 4px 0; }
+    .meta { font-size: 11px; color: #444; margin-bottom: 10px; border-bottom: 1px solid #999; padding-bottom: 6px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 5px 6px; border-bottom: 1px dashed #aaa; text-align: left; }
+    th { background: #eee; font-size: 12px; text-transform: uppercase; border-bottom: 2px solid #000; }
+    .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    tfoot td { border-top: 2px solid #000; border-bottom: none; font-weight: 800; padding-top: 8px; }
+    .footer { margin-top: 18px; font-size: 10px; color: #666; text-align: center; }
+</style>
+</head>
+<body>
+    <h1>Resumen de producción</h1>
+    <div class="meta">
+        Sesión #${SESSION_ID} · Sucursal <?= $idSucursal ?> · Tickets: ${TICKETS.length} · ${fecha}
+    </div>
+    <table>
+        <thead>
+            <tr><th>Producto</th><th class="num">Cantidad</th></tr>
+        </thead>
+        <tbody>${filas}</tbody>
+        <tfoot>
+            <tr>
+                <td>TOTAL UNIDADES</td>
+                <td class="num">${fmtQty(totalUnidades)}</td>
+            </tr>
+        </tfoot>
+    </table>
+    <div class="footer">Generado desde Pantalla de Cocina</div>
+    <script>
+        window.addEventListener('load', () => {
+            setTimeout(() => { window.print(); }, 150);
+        });
+    <\/script>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=720,height=900');
+    if (!w) { alert('El navegador bloqueó la ventana emergente. Permítela e intenta de nuevo.'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
 }
 
 renderProdBar();
