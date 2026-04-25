@@ -1,6 +1,20 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pin_auth.php
 // Sistema de autenticación con PIN - Separado del POS
+
+// Configurar parámetros de sesión ANTES de session_start()
+$posHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $posHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 session_start();
 require_once 'db.php';
 
