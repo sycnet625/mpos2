@@ -71,8 +71,9 @@ $subtotalOriginal = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'],
 $totalCantidad = array_sum(array_column($items, 'cantidad'));
 $totalOriginal = floatval($venta['total']);
 $costoEnvio    = round($totalOriginal - $subtotalOriginal, 2);
-$tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
-$hayEnvio   = $costoEnvio > 0.01 && in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio);
+// Mostrar manipulación/envío siempre que la diferencia entre total y subtotal
+// sea positiva, sin importar el tipo_servicio (puede haber recargo en mostrador).
+$hayEnvio   = $costoEnvio > 0.01;
 $subtotalDisplay = 0.0;
 foreach ($items as &$item) {
     $precioBase = floatval($item['precio']);
@@ -305,8 +306,7 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
     $totalCantidad = array_sum(array_column($items, 'cantidad'));
     $total         = floatval($cfg['totalDisplay'] ?? $venta['total']);
     $costoEnvio    = round($cfg['costoEnvio'] ?? ($total - $subtotal), 2);
-    $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
-    $hayEnvio      = $costoEnvio > 0.01 && in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio);
+    $hayEnvio      = $costoEnvio > 0.01;
     $numFactura    = date('Ymd', strtotime($venta['fecha'])) . str_pad($venta['id'] ?? 0, 3, '0', STR_PAD_LEFT);
     $terminos      = (($venta['estado_pago'] ?? '') === 'confirmado')
         ? 'PAGADO (' . htmlspecialchars($venta['metodo_pago'] ?? '') . ')'
