@@ -17,6 +17,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 session_start();
 require_once 'db.php';
+require_once 'pos_session_helpers.php';
 
 // --- Rate Limiting por IP ---
 function rl_file($ip) {
@@ -119,17 +120,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         $_SESSION['pos_session_regenerated_at'] = time();
         $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
 
-        // Establecer fingerprint igual que pos.php (mismo algoritmo)
-        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $ipFrag = implode('.', array_slice(explode('.', $ip), 0, 3));
-        } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $ipFrag = implode(':', array_slice(explode(':', $ip), 0, 4));
-        } else {
-            $ipFrag = $ip;
-        }
-        $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
-        $_SESSION['pos_session_fingerprint'] = hash('sha256', $ipFrag . '|' . $ua);
+        // Fingerprint canónico (mismo algoritmo que pos.php / pos_cash.php / pos_security.php)
+        $_SESSION['pos_session_fingerprint'] = pos_canon_session_fingerprint();
 
         error_log('PIN_AUTH: Session established. SID=' . session_id() . ' cajero=' . $_SESSION['cajero']);
 

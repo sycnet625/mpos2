@@ -29,32 +29,14 @@ if (!function_exists('pos_security_is_authenticated')) {
     }
 }
 
+require_once __DIR__ . '/pos_session_helpers.php';
+
 if (!function_exists('pos_security_client_ip_fragment')) {
-    function pos_security_client_ip_fragment(): string
-    {
-        // CRITICAL: debe coincidir EXACTAMENTE con pos_client_ip_fragment() en pos.php
-        // y poscash_client_ip_fragment() en pos_cash.php — distinto algoritmo provoca
-        // "Sesion invalida. Vuelva a autenticarse." al cobrar.
-        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-            $parts = explode('.', $ip);
-            return implode('.', array_slice($parts, 0, 3));
-        }
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-            $parts = explode(':', $ip);
-            return implode(':', array_slice($parts, 0, 4));
-        }
-        return $ip;
-    }
+    function pos_security_client_ip_fragment(): string { return pos_canon_client_ip_fragment(); }
 }
 
 if (!function_exists('pos_security_session_fingerprint')) {
-    function pos_security_session_fingerprint(): string
-    {
-        // CRITICAL: debe coincidir EXACTAMENTE con pos_session_fingerprint() en pos.php
-        $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
-        return hash('sha256', pos_security_client_ip_fragment() . '|' . $ua);
-    }
+    function pos_security_session_fingerprint(): string { return pos_canon_session_fingerprint(); }
 }
 
 if (!function_exists('pos_security_ensure_csrf_token')) {

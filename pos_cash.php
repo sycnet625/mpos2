@@ -29,26 +29,9 @@ function poscash_is_authenticated(): bool {
     return !empty($_SESSION['cajero']) || !empty($_SESSION['admin_logged_in']);
 }
 
-function poscash_client_ip_fragment(): string {
-    // CRITICAL: debe coincidir EXACTAMENTE con pos_client_ip_fragment() en pos.php
-    // de lo contrario el fingerprint no coincide y pos.php vacía la sesión
-    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-        $parts = explode('.', $ip);
-        return implode('.', array_slice($parts, 0, 3));
-    }
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-        $parts = explode(':', $ip);
-        return implode(':', array_slice($parts, 0, 4));
-    }
-    return $ip;
-}
-
-function poscash_session_fingerprint(): string {
-    // CRITICAL: debe coincidir EXACTAMENTE con pos_session_fingerprint() en pos.php
-    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
-    return hash('sha256', poscash_client_ip_fragment() . '|' . $ua);
-}
+require_once 'pos_session_helpers.php';
+function poscash_client_ip_fragment(): string { return pos_canon_client_ip_fragment(); }
+function poscash_session_fingerprint(): string { return pos_canon_session_fingerprint(); }
 
 function poscash_json_input(): array {
     $raw = file_get_contents('php://input');

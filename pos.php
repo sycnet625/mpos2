@@ -31,6 +31,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
+require_once 'pos_session_helpers.php';
 
 error_log('POS: Session loaded. SID=' . session_id() . ' Data=' . json_encode([
     'cajero' => $_SESSION['cajero'] ?? 'EMPTY',
@@ -52,25 +53,8 @@ function pos_is_authenticated(): bool
     return !empty($_SESSION['cajero']) || !empty($_SESSION['admin_logged_in']);
 }
 
-function pos_client_ip_fragment(): string
-{
-    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-        $parts = explode('.', $ip);
-        return implode('.', array_slice($parts, 0, 3));
-    }
-    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-        $parts = explode(':', $ip);
-        return implode(':', array_slice($parts, 0, 4));
-    }
-    return $ip;
-}
-
-function pos_session_fingerprint(): string
-{
-    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
-    return hash('sha256', pos_client_ip_fragment() . '|' . $ua);
-}
+function pos_client_ip_fragment(): string { return pos_canon_client_ip_fragment(); }
+function pos_session_fingerprint(): string { return pos_canon_session_fingerprint(); }
 
 function pos_reset_session_state(): void
 {
