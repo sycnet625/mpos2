@@ -103,6 +103,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         $_SESSION['id_almacen'] = $config['id_almacen'];
         $_SESSION['id_caja'] = $idCaja;
         $_SESSION['pos_session_regenerated_at'] = time();
+        $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
+
+        error_log('PIN_AUTH: Session established. SID=' . session_id() . ' Data=' . json_encode([
+            'cajero' => $_SESSION['cajero'],
+            'id_sucursal' => $_SESSION['id_sucursal'],
+            'id_almacen' => $_SESSION['id_almacen']
+        ]));
+
         session_write_close();
 
         // Redirigir al POS
