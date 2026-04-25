@@ -77,7 +77,7 @@ window.doOpen = async function() {
     try {
         const resp = await fetch('pos_cash.php?action=open', {
             method: 'POST', 
-            headers: {'Content-Type': 'application/json'},
+            headers: (window.posJsonHeaders ? window.posJsonHeaders() : {'Content-Type': 'application/json'}),
             body: JSON.stringify({
                 monto: m, 
                 fecha: f,
@@ -140,6 +140,5 @@ window.checkCashRegister = async function() {
     } catch(e){ console.error("Error al verificar caja:", e); }
 };
 window.updateCloseDifference = function() { const r=parseFloat(document.getElementById('final-cash').value)||0; const d=r-theoreticalTotal; const el=document.getElementById('diffDisplay'); el.innerText='Diferencia: $'+d.toFixed(2); el.className='form-text text-end fw-bold '+(d<0?'text-danger':(d>0?'text-success':'text-muted')); };
-window.validateAndCloseCash = async function() { const r=parseFloat(document.getElementById('final-cash').value); const n=document.getElementById('close-note').value; if(isNaN(r)) return alert("Ingrese efectivo"); if(!confirm('Cerrar?')) return; try{ const resp=await fetch('pos_cash.php?action=close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:cashId,real:r,nota:n})}); const res=await resp.json(); if(res.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('closeRegisterModal')).hide(); Synth.closeCash(); checkCashStatusSilent(); showToast('Cerrado','success'); setTimeout(()=>location.reload(),1500); } else alert(res.msg); } catch(e){ alert("Error"); } };
+window.validateAndCloseCash = async function() { const r=parseFloat(document.getElementById('final-cash').value); const n=document.getElementById('close-note').value; if(isNaN(r)) return alert("Ingrese efectivo"); if(!confirm('Cerrar?')) return; try{ const resp=await fetch('pos_cash.php?action=close',{method:'POST',headers:(window.posJsonHeaders ? window.posJsonHeaders() : {'Content-Type':'application/json'}),body:JSON.stringify({id:cashId,real:r,nota:n})}); const res=await resp.json(); if(res.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('closeRegisterModal')).hide(); Synth.closeCash(); checkCashStatusSilent(); showToast('Cerrado','success'); setTimeout(()=>location.reload(),1500); } else alert(res.msg); } catch(e){ alert("Error"); } };
 </script>
-

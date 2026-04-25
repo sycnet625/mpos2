@@ -13,10 +13,8 @@ ini_set('log_errors', 1);
 error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
+require_once 'pos_security.php';
+pos_security_bootstrap_session();
 require_once 'db.php';
 require_once 'pos_audit.php';
 
@@ -27,11 +25,14 @@ if (file_exists('kardex_engine.php')) {
 }
 
 try {
-    $input = json_decode(file_get_contents('php://input'), true);
+    pos_security_enforce_session(false);
+
+    $input = pos_security_json_input();
+    pos_security_require_csrf($input);
     if (!$input) throw new Exception("Datos de entrada inválidos");
 
     // ── 1. Autenticación con usuario/contraseña del sistema ───────────────────
-    $authUser = trim((string)($input['auth_user'] ?? ''));
+    $authUser = pos_security_clean_text($input['auth_user'] ?? '', 100);
     $authPass = (string)($input['auth_pass'] ?? '');
     if ($authUser === '' || $authPass === '') {
         throw new Exception("Debe ingresar usuario y contraseña del sistema");
@@ -53,13 +54,13 @@ try {
     $cajero = (string)($authRow['nombre'] ?? $authUser);
 
     // ── 2. Validar motivo ───────────────────────────────────────────────────────
-    $motivo = trim($input['motivo'] ?? '');
+    $motivo = pos_security_clean_text($input['motivo'] ?? '', 255);
     if (strlen($motivo) < 5) {
         throw new Exception("El motivo de anulación es obligatorio (mínimo 5 caracteres)");
     }
 
     // ── 3. Validar venta ────────────────────────────────────────────────────────
-    $idVenta = intval($input['id_venta'] ?? 0);
+    $idVenta = isset($input['id_venta']) && is_numeric($input['id_venta']) ? (int)$input['id_venta'] : 0;
     if ($idVenta <= 0) throw new Exception("ID de venta inválido");
 
     // ── 4. Obtener sesión activa (solo ventas de sesión abierta se pueden anular) ─

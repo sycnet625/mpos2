@@ -8,8 +8,8 @@ ini_set('log_errors', 1);
 error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
-session_start();
-
+require_once 'pos_security.php';
+pos_security_bootstrap_session();
 require_once 'db.php';
 require_once 'pos_audit.php';
 
@@ -23,14 +23,16 @@ if (file_exists('kardex_engine.php')) {
 }
 
 try {
+    pos_security_enforce_session(false);
+
     // 3. Obtener Datos
-    $rawInput = file_get_contents('php://input');
-    $input = json_decode($rawInput, true);
+    $input = pos_security_json_input();
+    pos_security_require_csrf($input);
 
     if (!$input) throw new Exception("Datos de entrada inválidos");
 
     // 3. Autorización con credenciales del sistema
-    $authUser = trim((string)($input['auth_user'] ?? ''));
+    $authUser = pos_security_clean_text($input['auth_user'] ?? '', 100);
     $authPass = (string)($input['auth_pass'] ?? '');
     if ($authUser === '' || $authPass === '') {
         throw new Exception("Debe ingresar usuario y contraseña del sistema");
@@ -50,8 +52,8 @@ try {
     }
 
     // Determinar si es devolución por Ítem o por Ticket completo
-    $idDetalle = isset($input['id']) ? intval($input['id']) : 0;
-    $idTicket  = isset($input['ticket_id']) ? intval($input['ticket_id']) : 0;
+    $idDetalle = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
+    $idTicket  = isset($input['ticket_id']) && is_numeric($input['ticket_id']) ? (int)$input['ticket_id'] : 0;
 
     if ($idDetalle <= 0 && $idTicket <= 0) {
         throw new Exception("Se requiere ID de detalle o ID de ticket");

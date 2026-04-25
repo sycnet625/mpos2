@@ -503,7 +503,7 @@ window.confirmPayment = async function() {
 
     bootstrap.Modal.getInstance(document.getElementById('paymentModal')).hide();
     try {
-        const r   = await fetch('pos_save.php', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const r   = await fetch('pos_save.php', { method: 'POST', headers: (window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' }), body: JSON.stringify(payload) });
         const res = await r.json();
         if (res.status === 'success') {
             Synth.cash();

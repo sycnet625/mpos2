@@ -1,12 +1,10 @@
 <?php
+require_once 'pos_security.php';
+pos_security_bootstrap_session();
 require_once 'db.php';
 require_once 'config_loader.php';
 
 header('Content-Type: application/json; charset=utf-8');
-
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
 
 function pos_order_auth_ok(): bool
 {
@@ -244,6 +242,8 @@ if (!pos_order_auth_ok()) {
     exit;
 }
 
+pos_security_enforce_session(false);
+
 $ctx = pos_order_ctx($config ?? []);
 $action = trim((string)($_GET['action'] ?? ''));
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -299,16 +299,14 @@ try {
         exit;
     }
 
-    $input = json_decode(file_get_contents('php://input'), true);
-    if (!is_array($input)) {
-        $input = [];
-    }
+    $input = pos_security_json_input();
+    pos_security_require_csrf($input);
 
     if ($method === 'POST' && $action === 'save_template_from_sale') {
         pos_order_templates_ensure_table($pdo);
         $saleId = (int)($input['sale_id'] ?? 0);
         $payload = pos_sale_order_payload($pdo, $saleId, $ctx);
-        $name = trim((string)($input['name'] ?? ''));
+        $name = pos_security_clean_text($input['name'] ?? '', 120);
         if ($name === '') {
             $defaultClient = trim((string)($payload['cliente_nombre'] ?? 'Cliente regular'));
             $name = mb_substr(($defaultClient !== '' ? $defaultClient : 'Plantilla') . ' #' . $saleId, 0, 120);
@@ -340,6 +338,9 @@ try {
     if ($method === 'POST' && $action === 'delete_template') {
         pos_order_templates_ensure_table($pdo);
         $templateId = (int)($input['id'] ?? 0);
+        if ($templateId <= 0) {
+            throw new RuntimeException('Plantilla inválida');
+        }
         $stmt = $pdo->prepare(
             "UPDATE pos_order_templates
              SET activo = 0

@@ -6,6 +6,13 @@ const QUEUE_KEY = 'pos_pending_sales';
 const CACHE_DURATION = 5 * 60 * 1000;
 const PARKED_ORDERS_KEY = 'pos_parked_orders';
 
+function getPosJsonHeaders(extra = {}) {
+    if (typeof window.posJsonHeaders === 'function') {
+        return window.posJsonHeaders(extra);
+    }
+    return Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+}
+
 // ==========================================
 // MODO DE PRECIO
 // ==========================================
@@ -371,7 +378,7 @@ async function syncOfflineQueue() {
         try {
             const resp = await fetch('pos_save.php', { 
                 method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
+                headers: getPosJsonHeaders(), 
                 body: JSON.stringify(sale) 
             });
             const res = await resp.json();
@@ -406,7 +413,7 @@ async function syncAllPending() {
             try {
                 const resp = await fetch('pos_save.php', { 
                     method: 'POST', 
-                    headers: {'Content-Type': 'application/json'}, 
+                    headers: getPosJsonHeaders(), 
                     body: JSON.stringify(sale) 
                 });
                 const res = await resp.json();
@@ -428,7 +435,7 @@ async function syncAllPending() {
                 try {
                     const resp = await fetch('pos_save.php', { 
                         method: 'POST', 
-                        headers: {'Content-Type': 'application/json'}, 
+                        headers: getPosJsonHeaders(), 
                         body: JSON.stringify(sale) 
                     });
                     const res = await resp.json();
@@ -713,7 +720,7 @@ async function verifyPin() {
         try {
             const resp = await fetch('pos_cash.php?action=login', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: getPosJsonHeaders(),
                 body: JSON.stringify({ pin: enteredPin }),
                 signal: AbortSignal.timeout(5000)
             });
@@ -1193,7 +1200,7 @@ function toggleFavorite(codigo, event) {
     event.stopPropagation();
     fetch('pos.php?toggle_fav=1', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getPosJsonHeaders(),
         body: JSON.stringify({ codigo: codigo })
     })
     .then(r => r.json())
@@ -1662,7 +1669,7 @@ async function confirmPayment() {
         try {
             const r = await fetch('pos_save.php', { 
                 method: 'POST', 
-                headers: {'Content-Type': 'application/json'}, 
+                headers: getPosJsonHeaders(), 
                 body: JSON.stringify(payload) 
             });
             const res = await r.json();
@@ -2027,7 +2034,7 @@ window.saveSaleAsTemplate = async function(saleId, defaultName) {
     try {
         const resp = await fetch('pos_order_templates.php?action=save_template_from_sale', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify({ sale_id: saleId, name: tplName.trim() })
         });
         const data = await resp.json();
@@ -2101,7 +2108,7 @@ window.deleteOrderTemplate = async function(templateId) {
     try {
         const resp = await fetch('pos_order_templates.php?action=delete_template', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify({ id: templateId })
         });
         const data = await resp.json();
@@ -2241,7 +2248,7 @@ window.refundTicketComplete = async function(ticketId) {
     try {
         const r = await fetch('pos_refund.php', { 
             method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
+            headers: getPosJsonHeaders(), 
             body: JSON.stringify({ ticket_id: ticketId, ...auth }) 
         });
         const d = await r.json();
@@ -2264,7 +2271,7 @@ window.refundItemFromHistorial = async function(detailId, prodName) {
     try {
         const r = await fetch('pos_refund.php', { 
             method: 'POST', 
-            headers: {'Content-Type': 'application/json'}, 
+            headers: getPosJsonHeaders(), 
             body: JSON.stringify({ id: detailId, ...auth }) 
         });
         const d = await r.json();
@@ -2314,7 +2321,7 @@ window.confirmVoid = async function() {
     try {
         const r = await fetch('pos_void.php', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify({ id_venta: window._voidTicketId, motivo, auth_user: authUser, auth_pass: authPass }),
         });
         const d = await r.json();
@@ -2561,7 +2568,7 @@ window.invCargarConteo = async function() {
     try {
         const r = await fetch('pos.php?inventario_api=1', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify({ accion: 'consultar_bulk', skus: cart.map(i => i.id) }),
         });
         const d = await r.json();
@@ -2622,7 +2629,7 @@ window.invConfirmar = async function() {
     try {
         const r = await fetch('pos.php?inventario_api=1', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify(payload),
         });
         const d = await r.json();
@@ -2695,7 +2702,7 @@ window.saveBarcodes = async function() {
 
         const r = await fetch('pos.php?inventario_api=1', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getPosJsonHeaders(),
             body: JSON.stringify(payload)
         });
         const d = await r.json();

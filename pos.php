@@ -13,12 +13,173 @@ header("X-XSS-Protection: 1; mode=block");
 // ─────────────────────────────────────────────────────────────────────────────
 
 ini_set('display_errors', 0);
+$posHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
 if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $posHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
     session_start();
 }
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
+
+function pos_is_authenticated(): bool
+{
+    return !empty($_SESSION['cajero']) || !empty($_SESSION['admin_logged_in']);
+}
+
+function pos_client_ip_fragment(): string
+{
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $parts = explode('.', $ip);
+        return implode('.', array_slice($parts, 0, 3));
+    }
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $parts = explode(':', $ip);
+        return implode(':', array_slice($parts, 0, 4));
+    }
+    return $ip;
+}
+
+function pos_session_fingerprint(): string
+{
+    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
+    return hash('sha256', pos_client_ip_fragment() . '|' . $ua);
+}
+
+function pos_reset_session_state(): void
+{
+    $_SESSION = [];
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_regenerate_id(true);
+    }
+}
+
+function pos_ensure_csrf_token(): string
+{
+    if (empty($_SESSION['pos_csrf_token']) || !is_string($_SESSION['pos_csrf_token'])) {
+        $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['pos_csrf_token'];
+}
+
+function pos_enforce_session_security(): void
+{
+    if (!pos_is_authenticated()) {
+        pos_ensure_csrf_token();
+        return;
+    }
+
+    $fingerprint = pos_session_fingerprint();
+    if (!empty($_SESSION['pos_session_fingerprint']) && !hash_equals((string)$_SESSION['pos_session_fingerprint'], $fingerprint)) {
+        pos_reset_session_state();
+        pos_ensure_csrf_token();
+        return;
+    }
+
+    $_SESSION['pos_session_fingerprint'] = $fingerprint;
+
+    $lastRegen = (int)($_SESSION['pos_session_regenerated_at'] ?? 0);
+    if ($lastRegen <= 0 || (time() - $lastRegen) > 900) {
+        session_regenerate_id(true);
+        $_SESSION['pos_session_regenerated_at'] = time();
+        $_SESSION['pos_session_fingerprint'] = $fingerprint;
+    }
+
+    pos_ensure_csrf_token();
+}
+
+function pos_json_input(): array
+{
+    $raw = file_get_contents('php://input');
+    if (!is_string($raw) || $raw === '') {
+        return [];
+    }
+    $input = json_decode($raw, true);
+    return is_array($input) ? $input : [];
+}
+
+function pos_json_error(string $message, int $statusCode = 400): void
+{
+    http_response_code($statusCode);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['status' => 'error', 'message' => $message, 'msg' => $message], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function pos_require_auth_json(): void
+{
+    if (!pos_is_authenticated()) {
+        pos_json_error('No autenticado', 401);
+    }
+}
+
+function pos_require_csrf(array $input = []): void
+{
+    $token = (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ($input['csrf_token'] ?? ''));
+    $sessionToken = (string)($_SESSION['pos_csrf_token'] ?? '');
+    if ($token === '' || $sessionToken === '' || !hash_equals($sessionToken, $token)) {
+        pos_json_error('Token CSRF inválido', 403);
+    }
+}
+
+function pos_clean_text($value, int $maxLen = 255): string
+{
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '';
+    }
+    $value = preg_replace('/[\x00-\x1F\x7F]/u', '', $value) ?? '';
+    return mb_substr($value, 0, $maxLen, 'UTF-8');
+}
+
+function pos_clean_sku($value): string
+{
+    $sku = trim((string)$value);
+    return preg_match('/^[A-Za-z0-9_.-]{1,50}$/', $sku) ? $sku : '';
+}
+
+function pos_clean_barcode($value): string
+{
+    $barcode = trim((string)$value);
+    if ($barcode === '') {
+        return '';
+    }
+    return preg_match('/^[A-Za-z0-9_.\-\/\s]{1,64}$/', $barcode) ? $barcode : '';
+}
+
+function pos_normalize_items($items): array
+{
+    if (!is_array($items)) {
+        return [];
+    }
+    $normalized = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $sku = pos_clean_sku($item['sku'] ?? '');
+        $qty = isset($item['cantidad']) && is_numeric($item['cantidad']) ? (float)$item['cantidad'] : null;
+        if ($sku === '' || $qty === null || !is_finite($qty)) {
+            continue;
+        }
+        $normalized[] = ['sku' => $sku, 'cantidad' => $qty];
+        if (count($normalized) >= 500) {
+            break;
+        }
+    }
+    return $normalized;
+}
+
+pos_enforce_session_security();
+$POS_CSRF_TOKEN = pos_ensure_csrf_token();
 
 function pos_image_meta(string $code): array {
     $safe = trim($code);
@@ -82,22 +243,24 @@ function pos_get_dynamic_cashiers(PDO $pdo, array $config): array
 // ---------------------------------------------------------
 if (isset($_GET['api_client']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
-    // Requiere sesión activa: cajero autenticado o admin
-    if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
-        echo json_encode(['status' => 'error', 'message' => 'No autenticado']);
-        exit;
-    }
-    $input = json_decode(file_get_contents('php://input'), true);
+    pos_require_auth_json();
+    $input = pos_json_input();
+    pos_require_csrf($input);
     
     try {
-        if (empty($input['nombre'])) throw new Exception("El nombre es obligatorio");
+        $nombre = pos_clean_text($input['nombre'] ?? '', 200);
+        $telefono = pos_clean_text($input['telefono'] ?? '', 60);
+        $direccion = pos_clean_text($input['direccion'] ?? '', 255);
+        $nitCi = pos_clean_text($input['nit_ci'] ?? '', 60);
+
+        if ($nombre === '') throw new Exception("El nombre es obligatorio");
         
         $stmt = $pdo->prepare("INSERT INTO clientes (nombre, telefono, direccion, nit_ci, activo) VALUES (?, ?, ?, ?, 1)");
         $stmt->execute([
-            trim($input['nombre']), 
-            $input['telefono'] ?? '', 
-            $input['direccion'] ?? '', 
-            $input['nit_ci'] ?? ''
+            $nombre,
+            $telefono,
+            $direccion,
+            $nitCi
         ]);
         
         $newId = $pdo->lastInsertId();
@@ -106,10 +269,10 @@ if (isset($_GET['api_client']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             'status' => 'success', 
             'client' => [
                 'id' => $newId,
-                'nombre' => $input['nombre'],
-                'telefono' => $input['telefono'] ?? '',
-                'direccion' => $input['direccion'] ?? '',
-                'nit_ci' => $input['nit_ci'] ?? ''
+                'nombre' => $nombre,
+                'telefono' => $telefono,
+                'direccion' => $direccion,
+                'nit_ci' => $nitCi
             ]
         ]);
     } catch (Exception $e) {
@@ -215,10 +378,9 @@ if (isset($_GET['load_products'])) {
 // ENDPOINT: Actualizar almacén de sesión (selección tras login multi-almacén)
 if (isset($_GET['set_almacen']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
-    if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
-        echo json_encode(['status' => 'error', 'msg' => 'No autenticado']); exit;
-    }
-    $inp = json_decode(file_get_contents('php://input'), true);
+    pos_require_auth_json();
+    $inp = pos_json_input();
+    pos_require_csrf($inp);
     $almId = (int)($inp['id_almacen'] ?? 0);
     if ($almId <= 0) {
         echo json_encode(['status' => 'error', 'msg' => 'ID de almacén inválido']); exit;
@@ -261,15 +423,17 @@ if (isset($_GET['load_cashiers'])) {
 // ENDPOINT: Toggle favorito de producto
 if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
-    $inp = json_decode(file_get_contents('php://input'), true);
-    $codigo = trim($inp['codigo'] ?? '');
+    pos_require_auth_json();
+    $inp = pos_json_input();
+    pos_require_csrf($inp);
+    $codigo = pos_clean_sku($inp['codigo'] ?? '');
     if ($codigo) {
-        $pdo->prepare("UPDATE productos SET favorito = 1 - favorito WHERE codigo = ?")->execute([$codigo]);
-        $favStmt = $pdo->prepare("SELECT favorito FROM productos WHERE codigo = ?");
-        $favStmt->execute([$codigo]);
+        $pdo->prepare("UPDATE productos SET favorito = 1 - favorito WHERE codigo = ? AND id_empresa = ?")->execute([$codigo, (int)($config['id_empresa'] ?? 1)]);
+        $favStmt = $pdo->prepare("SELECT favorito FROM productos WHERE codigo = ? AND id_empresa = ?");
+        $favStmt->execute([$codigo, (int)($config['id_empresa'] ?? 1)]);
         echo json_encode(['status' => 'success', 'favorito' => (int)$favStmt->fetchColumn()]);
     } else {
-        echo json_encode(['status' => 'error']);
+        echo json_encode(['status' => 'error', 'msg' => 'Código inválido']);
     }
     exit;
 }
@@ -278,17 +442,22 @@ if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
     ini_set('display_errors', 0);
-    $rawBody = file_get_contents('php://input');
-    $input   = json_decode($rawBody, true);
-    if (json_last_error() !== JSON_ERROR_NONE) { $input = []; }
-    if (!is_array($input)) { $input = []; }
-    $accion  = $input['accion']  ?? '';
-    $motivo  = trim($input['motivo']  ?? '');
-    $usuario = trim($input['usuario'] ?? 'POS-Admin');
-    $items   = $input['items']   ?? [];
+    pos_require_auth_json();
+    $input = pos_json_input();
+    pos_require_csrf($input);
+    $accion  = pos_clean_text($input['accion'] ?? '', 40);
+    $motivo  = pos_clean_text($input['motivo'] ?? '', 500);
+    $items   = pos_normalize_items($input['items'] ?? []);
     $fechaRaw = trim($input['fecha'] ?? '');
     $fechaParsed = $fechaRaw ? DateTime::createFromFormat('Y-m-d', substr($fechaRaw, 0, 10)) : false;
     $fecha   = $fechaParsed ? $fechaParsed->format('Y-m-d') . ' ' . date('H:i:s') : date('Y-m-d H:i:s');
+    $usuarioSesion = pos_clean_text($_SESSION['cajero'] ?? $_SESSION['admin_user'] ?? $_SESSION['admin_name'] ?? 'POS-Admin', 100);
+    $usuario = $usuarioSesion !== '' ? $usuarioSesion : 'POS-Admin';
+    $allowedActions = ['update_barcodes', 'consultar_bulk', 'merma', 'entrada', 'transferencia', 'ajuste', 'conteo'];
+    if (!in_array($accion, $allowedActions, true)) {
+        echo json_encode(['status' => 'error', 'msg' => 'Acción inválida']);
+        exit;
+    }
 
     $ctxConfig = array_merge([
         "id_almacen" => 1,
@@ -309,9 +478,9 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Actualización de códigos de barras desde el POS (Modo Inventario)
     if ($accion === 'update_barcodes') {
-        $sku = trim($input['sku'] ?? '');
-        $b1  = trim($input['barcode'] ?? '');
-        $b2  = trim($input['barcode2'] ?? '');
+        $sku = pos_clean_sku($input['sku'] ?? '');
+        $b1  = pos_clean_barcode($input['barcode'] ?? '');
+        $b2  = pos_clean_barcode($input['barcode2'] ?? '');
         if (!$sku) { echo json_encode(['status'=>'error','msg'=>'SKU no proporcionado']); exit; }
         
         $q = $pdo->prepare("UPDATE productos SET codigo_barra_1=?, codigo_barra_2=? WHERE codigo=? AND id_empresa=?");
@@ -325,10 +494,10 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // Consulta bulk de stock para el conteo visual (sin modificar datos)
     if ($accion === 'consultar_bulk') {
-        $skus = $input['skus'] ?? [];
+        $skus = is_array($input['skus'] ?? null) ? $input['skus'] : [];
         $stocks = [];
         foreach ($skus as $s) {
-            $s = trim($s);
+            $s = pos_clean_sku($s);
             if (!$s) continue;
             $q = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
             $q->execute([$s, $ALM]);
@@ -390,7 +559,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($accion === 'transferencia') {
-            $destino = trim($input['destino'] ?? '');
+            $destino = pos_clean_text($input['destino'] ?? '', 100);
             if (!$destino) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 echo json_encode(['status'=>'error','msg'=>'Indica la sucursal destino']);
@@ -1493,6 +1662,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     // INYECCIÓN DE DATOS GLOBALES
     let currentSaleTotal = 0;
     let currentPaymentMode = 'cash';
+    const POS_CSRF_TOKEN = <?php echo json_encode($POS_CSRF_TOKEN); ?>;
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
     // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
     const CAJEROS_CONFIG = <?php
@@ -1509,6 +1679,14 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     const ALMACENES_BY_SUCURSAL = <?php echo json_encode($almacenesPorSucursal); ?>;
     // Banners de sucursal (id_sucursal → URL relativa) — fondo dinámico del carrito
     const SUCURSALES_BANNERS = <?php echo json_encode($sucursalesBanners); ?>;
+
+    window.posJsonHeaders = function(extra) {
+        const headers = Object.assign({
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': POS_CSRF_TOKEN
+        }, extra || {});
+        return headers;
+    };
 
     // --- LÓGICA DE CLIENTES ---
     
@@ -1562,7 +1740,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
         fetch('pos.php?api_client=1', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: window.posJsonHeaders ? window.posJsonHeaders() : {'Content-Type': 'application/json'},
             body: JSON.stringify(data)
         })
         .then(r => r.json())
@@ -1745,7 +1923,7 @@ window.updateCartBackground = function (sucursalId) {
             try {
                 await fetch('pos.php?set_almacen=1', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id_almacen: almId }),
                     signal: AbortSignal.timeout(5000)
                 });

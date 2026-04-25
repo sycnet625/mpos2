@@ -7,10 +7,8 @@ ini_set('log_errors', 1);
 error_reporting(E_ALL);
 header('Content-Type: application/json; charset=utf-8');
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
+require_once 'pos_security.php';
+pos_security_bootstrap_session();
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'push_notify.php';
@@ -32,10 +30,12 @@ function safe_str($str, $len = 250) {
 }
 
 try {
+    pos_security_enforce_session(false);
+
     // 1. Recibir Datos
-    $rawInput = file_get_contents('php://input');
-    $input = json_decode($rawInput, true);
-    
+    $input = pos_security_json_input();
+    pos_security_require_csrf($input);
+
     if (!$input) throw new Exception("Datos vacíos o JSON inválido.");
 
     // 2. Configuración (dinámica por sesión/cajero; fallback a pos.cfg en config_loader)
@@ -50,8 +50,8 @@ try {
     $idEmpresa = intval($config['id_empresa']);
 
     // 3. Preparar Datos Generales
-    $idSesion = intval($input['id_caja'] ?? 0);
-    $usuarioNombre = 'Sistema';
+    $idSesion = isset($input['id_caja']) && is_numeric($input['id_caja']) ? (int)$input['id_caja'] : 0;
+    $usuarioNombre = pos_security_clean_text($_SESSION['cajero'] ?? $_SESSION['admin_user'] ?? 'Sistema', 100);
     $fechaContable = date('Y-m-d'); // Fallback
 
     // Recuperar sesión y su fecha contable
@@ -79,22 +79,48 @@ try {
         $fechaVenta = $fechaContable . ' ' . $horaReal;
     }
 
-    $uuid = $input['uuid'] ?? uniqid('pos_', true);
-    $tipoServicio = $input['tipo_servicio'] ?? 'mostrador';
+    $uuid = pos_security_clean_text($input['uuid'] ?? uniqid('pos_', true), 80);
+    if ($uuid === '') {
+        $uuid = uniqid('pos_', true);
+    }
+
+    $tipoServicio = pos_security_clean_text($input['tipo_servicio'] ?? 'mostrador', 50);
+    if (!in_array($tipoServicio, ['mostrador', 'delivery', 'reserva', 'mesa', 'recoger'], true)) {
+        $tipoServicio = 'mostrador';
+    }
 
     // Campos nuevos: pago online y reserva sin stock
-    $codigoPago    = isset($input['codigo_pago']) ? substr((string)$input['codigo_pago'], 0, 100) : null;
+    $codigoPago    = isset($input['codigo_pago']) ? pos_security_clean_text($input['codigo_pago'], 100) : null;
     // Las ventas del POS físico ya están cobradas en persona → 'confirmado'.
     // Solo las ventas web envían estado_pago explícitamente ('verificando' o 'pendiente').
-    $estadoPago    = isset($input['estado_pago'])  ? substr((string)$input['estado_pago'],  0, 20)  : 'confirmado';
-    $canalOrigen   = isset($input['canal_origen']) ? substr((string)$input['canal_origen'], 0, 30)  : 'POS';
+    $estadoPago = isset($input['estado_pago']) ? pos_security_clean_text($input['estado_pago'], 20) : 'confirmado';
+    if (!in_array($estadoPago, ['confirmado', 'pendiente', 'verificando'], true)) {
+        $estadoPago = 'confirmado';
+    }
+    $canalOrigen = isset($input['canal_origen']) ? pos_security_clean_text($input['canal_origen'], 30) : 'POS';
+    if ($canalOrigen === '') {
+        $canalOrigen = 'POS';
+    }
     $esReserva     = ($tipoServicio === 'reserva');
     $sinExistencia = 0; // se calcula en el loop de items
 
     // Campos de moneda (multi-divisa)
-    $moneda               = in_array($input['moneda'] ?? 'CUP', ['CUP','USD','MLC']) ? $input['moneda'] : 'CUP';
-    $tipoCambio           = floatval($input['tipo_cambio'] ?? 1.0);
-    $montoMonedaOriginal  = floatval($input['monto_moneda_original'] ?? 0);
+    $moneda = in_array($input['moneda'] ?? 'CUP', ['CUP', 'USD', 'MLC'], true) ? (string)$input['moneda'] : 'CUP';
+    $tipoCambio = isset($input['tipo_cambio']) && is_numeric($input['tipo_cambio']) ? (float)$input['tipo_cambio'] : 1.0;
+    if (!is_finite($tipoCambio) || $tipoCambio <= 0) {
+        $tipoCambio = 1.0;
+    }
+    $montoMonedaOriginal = isset($input['monto_moneda_original']) && is_numeric($input['monto_moneda_original'])
+        ? (float)$input['monto_moneda_original']
+        : 0.0;
+    $saleTotal = isset($input['total']) && is_numeric($input['total']) ? (float)$input['total'] : null;
+    if ($saleTotal === null || !is_finite($saleTotal)) {
+        throw new Exception('Total de venta inválido');
+    }
+    $saleItems = is_array($input['items'] ?? null) ? $input['items'] : [];
+    if (empty($saleItems)) {
+        throw new Exception('La venta no contiene productos');
+    }
 
     // Agregar columnas de moneda si no existen (idempotente)
     try {
@@ -120,17 +146,18 @@ try {
     }
 
     // --- PROCESAMIENTO DE PAGOS (NUEVO: CRÍTICO PARA EL HISTORIAL) ---
-    $payments = $input['payments'] ?? [];
+    $payments = is_array($input['payments'] ?? null) ? $input['payments'] : [];
     $mainMethod = 'Efectivo'; // Default
 
     // Si es legacy (no envía array payments), crearlo
     if (empty($payments) && !empty($input['metodo_pago'])) {
-        $payments[] = ['method' => $input['metodo_pago'], 'amount' => floatval($input['total'])];
-        $mainMethod = $input['metodo_pago'];
+        $legacyMethod = pos_security_clean_text($input['metodo_pago'], 50);
+        $payments[] = ['method' => $legacyMethod, 'amount' => $saleTotal];
+        $mainMethod = $legacyMethod !== '' ? $legacyMethod : 'Efectivo';
     } elseif (count($payments) > 1) {
         $mainMethod = 'Mixto';
     } elseif (count($payments) === 1) {
-        $mainMethod = $payments[0]['method'];
+        $mainMethod = pos_security_clean_text($payments[0]['method'] ?? '', 50) ?: 'Efectivo';
     }
 
     // B. Insertar Cabecera
@@ -146,26 +173,26 @@ try {
     $stmtCab->execute([
         $uuid,
         $fechaVenta,
-        floatval($input['total']),
+        $saleTotal,
         safe_str($mainMethod, 50),
         $idSucursal,
         $idAlmacen,
         $idSesion,
         safe_str($tipoServicio, 50),
-        safe_str($input['cliente_nombre'] ?? 'Mostrador', 100),
-        safe_str($input['cliente_telefono'] ?? '', 50),
-        safe_str($input['cliente_direccion'] ?? '', 200),
+        safe_str(pos_security_clean_text($input['cliente_nombre'] ?? 'Mostrador', 100), 100),
+        safe_str(pos_security_clean_text($input['cliente_telefono'] ?? '', 50), 50),
+        safe_str(pos_security_clean_text($input['cliente_direccion'] ?? '', 200), 200),
         $idEmpresa,
-        safe_str($input['mensajero_nombre'] ?? '', 100),
-        !empty($input['fecha_reserva']) ? $input['fecha_reserva'] : null,
+        safe_str(pos_security_clean_text($input['mensajero_nombre'] ?? '', 100), 100),
+        !empty($input['fecha_reserva']) ? pos_security_clean_text($input['fecha_reserva'], 25) : null,
         $idSesion,
-        floatval($input['abono'] ?? 0),
+        isset($input['abono']) && is_numeric($input['abono']) ? (float)$input['abono'] : 0.0,
         $codigoPago,
         $estadoPago,
         $canalOrigen,
         $moneda,
         $tipoCambio,
-        $montoMonedaOriginal > 0 ? $montoMonedaOriginal : floatval($input['total'])
+        $montoMonedaOriginal > 0 ? $montoMonedaOriginal : $saleTotal
     ]);
 
     $idVenta = $pdo->lastInsertId();
@@ -174,11 +201,13 @@ try {
     // Esto es lo que permite que el KPI del historial funcione
     $stmtPay = $pdo->prepare("INSERT INTO ventas_pagos (id_venta_cabecera, metodo_pago, monto) VALUES (?, ?, ?)");
     foreach ($payments as $pay) {
-        if (floatval($pay['amount']) > 0) {
+        $payAmount = isset($pay['amount']) && is_numeric($pay['amount']) ? (float)$pay['amount'] : 0.0;
+        $payMethod = pos_security_clean_text($pay['method'] ?? '', 50);
+        if ($payAmount > 0 && $payMethod !== '') {
             $stmtPay->execute([
                 $idVenta, 
-                safe_str($pay['method'], 50), 
-                floatval($pay['amount'])
+                safe_str($payMethod, 50), 
+                $payAmount
             ]);
         }
     }
@@ -192,13 +221,19 @@ try {
 
     $itemsCocina = [];
 
-    $resolvedSale = combo_expand_sale_items($pdo, $idEmpresa, $input['items'] ?? []);
+    $resolvedSale = combo_expand_sale_items($pdo, $idEmpresa, $saleItems);
 
-    foreach ($input['items'] as $item) {
-        $sku = $item['id'];
-        $qty = floatval($item['qty']);
-        $price = floatval($item['price']);
-        $name = safe_str($item['name'] ?? $sku, 150);
+    foreach ($saleItems as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $sku = pos_security_clean_code($item['id'] ?? '', 64);
+        $qty = isset($item['qty']) && is_numeric($item['qty']) ? (float)$item['qty'] : 0.0;
+        $price = isset($item['price']) && is_numeric($item['price']) ? (float)$item['price'] : 0.0;
+        $name = safe_str(pos_security_clean_text($item['name'] ?? $sku, 150), 150);
+        if ($sku === '' || !is_finite($qty) || !is_finite($price) || $qty == 0.0) {
+            throw new Exception('Detalle de venta inválido');
+        }
 
         // Insertar Detalle
         $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku]);
@@ -320,7 +355,7 @@ try {
         if ($canalOrigen === 'Web' && $estadoPago !== 'verificando') {
             push_notify($pdo, 'operador',
                 ($tipoServicio === 'reserva' ? '📅 Nueva reserva web' : '🛒 Nuevo pedido web'),
-                "#{$idVenta} — {$clienteNombre} — " . number_format(floatval($input['total']), 2) . ' CUP',
+                "#{$idVenta} — {$clienteNombre} — " . number_format($saleTotal, 2) . ' CUP',
                 '/marinero/reservas.php',
                 ($tipoServicio === 'reserva' ? 'reservation_web_new' : 'web_order_new')
             );
@@ -336,7 +371,7 @@ try {
         if ($canalOrigen !== 'Web' && $tipoServicio !== 'reserva' && $estadoPago !== 'verificando') {
             push_notify($pdo, 'operador',
                 '🧾 Compra nueva',
-                "#{$idVenta} — {$clienteNombre} — " . number_format(floatval($input['total']), 2) . ' CUP',
+                "#{$idVenta} — {$clienteNombre} — " . number_format($saleTotal, 2) . ' CUP',
                 '/marinero/pos.php',
                 'purchase_new'
             );

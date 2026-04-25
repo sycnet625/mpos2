@@ -1,5 +1,21 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_cash.php
+$isHttps = (
+    (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_set_cookie_params([
+        'lifetime' => 0,
+        'path' => '/',
+        'domain' => '',
+        'secure' => $isHttps,
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -7,16 +23,118 @@ header('Content-Type: application/json');
 ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'push_notify.php';
+require_once 'config_loader.php';
+
+function poscash_is_authenticated(): bool {
+    return !empty($_SESSION['cajero']) || !empty($_SESSION['admin_logged_in']);
+}
+
+function poscash_client_ip_fragment(): string {
+    $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
+    if ($ip === '') {
+        $ip = '0.0.0.0';
+    }
+    return substr(hash('sha256', $ip), 0, 16);
+}
+
+function poscash_session_fingerprint(): string {
+    $agent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? 'unknown-agent'));
+    if ($agent === '') {
+        $agent = 'unknown-agent';
+    }
+    return hash('sha256', poscash_client_ip_fragment() . '|' . $agent);
+}
+
+function poscash_json_input(): array {
+    $raw = file_get_contents('php://input');
+    if (!is_string($raw) || trim($raw) === '') {
+        return [];
+    }
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : [];
+}
+
+function poscash_error(string $msg, int $httpCode = 400): void {
+    http_response_code($httpCode);
+    echo json_encode(['status' => 'error', 'msg' => $msg]);
+    exit;
+}
+
+function poscash_ensure_csrf_token(): string {
+    if (empty($_SESSION['pos_csrf_token']) || !is_string($_SESSION['pos_csrf_token'])) {
+        $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['pos_csrf_token'];
+}
+
+function poscash_enforce_session_security(): void {
+    if (!poscash_is_authenticated()) {
+        return;
+    }
+
+    $expected = (string)($_SESSION['pos_session_fingerprint'] ?? '');
+    $current = poscash_session_fingerprint();
+
+    if ($expected === '') {
+        $_SESSION['pos_session_fingerprint'] = $current;
+        $_SESSION['pos_session_regenerated_at'] = time();
+        return;
+    }
+
+    if (!hash_equals($expected, $current)) {
+        $_SESSION = [];
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_regenerate_id(true);
+            session_destroy();
+        }
+        poscash_error('Sesion invalida. Vuelva a autenticarse.', 403);
+    }
+
+    $lastRegeneratedAt = (int)($_SESSION['pos_session_regenerated_at'] ?? 0);
+    if ($lastRegeneratedAt <= 0 || (time() - $lastRegeneratedAt) > 1800) {
+        session_regenerate_id(true);
+        $_SESSION['pos_session_regenerated_at'] = time();
+        $_SESSION['pos_session_fingerprint'] = $current;
+    }
+}
+
+function poscash_require_auth(): void {
+    if (!poscash_is_authenticated()) {
+        poscash_error('Sesion requerida.', 401);
+    }
+}
+
+function poscash_require_csrf(array $input): void {
+    $sessionToken = (string)($_SESSION['pos_csrf_token'] ?? '');
+    $providedToken = '';
+
+    if (isset($_SERVER['HTTP_X_CSRF_TOKEN']) && is_string($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+        $providedToken = trim($_SERVER['HTTP_X_CSRF_TOKEN']);
+    }
+    if ($providedToken === '' && isset($input['csrf_token']) && is_string($input['csrf_token'])) {
+        $providedToken = trim($input['csrf_token']);
+    }
+
+    if ($sessionToken === '' || $providedToken === '' || !hash_equals($sessionToken, $providedToken)) {
+        poscash_error('Token CSRF invalido.', 403);
+    }
+}
 
 $action = $_GET['action'] ?? '';
-$input = json_decode(file_get_contents('php://input'), true);
-
-require_once 'config_loader.php';
+$input = poscash_json_input();
 $sucursalID = intval($config['id_sucursal']);
+
+poscash_enforce_session_security();
 
 try {
     if ($action === 'login') {
-        $pin = $input['pin'] ?? '';
+        poscash_require_csrf($input);
+
+        $pin = preg_replace('/\D+/', '', (string)($input['pin'] ?? ''));
+        if ($pin === null || $pin === '' || strlen($pin) < 4 || strlen($pin) > 10) {
+            poscash_error('PIN invalido.', 422);
+        }
+
         $foundCajero = null;
 
         try {
@@ -69,6 +187,9 @@ try {
             $_SESSION['id_sucursal'] = (int)$foundCajero['id_sucursal'];
             $_SESSION['id_almacen'] = (int)$foundCajero['id_almacen'];
             $_SESSION['pos_rol'] = (string)$foundCajero['rol'];
+            $_SESSION['pos_session_fingerprint'] = poscash_session_fingerprint();
+            $_SESSION['pos_session_regenerated_at'] = time();
+            $csrfToken = poscash_ensure_csrf_token();
 
             echo json_encode([
                 'status' => 'success',
@@ -77,6 +198,7 @@ try {
                 'id_empresa' => (int)$foundCajero['id_empresa'],
                 'id_sucursal' => (int)$foundCajero['id_sucursal'],
                 'id_almacen' => (int)$foundCajero['id_almacen'],
+                'csrf_token' => $csrfToken,
             ]);
         } else {
             echo json_encode(['status' => 'error', 'msg' => 'PIN incorrecto']);
@@ -122,9 +244,27 @@ try {
     } 
     
     elseif ($action === 'open') {
-        $cajero = $input['cajero'] ?? 'Admin';
-        $monto = floatval($input['monto'] ?? 0);
-        $fechaContable = !empty($input['fecha']) ? $input['fecha'] : date('Y-m-d'); 
+        poscash_require_auth();
+        poscash_require_csrf($input);
+
+        $cajero = trim((string)($_SESSION['cajero'] ?? $input['cajero'] ?? 'Admin'));
+        if ($cajero === '') {
+            $cajero = 'Admin';
+        }
+
+        $monto = isset($input['monto']) && is_numeric($input['monto']) ? (float)$input['monto'] : 0.0;
+        if ($monto < 0) {
+            poscash_error('El monto inicial no puede ser negativo.', 422);
+        }
+
+        $fechaContable = date('Y-m-d');
+        if (!empty($input['fecha']) && is_string($input['fecha'])) {
+            $fechaTmp = trim($input['fecha']);
+            $dt = DateTime::createFromFormat('Y-m-d', $fechaTmp);
+            if ($dt && $dt->format('Y-m-d') === $fechaTmp) {
+                $fechaContable = $fechaTmp;
+            }
+        }
 
         $stmt = $pdo->prepare("INSERT INTO caja_sesiones 
             (nombre_cajero, monto_inicial, fecha_contable, id_sucursal, estado, fecha_apertura) 
@@ -147,6 +287,9 @@ try {
     } 
 
     elseif ($action === 'close') {
+        poscash_require_auth();
+        poscash_require_csrf($input);
+
         // RECTIFICACIÓN: Incluir columna 'nota' y validación de ejecución
         $sql = "UPDATE caja_sesiones SET 
                     fecha_cierre = NOW(), 
@@ -158,20 +301,32 @@ try {
                 WHERE id = ?";
         
         $stmt = $pdo->prepare($sql);
-        $diff = floatval($input['real'] ?? 0) - floatval($input['sistema'] ?? 0);
+        $sessionId = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
+        if ($sessionId <= 0) {
+            poscash_error('Sesion de caja invalida.', 422);
+        }
+
+        $montoSistema = isset($input['sistema']) && is_numeric($input['sistema']) ? (float)$input['sistema'] : 0.0;
+        $montoReal = isset($input['real']) && is_numeric($input['real']) ? (float)$input['real'] : 0.0;
+        $nota = trim((string)($input['nota'] ?? ''));
+        if (strlen($nota) > 500) {
+            $nota = substr($nota, 0, 500);
+        }
+
+        $diff = $montoReal - $montoSistema;
         
         if ($stmt->execute([
-            floatval($input['sistema'] ?? 0), 
-            floatval($input['real'] ?? 0), 
+            $montoSistema, 
+            $montoReal, 
             $diff, 
-            $input['nota'] ?? '', 
-            intval($input['id'])
+            $nota, 
+            $sessionId
         ])) {
             push_notify(
                 $pdo,
                 'operador',
                 '🔴 Sesión de caja cerrada',
-                'Caja #' . intval($input['id']) . ' — diferencia $' . number_format($diff, 2),
+                'Caja #' . $sessionId . ' — diferencia $' . number_format($diff, 2),
                 '/marinero/pos.php',
                 'cash_session_closed'
             );
