@@ -1536,6 +1536,9 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
                     </div>
                 </div>
+                <button id="btnEditPrice" class="btn btn-warning fw-bold shadow-sm w-100 mb-2" onclick="editPrice()" style="padding:10px 0;" disabled title="Requiere supervisor o administrador">
+                    <i class="fas fa-dollar-sign me-2"></i> PRECIO
+                </button>
                 <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
                     <i class="fas fa-check-circle me-2"></i> COBRAR
                 </button>

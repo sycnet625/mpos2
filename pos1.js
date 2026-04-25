@@ -13,6 +13,32 @@ function getPosJsonHeaders(extra = {}) {
     return Object.assign({ 'Content-Type': 'application/json' }, extra || {});
 }
 
+async function ensurePosCsrfToken(forceRefresh = false) {
+    if (!navigator.onLine) {
+        return !!window.POS_CSRF_TOKEN_VALUE;
+    }
+
+    if (!forceRefresh && typeof window.POS_CSRF_TOKEN_VALUE === 'string' && window.POS_CSRF_TOKEN_VALUE.length >= 32) {
+        return true;
+    }
+
+    try {
+        const resp = await fetch('pos_cash.php?action=csrf', {
+            method: 'GET',
+            cache: 'no-store',
+            credentials: 'same-origin',
+            signal: AbortSignal.timeout(5000)
+        });
+        const data = await resp.json();
+        if (data && data.status === 'success' && typeof data.csrf_token === 'string' && data.csrf_token.length >= 32) {
+            window.POS_CSRF_TOKEN_VALUE = data.csrf_token;
+            return true;
+        }
+    } catch (e) {}
+
+    return false;
+}
+
 // ==========================================
 // MODO DE PRECIO
 // ==========================================
@@ -78,6 +104,7 @@ function setPriceMode(mode, pctOverride) {
 function recalculateCartPrices() {
     if (!Array.isArray(cart) || cart.length === 0) return;
     cart.forEach(item => {
+        if (item.customPrice) return;
         const prod = productsDB.find(p => p.codigo == item.id);
         if (prod) {
             item.price = getPrice(prod);
@@ -224,12 +251,26 @@ let pinLockedUntil  = 0;          // timestamp de fin de bloqueo
 let pinLockInterval = null;       // interval del countdown
 let inactivityTimer = null;       // timer de auto-logout
 const INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos de inactividad
+let pinEntryMode = 'overlay';
+let pendingSessionRetry = null;
+let sessionLoginModalInstance = null;
 
 // ==========================================
 // INICIALIZACION
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
     console.log('Iniciando POS...');
+    const sessionLoginModalEl = document.getElementById('sessionLoginModal');
+    if (sessionLoginModalEl) {
+        sessionLoginModalEl.addEventListener('hidden.bs.modal', () => {
+            enteredPin = '';
+            updatePinDisplay();
+            pinEntryMode = 'overlay';
+            pendingSessionRetry = null;
+            const reasonEl = document.getElementById('sessionLoginReason');
+            if (reasonEl) reasonEl.innerText = '';
+        });
+    }
     _applyPriceModeUI();
     clearSearchAndRefreshProductList(false);
     // Algunos navegadores autocompletan luego del DOMContentLoaded.
@@ -364,6 +405,10 @@ async function updateSyncKeypadButton() {
 
 async function syncOfflineQueue() {
     if (!navigator.onLine) return showToast("Sin internet", "error");
+    if (!await ensurePosCsrfToken(true)) {
+        openSessionLoginModal('Inicio de sesion requerido para sincronizar ventas offline.', () => syncOfflineQueue());
+        return showToast('Sin sesion valida para sincronizar', 'warning');
+    }
     
     const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
     if (queue.length === 0) return;
@@ -382,8 +427,15 @@ async function syncOfflineQueue() {
                 body: JSON.stringify(sale) 
             });
             const res = await resp.json();
-            if (res.status === 'success') syncedCount++; 
-            else failedQueue.push(sale);
+            if (res.status === 'success') {
+                syncedCount++;
+            } else {
+                if (await handleSessionAuthFailure(res, () => syncOfflineQueue(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
+                    failedQueue.push(sale);
+                    break;
+                }
+                failedQueue.push(sale);
+            }
         } catch (e) { 
             failedQueue.push(sale); 
         }
@@ -401,6 +453,11 @@ async function syncOfflineQueue() {
 
 async function syncAllPending() {
     if (!navigator.onLine) return;
+    if (!await ensurePosCsrfToken(true)) {
+        openSessionLoginModal('Inicio de sesion requerido para sincronizar ventas offline.', () => syncAllPending());
+        showToast('Sin sesion valida para sincronizar', 'warning');
+        return;
+    }
     
     let totalSynced = 0;
     let totalErrors = 0;
@@ -417,8 +474,16 @@ async function syncAllPending() {
                     body: JSON.stringify(sale) 
                 });
                 const res = await resp.json();
-                if (res.status === 'success') totalSynced++; 
-                else { failedQueue.push(sale); totalErrors++; }
+                if (res.status === 'success') {
+                    totalSynced++;
+                } else {
+                    if (await handleSessionAuthFailure(res, () => syncAllPending(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
+                        failedQueue.push(sale);
+                        break;
+                    }
+                    failedQueue.push(sale);
+                    totalErrors++;
+                }
             } catch (e) { 
                 failedQueue.push(sale); 
                 totalErrors++;
@@ -443,6 +508,9 @@ async function syncAllPending() {
                         await window.posCache.markSaleSynced(sale.id);
                         totalSynced++;
                     } else {
+                        if (await handleSessionAuthFailure(res, () => syncAllPending(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
+                            break;
+                        }
                         totalErrors++;
                     }
                 } catch (e) { 
@@ -701,7 +769,46 @@ function typePin(v) {
 
 function updatePinDisplay() { 
     const display = document.getElementById('pinDisplay');
-    if (display) display.innerText = String.fromCharCode(8226).repeat(enteredPin.length); 
+    const masked = String.fromCharCode(8226).repeat(enteredPin.length);
+    if (display) display.innerText = masked;
+    const sessionDisplay = document.getElementById('sessionPinDisplay');
+    if (sessionDisplay) sessionDisplay.innerText = masked || '....';
+}
+
+function sessionErrorNeedsLogin(message) {
+    const msg = String(message || '').toLowerCase();
+    return /sesion requerida|sesion invalida|no autenticado|no autorizado|csrf/.test(msg);
+}
+
+function closeSessionLoginModal() {
+    const modalEl = document.getElementById('sessionLoginModal');
+    if (!modalEl) return;
+    sessionLoginModalInstance = sessionLoginModalInstance || bootstrap.Modal.getOrCreateInstance(modalEl);
+    sessionLoginModalInstance.hide();
+    pinEntryMode = 'overlay';
+    const reasonEl = document.getElementById('sessionLoginReason');
+    if (reasonEl) reasonEl.innerText = '';
+}
+
+function openSessionLoginModal(message, retryFn) {
+    const modalEl = document.getElementById('sessionLoginModal');
+    if (!modalEl) return;
+    pendingSessionRetry = typeof retryFn === 'function' ? retryFn : null;
+    enteredPin = '';
+    pinEntryMode = 'modal';
+    updatePinDisplay();
+    const reasonEl = document.getElementById('sessionLoginReason');
+    if (reasonEl) reasonEl.innerText = String(message || 'Inicio de sesion requerido');
+    sessionLoginModalInstance = sessionLoginModalInstance || bootstrap.Modal.getOrCreateInstance(modalEl);
+    sessionLoginModalInstance.show();
+}
+
+async function handleSessionAuthFailure(result, retryFn, fallbackMessage) {
+    const message = result?.msg || result?.message || fallbackMessage || 'Inicio de sesion requerido';
+    if (!sessionErrorNeedsLogin(message)) return false;
+    showToast(message, 'warning');
+    openSessionLoginModal(message, retryFn);
+    return true;
 }
 
 // ==========================================
@@ -718,18 +825,23 @@ async function verifyPin() {
 
     if (navigator.onLine) {
         try {
+            await ensurePosCsrfToken(true);
             const resp = await fetch('pos_cash.php?action=login', {
                 method: 'POST',
+                credentials: 'same-origin',
                 headers: getPosJsonHeaders(),
                 body: JSON.stringify({ pin: enteredPin }),
                 signal: AbortSignal.timeout(5000)
             });
             const data = await resp.json();
             if (data.status === 'success') {
+                if (typeof data.csrf_token === 'string' && data.csrf_token.length >= 32) {
+                    window.POS_CSRF_TOKEN_VALUE = data.csrf_token;
+                }
                 loginSuccess = true;
                 currentCashier = data.cajero;
                 cajeroRol = data.rol ?? 'cajero';
-                loginContext = data;
+                loginContext = Object.assign({}, data, { serverAuthenticated: true });
 
                 // Refrescar IndexedDB con lista completa de cajeros (incluyendo PINs)
                 // Los PINs NO están en CAJEROS_CONFIG del HTML — se obtienen del servidor
@@ -757,12 +869,13 @@ async function verifyPin() {
                 loginSuccess = true;
                 currentCashier = cajero.nombre;
                 cajeroRol = cajero.rol ?? 'cajero';
-                loginContext = cajero;
+                loginContext = Object.assign({}, cajero, { serverAuthenticated: false });
             }
         } catch(e) {}
     }
 
     if (loginSuccess) {
+        const isSessionReauth = pinEntryMode === 'modal';
         currentRole = cajeroRol;
         pinAttempts = 0;
         showPinAttemptDots(); // limpiar dots
@@ -794,7 +907,16 @@ async function verifyPin() {
             Synth.tada();
             applyRoleRestrictions();
             startInactivityTimer();
-            unlockPos();
+            if (isSessionReauth) {
+                closeSessionLoginModal();
+                const retryFn = pendingSessionRetry;
+                pendingSessionRetry = null;
+                if (typeof retryFn === 'function') {
+                    setTimeout(() => retryFn(), 120);
+                }
+            } else {
+                unlockPos();
+            }
         };
 
         // Si la sucursal tiene múltiples almacenes, mostrar selector antes de continuar
@@ -803,10 +925,10 @@ async function verifyPin() {
             ? (ALMACENES_BY_SUCURSAL[sucId] || [])
             : [];
 
-        if (almacenes.length > 1 && typeof window.showAlmacenPicker === 'function') {
+        if (!isSessionReauth && almacenes.length > 1 && typeof window.showAlmacenPicker === 'function') {
             window.showAlmacenPicker(almacenes, loginContext, finalizarLogin);
         } else {
-            await finalizarLogin();
+            await finalizarLogin(loginContext?.id_almacen || null);
         }
     } else {
         pinAttempts++;
@@ -818,6 +940,10 @@ async function verifyPin() {
         }
         enteredPin = "";
         updatePinDisplay();
+        if (pinEntryMode === 'modal') {
+            const reasonEl = document.getElementById('sessionLoginReason');
+            if (reasonEl) reasonEl.innerText = 'PIN incorrecto. Intenta otra vez.';
+        }
     }
 }
 
@@ -898,6 +1024,13 @@ function applyRoleRestrictions() {
     const btnCaja     = document.getElementById('btnCaja');
     if (btnDiscount) btnDiscount.classList.toggle('d-none', isCajero);
     if (btnCaja)     btnCaja.classList.toggle('d-none', isCajero);
+    // Botón de editar precio: visible siempre, deshabilitado para cajeros
+    const btnEditPrice = document.getElementById('btnEditPrice');
+    if (btnEditPrice) {
+        const allowed = (currentRole === 'admin' || currentRole === 'supervisor');
+        btnEditPrice.disabled = !allowed;
+        btnEditPrice.title = allowed ? 'Modificar precio del producto seleccionado' : 'Requiere supervisor o administrador';
+    }
     // Botón de inventario: solo admin
     const btnInv = document.getElementById('btnInventario');
     if (btnInv) btnInv.style.display = (currentRole === 'admin') ? '' : 'none';
@@ -1426,17 +1559,34 @@ function askQty() {
     } 
 }
 
-function applyDiscount() { 
-    if(selectedIndex < 0) return showToast('Seleccione item', 'warning'); 
-    let p = prompt("% Descuento Item:", cart[selectedIndex].discountPct); 
-    if(p !== null) { 
-        let v = parseFloat(p)||0; 
-        if(v<0||v>100) return; 
-        cart[selectedIndex].discountPct = v; 
-        renderCart(); 
+function applyDiscount() {
+    if(selectedIndex < 0) return showToast('Seleccione item', 'warning');
+    let p = prompt("% Descuento Item:", cart[selectedIndex].discountPct);
+    if(p !== null) {
+        let v = parseFloat(p)||0;
+        if(v<0||v>100) return;
+        cart[selectedIndex].discountPct = v;
+        renderCart();
         Synth.discount();
         saveCartState();
-    } 
+    }
+}
+
+function editPrice() {
+    if (currentRole !== 'admin' && currentRole !== 'supervisor') {
+        return showToast('Solo supervisores o administradores pueden modificar el precio', 'error');
+    }
+    if (selectedIndex < 0) return showToast('Seleccione un producto del carrito', 'warning');
+    const item = cart[selectedIndex];
+    const p = prompt('Nuevo precio para "' + item.name + '":', item.price);
+    if (p === null) return;
+    const v = parseFloat(p);
+    if (!Number.isFinite(v) || v < 0) return showToast('Precio inválido', 'error');
+    item.price = v;
+    item.customPrice = true;
+    renderCart();
+    if (typeof Synth !== 'undefined' && Synth.discount) Synth.discount();
+    saveCartState();
 }
 
 function applyGlobalDiscount() { 
@@ -1682,6 +1832,10 @@ async function confirmPayment() {
                 finishSale();
                 return;
             } else {
+                if (await handleSessionAuthFailure(res, () => confirmPayment(), 'Inicio de sesion requerido para registrar la venta.')) {
+                    paymentProcessing = false;
+                    return;
+                }
                 saveOffline(payload);
                 paymentProcessing = false;
                 return;
@@ -2650,6 +2804,9 @@ window.invConfirmar = async function() {
             // Refrescar catálogo completo desde servidor para dejar lista/stock 100% sincronizados.
             await refreshProducts();
         } else {
+            if (await handleSessionAuthFailure(d, () => invConfirmar(), 'Inicio de sesion requerido para completar la operacion de inventario.')) {
+                return;
+            }
             showToast(d.msg || 'Error', 'error');
         }
     } catch(e) {
@@ -2718,6 +2875,9 @@ window.saveBarcodes = async function() {
             bootstrap.Modal.getInstance(document.getElementById('barcodeModal')).hide();
             // Opcionalmente refrescar productos si los códigos se muestran en la UI
         } else {
+            if (await handleSessionAuthFailure(d, () => saveBarcodes(), 'Inicio de sesion requerido para actualizar codigos de barras.')) {
+                return;
+            }
             showToast(d.msg || 'Error al guardar', 'error');
         }
     } catch(e) {
