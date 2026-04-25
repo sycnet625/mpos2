@@ -123,8 +123,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         // Fingerprint canónico (mismo algoritmo que pos.php / pos_cash.php / pos_security.php)
         $_SESSION['pos_session_fingerprint'] = pos_canon_session_fingerprint();
 
-        error_log('PIN_AUTH: Session established. SID=' . session_id() . ' cajero=' . $_SESSION['cajero']);
-
         session_write_close();
 
         // Redirigir al POS

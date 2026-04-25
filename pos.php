@@ -33,12 +33,6 @@ require_once 'config_loader.php';
 require_once 'combo_helper.php';
 require_once 'pos_session_helpers.php';
 
-error_log('POS: Session loaded. SID=' . session_id() . ' Data=' . json_encode([
-    'cajero' => $_SESSION['cajero'] ?? 'EMPTY',
-    'id_sucursal' => $_SESSION['id_sucursal'] ?? 'EMPTY',
-    'id_almacen' => $_SESSION['id_almacen'] ?? 'EMPTY'
-]));
-
 $posScriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/pos.php'));
 $posBasePath = rtrim($posScriptDir === '.' ? '/' : $posScriptDir, '/');
 if ($posBasePath === '') {

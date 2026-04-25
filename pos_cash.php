@@ -127,15 +127,10 @@ try {
     }
 
     if ($action === 'login') {
-        $rawPin = (string)($input['pin'] ?? '');
-        $csrfDebug = (string)($_SESSION['pos_csrf_token'] ?? 'EMPTY');
-        error_log("POS_CASH login: SID=" . session_id() . " pin_raw=" . json_encode($rawPin) . " input_keys=" . json_encode(array_keys($input)) . " csrf_in_session=" . substr($csrfDebug, 0, 8));
-
         poscash_require_csrf($input);
 
-        $pin = preg_replace('/\D+/', '', $rawPin);
+        $pin = preg_replace('/\D+/', '', (string)($input['pin'] ?? ''));
         if ($pin === null || $pin === '' || strlen($pin) < 4 || strlen($pin) > 10) {
-            error_log("POS_CASH login: PIN INVALIDO pin_clean=" . json_encode($pin) . " len=" . strlen($pin));
             poscash_error('PIN invalido.', 422);
         }
 
@@ -197,8 +192,6 @@ try {
             $csrfToken = poscash_ensure_csrf_token();
             session_write_close();
 
-            error_log("POS_CASH login OK: SID=" . session_id() . " cajero=" . $foundCajero['nombre']);
-
             echo json_encode([
                 'status' => 'success',
                 'cajero' => $foundCajero['nombre'],
@@ -252,7 +245,6 @@ try {
     } 
     
     elseif ($action === 'open') {
-        error_log("POS_CASH open: SID=" . session_id() . " cajero=" . json_encode($_SESSION['cajero'] ?? 'EMPTY') . " auth=" . (poscash_is_authenticated() ? 'YES' : 'NO'));
         poscash_require_auth();
         poscash_require_csrf($input);
 
