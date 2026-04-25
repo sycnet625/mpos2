@@ -282,21 +282,6 @@ if (empty($logoUrl)) {
     <button class="btn-c" onclick="window.close()">✕ Cerrar</button>
 </div>
 
-<?php if ($priceView === 'mayorista' || abs($markupPct) > 0.001): ?>
-<div class="page-container" style="min-height:auto; padding:0.5cm 1.5cm; margin-bottom:0; border-bottom:none;">
-    <div class="price-note">
-        <strong>
-            <?php if ($priceView === 'mayorista'): ?>
-                Impresión visual con precio mayorista.
-            <?php else: ?>
-                Impresión visual con ajuste de <?php echo ($markupPct > 0 ? '+' : '') . number_format($markupPct, 0); ?>%.
-            <?php endif; ?>
-        </strong>
-        La venta y la contabilidad conservan el precio original del POS.
-    </div>
-</div>
-<?php endif; ?>
-
 <?php if ($duplex): ?>
 <!-- ══════════════════════ MODO DUPLEX ══════════════════════════════════════ -->
 <?php
