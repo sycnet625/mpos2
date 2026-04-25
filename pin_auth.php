@@ -110,7 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
     if ($cajeroEncontrado) {
         rl_clear($rl_ip);
         // PIN correcto - Crear sesión (sin guardar el PIN)
-        session_regenerate_id(true);
+        // NO usar session_regenerate_id(true) — destruye la sesión y rompe requests paralelos
         $_SESSION['cajero'] = $cajeroEncontrado['nombre'];
         $_SESSION['fecha_contable'] = $fechaContable;
         $_SESSION['id_sucursal'] = $config['id_sucursal'];
@@ -119,11 +119,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         $_SESSION['pos_session_regenerated_at'] = time();
         $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
 
-        error_log('PIN_AUTH: Session established. SID=' . session_id() . ' Data=' . json_encode([
-            'cajero' => $_SESSION['cajero'],
-            'id_sucursal' => $_SESSION['id_sucursal'],
-            'id_almacen' => $_SESSION['id_almacen']
-        ]));
+        // Establecer fingerprint igual que pos.php (mismo algoritmo)
+        $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $ipFrag = implode('.', array_slice(explode('.', $ip), 0, 3));
+        } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $ipFrag = implode(':', array_slice(explode(':', $ip), 0, 4));
+        } else {
+            $ipFrag = $ip;
+        }
+        $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
+        $_SESSION['pos_session_fingerprint'] = hash('sha256', $ipFrag . '|' . $ua);
+
+        error_log('PIN_AUTH: Session established. SID=' . session_id() . ' cajero=' . $_SESSION['cajero']);
 
         session_write_close();
 

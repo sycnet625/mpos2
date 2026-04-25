@@ -30,19 +30,24 @@ function poscash_is_authenticated(): bool {
 }
 
 function poscash_client_ip_fragment(): string {
-    $ip = trim((string)($_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'));
-    if ($ip === '') {
-        $ip = '0.0.0.0';
+    // CRITICAL: debe coincidir EXACTAMENTE con pos_client_ip_fragment() en pos.php
+    // de lo contrario el fingerprint no coincide y pos.php vacía la sesión
+    $ip = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $parts = explode('.', $ip);
+        return implode('.', array_slice($parts, 0, 3));
     }
-    return substr(hash('sha256', $ip), 0, 16);
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $parts = explode(':', $ip);
+        return implode(':', array_slice($parts, 0, 4));
+    }
+    return $ip;
 }
 
 function poscash_session_fingerprint(): string {
-    $agent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? 'unknown-agent'));
-    if ($agent === '') {
-        $agent = 'unknown-agent';
-    }
-    return hash('sha256', poscash_client_ip_fragment() . '|' . $agent);
+    // CRITICAL: debe coincidir EXACTAMENTE con pos_session_fingerprint() en pos.php
+    $ua = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 180);
+    return hash('sha256', poscash_client_ip_fragment() . '|' . $ua);
 }
 
 function poscash_json_input(): array {
