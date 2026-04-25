@@ -5,6 +5,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
 
 // CONFIGURACIÓN MÍNIMA
 $id_sucursal = 1; 
@@ -33,15 +34,17 @@ function print_report_ticket_session_id(array $ticket): int {
 // --- LÓGICA DE DATOS (Copia simplificada para solo lectura) ---
 try {
     // 1. Desglose
-    $sqlDaily = "SELECT 
+    $wReal   = ventas_reales_where_clause();
+    $wRealVc = ventas_reales_where_clause('vc');
+    $sqlDaily = "SELECT
                     dates.dia,
-                    COALESCE((SELECT SUM(total) FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_venta,
-                    COALESCE((SELECT SUM(vd.cantidad * p.costo) 
+                    COALESCE((SELECT SUM(total) FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) = dates.dia AND $wReal), 0) as total_venta,
+                    COALESCE((SELECT SUM(vd.cantidad * p.costo)
                               FROM ventas_detalle vd JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id JOIN productos p ON vd.id_producto = p.codigo
-                              WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia), 0) as total_costo,
+                              WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia AND $wRealVc), 0) as total_costo,
                     COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto
                  FROM (
-                    SELECT DISTINCT DATE(fecha) as dia FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
+                    SELECT DISTINCT DATE(fecha) as dia FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ? AND $wReal
                     UNION
                     SELECT DISTINCT DATE(fecha) as dia FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
                  ) as dates ORDER BY dates.dia ASC";
@@ -61,7 +64,7 @@ try {
     $pct_margen = $venta_total > 0 ? ($ganancia_bruta / $venta_total)*100 : 0;
 
     // 2. Pagos
-    $stmt = $pdo->prepare("SELECT vp.metodo_pago, SUM(vp.monto) as total FROM ventas_pagos vp JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id WHERE vc.id_sucursal = ? AND DATE(vc.fecha) BETWEEN ? AND ? GROUP BY vp.metodo_pago");
+    $stmt = $pdo->prepare("SELECT vp.metodo_pago, SUM(vp.monto) as total FROM ventas_pagos vp JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id WHERE vc.id_sucursal = ? AND DATE(vc.fecha) BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " GROUP BY vp.metodo_pago");
     $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
     $payments = $stmt->fetchAll();
 
@@ -70,7 +73,7 @@ try {
 
     $stmt = $pdo->prepare("SELECT *
                            FROM ventas_cabecera
-                           WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
+                           WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ? AND " . ventas_reales_where_clause() . "
                            ORDER BY fecha ASC, id ASC");
     $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
     $sessionTickets = $stmt->fetchAll(PDO::FETCH_ASSOC);

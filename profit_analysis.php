@@ -4,6 +4,7 @@
 
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'accounting_helpers.php';
 
 
 // ---------------------------------------------------------
@@ -68,7 +69,7 @@ try {
 
     // A. VENTAS NETAS (Filtradas por SUCURSAL o GLOBAL)
     // CAMBIO: Filtro dinámico según modo de vista
-    $stmtVentas = $pdo->prepare("SELECT SUM(total) FROM ventas_cabecera WHERE DATE(fecha) BETWEEN ? AND ? $sqlFilterSucursal");
+    $stmtVentas = $pdo->prepare("SELECT SUM(total) FROM ventas_cabecera WHERE DATE(fecha) BETWEEN ? AND ? $sqlFilterSucursal AND " . ventas_reales_where_clause());
     if ($isGlobal) {
         $stmtVentas->execute([$start, $end]);
     } else {
@@ -77,11 +78,11 @@ try {
     $ingresosVentas = floatval($stmtVentas->fetchColumn() ?: 0);
 
     // B. COSTO DE VENTA - COGS (Filtrado DINÁMICO)
-    $sqlCogs = "SELECT SUM(d.cantidad * p.costo) 
-                FROM ventas_detalle d 
-                JOIN productos p ON d.id_producto = p.codigo 
-                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-                WHERE DATE(v.fecha) BETWEEN ? AND ? $sqlFilterSucursal";
+    $sqlCogs = "SELECT SUM(d.cantidad * p.costo)
+                FROM ventas_detalle d
+                JOIN productos p ON d.id_producto = p.codigo
+                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                WHERE DATE(v.fecha) BETWEEN ? AND ? $sqlFilterSucursal AND " . ventas_reales_where_clause('v');
     $stmtCogs = $pdo->prepare($sqlCogs);
     $stmtCogs->execute([$start, $end]);
     $costoVentas = floatval($stmtCogs->fetchColumn() ?: 0);

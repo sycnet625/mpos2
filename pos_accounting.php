@@ -4,6 +4,7 @@
 
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'accounting_helpers.php';
 
 // 1. CONFIGURACIÓN
 require_once 'config_loader.php';
@@ -67,7 +68,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("DELETE FROM contabilidad_diario WHERE fecha BETWEEN ? AND ? AND asiento_tipo IN ('VENTA','COSTO','GASTO','VENTA_CASA','IMPUESTOS','COMPRA','MERMA')")->execute([$fi, $ff]);
             
             // PREPARAR FILTROS SCOPE
-            $sqlVentas = "SELECT * FROM ventas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'";
+            $sqlVentas = "SELECT * FROM ventas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND " . ventas_reales_where_clause();
             $sqlGastos = "SELECT * FROM gastos_historial WHERE fecha BETWEEN '$fi' AND '$ff'";
             $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
             $sqlMermas = "SELECT * FROM mermas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'"; // Asumiendo columna fecha
@@ -209,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $fh = date('Y-m-d'); $ff = $_GET['fecha'] ?? $fh; $scope = $_GET['scope'] ?? 'local'; $errView = "";
 try {
     $qInv = "SELECT SUM(s.cantidad*p.costo) FROM stock_almacen s JOIN productos p ON s.id_producto=p.codigo WHERE p.activo=1";
-    $qVta = "SELECT COALESCE(SUM(total),0) FROM ventas_cabecera WHERE 1=1";
+    $qVta = "SELECT COALESCE(SUM(total),0) FROM ventas_cabecera WHERE " . ventas_reales_where_clause();
     $qGas = "SELECT COALESCE(SUM(monto),0) as total FROM gastos_historial WHERE 1=1";
 
     if ($scope === 'local') {

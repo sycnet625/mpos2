@@ -2,6 +2,7 @@
 // ARCHIVO: dashboard.php
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
 
 // --- FUNCIONES DE CONSULTA (DATA FETCHING) ---
 function getScalar($pdo, $sql, $params = []) {
@@ -63,13 +64,13 @@ $stockCritico = getScalar($pdo, "
 // -------------------------------------
 
 // Ventas de Hoy
-$ventasHoy = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND DATE(fecha) = CURDATE()", [$empresaId]);
+$ventasHoy = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND DATE(fecha) = CURDATE() AND " . ventas_reales_where_clause(), [$empresaId]);
 
 // Ventas del Mes
-$ventasMes = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND MONTH(fecha) = MONTH(CURRENT_DATE()) AND YEAR(fecha) = YEAR(CURRENT_DATE())", [$empresaId]);
+$ventasMes = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND MONTH(fecha) = MONTH(CURRENT_DATE()) AND YEAR(fecha) = YEAR(CURRENT_DATE()) AND " . ventas_reales_where_clause(), [$empresaId]);
 
 // Ticket Promedio
-$ticketPromedio = getScalar($pdo, "SELECT AVG(total) FROM ventas_cabecera WHERE id_empresa = ?", [$empresaId]);
+$ticketPromedio = getScalar($pdo, "SELECT AVG(total) FROM ventas_cabecera WHERE id_empresa = ? AND " . ventas_reales_where_clause(), [$empresaId]);
 
 // --- NUEVO KPI: GANANCIA GLOBAL REAL ---
 // Fórmula: Suma de [(Precio Venta - Costo Producto) * Cantidad] de todas las ventas históricas
@@ -78,10 +79,10 @@ $gananciaGlobal = getScalar($pdo, "
     FROM ventas_detalle d
     JOIN productos p ON d.id_producto = p.id
     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-    WHERE v.id_empresa = ?", [$empresaId]);
+    WHERE v.id_empresa = ? AND " . ventas_reales_where_clause('v'), [$empresaId]);
 
 // Cálculo de Rentabilidad % (Margen sobre ventas)
-$totalVentasHistorico = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ?", [$empresaId]);
+$totalVentasHistorico = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND " . ventas_reales_where_clause(), [$empresaId]);
 $porcentajeRentabilidad = ($totalVentasHistorico > 0) ? ($gananciaGlobal / $totalVentasHistorico) * 100 : 0;
 
 
@@ -100,7 +101,7 @@ $costoPorAlmacen = getRows($pdo, "
 $ventasPorSucursal = getRows($pdo, "
     SELECT id_sucursal, SUM(total) as total_ventas, COUNT(*) as transacciones
     FROM ventas_cabecera
-    WHERE id_empresa = ?
+    WHERE id_empresa = ? AND " . ventas_reales_where_clause() . "
     GROUP BY id_sucursal", [$empresaId]);
 
 // Top 5 Productos
@@ -109,7 +110,7 @@ $topProductos = getRows($pdo, "
     FROM ventas_detalle d
     JOIN productos p ON d.id_producto = p.id
     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-    WHERE v.id_empresa = ?
+    WHERE v.id_empresa = ? AND " . ventas_reales_where_clause('v') . "
     GROUP BY p.id
     ORDER BY vendidos DESC LIMIT 5", [$empresaId]);
 

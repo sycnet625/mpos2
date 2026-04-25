@@ -16,6 +16,7 @@ error_reporting(E_ALL);
 
 try {
     require_once 'db.php';
+require_once 'accounting_helpers.php';
     date_default_timezone_set('America/Havana');
     $pdo->exec("SET time_zone = '-05:00';");
 } catch (Exception $e) {
@@ -123,7 +124,7 @@ $margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
 // B. Ventas (Periodo)
 $paramsDate = [$fechaInicio, $fechaFin];
 
-$sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
+$sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
 $ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
 
 // C. Ofertas Comerciales (Periodo)
@@ -137,7 +138,7 @@ $sqlGanancia = "SELECT SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.c
                 JOIN productos p ON d.id_producto = p.codigo
                 LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
+                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
 $gananciaPeriodo = getScalar($pdo, $sqlGanancia, $paramsDate);
 
 // --- C. MÉTRICAS WEB (AMPLIADO) ---
@@ -202,6 +203,20 @@ try {
     )->fetchColumn();
 } catch (Throwable $e) { /* columnas pueden no existir aún */ }
 
+// Reservas pendientes de cobro (informativo, NO sumadas a ventas)
+$reservasPendCount = 0;
+$reservasPendMonto = 0.0;
+try {
+    $rp = $pdo->query(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(total),0) AS monto
+         FROM ventas_cabecera
+         WHERE id_empresa = $EMP_ID" . (($scope === 'local') ? " AND id_sucursal = $SUC_ID" : "") . "
+           AND " . reservas_pendientes_where_clause()
+    )->fetch(PDO::FETCH_ASSOC);
+    $reservasPendCount = (int)($rp['n'] ?? 0);
+    $reservasPendMonto = (float)($rp['monto'] ?? 0);
+} catch (Throwable $e) { /* tablas/columnas pueden no existir aún */ }
+
 // ============================================================================
 //   2.5 ANÁLISIS DE LOGS DE SERVIDOR (NGINX)
 // ============================================================================
@@ -233,7 +248,7 @@ $logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-l
 $logErrors = shell_exec("tail -n 50 $errorLogPath | grep 'error' | tail -n 5");
 
 
-$sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0";
+$sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
 $totalTransacciones = getScalar($pdo, $sqlTrans, $paramsDate);
 $ticketPromedio = ($totalTransacciones > 0) ? $ventasPeriodo / $totalTransacciones : 0;
 
@@ -243,7 +258,7 @@ $countPendientes = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE 
 // D. Datos para Gráficas
 $sqlPagos = "SELECT COALESCE(metodo_pago, 'Efectivo') as metodo, SUM(total) as total 
              FROM ventas_cabecera v 
-             WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+             WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
              GROUP BY metodo_pago ORDER BY total DESC";
 $pagosData = getRows($pdo, $sqlPagos, $paramsDate);
 
@@ -251,7 +266,7 @@ $topProductos = getRows($pdo, "SELECT p.nombre, SUM(d.cantidad) as vendidos, SUM
                                FROM ventas_detalle d
                                JOIN productos p ON d.id_producto = p.codigo
                                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                               WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+                               WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
                                GROUP BY p.codigo ORDER BY vendidos DESC LIMIT 5", $paramsDate);
 
 // ============================================================================
@@ -263,7 +278,7 @@ $sqlTopProfit = "SELECT p.nombre, SUM(d.cantidad * (d.precio - p.costo)) as tota
                  FROM ventas_detalle d
                  JOIN productos p ON d.id_producto = p.codigo
                  JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
                  GROUP BY p.codigo
                  ORDER BY total_ganancia DESC LIMIT 5";
 $topProfitProds = getRows($pdo, $sqlTopProfit, $paramsDate);
@@ -304,7 +319,7 @@ $sqlCatSales = "SELECT p.categoria, SUM(d.cantidad * COALESCE(ps.precio_venta, p
                  JOIN productos p ON d.id_producto = p.codigo
                  LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
                  JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
                  GROUP BY p.categoria ORDER BY total_venta DESC";
 $catSalesData = getRows($pdo, $sqlCatSales, $paramsDate);
 
@@ -313,7 +328,7 @@ $sqlCatProfit = "SELECT p.categoria, SUM(d.cantidad * (d.precio - p.costo)) as t
                  FROM ventas_detalle d
                  JOIN productos p ON d.id_producto = p.codigo
                  JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0
+                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
                  GROUP BY p.categoria
                  ORDER BY total_ganancia DESC";
 $catProfitData = getRows($pdo, $sqlCatProfit, $paramsDate);
@@ -1015,9 +1030,24 @@ HTML;
                 </div>
             </div>
 
-            <?php if ($reservasSinStock > 0 || $pagosVerificando > 0): ?>
+            <?php if ($reservasSinStock > 0 || $pagosVerificando > 0 || $reservasPendCount > 0): ?>
             <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1"><i class="fas fa-bell me-2 text-warning"></i> Alertas Operativas</h6>
             <div class="row g-4 mb-4">
+                <?php if ($reservasPendCount > 0): ?>
+                <div class="col-md-6">
+                    <div class="card h-100 shadow-sm border-0" style="background:#cfe2ff; border-left:5px solid #0d6efd !important; border-left-width:5px;">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div style="font-size:2.5rem;">⏳</div>
+                            <div>
+                                <h6 class="text-uppercase fw-bold small text-muted mb-1">Reservas Pendientes de Cobro</h6>
+                                <h3 class="fw-bold mb-1 text-primary"><?= $reservasPendCount ?> reserva<?= $reservasPendCount > 1 ? 's' : '' ?> · $<?= number_format($reservasPendMonto, 2) ?></h3>
+                                <small class="text-muted d-block mb-2">No incluidas en ventas del periodo (se sumarán al confirmar el pago).</small>
+                                <a href="reservas.php" class="btn btn-sm btn-outline-primary">Ver reservas →</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <?php if ($reservasSinStock > 0): ?>
                 <div class="col-md-6">
                     <div class="card h-100 shadow-sm border-0" style="background:#fff3cd; border-left:5px solid #fd7e14 !important; border-left-width:5px;">

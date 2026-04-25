@@ -4,6 +4,7 @@
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 require_once 'db.php';
+require_once 'accounting_helpers.php';
 
 // ---------------------------------------------------------
 // 🔒 SEGURIDAD Y CONFIGURACIÓN
@@ -101,7 +102,7 @@ try {
     $sqlDateLogic = "IF(v.id_caja > 0, s.fecha_contable, DATE(v.fecha))";
 
     // 1. RESUMEN FINANCIERO
-    $sqlFinanzas = "SELECT 
+    $sqlFinanzas = "SELECT
                         SUM(d.cantidad * d.precio) as venta_total,
                         SUM(d.cantidad * p.costo) as costo_total,
                         SUM(d.cantidad) as total_items
@@ -109,7 +110,7 @@ try {
                     JOIN productos p ON d.id_producto = p.codigo
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                     LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                    WHERE $sqlDateLogic BETWEEN ? AND ?";
+                    WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v');
     
     $stmtF = $pdo->prepare($sqlFinanzas);
     $stmtF->execute([$start, $end]);
@@ -122,10 +123,10 @@ try {
     $margen     = ($ventaTotal > 0) ? ($ganancia / $ventaTotal) * 100 : 0;
 
     // 2. MÉTODOS DE PAGO
-    $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total 
+    $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total
                  FROM ventas_cabecera v
                  LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                 WHERE $sqlDateLogic BETWEEN ? AND ? 
+                 WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . "
                  GROUP BY v.metodo_pago";
     $stmtP = $pdo->prepare($sqlPagos);
     $stmtP->execute([$start, $end]);
@@ -198,7 +199,7 @@ try {
     $kpiReserva = $stmtRes->fetch(PDO::FETCH_ASSOC);
 
     // PROMEDIOS DIARIOS
-    $stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? GROUP BY dia HAVING venta_dia >= 1");
+    $stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . " GROUP BY dia HAVING venta_dia >= 1");
     $stmtActive->execute([$start, $end]);
     $activeDays = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
     

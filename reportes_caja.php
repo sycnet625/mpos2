@@ -2,6 +2,7 @@
 // ARCHIVO: /var/www/palweb/api/reportes_caja.php
 ini_set('display_errors', 0);
 require_once 'db.php';
+require_once 'accounting_helpers.php';
 
 
 // ---------------------------------------------------------
@@ -61,18 +62,18 @@ function getCanalBadgeRC($canal, $map) {
 }
 
 // 3. OBTENER DATOS
-$sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja = ? AND id_sucursal = ? ORDER BY id DESC";
+$sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja = ? AND id_sucursal = ? AND " . ventas_reales_where_clause() . " ORDER BY id DESC";
 $stmtT = $pdo->prepare($sqlTickets);
 $stmtT->execute([$idSesion, $sucursalID]);
 $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 
 // Detalles
 // CORRECCIÓN: JOIN por p.codigo (El ID numérico ya no existe)
-$sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria 
+$sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria
                 FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo 
+                JOIN productos p ON d.id_producto = p.codigo
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_caja = ? AND v.id_sucursal = ?";
+                WHERE v.id_caja = ? AND v.id_sucursal = ? AND " . ventas_reales_where_clause('v');
 $stmtD = $pdo->prepare($sqlDetalles);
 $stmtD->execute([$idSesion, $sucursalID]);
 $allDetalles = $stmtD->fetchAll(PDO::FETCH_ASSOC);
