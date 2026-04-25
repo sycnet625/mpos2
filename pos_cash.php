@@ -127,11 +127,25 @@ $sucursalID = intval($config['id_sucursal']);
 poscash_enforce_session_security();
 
 try {
+    if ($action === 'csrf') {
+        echo json_encode([
+            'status' => 'success',
+            'csrf_token' => poscash_ensure_csrf_token(),
+            'authenticated' => poscash_is_authenticated(),
+        ]);
+        exit;
+    }
+
     if ($action === 'login') {
+        $rawPin = (string)($input['pin'] ?? '');
+        $csrfDebug = (string)($_SESSION['pos_csrf_token'] ?? 'EMPTY');
+        error_log("POS_CASH login: SID=" . session_id() . " pin_raw=" . json_encode($rawPin) . " input_keys=" . json_encode(array_keys($input)) . " csrf_in_session=" . substr($csrfDebug, 0, 8));
+
         poscash_require_csrf($input);
 
-        $pin = preg_replace('/\D+/', '', (string)($input['pin'] ?? ''));
+        $pin = preg_replace('/\D+/', '', $rawPin);
         if ($pin === null || $pin === '' || strlen($pin) < 4 || strlen($pin) > 10) {
+            error_log("POS_CASH login: PIN INVALIDO pin_clean=" . json_encode($pin) . " len=" . strlen($pin));
             poscash_error('PIN invalido.', 422);
         }
 
