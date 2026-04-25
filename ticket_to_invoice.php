@@ -674,12 +674,6 @@ $cfg = [
                                 <td class="left total-final" style="color:#2F75B5;">TOTAL</td>
                                 <td class="right total-final">$<?= number_format($totalDisplay, 2) ?></td>
                             </tr>
-                            <?php if ($priceView === 'mayorista' || abs($markupPct) > 0.001): ?>
-                            <tr style="background-color:#f8f9fa;">
-                                <td class="left">Total POS</td>
-                                <td class="right">$<?= number_format($totalOriginal, 2) ?></td>
-                            </tr>
-                            <?php endif; ?>
                         </tbody>
                     </table>
                 </td>
