@@ -10,6 +10,9 @@ header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload"
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
 // ─────────────────────────────────────────────────────────────────────────────
 
 ini_set('display_errors', 0);
@@ -28,6 +31,15 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
+
+$posScriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/pos.php'));
+$posBasePath = rtrim($posScriptDir === '.' ? '/' : $posScriptDir, '/');
+if ($posBasePath === '') {
+    $posBasePath = '/';
+}
+$posPrefix = $posBasePath === '/' ? '' : $posBasePath;
+$posDocumentBase = $posPrefix . '/';
+$posScopePath = $posPrefix . '/pos/';
 
 function pos_is_authenticated(): bool
 {
@@ -1223,8 +1235,54 @@ try {
             background: none; border: none; color: rgba(255,255,255,0.4);
             cursor: pointer; text-decoration: underline;
         }
+        #sessionLoginModal .modal-content {
+            border: none;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 18px 60px rgba(0,0,0,0.28);
+        }
+        #sessionLoginModal .modal-header {
+            background: linear-gradient(135deg, #1f2937 0%, #334155 100%);
+            color: #fff;
+            border-bottom: none;
+            padding: 0.8rem 1rem;
+        }
+        #sessionLoginModal .modal-body {
+            padding: 1rem 1rem 1.1rem;
+            background: #f8fafc;
+        }
+        #sessionLoginModal .mini-login-copy {
+            font-size: 0.82rem;
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+        #sessionLoginModal .mini-pin-display {
+            font-size: 1.9rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            color: #0f172a;
+            text-align: center;
+            margin-bottom: 0.75rem;
+            min-height: 2.3rem;
+        }
+        #sessionLoginModal .mini-pin-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+        }
+        #sessionLoginModal .mini-pin-grid .pin-btn {
+            min-height: 56px;
+        }
+        #sessionLoginReason {
+            font-size: 0.78rem;
+            color: #b91c1c;
+            min-height: 1.15rem;
+            margin-bottom: 0.55rem;
+            text-align: center;
+        }
     </style>
 
+<base href="<?php echo htmlspecialchars($posDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
 <link rel="manifest" href="manifest-pos.php">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-192.png">
@@ -1236,8 +1294,14 @@ try {
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            const posScope = new URL('./', window.location.href).pathname;
-            navigator.serviceWorker.register('service-worker.js', { scope: posScope })
+            const posScope = <?php echo json_encode($posScopePath); ?>;
+            const rootScope = new URL('./', document.baseURI).href;
+            navigator.serviceWorker.getRegistration(rootScope)
+                .then(reg => {
+                    if (reg && reg.scope === rootScope) return reg.unregister();
+                })
+                .catch(() => {})
+                .finally(() => navigator.serviceWorker.register('service-worker.js', { scope: posScope }))
                 .then(reg => console.log('SW registrado: ', reg))
                 .catch(err => console.log('SW error: ', err));
         });
@@ -1313,6 +1377,28 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <button class="btn btn-primary btn-sm w-100" onclick="confirmAlmacenSelection()">
                 <i class="fas fa-check me-1"></i> Confirmar almacén
             </button>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="sessionLoginModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold mb-0"><i class="fas fa-user-shield me-2"></i>Inicio de sesion requerido</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mini-login-copy">Vuelve a autenticarte para continuar esta accion sin cerrar el POS.</div>
+                <div id="sessionLoginReason"></div>
+                <div class="mini-pin-display" id="sessionPinDisplay">....</div>
+                <div class="mini-pin-grid">
+                    <button class="pin-btn" onclick="typePin(1)">1</button><button class="pin-btn" onclick="typePin(2)">2</button><button class="pin-btn" onclick="typePin(3)">3</button>
+                    <button class="pin-btn" onclick="typePin(4)">4</button><button class="pin-btn" onclick="typePin(5)">5</button><button class="pin-btn" onclick="typePin(6)">6</button>
+                    <button class="pin-btn" onclick="typePin(7)">7</button><button class="pin-btn" onclick="typePin(8)">8</button><button class="pin-btn" onclick="typePin(9)">9</button>
+                    <button class="pin-btn c-red" onclick="typePin('C')">C</button><button class="pin-btn" onclick="typePin(0)">0</button><button class="pin-btn c-green" onclick="verifyPin()">OK</button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -1596,26 +1682,28 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             </div>
             <div class="modal-body pb-2">
                 <p class="text-muted small mb-3">Esta acción es permanente y quedará registrada en el audit trail con su nombre y hora exacta.</p>
-                <div class="mb-3">
-                    <label class="form-label small fw-bold">Motivo de Anulación <span class="text-danger">*</span></label>
-                    <textarea id="voidMotivo" class="form-control form-control-sm" rows="3"
-                        placeholder="Ej: Error en precio, cliente canceló, producto incorrecto..."
-                        maxlength="200"></textarea>
-                    <div class="form-text text-muted" style="font-size:0.7rem">Mínimo 5 caracteres. Quedará firmado con su usuario del sistema.</div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-bold">Usuario del sistema</label>
-                    <input type="text" id="voidAuthUser" class="form-control form-control-sm"
-                        maxlength="100" placeholder="Ej: admin" autocomplete="off">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label small fw-bold">Contraseña del sistema</label>
-                    <input type="password" id="voidAuthPass" class="form-control form-control-sm"
-                        maxlength="120" placeholder="••••••" autocomplete="off">
-                </div>
-                <button class="btn btn-danger w-100 fw-bold btn-void-confirm" onclick="confirmVoid()">
-                    <i class="fas fa-ban me-1"></i> CONFIRMAR ANULACIÓN
-                </button>
+                <form onsubmit="confirmVoid(); return false;">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Motivo de Anulación <span class="text-danger">*</span></label>
+                        <textarea id="voidMotivo" class="form-control form-control-sm" rows="3"
+                            placeholder="Ej: Error en precio, cliente canceló, producto incorrecto..."
+                            maxlength="200"></textarea>
+                        <div class="form-text text-muted" style="font-size:0.7rem">Mínimo 5 caracteres. Quedará firmado con su usuario del sistema.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Usuario del sistema</label>
+                        <input type="text" id="voidAuthUser" class="form-control form-control-sm"
+                            maxlength="100" placeholder="Ej: admin" autocomplete="username">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Contraseña del sistema</label>
+                        <input type="password" id="voidAuthPass" class="form-control form-control-sm"
+                            maxlength="120" placeholder="••••••" autocomplete="current-password">
+                    </div>
+                    <button type="submit" class="btn btn-danger w-100 fw-bold btn-void-confirm">
+                        <i class="fas fa-ban me-1"></i> CONFIRMAR ANULACIÓN
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -1662,7 +1750,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     // INYECCIÓN DE DATOS GLOBALES
     let currentSaleTotal = 0;
     let currentPaymentMode = 'cash';
-    const POS_CSRF_TOKEN = <?php echo json_encode($POS_CSRF_TOKEN); ?>;
+    window.POS_CSRF_TOKEN_VALUE = <?php echo json_encode($POS_CSRF_TOKEN); ?>;
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
     // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
     const CAJEROS_CONFIG = <?php
@@ -1683,7 +1771,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     window.posJsonHeaders = function(extra) {
         const headers = Object.assign({
             'Content-Type': 'application/json',
-            'X-CSRF-Token': POS_CSRF_TOKEN
+            'X-CSRF-Token': window.POS_CSRF_TOKEN_VALUE || ''
         }, extra || {});
         return headers;
     };
@@ -1918,15 +2006,19 @@ window.updateCartBackground = function (sucursalId) {
         const almBadge = document.getElementById('ctxAlmacenBadge');
         if (almBadge) almBadge.innerText = almNombre;
 
-        // Persistir en sesión PHP si hay conexión
-        if (navigator.onLine) {
+        // Persistir en sesión PHP solo cuando el login realmente creó sesión en backend.
+        if (navigator.onLine && _pickerContext && _pickerContext.serverAuthenticated === true) {
             try {
-                await fetch('pos.php?set_almacen=1', {
+                const resp = await fetch('pos.php?set_almacen=1', {
                     method: 'POST',
+                    credentials: 'same-origin',
                     headers: window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ id_almacen: almId }),
                     signal: AbortSignal.timeout(5000)
                 });
+                if (!resp.ok) {
+                    console.warn('No se pudo persistir el almacén en la sesión del servidor');
+                }
             } catch (e) { /* sin conexión — el contexto JS ya fue actualizado */ }
         }
 
