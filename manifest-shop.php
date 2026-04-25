@@ -14,6 +14,7 @@ $scriptDir   = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
 $basePath    = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
 if ($basePath === '') $basePath = '/';
 $prefix      = $basePath === '/' ? '' : $basePath;
+$shopScope   = $prefix . '/shop/';
 $nombre      = $cfg['tienda_nombre'] ?? 'Tienda PalWeb';
 $nombreCorto = explode(' ', $nombre)[0]; // Primera palabra
 
@@ -21,8 +22,8 @@ $manifest = [
     'id'               => $prefix . '/shop',
     'name'             => $nombre,
     'short_name'       => $nombreCorto,
-    'start_url'        => $prefix . '/shop.php',
-    'scope'            => ($prefix === '' ? '/' : $prefix . '/'),
+    'start_url'        => $shopScope,
+    'scope'            => $shopScope,
     'display'          => 'standalone',
     'display_override' => ['window-controls-overlay', 'standalone', 'minimal-ui'],
     'orientation'      => 'portrait-primary',
@@ -52,7 +53,7 @@ $manifest = [
         ],
     ],
     'share_target'     => [
-        'action'  => $prefix . '/shop.php',
+        'action'  => $shopScope,
         'method'  => 'GET',
         'enctype' => 'application/x-www-form-urlencoded',
         'params'  => ['title' => 'q', 'text' => 'q', 'url' => 'q'],
@@ -60,7 +61,7 @@ $manifest = [
     'shortcuts'        => [
         [
             'name'      => 'Ver catálogo',
-            'url'       => $prefix . '/shop.php',
+            'url'       => $shopScope,
             'icons'     => [['src' => 'icon-shop-192.png', 'sizes' => '192x192']],
         ],
     ],

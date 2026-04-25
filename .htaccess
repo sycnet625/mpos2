@@ -1,6 +1,9 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
+    RewriteRule ^pos/?$ pos.php [QSA,L,NC]
+    RewriteRule ^shop/?$ shop.php [QSA,L,NC]
+
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^([a-z0-9]+(?:-[a-z0-9]+)*)/?$ shop.php?slug=$1 [QSA,L,NC]

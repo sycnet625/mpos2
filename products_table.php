@@ -111,8 +111,8 @@ function ptable_get_actor(): string {
     return 'admin';
 }
 
-function ptable_next_product_code(PDO $pdo, int $empId, int $sucId): string {
-    $prefix = str_repeat((string)$sucId, 2);
+function ptable_next_product_code(PDO $pdo, int $empId, int $sucId, int $almId): string {
+    $prefix = (string)$sucId . (string)$almId;
     $lenPrefix = strlen($prefix);
     $stmt = $pdo->prepare(
         "SELECT MAX(CAST(SUBSTRING(codigo, :len + 1) AS UNSIGNED)) AS max_seq
@@ -422,7 +422,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
             $sku = trim((string)($_POST['sku'] ?? ''));
             if (!$sku) throw new Exception('SKU origen vacío.');
 
-            $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+            $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID, $ALM_ID);
 
             $stmt = $pdo->prepare("
                 INSERT INTO productos (
@@ -703,7 +703,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     foreach ($skus as $sku) {
                         $src = trim((string)$sku);
                         if ($src === '') continue;
-                        $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID);
+                        $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID, $ALM_ID);
                         $stmtClone->execute([$newSku, $src, $EMP_ID]);
                         if ($stmtClone->rowCount() < 1) throw new Exception("No se pudo clonar SKU $src.");
                         $created[] = $newSku;

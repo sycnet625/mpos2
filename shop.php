@@ -228,6 +228,7 @@ $requestedSlug = '';
 if ($requestPathTrimmed !== ''
     && $requestPathTrimmed !== $scriptPathTrimmed
     && $requestPathTrimmed !== 'shop.php'
+    && !in_array($requestPathTrimmed, ['shop', 'pos'], true)
     && !str_contains($requestPathTrimmed, '/')
 ) {
     $requestedSlug = strtolower(rawurldecode($requestPathTrimmed));
@@ -5435,11 +5436,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
 // ── Service Worker Tienda (scope exclusivo shop.php) ──
-const SHOP_SCOPE_PATH = new URL('./', document.baseURI).pathname;
+const SHOP_SCOPE_PATH = <?php echo json_encode($shopPrettyBasePath . '/shop/'); ?>;
 const SHOP_SW_URL = new URL('sw-shop.js', document.baseURI).toString();
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH })
+    const ROOT_SCOPE_PATH = new URL('./', document.baseURI).href;
+    navigator.serviceWorker.getRegistration(ROOT_SCOPE_PATH)
+        .then(reg => {
+            if (reg && reg.scope === ROOT_SCOPE_PATH) return reg.unregister();
+        })
+        .catch(() => {})
+        .finally(() => navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH }))
         .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
         .catch(err => console.warn('[Shop PWA] SW error:', err));
 }

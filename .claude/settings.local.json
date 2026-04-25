@@ -150,7 +150,10 @@
       "Bash(echo \"Exit: $?\")",
       "Read(//etc/nginx/sites-enabled/**)",
       "Read(//etc/apache2/**)",
-      "Bash(systemctl reload *)"
+      "Bash(systemctl reload *)",
+      "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && tail -20 \"{}\"')",
+      "Bash(node -c /var/www/pos1.js)",
+      "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && grep -l \"session_regenerate_id\\\\|fingerprint\" \"{}\" 2>/dev/null')"
     ]
   },
   "remote": {

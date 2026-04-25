@@ -7,7 +7,7 @@ const CACHE_NAME      = 'palweb-shop-v30';
 const IMG_CACHE       = 'palweb-shop-images-v2';
 const STATIC_CACHE    = 'palweb-shop-static-v30';
 const PUSH_CACHE      = 'push-config-v1';
-const BASE_URL        = new URL('./', self.registration.scope);
+const BASE_URL        = new URL('./', self.location.href);
 const assetUrl        = (rel) => new URL(rel, BASE_URL).toString();
 
 // Recursos estáticos: cacheados permanentemente, revalidados en background
@@ -22,10 +22,12 @@ const STATIC_ASSETS = [
     assetUrl('icon-shop-192.png'),
     assetUrl('icon-shop-512.png'),
     assetUrl('manifest-shop.php'),
+    assetUrl('shop/'),
 ];
 
 // Ruta principal de la tienda (SWR)
 const SHOP_MAIN_URL = assetUrl('shop.php');
+const SHOP_START_URL = assetUrl('shop/');
 
 // Params GET que son siempre AJAX — nunca cachear, nunca servir offline con HTML
 const AJAX_PARAMS = [
@@ -92,8 +94,8 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 4. shop.php sin parámetros (navegación principal) → Stale-While-Revalidate
-    if (url.pathname.endsWith('shop.php') && !url.search) {
+    // 4. Entrada instalada de la tienda → Stale-While-Revalidate
+    if ((url.pathname.endsWith('shop.php') || /\/shop\/?$/.test(url.pathname)) && !url.search) {
         event.respondWith(staleWhileRevalidate(event.request, CACHE_NAME));
         return;
     }
@@ -237,7 +239,7 @@ self.addEventListener('push', (event) => {
                     body:      data.cuerpo || '',
                     icon:      assetUrl('icon-shop-192.png'),
                     badge:     assetUrl('icon-shop-192.png'),
-                    data:      { url: data.url || assetUrl('shop.php') },
+                    data:      { url: data.url || SHOP_START_URL },
                     tag:       'palweb-shop-' + (data.id || Date.now()),
                     renotify:  true,
                     vibrate:   [200, 100, 200],
@@ -250,7 +252,7 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
     event.notification.close();
-    const target = event.notification.data?.url || assetUrl('shop.php');
+    const target = event.notification.data?.url || SHOP_START_URL;
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
             for (const c of list) {

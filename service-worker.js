@@ -1,12 +1,15 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.3 - Cache individual + ping offline fix
+// Versión 8.5 - Cache individual + ping offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v84';
+const CACHE_NAME = 'palweb-pos-v85';
+const APP_BASE_URL = new URL('./', self.location.href);
+const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
+    './pos/',
     './pos.php',
     './clock.php',
     './clock.html',
@@ -32,7 +35,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.4...');
+    console.log('[SW-POS] Instalando Service Worker v8.5...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -59,7 +62,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.4...');
+    console.log('[SW-POS] Activando Service Worker v8.5...');
     
     event.waitUntil(
         caches.keys()
@@ -145,7 +148,8 @@ self.addEventListener('fetch', (event) => {
 // ==========================================
 async function onlineFirst(request) {
     const url = new URL(request.url);
-    const LOCAL_NO_IMAGE = (self.registration && self.registration.scope ? self.registration.scope : './') + 'assets/img/no-image-50.png';
+    const LOCAL_NO_IMAGE = appUrl('assets/img/no-image-50.png');
+    const isPosStart = /\/pos\/?$/.test(url.pathname);
 
     // Sustituye placeholders externos por imagen local para evitar ruido offline.
     if (url.hostname === 'via.placeholder.com') {
@@ -175,6 +179,7 @@ async function onlineFirst(request) {
             
             // Solo cachear recursos estáticos (no PHP dinámico con parámetros)
             const shouldCache = 
+                isPosStart ||
                 request.url.endsWith('.js') ||
                 request.url.endsWith('.css') ||
                 request.url.endsWith('.jpg') ||
@@ -197,7 +202,9 @@ async function onlineFirst(request) {
 
         // ignoreSearch permite que pos.php?ping=1 resuelva desde la caché de pos.php
         const cachedResponse = await caches.match(request) ||
-                               await caches.match(request, { ignoreSearch: true });
+                               await caches.match(request, { ignoreSearch: true }) ||
+                               (isPosStart ? await caches.match(appUrl('pos/')) : null) ||
+                               (isPosStart ? await caches.match(appUrl('pos.php')) : null);
         
         if (cachedResponse && cachedResponse.type !== 'opaqueredirect') {
             console.log('[SW-POS] Servido desde caché:', request.url);
@@ -249,7 +256,7 @@ self.addEventListener('message', (event) => {
     }
 });
 
-console.log('[SW-POS] Service Worker v8.4 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.5 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS
@@ -258,7 +265,8 @@ console.log('[SW-POS] Service Worker v8.4 (ONLINE FIRST + offline real) cargado'
 // ══════════════════════════════════════════════════════════════════════════
 
 const PUSH_CACHE = 'push-config-v1';
-const BASE        = self.registration.scope; // ej. https://example.com/marinero/
+const BASE        = APP_BASE_URL.toString();
+const POS_START_URL = appUrl('pos/');
 
 // Leer tipo desde Cache API (guardado por el frontend al suscribirse)
 async function getPushTipo() {
@@ -274,7 +282,7 @@ async function getPushTipo() {
 self.addEventListener('push', event => {
     event.waitUntil(
         getPushTipo().then(tipo =>
-            fetch(BASE + 'push_api.php?action=latest&tipo=' + encodeURIComponent(tipo), {
+            fetch(appUrl('push_api.php') + '?action=latest&tipo=' + encodeURIComponent(tipo), {
                 credentials: 'same-origin',
                 cache: 'no-store',
             })
@@ -284,10 +292,10 @@ self.addEventListener('push', event => {
                 
                 const options = {
                     body:    data.cuerpo || '',
-                    icon:    BASE + 'icon-192.png',
-                    badge:   BASE + 'icon-192.png',
+                    icon:    appUrl('icon-192.png'),
+                    badge:   appUrl('icon-192.png'),
                     data:    { 
-                        url: data.url || BASE,
+                        url: data.url || POS_START_URL,
                         chat_id: data.chat_id || null, // Guardar chat_id para acciones
                         agente: data.agente || 'claude'
                     },
@@ -312,7 +320,7 @@ self.addEventListener('notificationclick', event => {
     notification.close();
 
     // Comportamiento normal: abrir/enfocar app
-    const target = data.url || BASE;
+    const target = data.url || POS_START_URL;
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
             for (const client of list) {

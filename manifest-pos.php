@@ -12,6 +12,7 @@ $scriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/'));
 $basePath = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
 if ($basePath === '') $basePath = '/';
 $prefix = $basePath === '/' ? '' : $basePath;
+$posScope = $prefix . '/pos/';
 
 $tienda = trim((string)($cfg['marca_sistema_nombre'] ?? ($cfg['tienda_nombre'] ?? 'PalWeb POS')));
 $short = preg_split('/\s+/', $tienda)[0] ?? 'PalWeb';
@@ -20,8 +21,8 @@ $manifest = [
     'id' => $prefix . '/pos',
     'name' => $tienda,
     'short_name' => mb_substr($short, 0, 12),
-    'start_url' => $prefix . '/pos.php',
-    'scope' => ($prefix === '' ? '/' : $prefix . '/'),
+    'start_url' => $posScope,
+    'scope' => $posScope,
     'display' => 'standalone',
     'orientation' => 'any',        // Permite landscape en tablets/POS
     'lang' => 'es',

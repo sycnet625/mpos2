@@ -40,6 +40,31 @@
     </div>
 </div>
 <script>
+window.handleCashPermissionError = async function(res, retryFn, fallbackMessage) {
+    const msg = String(res?.msg || res?.message || fallbackMessage || 'Inicio de sesion requerido');
+    const needsAuth = /sesion requerida|sesion invalida|no autenticado|no autorizado|csrf/i.test(msg);
+    if (!needsAuth) return false;
+
+    if (typeof showToast === 'function') showToast(msg, 'warning');
+
+    const openModal = bootstrap.Modal.getInstance(document.getElementById('cashModal'));
+    if (openModal) openModal.hide();
+    const closeModal = bootstrap.Modal.getInstance(document.getElementById('closeRegisterModal'));
+    if (closeModal) closeModal.hide();
+
+    if (typeof openSessionLoginModal === 'function') {
+        openSessionLoginModal(msg, retryFn);
+        return true;
+    }
+
+    if (typeof pinEntryMode !== 'undefined') pinEntryMode = 'overlay';
+    if (typeof enteredPin !== 'undefined') enteredPin = '';
+    if (typeof updatePinDisplay === 'function') updatePinDisplay();
+    const overlay = document.getElementById('pinOverlay');
+    if (overlay) overlay.style.display = 'flex';
+    return true;
+};
+
 window.showOpenCashModal = function() {
     const body = document.getElementById('cashModalBody');
     const today = new Date().toISOString().split('T')[0];
@@ -92,6 +117,9 @@ window.doOpen = async function() {
             if(typeof Synth !== 'undefined') Synth.openCash();
             showToast("Turno abierto correctamente");
         } else {
+            if (await handleCashPermissionError(res, () => { window.showOpenCashModal(); setTimeout(() => { const amt=document.getElementById('startAmount'); const dt=document.getElementById('startOpenDate'); if(amt) amt.value = m; if(dt) dt.value = f; doOpen(); }, 120); }, 'Inicio de sesion requerido para abrir caja.')) {
+                return;
+            }
             alert("Error: " + res.msg);
         }
     } catch(e){ 
@@ -140,5 +168,5 @@ window.checkCashRegister = async function() {
     } catch(e){ console.error("Error al verificar caja:", e); }
 };
 window.updateCloseDifference = function() { const r=parseFloat(document.getElementById('final-cash').value)||0; const d=r-theoreticalTotal; const el=document.getElementById('diffDisplay'); el.innerText='Diferencia: $'+d.toFixed(2); el.className='form-text text-end fw-bold '+(d<0?'text-danger':(d>0?'text-success':'text-muted')); };
-window.validateAndCloseCash = async function() { const r=parseFloat(document.getElementById('final-cash').value); const n=document.getElementById('close-note').value; if(isNaN(r)) return alert("Ingrese efectivo"); if(!confirm('Cerrar?')) return; try{ const resp=await fetch('pos_cash.php?action=close',{method:'POST',headers:(window.posJsonHeaders ? window.posJsonHeaders() : {'Content-Type':'application/json'}),body:JSON.stringify({id:cashId,real:r,nota:n})}); const res=await resp.json(); if(res.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('closeRegisterModal')).hide(); Synth.closeCash(); checkCashStatusSilent(); showToast('Cerrado','success'); setTimeout(()=>location.reload(),1500); } else alert(res.msg); } catch(e){ alert("Error"); } };
+window.validateAndCloseCash = async function() { const r=parseFloat(document.getElementById('final-cash').value); const n=document.getElementById('close-note').value; if(isNaN(r)) return alert("Ingrese efectivo"); if(!confirm('Cerrar?')) return; try{ const resp=await fetch('pos_cash.php?action=close',{method:'POST',headers:(window.posJsonHeaders ? window.posJsonHeaders() : {'Content-Type':'application/json'}),body:JSON.stringify({id:cashId,real:r,nota:n})}); const res=await resp.json(); if(res.status==='success'){ bootstrap.Modal.getInstance(document.getElementById('closeRegisterModal')).hide(); Synth.closeCash(); checkCashStatusSilent(); showToast('Cerrado','success'); setTimeout(()=>location.reload(),1500); } else if (await handleCashPermissionError(res, () => { const input=document.getElementById('final-cash'); const note=document.getElementById('close-note'); const cachedR = input ? input.value : ''; const cachedN = note ? note.value : ''; const closeM = bootstrap.Modal.getOrCreateInstance(document.getElementById('closeRegisterModal')); closeM.show(); setTimeout(() => { if(input) input.value = cachedR; if(note) note.value = cachedN; validateAndCloseCash(); }, 120); }, 'Inicio de sesion requerido para cerrar caja.')) { return; } else alert(res.msg); } catch(e){ alert("Error"); } };
 </script>
