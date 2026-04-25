@@ -92,7 +92,9 @@ function poscash_enforce_session_security(): void {
 
     $lastRegeneratedAt = (int)($_SESSION['pos_session_regenerated_at'] ?? 0);
     if ($lastRegeneratedAt <= 0 || (time() - $lastRegeneratedAt) > 1800) {
-        session_regenerate_id(true);
+        // Usar false para no destruir la sesión antigua inmediatamente
+        // y evitar race conditions con requests paralelos
+        session_regenerate_id(false);
         $_SESSION['pos_session_regenerated_at'] = time();
         $_SESSION['pos_session_fingerprint'] = $current;
     }
@@ -194,7 +196,8 @@ try {
         }
 
         if ($foundCajero) {
-            session_regenerate_id(true);
+            // NO regenerar ID aquí para evitar race condition:
+            // requests paralelos (set_almacen, doOpen) llegarían con el SID antiguo destruido
             $_SESSION['cajero'] = $foundCajero['nombre'];
             $_SESSION['cajero_id'] = (int)$foundCajero['id'];
             $_SESSION['id_empresa'] = (int)$foundCajero['id_empresa'];
@@ -204,6 +207,9 @@ try {
             $_SESSION['pos_session_fingerprint'] = poscash_session_fingerprint();
             $_SESSION['pos_session_regenerated_at'] = time();
             $csrfToken = poscash_ensure_csrf_token();
+            session_write_close();
+
+            error_log("POS_CASH login OK: SID=" . session_id() . " cajero=" . $foundCajero['nombre']);
 
             echo json_encode([
                 'status' => 'success',
@@ -258,6 +264,7 @@ try {
     } 
     
     elseif ($action === 'open') {
+        error_log("POS_CASH open: SID=" . session_id() . " cajero=" . json_encode($_SESSION['cajero'] ?? 'EMPTY') . " auth=" . (poscash_is_authenticated() ? 'YES' : 'NO'));
         poscash_require_auth();
         poscash_require_csrf($input);
 

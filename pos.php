@@ -106,7 +106,8 @@ function pos_enforce_session_security(): void
 
     $lastRegen = (int)($_SESSION['pos_session_regenerated_at'] ?? 0);
     if ($lastRegen <= 0 || (time() - $lastRegen) > 900) {
-        session_regenerate_id(true);
+        // false = no destruir la sesión antigua para evitar race conditions
+        session_regenerate_id(false);
         $_SESSION['pos_session_regenerated_at'] = time();
         $_SESSION['pos_session_fingerprint'] = $fingerprint;
     }
