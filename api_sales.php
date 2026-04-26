@@ -5,11 +5,17 @@ require_once 'config_loader.php';
 header('Content-Type: application/json');
 
 try {
-    $stmt = $pdo->prepare("SELECT SUM(total) as total, COUNT(*) as count FROM ventas_cabecera WHERE DATE(fecha) = CURDATE() AND total > 0");
+    $stmt = $pdo->prepare("SELECT SUM(v.total) as total, COUNT(*) as count 
+                           FROM ventas_cabecera v 
+                           LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
+                           WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) = CURDATE() AND v.total > 0");
     $stmt->execute();
     $sales = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    $stmt2 = $pdo->prepare("SELECT COUNT(DISTINCT id_cliente) as clients FROM ventas_cabecera WHERE DATE(fecha) = CURDATE() AND total > 0");
+    $stmt2 = $pdo->prepare("SELECT COUNT(DISTINCT v.id_cliente) as clients 
+                            FROM ventas_cabecera v 
+                            LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
+                            WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) = CURDATE() AND v.total > 0");
     $stmt2->execute();
     $clients = $stmt2->fetch(PDO::FETCH_ASSOC);
 

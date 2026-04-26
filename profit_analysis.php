@@ -68,21 +68,27 @@ try {
     // =========================================================
 
     // A. VENTAS NETAS (Filtradas por SUCURSAL o GLOBAL)
-    // CAMBIO: Filtro dinámico según modo de vista
-    $stmtVentas = $pdo->prepare("SELECT SUM(total) FROM ventas_cabecera WHERE DATE(fecha) BETWEEN ? AND ? $sqlFilterSucursal AND " . ventas_reales_where_clause());
-    if ($isGlobal) {
-        $stmtVentas->execute([$start, $end]);
-    } else {
-        $stmtVentas->execute([$start, $end]);
-    }
+    // CAMBIO: Filtro dinámico según modo de vista y FECHA CONTABLE
+    $sqlVentas = "SELECT SUM(v.total) 
+                  FROM ventas_cabecera v 
+                  LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
+                  WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
+                  " . ($isGlobal ? "" : " AND v.id_sucursal = $SUC_ID ") . " 
+                  AND " . ventas_reales_where_clause('v');
+    
+    $stmtVentas = $pdo->prepare($sqlVentas);
+    $stmtVentas->execute([$start, $end]);
     $ingresosVentas = floatval($stmtVentas->fetchColumn() ?: 0);
 
-    // B. COSTO DE VENTA - COGS (Filtrado DINÁMICO)
+    // B. COSTO DE VENTA - COGS (Filtrado DINÁMICO y FECHA CONTABLE)
     $sqlCogs = "SELECT SUM(d.cantidad * p.costo)
                 FROM ventas_detalle d
                 JOIN productos p ON d.id_producto = p.codigo
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE DATE(v.fecha) BETWEEN ? AND ? $sqlFilterSucursal AND " . ventas_reales_where_clause('v');
+                LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+                WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
+                " . ($isGlobal ? "" : " AND v.id_sucursal = $SUC_ID ") . " 
+                AND " . ventas_reales_where_clause('v');
     $stmtCogs = $pdo->prepare($sqlCogs);
     $stmtCogs->execute([$start, $end]);
     $costoVentas = floatval($stmtCogs->fetchColumn() ?: 0);

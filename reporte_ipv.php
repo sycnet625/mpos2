@@ -53,12 +53,15 @@ try {
     $stockInicialMap = $stmtIni->fetchAll(PDO::FETCH_KEY_PAIR); // [SKU => saldo]
 
     // 6. OBTENER VENTAS ($ Dinero) REALES (Filtrado por Almacén Y Sucursal)
+    // CAMBIO: Usar fecha contable de la sesión
     $sqlVentas = "SELECT d.id_producto, SUM(d.cantidad * d.precio) as monto_venta_real
                   FROM ventas_detalle d
                   JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                  WHERE v.fecha BETWEEN ? AND ? 
+                  LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
+                  WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
                   AND v.id_almacen = ? 
                   AND v.id_sucursal = ?
+                  AND " . ventas_reales_where_clause('v') . "
                   GROUP BY d.id_producto";
     $stmtV = $pdo->prepare($sqlVentas);
     $stmtV->execute([$startDateTime, $endDateTime, $id_almacen, $id_sucursal]);

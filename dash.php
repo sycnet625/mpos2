@@ -63,11 +63,24 @@ $stockCritico = getScalar($pdo, "
 // 2. VENTAS Y GANANCIAS (Lo que ya vendiste)
 // -------------------------------------
 
-// Ventas de Hoy
-$ventasHoy = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND DATE(fecha) = CURDATE() AND " . ventas_reales_where_clause(), [$empresaId]);
+// Ventas de Hoy (Usando Fecha Contable)
+$ventasHoy = getScalar($pdo, "
+    SELECT SUM(v.total) 
+    FROM ventas_cabecera v 
+    LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
+    WHERE v.id_empresa = ? 
+      AND IFNULL(s.fecha_contable, DATE(v.fecha)) = CURDATE() 
+      AND " . ventas_reales_where_clause('v'), [$empresaId]);
 
-// Ventas del Mes
-$ventasMes = getScalar($pdo, "SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND MONTH(fecha) = MONTH(CURRENT_DATE()) AND YEAR(fecha) = YEAR(CURRENT_DATE()) AND " . ventas_reales_where_clause(), [$empresaId]);
+// Ventas del Mes (Usando Fecha Contable)
+$ventasMes = getScalar($pdo, "
+    SELECT SUM(v.total) 
+    FROM ventas_cabecera v 
+    LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
+    WHERE v.id_empresa = ? 
+      AND MONTH(IFNULL(s.fecha_contable, DATE(v.fecha))) = MONTH(CURRENT_DATE()) 
+      AND YEAR(IFNULL(s.fecha_contable, DATE(v.fecha))) = YEAR(CURRENT_DATE()) 
+      AND " . ventas_reales_where_clause('v'), [$empresaId]);
 
 // Ticket Promedio
 $ticketPromedio = getScalar($pdo, "SELECT AVG(total) FROM ventas_cabecera WHERE id_empresa = ? AND " . ventas_reales_where_clause(), [$empresaId]);

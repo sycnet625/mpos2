@@ -94,11 +94,21 @@ $fecha_inicio = sprintf("%d-%02d-01 00:00:00", $anio, $mes);
 $fecha_fin    = date("Y-m-t 23:59:59", strtotime($fecha_inicio));
 
 // Datos Automáticos
-$stmtV = $pdo->prepare("SELECT SUM(total) FROM ventas_cabecera WHERE id_empresa = ? AND fecha BETWEEN ? AND ? AND " . ventas_reales_where_clause());
+$stmtV = $pdo->prepare("SELECT SUM(v.total) 
+                        FROM ventas_cabecera v 
+                        LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+                        WHERE v.id_empresa = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
+                        AND " . ventas_reales_where_clause('v'));
 $stmtV->execute([$EMP_ID, $fecha_inicio, $fecha_fin]);
 $ingresos_brutos = floatval($stmtV->fetchColumn() ?: 0);
 
-$stmtC = $pdo->prepare("SELECT SUM(d.cantidad * p.costo) FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id WHERE v.id_empresa = ? AND v.fecha BETWEEN ? AND ? AND " . ventas_reales_where_clause('v'));
+$stmtC = $pdo->prepare("SELECT SUM(d.cantidad * p.costo) 
+                        FROM ventas_detalle d 
+                        JOIN productos p ON d.id_producto = p.codigo 
+                        JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
+                        LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+                        WHERE v.id_empresa = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
+                        AND " . ventas_reales_where_clause('v'));
 $stmtC->execute([$EMP_ID, $fecha_inicio, $fecha_fin]);
 $costo_ventas_auto = floatval($stmtC->fetchColumn() ?: 0);
 

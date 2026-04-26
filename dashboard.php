@@ -102,7 +102,11 @@ $sqlAlmacen = ($scope === 'local') ? " AND s.id_almacen = $ALM_ID " : "";
 $sqlSucursal = ($scope === 'local') ? " AND v.id_sucursal = $SUC_ID " : "";
 $sqlPedidosSucursal = ($scope === 'local') ? " AND id_sucursal = $SUC_ID " : "";
 $sqlPedidosAliasSucursal = ($scope === 'local') ? " AND pc.id_sucursal = $SUC_ID " : "";
-$sqlDateRange = " AND DATE(v.fecha) BETWEEN ? AND ? ";
+
+// CAMBIO: Lógica de fecha contable (priorizar sesión sobre creación)
+$sqlDateJoin = " LEFT JOIN caja_sesiones s ON v.id_caja = s.id ";
+$sqlAccountingDate = " IFNULL(s.fecha_contable, DATE(v.fecha)) ";
+$sqlDateRange = " AND $sqlAccountingDate BETWEEN ? AND ? ";
 
 // A. Inventario (Priorizar precios por sucursal si existen)
 $sqlInvBase = "SELECT SUM(s.cantidad * COALESCE(%PS_FIELD%, %P_FIELD%)) 
@@ -124,7 +128,10 @@ $margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
 // B. Ventas (Periodo)
 $paramsDate = [$fechaInicio, $fechaFin];
 
-$sqlVentasBase = "SELECT SUM(v.total) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
+$sqlVentasBase = "SELECT SUM(v.total) 
+                  FROM ventas_cabecera v 
+                  $sqlDateJoin
+                  WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
 $ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
 
 // C. Ofertas Comerciales (Periodo)
@@ -138,6 +145,7 @@ $sqlGanancia = "SELECT SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.c
                 JOIN productos p ON d.id_producto = p.codigo
                 LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                $sqlDateJoin
                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
 $gananciaPeriodo = getScalar($pdo, $sqlGanancia, $paramsDate);
 

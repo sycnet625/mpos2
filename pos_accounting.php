@@ -68,7 +68,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("DELETE FROM contabilidad_diario WHERE fecha BETWEEN ? AND ? AND asiento_tipo IN ('VENTA','COSTO','GASTO','VENTA_CASA','IMPUESTOS','COMPRA','MERMA')")->execute([$fi, $ff]);
             
             // PREPARAR FILTROS SCOPE
-            $sqlVentas = "SELECT * FROM ventas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND " . ventas_reales_where_clause();
+            // CAMBIO: Usar fecha contable de la sesión (caja_sesiones.fecha_contable)
+            $sqlVentas = "SELECT v.*, IFNULL(sc.fecha_contable, DATE(v.fecha)) as fecha_contable_final 
+                          FROM ventas_cabecera v 
+                          LEFT JOIN caja_sesiones sc ON v.id_caja = sc.id
+                          WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN '$fi' AND '$ff' AND " . ventas_reales_where_clause('v');
             $sqlGastos = "SELECT * FROM gastos_historial WHERE fecha BETWEEN '$fi' AND '$ff'";
             $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
             $sqlMermas = "SELECT * FROM mermas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'"; // Asumiendo columna fecha
@@ -80,13 +84,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mermasHasEmpresa = acctTableHasColumn($pdo, 'mermas_cabecera', 'id_empresa');
 
             if ($scope === 'local') {
-                $sqlVentas .= " AND id_sucursal = $SUC_ID";
+                $sqlVentas .= " AND v.id_sucursal = $SUC_ID";
                 $sqlGastos .= " AND id_sucursal = $SUC_ID"; 
                 if ($comprasHasSucursal) $sqlCompras .= " AND id_sucursal=$SUC_ID";
                 if ($comprasHasAlmacen) $sqlCompras .= " AND id_almacen=$ALM_ID";
                 if ($mermasHasSucursal) $sqlMermas .= " AND id_sucursal=$SUC_ID";
             } else {
-                $sqlVentas .= " AND id_empresa = $EMP_ID";
+                $sqlVentas .= " AND v.id_empresa = $EMP_ID";
                 try { $pdo->query("SELECT id_empresa FROM gastos_historial LIMIT 1"); $sqlGastos .= " AND id_empresa=$EMP_ID"; } catch(Exception $e){}
                 if ($comprasHasEmpresa) $sqlCompras .= " AND id_empresa=$EMP_ID";
                 if ($mermasHasEmpresa) $sqlMermas .= " AND id_empresa=$EMP_ID";
@@ -96,8 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $subCaja = getCajaSucursal($pdo, $SUC_ID); $nomCaja = getNombreCuenta($pdo, $subCaja);
             $vtas = $pdo->query($sqlVentas)->fetchAll(PDO::FETCH_ASSOC);
             foreach($vtas as $v){
-                $f=date('Y-m-d',strtotime($v['fecha'])); $t=floatval($v['total']); 
-                $c=$pdo->query("SELECT SUM(d.cantidad*p.costo) FROM ventas_detalle d JOIN productos p ON d.id_producto=p.codigo WHERE d.id_venta_cabecera={$v['id']}")->fetchColumn()?:0;
+                $f = $v['fecha_contable_final']; 
+                $t = floatval($v['total']); 
+                $c = $pdo->query("SELECT SUM(d.cantidad*p.costo) FROM ventas_detalle d JOIN productos p ON d.id_producto=p.codigo WHERE d.id_venta_cabecera={$v['id']}")->fetchColumn()?:0;
                 if($v['metodo_pago']==='Gasto Casa'){
                     insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'709 - Retiro Dueño',$c,0,"Consumo Casa #{$v['id']}");
                     insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'120 - Inventario',0,$c,"Salida Inv.");
