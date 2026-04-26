@@ -121,7 +121,7 @@ $valorInventarioCosto = getScalar($pdo, $qCosto);
 $qVenta = str_replace(['%PS_FIELD%', '%P_FIELD%'], ['ps.precio_venta', 'p.precio'], $sqlInvBase);
 $valorInventarioVenta = getScalar($pdo, $qVenta);
 
-$sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.cantidad <= p.stock_minimo $sqlEmpresa $sqlProductScope $sqlAlmacen";
+    $sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE COALESCE(s.cantidad,0) <= COALESCE(p.stock_minimo,0) $sqlEmpresa $sqlProductScope $sqlAlmacen";
 $stockCritico = getScalar($pdo, $sqlStockCritico);
 $margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
 
@@ -135,10 +135,10 @@ $sqlVentasBase = "SELECT SUM(v.total)
 $ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
 
 // C. Ofertas Comerciales (Periodo)
-$sqlOfertas = "SELECT COUNT(*) FROM ofertas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
-$cantOfertas = getScalar($pdo, $sqlOfertas, $paramsDate);
-$sqlOfertasTotal = "SELECT SUM(total) FROM ofertas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
-$montoOfertas = getScalar($pdo, $sqlOfertasTotal, $paramsDate);
+    $sqlOfertas = "SELECT COUNT(*) FROM ofertas WHERE id_empresa = $EMP_ID AND DATE(fecha_emision) BETWEEN ? AND ?";
+    $cantOfertas = getScalar($pdo, $sqlOfertas, $paramsDate);
+    $sqlOfertasTotal = "SELECT SUM(total) FROM ofertas WHERE id_empresa = $EMP_ID AND DATE(fecha_emision) BETWEEN ? AND ?";
+    $montoOfertas = getScalar($pdo, $sqlOfertasTotal, $paramsDate);
 
 $sqlGanancia = "SELECT SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.cantidad)
                 FROM ventas_detalle d
@@ -205,7 +205,7 @@ try {
     )->fetchColumn();
     $pagosVerificando = (int)$pdo->query(
         "SELECT COUNT(*) FROM ventas_cabecera
-         WHERE estado_pago='verificando'
+         WHERE tipo_servicio = 'reserva' AND estado_pago='verificando'
            AND id_empresa = $EMP_ID" . (($scope === 'local') ? " AND id_sucursal = $SUC_ID" : "") . "
            AND (estado_reserva IS NULL OR estado_reserva='PENDIENTE')"
     )->fetchColumn();
@@ -249,11 +249,13 @@ function parseLogStats($cmd) {
 $accessLogPath = '/var/log/nginx/palweb_access.log';
 $errorLogPath = '/var/log/nginx/palweb_error.log';
 
-$logIps = parseLogStats("tail -n 10000 $accessLogPath | awk '{print \$1}' | sort | uniq -c | sort -nr | head -n 10");
-$logPages = parseLogStats("tail -n 10000 $accessLogPath | awk '{print \$7}' | sort | uniq -c | sort -nr | head -n 10");
-$logBrowsers = parseLogStats("tail -n 10000 $accessLogPath | awk -F'\"' '{print \$6}' | sort | uniq -c | sort -nr | head -n 10");
-$logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-login|config\.php|\.env' $accessLogPath | awk '{print \$1 \" -> \" \$7}' | tail -n 10");
-$logErrors = shell_exec("tail -n 50 $errorLogPath | grep 'error' | tail -n 5");
+$_escAccess = escapeshellarg($accessLogPath);
+$_escError  = escapeshellarg($errorLogPath);
+$logIps = parseLogStats("tail -n 10000 $_escAccess | awk '{print \$1}' | sort | uniq -c | sort -nr | head -n 10");
+$logPages = parseLogStats("tail -n 10000 $_escAccess | awk '{print \$7}' | sort | uniq -c | sort -nr | head -n 10");
+$logBrowsers = parseLogStats("tail -n 10000 $_escAccess | awk -F'\"' '{print \$6}' | sort | uniq -c | sort -nr | head -n 10");
+$logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-login|config\.php|\\.env' $_escAccess | awk '{print \$1 \" -> \" \$7}' | tail -n 10");
+$logErrors = shell_exec("tail -n 50 $_escError | grep 'error' | tail -n 5");
 
 
 $sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
@@ -1307,19 +1309,28 @@ HTML;
                             <tbody>
                                 <?php if(empty($pedidos)): ?>
                                     <tr><td colspan="8" class="text-center py-5 text-muted">No hay pedidos registrados.</td></tr>
-                                <?php else: ?>
-                                    <?php foreach($pedidos as $row): 
-                                        $stmtDet = $pdo->prepare("SELECT d.cantidad, p.nombre FROM pedidos_detalle d JOIN productos p ON d.id_producto = p.codigo WHERE d.id_pedido = ?");
-                                        $stmtDet->execute([$row['id']]);
-                                        $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
+                                <?php else:
+                                    // Precargar items de todos los pedidos web en una sola query (evita N+1)
+                                    $pedidoIds = array_column(array_filter($pedidos, fn($r) => ($r['origen'] ?? '') === 'WEB'), 'id');
+                                    $pedidoItemsMap = [];
+                                    if (!empty($pedidoIds)) {
+                                        $placeholders = implode(',', array_fill(0, count($pedidoIds), '?'));
+                                        $stmtDetAll = $pdo->prepare("SELECT d.id_pedido, d.cantidad, p.nombre FROM pedidos_detalle d JOIN productos p ON d.id_producto = p.codigo WHERE d.id_pedido IN ($placeholders)");
+                                        $stmtDetAll->execute($pedidoIds);
+                                        foreach ($stmtDetAll->fetchAll(PDO::FETCH_ASSOC) as $it) {
+                                            $pedidoItemsMap[$it['id_pedido']][] = $it;
+                                        }
+                                    }
+                                    foreach($pedidos as $row):
+                                        $items = $pedidoItemsMap[$row['id']] ?? [];
                                         $itemsStr = "";
                                         foreach($items as $it) {
                                             $itemsStr .= "<div><small><strong>" . (float)$it['cantidad'] . "x</strong> " . htmlspecialchars($it['nombre']) . "</small></div>";
                                         }
 
                                         $fechaCrea = strtotime($row['fecha']);
-                                        $fechaProg = $row['fecha_programada'] ? strtotime($row['fecha_programada']) : null;
-                                        $isFuture = $fechaProg && $fechaProg > time();
+                                        $fechaProg = $row['fecha_programada'] ? strtotime($row['fecha_programada']) : false;
+                                        $isFuture = $fechaProg !== false && $fechaProg > time();
                                     ?>
                                     <tr class="<?php echo ($row['estado'] == 'pendiente') ? 'table-warning' : ''; ?>">
                                         <td class="ps-3 fw-bold">#<?php echo $row['id']; ?></td>
@@ -1334,7 +1345,7 @@ HTML;
                                             <div class="small text-muted">Creado: <?php echo date('d/m H:i', $fechaCrea); ?></div>
                                             <?php if($fechaProg): ?>
                                                 <div class="scheduled-date shadow-sm <?php echo !$isFuture ? 'urgent-date' : ''; ?>">
-                                                    <i class="far fa-calendar-alt"></i> Reserva: <?php echo date('d/m h:i A', $fechaProg); ?>
+                                                    <i class="far fa-calendar-alt"></i> Reserva: <?php echo date('d/m H:i', $fechaProg); ?>
                                                 </div>
                                             <?php endif; ?>
                                         </td>
@@ -1342,13 +1353,13 @@ HTML;
                                         <td><?php echo getStatusBadge($row['estado']); ?></td>
                                         <td class="text-center"><?php echo getCanalBadge($row['canal_origen'] ?? 'POS'); ?></td>
                                         <td class="text-end pe-3">
-                                            <button class="btn btn-sm btn-primary shadow-sm"
-                                                    onclick="openManageModal(
-                                                        <?php echo $row['id']; ?>,
-                                                        '<?php echo $row['estado']; ?>',
-                                                        `<?php echo addslashes($row['notas'] ?? ''); ?>`,
-                                                        '<?php echo $row['origen']; ?>'
-                                                    )">
+                                             <button class="btn btn-sm btn-primary shadow-sm"
+                                                     onclick="openManageModal(
+                                                         <?php echo $row['id']; ?>,
+                                                         '<?php echo $row['estado']; ?>',
+                                                         <?php echo json_encode((string)($row['notas'] ?? ''), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE); ?>,
+                                                         '<?php echo $row['origen']; ?>'
+                                                     )">
                                                 <i class="fas fa-edit"></i> Gestionar
                                             </button>
                                         </td>
