@@ -537,3 +537,149 @@ function bot_send_buttons(PDO $pdo, string $wa, string $body, array $buttons, st
         'footer' => trim($footer)
     ]);
 }
+
+function bot_validate_bridge_for_campaign(): array {
+    $running = bot_is_bridge_process_running();
+    $statusFile = bot_bridge_status_file();
+    $bridgeState = 'unknown';
+    $bridgeMsg = 'Sin información';
+    if (is_file($statusFile)) {
+        $raw = @file_get_contents($statusFile);
+        $data = json_decode((string)$raw, true);
+        if (is_array($data)) {
+            $bridgeState = (string)($data['state'] ?? 'unknown');
+            $bridgeMsg = (string)($data['msg'] ?? $bridgeMsg);
+            $updatedAt = strtotime((string)($data['updated_at'] ?? '')) ?: 0;
+            if ($updatedAt > 0 && (time() - $updatedAt) > 45) {
+                $bridgeState = 'stale';
+                $bridgeMsg = 'Estado desactualizado (>45s)';
+            }
+        }
+    }
+    return [
+        'ok' => $running && $bridgeState === 'connected',
+        'running' => $running,
+        'state' => $bridgeState,
+        'msg' => $bridgeMsg
+    ];
+}
+
+function bot_process_scheduled_campaigns(PDO $pdo, array $cfg): array {
+    $queue = bot_repo_read('promo_queue_file', ['jobs' => []]);
+    $jobs = is_array($queue['jobs'] ?? null) ? $queue['jobs'] : [];
+    $now = time();
+    $today = (int)date('w');
+    $processed = 0;
+    $errors = [];
+    $notifications = [];
+    $bridgeStatus = bot_validate_bridge_for_campaign();
+    $needsWrite = false;
+    foreach ($jobs as &$job) {
+        if ((string)($job['status'] ?? '') !== 'scheduled') continue;
+        if (empty($job['schedule_enabled'])) continue;
+        $scheduleDays = is_array($job['schedule_days'] ?? null) ? $job['schedule_days'] : [];
+        if (!in_array($today, $scheduleDays, true)) continue;
+        $scheduleTime = substr(trim((string)($job['schedule_time'] ?? '09:00')), 0, 5);
+        if (!preg_match('/^\d{2}:\d{2}$/', $scheduleTime)) $scheduleTime = '09:00';
+        $scheduledTs = strtotime(date('Y-m-d') . ' ' . $scheduleTime);
+        $windowStart = $scheduledTs - 60;
+        $windowEnd = $scheduledTs + 300;
+        if ($now < $windowStart || $now > $windowEnd) {
+            if ($now < $scheduledTs) continue;
+            if (($now - $scheduledTs) > 3600) {
+                $job['status'] = 'missed';
+                $job['missed_at'] = date('c', $now);
+                $job['log'] = is_array($job['log'] ?? null) ? $job['log'] : [];
+                $job['log'][] = [
+                    'at' => date('c', $now),
+                    'type' => 'missed_window',
+                    'ok' => false,
+                    'target_id' => '',
+                    'target_name' => '',
+                    'messages_sent' => 0,
+                    'error' => 'Ventana de horario perdida (>1h)'
+                ];
+                $needsWrite = true;
+            }
+            continue;
+        }
+        if (!empty($job['retry_count']) && $job['retry_count'] >= 3) continue;
+        $job['status'] = 'queued';
+        $job['next_run_at'] = $now;
+        $job['queue_note'] = 'Activada por scheduler';
+        $job['log'] = is_array($job['log'] ?? null) ? $job['log'] : [];
+        $job['log'][] = [
+            'at' => date('c', $now),
+            'type' => 'scheduler_queued',
+            'ok' => true,
+            'target_id' => '',
+            'target_name' => '',
+            'messages_sent' => 0,
+            'error' => ''
+        ];
+        $needsWrite = true;
+        $processed++;
+        $notifications[] = [
+            'id' => (string)($job['id'] ?? ''),
+            'name' => (string)($job['name'] ?? 'Campaña sin nombre'),
+            'group' => (string)($job['campaign_group'] ?? 'General')
+        ];
+    }
+    unset($job);
+    if ($needsWrite) {
+        bot_repo_write('promo_queue_file', ['jobs' => $jobs]);
+    }
+    return [
+        'processed' => $processed,
+        'notifications' => $notifications,
+        'bridge' => $bridgeStatus,
+        'now' => date('c', $now),
+        'today' => $today
+    ];
+}
+
+function bot_retry_campaign_job(array &$job, int $now, int $maxRetries = 3): bool {
+    $retryCount = (int)($job['retry_count'] ?? 0);
+    if ($retryCount >= $maxRetries) return false;
+    $job['retry_count'] = $retryCount + 1;
+    $backoffSeconds = pow(2, $retryCount) * 60;
+    $job['status'] = 'queued';
+    $job['next_run_at'] = $now + $backoffSeconds;
+    $job['log'] = is_array($job['log'] ?? null) ? $job['log'] : [];
+    $job['log'][] = [
+        'at' => date('c', $now),
+        'type' => 'retry_scheduled',
+        'ok' => true,
+        'target_id' => '',
+        'target_name' => '',
+        'messages_sent' => 0,
+        'error' => "Reintento {$job['retry_count']}/{$maxRetries} en {$backoffSeconds}s"
+    ];
+    return true;
+}
+
+function bot_mark_campaign_failed(PDO $pdo, array &$job, int $now, string $errorMsg): void {
+    $job['status'] = 'failed';
+    $job['last_error_at'] = date('c', $now);
+    $job['last_error'] = mb_substr($errorMsg, 0, 200);
+    $job['log'] = is_array($job['log'] ?? null) ? $job['log'] : [];
+    $job['log'][] = [
+        'at' => date('c', $now),
+        'type' => 'failed',
+        'ok' => false,
+        'target_id' => '',
+        'target_name' => '',
+        'messages_sent' => 0,
+        'error' => $errorMsg
+    ];
+    if (!empty($job['template_id'])) {
+        push_notify(
+            $pdo,
+            'operador',
+            '❌ Campaña fallida',
+            "Campaña \"" . ($job['name'] ?? 'sin nombre') . "\" falló: {$errorMsg}",
+            '/posbot/page.php',
+            'bot_campaign_failed'
+        );
+    }
+}

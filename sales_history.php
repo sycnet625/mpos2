@@ -84,24 +84,32 @@ $scopeCondInv = ($scope === 'global') ? "1=1" : "k.id_almacen = $ALM_ID_LOCAL";
 $scopeCondSes = ($scope === 'global') ? "1=1" : "s.id_sucursal = $SUC_ID_LOCAL";
 
 try {
-    $sqlDateLogic = "IF(v.id_sesion_caja > 0, s.fecha_contable, DATE(v.fecha))";
+    $sqlDateLogic = "IF(v.id_sesion_caja > 0 AND s.id IS NOT NULL, s.fecha_contable, DATE(v.fecha))";
 
-    // 1. RESUMEN FINANCIERO (Sin COLLATE forzado)
-    $sqlFinanzas = "SELECT 
-                        SUM(d.cantidad * d.precio) as venta_total,
+    // 1. RESUMEN FINANCIERO (VENTA TOTAL desde cabecera, COSTO desde detalle)
+    // Venta total: calculada directamente de cabecera para evitar duplicados por items
+    $sqlVentaTotal = "SELECT SUM(v.total) as venta_total 
+                      FROM ventas_cabecera v 
+                      LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id 
+                      WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'";
+    $stmtVT = $pdo->prepare($sqlVentaTotal);
+    $stmtVT->execute([$start, $end]);
+    $ventaTotal = floatval($stmtVT->fetchColumn() ?: 0);
+
+    // Costo y cantidad: desde detalle (estos sí dependen de líneas de productos)
+    $sqlFinanzasDetalle = "SELECT
                         SUM(d.cantidad * p.costo) as costo_total,
                         SUM(d.cantidad) as total_items
                     FROM ventas_detalle d
-                    JOIN productos p ON d.id_producto = p.codigo 
+                    JOIN productos p ON d.id_producto = p.codigo
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                     LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                    WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0";
-    
-    $stmtF = $pdo->prepare($sqlFinanzas);
+                    WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'";
+
+    $stmtF = $pdo->prepare($sqlFinanzasDetalle);
     $stmtF->execute([$start, $end]);
     $finanzas = $stmtF->fetch(PDO::FETCH_ASSOC);
 
-    $ventaTotal = floatval($finanzas['venta_total'] ?? 0);
     $costoTotal = floatval($finanzas['costo_total'] ?? 0);
     $totalItems = floatval($finanzas['total_items'] ?? 0);
     $ganancia   = $ventaTotal - $costoTotal;
@@ -111,7 +119,7 @@ try {
     $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total 
                  FROM ventas_cabecera v
                  LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                 WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0
+                 WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'
                  GROUP BY v.metodo_pago";
     $stmtP = $pdo->prepare($sqlPagos);
     $stmtP->execute([$start, $end]);
@@ -127,7 +135,7 @@ try {
     $stmt->execute([$start, $end]);
     $sesiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // 4. TICKETS
+    // 4. TICKETS (solo ventas reales, sin reservas)
     $sessionIds = array_column($sesiones, 'id');
     
     if (!empty($sessionIds)) {
@@ -135,14 +143,14 @@ try {
         $sqlTickets = "SELECT v.*, $sqlDateLogic as fecha_contable_calc 
                        FROM ventas_cabecera v 
                        LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                       WHERE $inQuery AND $scopeCondVentas
+                       WHERE $inQuery AND $scopeCondVentas AND v.tipo_servicio != 'reserva'
                        ORDER BY v.id DESC";
         $stmtT = $pdo->prepare($sqlTickets);
         $stmtT->execute();
     } else {
         $sqlTickets = "SELECT v.*, DATE(v.fecha) as fecha_contable_calc 
                        FROM ventas_cabecera v 
-                       WHERE v.id_sesion_caja = 0 AND DATE(v.fecha) BETWEEN ? AND ? AND $scopeCondVentas
+                       WHERE v.id_sesion_caja = 0 AND DATE(v.fecha) BETWEEN ? AND ? AND $scopeCondVentas AND v.tipo_servicio != 'reserva'
                        ORDER BY v.id DESC";
         $stmtT = $pdo->prepare($sqlTickets);
         $stmtT->execute([$start, $end]);
@@ -175,7 +183,7 @@ try {
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-        WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0
+        WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'
         GROUP BY dia
     ");
     $stmtChart->execute([$start, $end]);
@@ -248,13 +256,13 @@ $sqlRes = "SELECT SUM(d.cantidad * (d.precio - p.costo)) as ganancia, SUM(d.cant
            JOIN productos p ON d.id_producto = p.codigo 
            JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
            LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-           WHERE v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0";
+           WHERE v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.estado_pago = 'confirmado'";
 $stmtRes = $pdo->prepare($sqlRes);
 $stmtRes->execute([$start, $end]);
 $kpiReserva = $stmtRes->fetch(PDO::FETCH_ASSOC);
 
-// PROMEDIOS DIARIOS (NUEVO CALCULO)
-$stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 GROUP BY dia HAVING venta_dia >= 1");
+// PROMEDIOS DIARIOS
+$stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva' GROUP BY dia HAVING venta_dia >= 1");
 $stmtActive->execute([$start, $end]);
 $activeDays = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
 

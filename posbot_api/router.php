@@ -9,6 +9,7 @@ $adminActions = [
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_pause','promo_clone',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'promo_group_lists','promo_group_list_save','promo_group_list_delete',
+    'promo_process_scheduled','promo_validate_bridge',
     'bridge_restart','bridge_reset_session','bridge_logs','clear_message_logs'
 ];
 if (in_array($action, $adminActions, true)) bot_require_admin_session();

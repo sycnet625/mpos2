@@ -661,6 +661,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         if (count($daysFinal) === 0) {
             echo json_encode(['status'=>'error','msg'=>'Selecciona al menos un día']); exit;
         }
+        $bridge = bot_validate_bridge_for_campaign();
+        if (!$bridge['running']) {
+            echo json_encode(['status'=>'error','msg'=>'Bridge no está activo. Programa la campaña manualmente más tarde.']); exit;
+        }
     } else {
         $scheduleTime = '';
         $daysFinal = [];
@@ -704,4 +708,34 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
         'bot_campaign_created'
     );
     echo json_encode(['status'=>'success','id'=>$jobId]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_validate_bridge') {
+    $bridge = bot_validate_bridge_for_campaign();
+    echo json_encode(['status' => 'success', 'bridge' => $bridge]); exit;
+}
+
+if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_process_scheduled') {
+    $in = json_decode(file_get_contents('php://input'), true) ?: [];
+    $provided = (string)($in['verify_token'] ?? '');
+    if (!bot_verify_token_matches($cfg, $provided)) {
+        http_response_code(403);
+        echo json_encode(['status' => 'error', 'msg' => 'invalid token']); exit;
+    }
+    $result = bot_process_scheduled_campaigns($pdo, $cfg);
+    $bridge = bot_validate_bridge_for_campaign();
+    $result['bridge'] = $bridge;
+    if (!empty($result['notifications'])) {
+        foreach ($result['notifications'] as $n) {
+            push_notify(
+                $pdo,
+                'operador',
+                '⏰ Campaña activada por scheduler',
+                $n['name'] . ' — Grupo: ' . $n['group'],
+                '/posbot/page.php',
+                'bot_campaign_scheduler_queued'
+            );
+        }
+    }
+    echo json_encode(['status' => 'success'] + $result); exit;
 }

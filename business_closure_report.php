@@ -109,25 +109,32 @@ function business_report_ticket_session_id(array $ticket): int {
 
 // 4. OBTENER DATOS PRINCIPALES
 try {
-    // DESGLOSE DIARIO
+    // Lógica de fecha: usar fecha_contable de sesión si existe, sino fecha del ticket
+    // CAMBIO: Soporte para id_caja (estándar del sistema) e id_sesion_caja
+    $sqlDateLogic = "IF(cs.id IS NOT NULL, cs.fecha_contable, DATE(vc.fecha))";
+    $sqlJoin = " LEFT JOIN caja_sesiones cs ON (vc.id_caja = cs.id OR vc.id_sesion_caja = cs.id) ";
+
+    // DESGLOSE DIARIO (usando fecha contable)
     $wReal   = ventas_reales_where_clause();
     $wRealVc = ventas_reales_where_clause('vc');
     $sqlDaily = "SELECT
                     dates.dia,
-                    COALESCE((SELECT SUM(total) FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) = dates.dia AND $wReal), 0) as total_venta,
-                    COALESCE((SELECT COUNT(id) FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) = dates.dia AND $wReal), 0) as num_transacciones,
+                    COALESCE((SELECT SUM(vc.total) FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_venta,
+                    COALESCE((SELECT COUNT(vc.id) FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as num_transacciones,
                     COALESCE((SELECT SUM(vd.cantidad * p.costo)
                               FROM ventas_detalle vd
                               JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id
                               JOIN productos p ON vd.id_producto = p.codigo
-                              WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia AND $wRealVc), 0) as total_costo,
+                              $sqlJoin
+                              WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_costo,
                     COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto,
                     COALESCE((SELECT SUM(vp.monto)
                               FROM ventas_pagos vp
                               JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
-                              WHERE vc.id_sucursal = ? AND DATE(vc.fecha) = dates.dia AND vp.metodo_pago = 'Transferencia' AND $wRealVc), 0) as total_transferencia
+                              $sqlJoin
+                              WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND vp.metodo_pago = 'Transferencia' AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_transferencia
                  FROM (
-                    SELECT DISTINCT DATE(fecha) as dia FROM ventas_cabecera WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ? AND $wReal
+                    SELECT DISTINCT IFNULL(cs.fecha_contable, DATE(vc.fecha)) as dia FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic BETWEEN ? AND ? AND $wRealVc AND vc.tipo_servicio != 'reserva'
                     UNION
                     SELECT DISTINCT DATE(fecha) as dia FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
                  ) as dates
@@ -135,7 +142,7 @@ try {
     $stmt = $pdo->prepare($sqlDaily);
     $stmt->execute([
         $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal,
-        $id_sucursal, $fecha_inicio, $fecha_fin, 
+        $id_sucursal, $fecha_inicio, $fecha_fin,
         $id_sucursal, $fecha_inicio, $fecha_fin
     ]);
     $dailySummary = $stmt->fetchAll();
@@ -160,11 +167,13 @@ try {
     $ganancia_limpia = $ganancia_bruta - $reserva_monto - $gastos_totales;
     $pct_margen_bruto = $venta_total > 0 ? ($ganancia_bruta / $venta_total) * 100 : 0;
 
-    // PAGOS POR MÉTODO
+    // PAGOS POR MÉTODO (usando fecha contable)
+    $sqlDateLogicVP = "IF(vc.id_sesion_caja > 0 AND cs.id IS NOT NULL, cs.fecha_contable, DATE(vc.fecha))";
     $stmt = $pdo->prepare("SELECT vp.metodo_pago, SUM(vp.monto) as total
                            FROM ventas_pagos vp
                            JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
-                           WHERE vc.id_sucursal = ? AND DATE(vc.fecha) BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . "
+                           LEFT JOIN caja_sesiones cs ON vc.id_sesion_caja = cs.id
+                           WHERE vc.id_sucursal = ? AND $sqlDateLogicVP BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " AND vc.tipo_servicio != 'reserva'
                            GROUP BY vp.metodo_pago");
     $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
     $payments = $stmt->fetchAll();
@@ -190,10 +199,12 @@ try {
     $sessionSummary = [];
     $ticketDetailsBySale = [];
 
-    $stmt = $pdo->prepare("SELECT *
-                           FROM ventas_cabecera
-                           WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ? AND " . ventas_reales_where_clause() . "
-                           ORDER BY fecha ASC, id ASC");
+    $sqlDateLogicTickets = "IF(vc.id_sesion_caja > 0 AND cs.id IS NOT NULL, cs.fecha_contable, DATE(vc.fecha))";
+    $stmt = $pdo->prepare("SELECT vc.*, $sqlDateLogicTickets as fecha_contable_calc
+                           FROM ventas_cabecera vc
+                           LEFT JOIN caja_sesiones cs ON vc.id_sesion_caja = cs.id
+                           WHERE vc.id_sucursal = ? AND $sqlDateLogicTickets BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " AND vc.tipo_servicio != 'reserva'
+                           ORDER BY vc.fecha ASC, vc.id ASC");
     $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
     $sessionTickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
