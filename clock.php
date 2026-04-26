@@ -2306,56 +2306,56 @@ let events = [];
       return true;
     }
 
-    function startClock() {
-      let lastBeepMinute = -1;
-      const line = $("#clockLine");
-      const dateEl = $("#dateLine");
-
-      function tick() {
-        const now = new Date();
-        applyNightVisual(now);
-
-        const hours24 = now.getHours();
-        const useAmpm = use24Hour ? false : $("#ampmToggle").checked;
-        const h = useAmpm ? (hours24 % 12 || 12) : hours24;
-        const m = String(now.getMinutes()).padStart(2, "0");
-        const ampm = hours24 < 12 ? "AM" : "PM";
-
-        if ($("#colorMode").checked) syncColorStyleIfNeeded(now);
-        renderTimeLine(String(h).padStart(2, "0"), m, useAmpm, ampm);
-        line.classList.toggle("blink-colon", now.getSeconds() % 2 === 1);
-        dateEl.textContent = formatDateEs(now);
-
-        const totalMin = hours24 * 60 + now.getMinutes();
-        if (now.getSeconds() === 0 && totalMin !== lastBeepMinute) {
-          lastBeepMinute = totalMin;
-
-          if (alarmMatch(1, now)) startAlarm("1");
-          if (alarmMatch(2, now)) startAlarm("2");
-
-          if (canPlaySound(now)) {
-            if (now.getMinutes() === 0) {
-              Synth.onHour();
-            } else if (now.getMinutes() === 30) {
-              Synth.onHalf();
-            }
-          }
-        }
-
-const sec = String(now.getSeconds()).padStart(2, "0");
-        if (secondsLine.textContent !== sec) {
-          secondsLine.textContent = sec;
-          secondsLine.classList.toggle("breathe", breatheEnabled);
-        }
-
-        EventManager.check(now);
-      }
-
-      tick();
-      setInterval(tick, 1000);
-      setInterval(rotateRainbowPattern, 5000);
-      setInterval(driftClockIfColorMode, 10000);
-    }
+     function startClock() {
+       let lastBeepMinute = -1;
+       const line = $("#clockLine");
+       const dateEl = $("#dateLine");
+ 
+       function tick() {
+         const now = new Date();
+         applyNightVisual(now);
+ 
+         const hours24 = now.getHours();
+         const useAmpm = use24Hour ? false : $("#ampmToggle").checked;
+         const h = useAmpm ? (hours24 % 12 || 12) : hours24;
+         const m = String(now.getMinutes()).padStart(2, "0");
+         const ampm = hours24 < 12 ? "AM" : "PM";
+ 
+         if ($("#colorMode").checked) syncColorStyleIfNeeded(now);
+         renderTimeLine(String(h).padStart(2, "0"), m, useAmpm, ampm);
+         line.classList.toggle("blink-colon", now.getSeconds() % 2 === 1);
+         dateEl.textContent = formatDateEs(now);
+ 
+         const totalMin = hours24 * 60 + now.getMinutes();
+         if (now.getSeconds() === 0 && totalMin !== lastBeepMinute) {
+           lastBeepMinute = totalMin;
+ 
+           if (alarmMatch(1, now)) startAlarm("1");
+           if (alarmMatch(2, now)) startAlarm("2");
+ 
+           if (canPlaySound(now)) {
+             if (now.getMinutes() === 0) {
+               Synth.onHour();
+             } else if (now.getMinutes() === 30) {
+               Synth.onHalf();
+             }
+           }
+         }
+ 
+         const sec = String(now.getSeconds()).padStart(2, "0");
+         if (secondsLine.textContent !== sec) {
+           secondsLine.textContent = sec;
+           secondsLine.classList.toggle("breathe", breatheEnabled);
+         }
+ 
+         EventManager.check(now);
+       }
+ 
+       tick();
+       setInterval(tick, 1000);
+       setInterval(rotateRainbowPattern, 5000);
+       setInterval(driftClockIfColorMode, 10000);
+     }
 
     function bindAlarmDismiss() {
       const stopIfActive = () => {
