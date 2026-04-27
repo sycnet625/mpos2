@@ -5,6 +5,7 @@ require_once 'db.php';
 
 // 1. CARGAR CONFIGURACIÓN (Almacén y Sucursal Actuales)
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
 
 $id_almacen = intval($config['id_almacen']);
 $id_sucursal = intval($config['id_sucursal']);

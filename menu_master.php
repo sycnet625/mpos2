@@ -2,11 +2,6 @@
 // ARCHIVO: menu_master.php
 // Menú Flotante v3.0 - FEATURE: Categorías Colapsables & Expand All
 
-// 1. Incluir herramientas (Calculadora)
-if (file_exists(__DIR__ . '/tools_unit_converter.php')) {
-    include_once __DIR__ . '/tools_unit_converter.php';
-}
-
 global $config, $currentConfig;
 $_c = $config ?? $currentConfig ?? [];
 $menuSystemName = trim((string)($_c['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
@@ -66,6 +61,7 @@ $menuCategories = [
         ["icon" => "fa-history", "name" => "Historial Ventas", "url" => "sales_history.php"],
         ["icon" => "fa-balance-scale", "name" => "Reporte IPV (Kardex)", "url" => "reporte_ipv.php"],
         ["icon" => "fa-cash-register", "name" => "Cortes de Caja", "url" => "reportes_caja.php"],
+        ["icon" => "fa-layer-group", "name" => "Reporte Multi-Sesión", "url" => "reportes_caja_multi.php"],
         ["icon" => "fa-chart-pie", "name" => "Análisis Ganancia", "url" => "profit_analysis.php"],
         ["icon" => "fa-chart-bar", "name" => "Análisis Diario", "url" => "profit.php"],
     ],
@@ -296,11 +292,7 @@ $menuCategories = [
     </div>
 </div>
 
-<?php
-if (!defined('DISABLE_MENU_UNIT_CONVERTER') && function_exists('render_unit_converter_modal')) {
-    render_unit_converter_modal();
-}
-?>
+
 
 <div class="admin-chat-overlay" id="adminChatModal">
     <div class="admin-chat-box">

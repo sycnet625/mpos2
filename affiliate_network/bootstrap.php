@@ -35,10 +35,6 @@ if (!aff_is_authenticated() && empty($_SESSION['admin_logged_in'])) {
     exit;
 }
 
-if (!defined('DISABLE_MENU_UNIT_CONVERTER')) {
-    define('DISABLE_MENU_UNIT_CONVERTER', true);
-}
-
 if (empty($_SESSION['affiliate_csrf_token'])) {
     $_SESSION['affiliate_csrf_token'] = bin2hex(random_bytes(24));
 }
