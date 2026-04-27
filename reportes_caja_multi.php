@@ -213,7 +213,8 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID): array {
     $cliAgg = [];
     $cajAgg = [];
     foreach ($r['tickets'] as $t) {
-        if ($t['total'] > 0) { $r['ventasReales'] += $t['total']; $r['conteoTickets']++; }
+        $r['ventasReales'] += $t['total'];  // neto: incluye devoluciones negativas
+        if ($t['total'] > 0) $r['conteoTickets']++;
         if ($t['total'] < 0 || $t['cliente_nombre'] === 'DEVOLUCIÓN') {
             $r['cantDevoluciones']++; $r['valorDevoluciones'] += abs($t['total']);
         }
@@ -254,7 +255,8 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID): array {
     foreach ($r['tickets'] as $t) {
         $cn = $sesByCaja[$t['id_caja']] ?? '—';
         if (!isset($cajAgg[$cn])) $cajAgg[$cn] = ['cajero'=>$cn,'sesiones'=>0,'tickets'=>0,'ventas'=>0,'devoluciones'=>0,'diferencia'=>0];
-        if ($t['total'] > 0) { $cajAgg[$cn]['tickets']++; $cajAgg[$cn]['ventas'] += $t['total']; }
+        if ($t['total'] > 0) $cajAgg[$cn]['tickets']++;
+        $cajAgg[$cn]['ventas'] += $t['total'];
         if ($t['total'] < 0) $cajAgg[$cn]['devoluciones'] += abs($t['total']);
     }
     usort($cajAgg, fn($a,$b)=>$b['ventas']<=>$a['ventas']);
@@ -1192,7 +1194,7 @@ async function refundItem(id, name) {
 // ── Gráficos ──────────────────────────────────────────────────
 <?php if($haySeleccion): ?>
 const sesData   = <?php echo json_encode(array_map(fn($s)=>['id'=>$s['id']], $A['sesiones'])); ?>;
-const vps       = <?php $vps=[]; foreach($A['tickets'] as $t){$c=intval($t['id_caja']);if(!isset($vps[$c]))$vps[$c]=0;if($t['total']>0)$vps[$c]+=floatval($t['total']);}; echo json_encode($vps); ?>;
+const vps       = <?php $vps=[]; foreach($A['tickets'] as $t){$c=intval($t['id_caja']);if(!isset($vps[$c]))$vps[$c]=0;$vps[$c]+=floatval($t['total']);}; echo json_encode($vps); ?>;
 new Chart(document.getElementById('chartVentasSesion'),{type:'bar',data:{labels:sesData.map(s=>'#'+s.id),datasets:[{label:'Ventas $',data:sesData.map(s=>vps[s.id]||0),backgroundColor:'#0d6efd'}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
 new Chart(document.getElementById('chartMetodos'),{type:'doughnut',data:{labels:<?php echo json_encode(array_keys($A['metodosPago'])); ?>,datasets:[{data:<?php echo json_encode(array_values($A['metodosPago'])); ?>,backgroundColor:['#198754','#0d6efd','#fd7e14','#6f42c1','#dc3545','#0dcaf0','#ffc107']}]}});
 new Chart(document.getElementById('chartProductos'),{type:'doughnut',data:{labels:<?php echo json_encode(array_map(fn($p)=>mb_substr($p['nombre'],0,18),$A['topProductos'])); ?>,datasets:[{data:<?php echo json_encode(array_map(fn($p)=>floatval($p['monto']),$A['topProductos'])); ?>,backgroundColor:['#0d6efd','#198754','#fd7e14','#6f42c1','#dc3545','#0dcaf0','#ffc107','#20c997','#6610f2','#e83e8c']}]}});
