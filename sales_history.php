@@ -83,6 +83,7 @@ $end = $_GET['end'] ?? date('Y-m-d');
 $scopeCondVentas = ($scope === 'global') ? "1=1" : "v.id_sucursal = $SUC_ID_LOCAL";
 $scopeCondInv = ($scope === 'global') ? "1=1" : "k.id_almacen = $ALM_ID_LOCAL";
 $scopeCondSes = ($scope === 'global') ? "1=1" : "s.id_sucursal = $SUC_ID_LOCAL";
+$sqlDateLogic = "COALESCE(s.fecha_contable, DATE(v.fecha))";
 
 try {
     // 1 + 2. KPIs financieros y métodos de pago via motor central
@@ -94,7 +95,7 @@ try {
         'secciones'    => [BM_VENTAS],
     ]);
 
-    $ventaTotal = $mMetrics[BM_VENTAS]['total'];
+    $ventaTotal = $mMetrics[BM_VENTAS]['total'] - $mMetrics[BM_VENTAS]['devoluciones']['valor'];
     $costoTotal = $mMetrics[BM_VENTAS]['costo'];
     $totalItems = 0;  // no es necesario para el HTML actual
     $ganancia   = $mMetrics[BM_VENTAS]['ganancia_bruta'];
@@ -484,7 +485,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         $sid = $s['id']; 
         $sessionTickets = isset($grouped[$sid]) ? $grouped[$sid] : [];
         $totalSession = 0;
-        foreach($sessionTickets as $st) { if($st['total'] > 0) $totalSession += $st['total']; }
+        foreach($sessionTickets as $st) { $totalSession += $st['total']; }
         $isOpen = ($s['estado'] == 'ABIERTA');
         $isContabilizado = ($s['es_contabilizado'] > 0);
         $fechaContableStr = date('d/m/Y', strtotime($s['fecha_contable']));
