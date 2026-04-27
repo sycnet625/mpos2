@@ -202,6 +202,29 @@ $deliveryWithEnvio = 0;
 $grouped = [];
 $orphans = [];
 
+// Precalcular costos de envío (total - suma detalle) para tickets de mensajería
+$deliveryEnvioCosts = [];
+if (!empty($allTickets)) {
+    $ticketIds = array_column($allTickets, 'id');
+    if (!empty($ticketIds)) {
+        $ph = implode(',', array_fill(0, count($ticketIds), '?'));
+        $stmtEnvio = $pdo->prepare(
+            "SELECT v.id, v.total, COALESCE(SUM(d.cantidad * d.precio), 0) as det_sum
+             FROM ventas_cabecera v
+             LEFT JOIN ventas_detalle d ON v.id = d.id_venta_cabecera
+             WHERE v.id IN ($ph)
+             GROUP BY v.id"
+        );
+        $stmtEnvio->execute($ticketIds);
+        foreach ($stmtEnvio->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $deliveryEnvioCosts[(int)$row['id']] = round(floatval($row['total']) - floatval($row['det_sum']), 2);
+        }
+    }
+}
+
+$totalEnvioRevenue = 0.0;
+$enviosConCosto = 0;
+
 foreach ($allTickets as $t) {
     $sid = intval($t['id_sesion_caja']);
     if ($sid > 0) $grouped[$sid][] = $t;
@@ -220,6 +243,12 @@ foreach ($allTickets as $t) {
             $driver = ($t['mensajero_nombre']) ? $t['mensajero_nombre'] : 'General';
             if (!isset($deliveryStats[$driver])) $deliveryStats[$driver] = 0;
             $deliveryStats[$driver] += $t['total'];
+
+            $envioCost = $deliveryEnvioCosts[(int)$t['id']] ?? 0.0;
+            $totalEnvioRevenue += $envioCost;
+            if ($envioCost > 0.01) {
+                $enviosConCosto++;
+            }
         }
         if (stripos($t['metodo_pago'], 'transferencia') !== false) $sumaTransferencia += $t['total'];
     }
@@ -476,22 +505,22 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
             <div class="card card-stat h-100 p-3 border-start border-4 border-info">
                 <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <small class="text-muted fw-bold text-uppercase"><i class="fas fa-motorcycle me-1"></i> Mensajería</small>
+                        <small class="text-muted fw-bold text-uppercase"><i class="fas fa-motorcycle me-1"></i> Costos de Envío</small>
                         <div class="d-flex flex-column gap-1 mt-1">
                             <div>
-                                <span class="fw-bold text-info fs-4">$<?php echo number_format($deliveryRevenue, 2); ?></span>
-                                <small class="text-muted d-block">Ingreso total</small>
+                                <span class="fw-bold text-info fs-4">$<?php echo number_format($totalEnvioRevenue, 2); ?></span>
+                                <small class="text-muted d-block">recaudado en envíos</small>
                             </div>
                             <div class="border-top pt-1 mt-1">
-                                <span class="fw-bold text-dark"><?php echo number_format($deliveryWithEnvio, 0); ?></span>
-                                <small class="text-muted">envíos con costo</small>
+                                <span class="fw-bold text-dark"><?php echo number_format($enviosConCosto, 0); ?></span>
+                                <small class="text-muted">con costo > 0</small>
                                 <span class="text-muted">/</span>
                                 <span class="fw-bold text-secondary"><?php echo number_format($cntDelivery, 0); ?></span>
-                                <small class="text-muted">total</small>
+                                <small class="text-muted">envíos total</small>
                             </div>
                         </div>
                     </div>
-                    <div class="icon-box bg-info bg-opacity-10 text-info"><i class="fas fa-motorcycle"></i></div>
+                    <div class="icon-box bg-info bg-opacity-10 text-info"><i class="fas fa-shipping-fast"></i></div>
                 </div>
             </div>
         </div>
