@@ -55,19 +55,34 @@ try {
     $stockInicialMap = $stmtIni->fetchAll(PDO::FETCH_KEY_PAIR); // [SKU => saldo]
 
     // 6. OBTENER VENTAS ($ Dinero) REALES (Filtrado por Almacén Y Sucursal)
-    // CAMBIO: Usar fecha contable de la sesión
+    // CAMBIO: Usar fecha contable de la sesión. Excluir devoluciones para no
+    // distorsionar los totales por producto (la devolución tiene cantidades negativas).
     $sqlVentas = "SELECT d.id_producto, SUM(d.cantidad * d.precio) as monto_venta_real
                   FROM ventas_detalle d
                   JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                   LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
-                  WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
-                  AND v.id_almacen = ? 
+                  WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+                  AND v.id_almacen = ?
                   AND v.id_sucursal = ?
+                  AND v.tipo_servicio != 'devolucion'
                   AND " . ventas_reales_where_clause('v') . "
                   GROUP BY d.id_producto";
     $stmtV = $pdo->prepare($sqlVentas);
     $stmtV->execute([$startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
     $ventasDineroMap = $stmtV->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // 6b. TOTAL GLOBAL DESDE CABECERA (venta neta: incluye devoluciones negativas)
+    // Las devoluciones restan automáticamente porque su total es negativo.
+    $sqlTotalGlobal = "SELECT SUM(v.total) as total_global, COUNT(*) as count_global
+                       FROM ventas_cabecera v
+                       LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
+                       WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+                       AND v.id_almacen = ? AND v.id_sucursal = ?
+                       AND " . ventas_reales_where_clause('v');
+    $stmtTg = $pdo->prepare($sqlTotalGlobal);
+    $stmtTg->execute([$startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
+    $totalGlobalRow = $stmtTg->fetch(PDO::FETCH_ASSOC);
+    $totalGlobalVenta = floatval($totalGlobalRow['total_global'] ?? 0);
 
     // 7. PROCESAR DATA
     $reportData = [];
@@ -134,7 +149,8 @@ try {
         $totales['ganancia'] += $ganancia;
     }
 
-    $margen_global = ($totales['venta'] > 0) ? ($totales['ganancia'] / $totales['venta']) * 100 : 0;
+    // Margen sobre la venta REAL (desde cabecera, que incluye envíos y netea devoluciones)
+    $margen_global = ($totalGlobalVenta > 0) ? ($totales['ganancia'] / $totalGlobalVenta) * 100 : 0;
 
     // KPIs globales del periodo para comparación (no dependen del filtro filter_mode)
     try {
@@ -243,7 +259,7 @@ try {
     <table class="total-table">
         <tr>
             <td class="label-cell">💰 VENTA TOTAL</td>
-            <td class="right bold" style="font-size:14px">$ <?php echo number_format($totales['venta'], 2); ?></td>
+            <td class="right bold" style="font-size:14px">$ <?php echo number_format($totalGlobalVenta, 2); ?></td>
         </tr>
         <tr>
             <td class="label-cell" style="color:#2F75B5;">📦 Valor Inv. Final (Costo)</td>
