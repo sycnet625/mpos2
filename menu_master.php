@@ -94,6 +94,7 @@ $menuCategories = [
 ?>
 
 <?php require_once __DIR__ . '/theme.php'; ?>
+<?php if (!defined('DISABLE_MENU_MASTER')): ?>
 <style>
     /* Estilos del Menú Flotante */
     @media print { #palweb-float-nav { display: none !important; } }
@@ -860,3 +861,4 @@ async function submitChangePass() {
     }
 }
 </script>
+<?php endif; // DISABLE_MENU_MASTER ?>

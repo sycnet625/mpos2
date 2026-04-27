@@ -251,6 +251,6 @@ try {
 
 
 
-<?php include_once 'menu_master.php'; ?>
+<?php define('DISABLE_MENU_MASTER', true); include_once 'menu_master.php'; ?>
 </body>
 </html>
