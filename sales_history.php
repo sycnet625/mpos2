@@ -97,7 +97,6 @@ try {
 
     $ventaTotal = $mMetrics[BM_VENTAS]['total'] - $mMetrics[BM_VENTAS]['devoluciones']['valor'];
     $costoTotal = $mMetrics[BM_VENTAS]['costo'];
-    $totalItems = 0;  // no es necesario para el HTML actual
     $ganancia   = $mMetrics[BM_VENTAS]['ganancia_bruta'];
     $margen     = $mMetrics[BM_VENTAS]['margen_bruto_pct'];
 
@@ -197,13 +196,15 @@ try {
 // --- PROCESAMIENTO DE TICKETS Y KPIS ---
 $cntReservas = 0; $cntDelivery = 0; $cntReembolsos = 0;
 $sumaTransferencia = 0; $sumaVentaPositiva = 0; $maxVenta = 0;
-$deliveryStats = []; 
-$grouped = []; 
+$deliveryStats = [];
+$deliveryRevenue = 0.0;
+$deliveryWithEnvio = 0;
+$grouped = [];
 $orphans = [];
 
 foreach ($allTickets as $t) {
     $sid = intval($t['id_sesion_caja']);
-    if ($sid > 0) $grouped[$sid][] = $t; 
+    if ($sid > 0) $grouped[$sid][] = $t;
     else $orphans[] = $t;
 
     if ($t['total'] < 0) { $cntReembolsos++; } else {
@@ -212,6 +213,10 @@ foreach ($allTickets as $t) {
         if ($t['tipo_servicio'] === 'reserva') $cntReservas++;
         if ($t['tipo_servicio'] === 'mensajeria') {
             $cntDelivery++;
+            $deliveryRevenue += floatval($t['total']);
+            if (!empty($t['mensajero_nombre'])) {
+                $deliveryWithEnvio++;
+            }
             $driver = ($t['mensajero_nombre']) ? $t['mensajero_nombre'] : 'General';
             if (!isset($deliveryStats[$driver])) $deliveryStats[$driver] = 0;
             $deliveryStats[$driver] += $t['total'];
@@ -469,13 +474,24 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         </div>
         <div class="col-md-4">
             <div class="card card-stat h-100 p-3 border-start border-4 border-info">
-                <div class="d-flex justify-content-between align-items-center">
+                <div class="d-flex justify-content-between align-items-start">
                     <div>
-                        <small class="text-muted fw-bold text-uppercase">Rotación (Items)</small>
-                        <h3 class="fw-bold text-info mb-0"><?php echo number_format($totalItems, 0); ?></h3>
-                        <small class="text-muted">Productos totales vendidos</small>
+                        <small class="text-muted fw-bold text-uppercase"><i class="fas fa-motorcycle me-1"></i> Mensajería</small>
+                        <div class="d-flex flex-column gap-1 mt-1">
+                            <div>
+                                <span class="fw-bold text-info fs-4">$<?php echo number_format($deliveryRevenue, 2); ?></span>
+                                <small class="text-muted d-block">Ingreso total</small>
+                            </div>
+                            <div class="border-top pt-1 mt-1">
+                                <span class="fw-bold text-dark"><?php echo number_format($deliveryWithEnvio, 0); ?></span>
+                                <small class="text-muted">envíos con costo</small>
+                                <span class="text-muted">/</span>
+                                <span class="fw-bold text-secondary"><?php echo number_format($cntDelivery, 0); ?></span>
+                                <small class="text-muted">total</small>
+                            </div>
+                        </div>
                     </div>
-                    <div class="icon-box bg-info bg-opacity-10 text-info"><i class="fas fa-boxes"></i></div>
+                    <div class="icon-box bg-info bg-opacity-10 text-info"><i class="fas fa-motorcycle"></i></div>
                 </div>
             </div>
         </div>
