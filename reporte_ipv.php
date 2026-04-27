@@ -6,6 +6,7 @@ require_once 'db.php';
 // 1. CARGAR CONFIGURACIÓN (Almacén y Sucursal Actuales)
 require_once 'config_loader.php';
 require_once 'accounting_helpers.php';
+require_once 'business_metrics.php';
 
 $id_almacen = intval($config['id_almacen']);
 $id_sucursal = intval($config['id_sucursal']);
@@ -135,6 +136,23 @@ try {
 
     $margen_global = ($totales['venta'] > 0) ? ($totales['ganancia'] / $totales['venta']) * 100 : 0;
 
+    // KPIs globales del periodo para comparación (no dependen del filtro filter_mode)
+    try {
+        $mIpv = bm_calcular($pdo, [
+            'fecha_inicio' => $start,
+            'fecha_fin'    => $end,
+            'id_empresa'   => intval($config['id_empresa']),
+            'id_sucursal'  => $id_sucursal,
+            'secciones'    => [BM_VENTAS],
+        ]);
+        $ipv_venta_global   = $mIpv[BM_VENTAS]['total'];
+        $ipv_costo_global   = $mIpv[BM_VENTAS]['costo'];
+        $ipv_ganancia_global = $mIpv[BM_VENTAS]['ganancia_bruta'];
+        $ipv_margen_global  = $mIpv[BM_VENTAS]['margen_bruto_pct'];
+    } catch (Throwable $e) {
+        $ipv_venta_global = $ipv_costo_global = $ipv_ganancia_global = $ipv_margen_global = null;
+    }
+
 } catch (Exception $e) {
     die("Error: " . $e->getMessage());
 }
@@ -239,6 +257,16 @@ try {
             <td class="label-cell" style="color:green; font-size:15px">GANANCIA NETA</td>
             <td class="right bold" style="color:green; font-size:15px">$ <?php echo number_format($totales['ganancia'], 2); ?></td>
         </tr>
+        <?php if ($ipv_venta_global !== null): ?>
+        <tr style="background-color:#e8f4fd; border-top:2px solid #2F75B5;">
+            <td class="label-cell" style="color:#2F75B5; font-size:11px;">📊 Venta real periodo (todos)</td>
+            <td class="right" style="color:#2F75B5; font-size:11px;">$ <?php echo number_format($ipv_venta_global, 2); ?></td>
+        </tr>
+        <tr style="background-color:#e8f4fd;">
+            <td class="label-cell" style="color:#2F75B5; font-size:11px;">📊 Ganancia real periodo (todos)</td>
+            <td class="right" style="color:#2F75B5; font-size:11px;">$ <?php echo number_format($ipv_ganancia_global, 2); ?> (<?php echo number_format($ipv_margen_global, 1); ?>%)</td>
+        </tr>
+        <?php endif; ?>
     </table>
 </div>
 

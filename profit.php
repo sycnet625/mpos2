@@ -16,99 +16,77 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 try {
     require_once 'db.php';
+    require_once 'business_metrics.php';
     date_default_timezone_set('America/Havana');
     $pdo->exec("SET time_zone = '-05:00';");
 
-    // 1. CARGAR CONFIGURACIÓN LOCAL (Para saber la sucursal actual)
     require_once 'config_loader.php';
-    
+
     $EMP_ID = intval($config['id_empresa']);
     $SUC_ID = intval($config['id_sucursal']);
 
-    // 2. FILTROS DE VISTA (GLOBAL vs LOCAL)
-    $viewMode = $_GET['view'] ?? 'local';
-    $isGlobal = ($viewMode === 'global');
-    $excludeRaw = isset($_GET['exclude_raw']) ? true : false;
+    $viewMode   = $_GET['view'] ?? 'local';
+    $isGlobal   = ($viewMode === 'global');
+    $excludeRaw = !empty($_GET['exclude_raw']);
 
-    $sqlFilterProduct = $excludeRaw ? " AND p.es_elaborado = 1 " : "";
-    
     if ($isGlobal) {
-        $sqlFilterSucursal = ""; 
-        $queryParams = [':emp' => $EMP_ID];
         $tituloVista = "VISTA GLOBAL (Todas las Sucursales)";
-        $btnText = "🏠 Ver SUCURSAL ACTUAL";
-        $btnLink = "?view=local" . ($excludeRaw ? "&exclude_raw=1" : "");
+        $btnText  = "🏠 Ver SUCURSAL ACTUAL";
+        $btnLink  = "?view=local" . ($excludeRaw ? "&exclude_raw=1" : "");
         $btnClass = "btn-warning";
     } else {
-        $sqlFilterSucursal = " AND v.id_sucursal = :suc ";
-        $queryParams = [':emp' => $EMP_ID, ':suc' => $SUC_ID];
         $tituloVista = "SUCURSAL #$SUC_ID (Local)";
-        $btnText = "🌍 Ver GLOBAL";
-        $btnLink = "?view=global" . ($excludeRaw ? "&exclude_raw=1" : "");
+        $btnText  = "🌍 Ver GLOBAL";
+        $btnLink  = "?view=global" . ($excludeRaw ? "&exclude_raw=1" : "");
         $btnClass = "btn-info text-white";
     }
 
-    $dates = [];
-    $kpiSales = 0;
-    $kpiProfit = 0;
+    $fechaInicio = date('Y-m-d', strtotime('-29 days'));
+    $fechaFin    = date('Y-m-d');
 
+    $m = bm_calcular($pdo, [
+        'fecha_inicio' => $fechaInicio,
+        'fecha_fin'    => $fechaFin,
+        'id_empresa'   => $EMP_ID,
+        'id_sucursal'  => $isGlobal ? null : $SUC_ID,
+        'secciones'    => [BM_VENTAS, BM_SERIES, BM_PRODUCTOS],
+        'limite_top'   => 10,
+    ]);
+
+    // KPIs principales
+    $kpiSales  = $m[BM_VENTAS]['total'];
+    $kpiProfit = $m[BM_VENTAS]['ganancia_bruta'];
+    $kpiMargin = $m[BM_VENTAS]['margen_bruto_pct'];
+
+    // Construir serie de 30 días (incluye días sin actividad como ceros)
+    $dates = [];
     for ($i = 29; $i >= 0; $i--) {
         $date = date('Y-m-d', strtotime("-$i days"));
-        $dates[$date] = ['venta' => 0, 'ganancia' => 0, 'label' => date('d/m', strtotime($date))];
+        $dates[$date] = ['venta' => 0.0, 'ganancia' => 0.0, 'label' => date('d/m', strtotime($date))];
     }
-
-    $sqlGraph = "SELECT 
-                s.fecha_contable as dia,
-                SUM(d.precio * d.cantidad) as total_venta,
-                SUM((d.precio - p.costo) * d.cantidad) as total_ganancia
-            FROM ventas_cabecera v
-            JOIN caja_sesiones s ON v.id_caja = s.id
-            JOIN ventas_detalle d ON v.id = d.id_venta_cabecera
-            JOIN productos p ON d.id_producto = p.codigo
-            WHERE v.id_empresa = :emp 
-              AND s.fecha_contable >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-              $sqlFilterProduct
-              $sqlFilterSucursal
-            GROUP BY s.fecha_contable";
-
-    $stmt = $pdo->prepare($sqlGraph);
-    $stmt->execute($queryParams);
-    
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        if (isset($dates[$row['dia']])) {
-            $dates[$row['dia']]['venta'] = floatval($row['total_venta']);
-            $dates[$row['dia']]['ganancia'] = floatval($row['total_ganancia']);
-            $kpiSales += $dates[$row['dia']]['venta'];
-            $kpiProfit += $dates[$row['dia']]['ganancia'];
+    foreach ($m[BM_SERIES] as $row) {
+        if (isset($dates[$row['fecha']])) {
+            $dates[$row['fecha']]['venta']    = $row['venta'];
+            $dates[$row['fecha']]['ganancia'] = $row['ganancia'];
         }
     }
-
-    $kpiMargin = ($kpiSales > 0) ? ($kpiProfit / $kpiSales) * 100 : 0;
     $chartLabels = array_column($dates, 'label');
-    $chartSales = array_column($dates, 'venta');
+    $chartSales  = array_column($dates, 'venta');
     $chartProfit = array_column($dates, 'ganancia');
 
-    $sqlBaseProducts = "SELECT 
-                p.nombre, p.categoria,
-                SUM(d.cantidad) as unidades,
-                SUM((d.precio - p.costo) * d.cantidad) as ganancia_total
-            FROM ventas_detalle d
-            JOIN productos p ON d.id_producto = p.codigo
-            JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-            JOIN caja_sesiones s ON v.id_caja = s.id
-            WHERE v.id_empresa = :emp 
-              AND s.fecha_contable >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-              $sqlFilterProduct
-              $sqlFilterSucursal
-            GROUP BY p.codigo, p.nombre, p.categoria ";
+    // Productos top/bottom — con filtro es_elaborado si aplica
+    $topGanancia = $m[BM_PRODUCTOS]['top_por_ganancia'];
+    $botGanancia = $m[BM_PRODUCTOS]['bottom_por_ganancia'];
+    if ($excludeRaw) {
+        $topGanancia = array_values(array_filter($topGanancia, fn($p) => !empty($p['es_elaborado'])));
+        $botGanancia = array_values(array_filter($botGanancia, fn($p) => !empty($p['es_elaborado'])));
+    }
+    $topProducts = array_slice($topGanancia, 0, 10);
+    $lowProducts = array_slice($botGanancia, 0, 10);
 
-    $stmtTop = $pdo->prepare($sqlBaseProducts . " ORDER BY ganancia_total DESC LIMIT 10");
-    $stmtTop->execute($queryParams);
-    $topProducts = $stmtTop->fetchAll(PDO::FETCH_ASSOC);
-
-    $stmtLow = $pdo->prepare($sqlBaseProducts . " ORDER BY ganancia_total ASC LIMIT 10");
-    $stmtLow->execute($queryParams);
-    $lowProducts = $stmtLow->fetchAll(PDO::FETCH_ASSOC);
+    // Adaptar claves para compatibilidad con la vista HTML (unidades, ganancia_total)
+    $topProducts = array_map(fn($p) => array_merge($p, ['unidades' => $p['cantidad'], 'ganancia_total' => $p['ganancia']]), $topProducts);
+    $lowProducts = array_map(fn($p) => array_merge($p, ['unidades' => $p['cantidad'], 'ganancia_total' => $p['ganancia']]), $lowProducts);
 
 } catch (Exception $e) { die("Error: " . $e->getMessage()); }
 ?><!DOCTYPE html>

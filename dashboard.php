@@ -16,7 +16,8 @@ error_reporting(E_ALL);
 
 try {
     require_once 'db.php';
-require_once 'accounting_helpers.php';
+    require_once 'accounting_helpers.php';
+    require_once 'business_metrics.php';
     date_default_timezone_set('America/Havana');
     $pdo->exec("SET time_zone = '-05:00';");
 } catch (Exception $e) {
@@ -108,46 +109,54 @@ $sqlDateJoin = " LEFT JOIN caja_sesiones s ON v.id_caja = s.id ";
 $sqlAccountingDate = " IFNULL(s.fecha_contable, DATE(v.fecha)) ";
 $sqlDateRange = " AND $sqlAccountingDate BETWEEN ? AND ? ";
 
-// A. Inventario (Priorizar precios por sucursal si existen)
-$sqlInvBase = "SELECT SUM(s.cantidad * COALESCE(%PS_FIELD%, %P_FIELD%)) 
-               FROM stock_almacen s 
-               JOIN productos p ON s.id_producto = p.codigo 
-               LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
-               WHERE 1=1 $sqlEmpresa $sqlProductScope $sqlAlmacen";
+// A. Inventario — calculado más abajo via bm_calcular (mDash)
 
-$qCosto = str_replace(['%PS_FIELD%', '%P_FIELD%'], ['ps.precio_costo', 'p.costo'], $sqlInvBase);
-$valorInventarioCosto = getScalar($pdo, $qCosto);
-
-$qVenta = str_replace(['%PS_FIELD%', '%P_FIELD%'], ['ps.precio_venta', 'p.precio'], $sqlInvBase);
-$valorInventarioVenta = getScalar($pdo, $qVenta);
-
-    $sqlStockCritico = "SELECT COUNT(*) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE COALESCE(s.cantidad,0) <= COALESCE(p.stock_minimo,0) $sqlEmpresa $sqlProductScope $sqlAlmacen";
-$stockCritico = getScalar($pdo, $sqlStockCritico);
-$margenPotencial = $valorInventarioVenta - $valorInventarioCosto;
-
-// B. Ventas (Periodo)
+// B. Ventas + Ganancia + Métodos de pago + Top productos via motor central
 $paramsDate = [$fechaInicio, $fechaFin];
 
-$sqlVentasBase = "SELECT SUM(v.total) 
-                  FROM ventas_cabecera v 
-                  $sqlDateJoin
-                  WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
-$ventasPeriodo = getScalar($pdo, $sqlVentasBase, $paramsDate);
+$mDash = bm_calcular($pdo, [
+    'fecha_inicio' => $fechaInicio,
+    'fecha_fin'    => $fechaFin,
+    'id_empresa'   => $EMP_ID,
+    'id_sucursal'  => ($scope === 'local') ? $SUC_ID : null,
+    'id_almacen'   => ($scope === 'local') ? $ALM_ID : null,
+    'secciones'    => [BM_VENTAS, BM_PRODUCTOS, BM_INVENTARIO],
+    'limite_top'   => 5,
+]);
+
+$ventasPeriodo  = $mDash[BM_VENTAS]['total'];
+$gananciaPeriodo = $mDash[BM_VENTAS]['ganancia_bruta'];
+
+// Métodos de pago en formato array de filas
+$pagosData = [];
+foreach ($mDash[BM_VENTAS]['por_metodo_pago'] as $mp => $total) {
+    $pagosData[] = ['metodo' => $mp, 'total' => $total];
+}
+
+// Top productos (por cantidad vendida, compatible con la vista que usa 'vendidos')
+$topProductos = array_map(fn($p) => [
+    'nombre'   => $p['nombre'],
+    'vendidos' => $p['cantidad'],
+    'ganancia' => $p['ganancia'],
+], $mDash[BM_PRODUCTOS]['top_por_monto']);
+
+// Top por ganancia (para las tarjetas de análisis)
+$topProfitProds = array_map(fn($p) => [
+    'nombre'         => $p['nombre'],
+    'total_ganancia' => $p['ganancia'],
+], $mDash[BM_PRODUCTOS]['top_por_ganancia']);
+
+// Inventario
+$valorInventarioCosto = $mDash[BM_INVENTARIO]['valor_costo'];
+$valorInventarioVenta = $mDash[BM_INVENTARIO]['valor_venta'];
+$margenPotencial      = $mDash[BM_INVENTARIO]['margen_potencial'];
+$stockCritico         = $mDash[BM_INVENTARIO]['stock_critico'];
 
 // C. Ofertas Comerciales (Periodo)
     $sqlOfertas = "SELECT COUNT(*) FROM ofertas WHERE id_empresa = $EMP_ID AND DATE(fecha_emision) BETWEEN ? AND ?";
     $cantOfertas = getScalar($pdo, $sqlOfertas, $paramsDate);
     $sqlOfertasTotal = "SELECT SUM(total) FROM ofertas WHERE id_empresa = $EMP_ID AND DATE(fecha_emision) BETWEEN ? AND ?";
     $montoOfertas = getScalar($pdo, $sqlOfertasTotal, $paramsDate);
-
-$sqlGanancia = "SELECT SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.cantidad)
-                FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo
-                LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
-                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                $sqlDateJoin
-                WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
-$gananciaPeriodo = getScalar($pdo, $sqlGanancia, $paramsDate);
 
 // --- C. MÉTRICAS WEB (AMPLIADO) ---
 $totalVisitas = getScalar($pdo, "SELECT COUNT(*) FROM metricas_web");
@@ -258,40 +267,18 @@ $logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-l
 $logErrors = shell_exec("tail -n 50 $_escError | grep 'error' | tail -n 5");
 
 
-$sqlTrans = "SELECT COUNT(*) FROM ventas_cabecera v WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')";
-$totalTransacciones = getScalar($pdo, $sqlTrans, $paramsDate);
-$ticketPromedio = ($totalTransacciones > 0) ? $ventasPeriodo / $totalTransacciones : 0;
+// Transacciones y ticket promedio desde motor central
+$totalTransacciones = $mDash[BM_VENTAS]['count_tickets'];
+$ticketPromedio     = $mDash[BM_VENTAS]['ticket_promedio'];
 
-// C. Pendientes (Pedidos Web - Globalmente o por sucursal si se implementara asignación)
+// C. Pendientes (Pedidos Web)
 $countPendientes = getScalar($pdo, "SELECT COUNT(*) FROM pedidos_cabecera WHERE id_empresa = $EMP_ID $sqlPedidosSucursal AND estado = 'pendiente'", []);
 
-// D. Datos para Gráficas
-$sqlPagos = "SELECT COALESCE(metodo_pago, 'Efectivo') as metodo, SUM(total) as total 
-             FROM ventas_cabecera v 
-             WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
-             GROUP BY metodo_pago ORDER BY total DESC";
-$pagosData = getRows($pdo, $sqlPagos, $paramsDate);
-
-$topProductos = getRows($pdo, "SELECT p.nombre, SUM(d.cantidad) as vendidos, SUM(d.cantidad * (d.precio - p.costo)) as ganancia
-                               FROM ventas_detalle d
-                               JOIN productos p ON d.id_producto = p.codigo
-                               JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                               WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
-                               GROUP BY p.codigo ORDER BY vendidos DESC LIMIT 5", $paramsDate);
+// pagosData, topProductos y topProfitProds ya calculados arriba via bm_calcular
 
 // ============================================================================
 //   3. NUEVAS TARJETAS SOLICITADAS (ANÁLISIS PRODUCTO)
 // ============================================================================
-
-// 1. Productos con Mayor Ganancia Neta (Absoluta)
-$sqlTopProfit = "SELECT p.nombre, SUM(d.cantidad * (d.precio - p.costo)) as total_ganancia
-                 FROM ventas_detalle d
-                 JOIN productos p ON d.id_producto = p.codigo
-                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
-                 GROUP BY p.codigo
-                 ORDER BY total_ganancia DESC LIMIT 5";
-$topProfitProds = getRows($pdo, $sqlTopProfit, $paramsDate);
 
 // 2. Productos con Menor Margen % (Que tengan stock > 0)
 // Margen = ((Precio - Costo) / Precio) * 100
@@ -314,7 +301,9 @@ $sqlSlow = "SELECT p.nombre, s.cantidad
                 SELECT d.id_producto
                 FROM ventas_detalle d
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.fecha >= ? $sqlSucursal
+                LEFT JOIN caja_sesiones cs ON v.id_caja = cs.id
+                WHERE IFNULL(cs.fecha_contable, DATE(v.fecha)) >= ? $sqlSucursal
+                  AND " . ventas_reales_where_clause('v') . "
             )
             LIMIT 5";
 $slowMovingProds = getRows($pdo, $sqlSlow, [$sevenDaysAgo]);
@@ -323,25 +312,15 @@ $slowMovingProds = getRows($pdo, $sqlSlow, [$sevenDaysAgo]);
 //   4. NUEVAS TARJETAS: CATEGORÍAS
 // ============================================================================
 
-// 4.1 Ventas por Categoría
-$sqlCatSales = "SELECT p.categoria, SUM(d.cantidad * COALESCE(ps.precio_venta, p.precio)) as total_venta
-                 FROM ventas_detalle d
-                 JOIN productos p ON d.id_producto = p.codigo
-                 LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = $SUC_ID
-                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
-                 GROUP BY p.categoria ORDER BY total_venta DESC";
-$catSalesData = getRows($pdo, $sqlCatSales, $paramsDate);
-
-// 4.2 Ganancias por Categoría
-$sqlCatProfit = "SELECT p.categoria, SUM(d.cantidad * (d.precio - p.costo)) as total_ganancia
-                 FROM ventas_detalle d
-                 JOIN productos p ON d.id_producto = p.codigo
-                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                 WHERE v.id_empresa = $EMP_ID $sqlSucursal $sqlDateRange AND v.total > 0 AND (v.tipo_servicio != 'reserva' OR v.estado_pago = 'confirmado')
-                 GROUP BY p.categoria
-                 ORDER BY total_ganancia DESC";
-$catProfitData = getRows($pdo, $sqlCatProfit, $paramsDate);
+// 4.1 y 4.2 Ventas y Ganancias por Categoría — desde motor central (por_categoria usa precio real de la venta)
+$catSalesData = [];
+$catProfitData = [];
+foreach ($mDash[BM_PRODUCTOS]['por_categoria'] as $cat => $vals) {
+    $catSalesData[]  = ['categoria' => $cat, 'total_venta'    => $vals['monto']];
+    $catProfitData[] = ['categoria' => $cat, 'total_ganancia' => $vals['ganancia']];
+}
+usort($catSalesData,  fn($a, $b) => $b['total_venta']    <=> $a['total_venta']);
+usort($catProfitData, fn($a, $b) => $b['total_ganancia'] <=> $a['total_ganancia']);
 
 // 4.3 Inventarios por Categoría (Cantidad y Valor Costo)
 $sqlInvByCategory = "SELECT p.categoria, SUM(s.cantidad) as total_cantidad, SUM(s.cantidad * p.costo) as total_costo_valor

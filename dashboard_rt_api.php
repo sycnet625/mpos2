@@ -1,5 +1,6 @@
 <?php
 // dashboard_rt_api.php — Datos en tiempo real para el tab de ventas del día
+// VERSIÓN: 2.0 — Usa fecha contable y ventas_reales_where_clause para coherencia con el nuevo modelo de devoluciones.
 session_start();
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     http_response_code(401);
@@ -11,6 +12,8 @@ ini_set('display_errors', 0);
 
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
+require_once 'business_metrics.php';
 date_default_timezone_set('America/Havana');
 $pdo->exec("SET time_zone = '-05:00';");
 
@@ -21,6 +24,10 @@ $ayer   = date('Y-m-d', strtotime('-1 day'));
 $semAnt = date('Y-m-d', strtotime('-7 days'));
 $horaActual = date('H:i:s');
 
+// Helper de fecha contable reutilizable
+$sqlDateJoin = " LEFT JOIN caja_sesiones s ON v.id_caja = s.id ";
+$sqlAccountingDate = " IFNULL(s.fecha_contable, DATE(v.fecha)) ";
+
 function q($pdo, $sql, $p = []) {
     $s = $pdo->prepare($sql); $s->execute($p);
     return $s->fetchAll(PDO::FETCH_ASSOC);
@@ -30,26 +37,36 @@ function qs($pdo, $sql, $p = []) {
     catch (Exception $e) { return 0; }
 }
 
-// 1. Ventas por hora hoy y ayer
-$horasRaw = q($pdo, "SELECT HOUR(fecha) as h, COUNT(*) as ops, COALESCE(SUM(total),0) as total
-    FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=?
-    GROUP BY HOUR(fecha)", [$EMP_ID, $SUC_ID, $hoy]);
+// 1. Ventas por hora hoy y ayer (neto: incluye devoluciones)
+$horasRaw = q($pdo, "SELECT HOUR(v.fecha) as h, COUNT(*) as ops, COALESCE(SUM(v.total),0) as total
+    FROM ventas_cabecera v
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND " . ventas_reales_where_clause('v') . "
+    GROUP BY HOUR(v.fecha)", [$EMP_ID, $SUC_ID, $hoy]);
 $ventasPorHora = array_fill(0, 24, 0);
 $opsPorHora    = array_fill(0, 24, 0);
 foreach ($horasRaw as $r) {
     $ventasPorHora[(int)$r['h']] = (float)$r['total'];
     $opsPorHora[(int)$r['h']]    = (int)$r['ops'];
 }
-$horasAyer = q($pdo, "SELECT HOUR(fecha) as h, COALESCE(SUM(total),0) as total
-    FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=?
-    GROUP BY HOUR(fecha)", [$EMP_ID, $SUC_ID, $ayer]);
+$horasAyer = q($pdo, "SELECT HOUR(v.fecha) as h, COALESCE(SUM(v.total),0) as total
+    FROM ventas_cabecera v
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND " . ventas_reales_where_clause('v') . "
+    GROUP BY HOUR(v.fecha)", [$EMP_ID, $SUC_ID, $ayer]);
 $ventasAyer = array_fill(0, 24, 0);
 foreach ($horasAyer as $r) $ventasAyer[(int)$r['h']] = (float)$r['total'];
 
-// 2. Totales comparativos
+// 2. Totales comparativos (neto)
 function getTotales($pdo, $eid, $sid, $fecha, $hora) {
-    $s = $pdo->prepare("SELECT COUNT(*) as ops, COALESCE(SUM(total),0) as total
-        FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=? AND TIME(fecha)<=?");
+    global $sqlDateJoin, $sqlAccountingDate;
+    $s = $pdo->prepare("SELECT COUNT(*) as ops, COALESCE(SUM(v.total),0) as total
+        FROM ventas_cabecera v
+        $sqlDateJoin
+        WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=? AND TIME(v.fecha)<=?
+          AND " . ventas_reales_where_clause('v'));
     $s->execute([$eid, $sid, $fecha, $hora]);
     return $s->fetch(PDO::FETCH_ASSOC);
 }
@@ -57,26 +74,34 @@ $totHoy  = getTotales($pdo, $EMP_ID, $SUC_ID, $hoy,    '23:59:59');
 $totAyer = getTotales($pdo, $EMP_ID, $SUC_ID, $ayer,    $horaActual);
 $totSem  = getTotales($pdo, $EMP_ID, $SUC_ID, $semAnt,  $horaActual);
 
-// 3. Ganancia neta hoy
-$gananciaHoy = (float)qs($pdo, "SELECT COALESCE(SUM((d.precio - COALESCE(ps.precio_costo, p.costo)) * d.cantidad),0)
-    FROM ventas_detalle d
-    JOIN productos p ON d.id_producto = p.codigo
-    LEFT JOIN productos_precios_sucursal ps ON p.codigo = ps.codigo_producto AND ps.id_sucursal = ?
-    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND DATE(v.fecha) = ?", [$SUC_ID, $EMP_ID, $SUC_ID, $hoy]);
+// 3. Ganancia bruta hoy via motor central (costo desde ventas_detalle * productos.costo)
+$mHoy = bm_calcular($pdo, [
+    'fecha_inicio' => $hoy,
+    'fecha_fin'    => $hoy,
+    'id_empresa'   => $EMP_ID,
+    'id_sucursal'  => $SUC_ID,
+    'secciones'    => [BM_VENTAS],
+]);
+$gananciaHoy = $mHoy[BM_VENTAS]['ganancia_bruta'];
 
-// 4. Top 10 productos del día
+// 4. Top 10 productos del día (neto: cantidades negativas de devoluciones restan)
 $top10 = q($pdo, "SELECT p.nombre, SUM(d.cantidad) as vendidos, COALESCE(SUM(d.cantidad*d.precio),0) as total_venta
     FROM ventas_detalle d
     JOIN productos p ON d.id_producto=p.codigo
     JOIN ventas_cabecera v ON d.id_venta_cabecera=v.id
-    WHERE v.id_empresa=? AND v.id_sucursal=? AND DATE(v.fecha)=?
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND " . ventas_reales_where_clause('v') . "
     GROUP BY p.codigo ORDER BY vendidos DESC LIMIT 10", [$EMP_ID, $SUC_ID, $hoy]);
 
-// 5. Por tipo de servicio
-$tiposRaw = q($pdo, "SELECT tipo_servicio, COUNT(*) as cnt, COALESCE(SUM(total),0) as total
-    FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=?
-    GROUP BY tipo_servicio", [$EMP_ID, $SUC_ID, $hoy]);
+// 5. Por tipo de servicio (solo positivos para no mezclar devoluciones en la clasificación)
+$tiposRaw = q($pdo, "SELECT v.tipo_servicio, COUNT(*) as cnt, COALESCE(SUM(v.total),0) as total
+    FROM ventas_cabecera v
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND v.total > 0
+      AND " . ventas_reales_where_clause('v') . "
+    GROUP BY v.tipo_servicio", [$EMP_ID, $SUC_ID, $hoy]);
 $mensajerias = 0; $totalMensajeria = 0.0;
 $reservasCount = 0; $totalReservas = 0.0;
 $autoservicio = 0; $totalAutoservicio = 0.0;
@@ -91,15 +116,23 @@ foreach ($tiposRaw as $t) {
     }
 }
 
-// 6. Métodos de pago hoy
-$pagosHoy = q($pdo, "SELECT COALESCE(metodo_pago,'Efectivo') as metodo, COUNT(*) as cnt, COALESCE(SUM(total),0) as total
-    FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=?
-    GROUP BY metodo_pago ORDER BY total DESC", [$EMP_ID, $SUC_ID, $hoy]);
+// 6. Métodos de pago hoy (solo positivos)
+$pagosHoy = q($pdo, "SELECT COALESCE(v.metodo_pago,'Efectivo') as metodo, COUNT(*) as cnt, COALESCE(SUM(v.total),0) as total
+    FROM ventas_cabecera v
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND v.total > 0
+      AND " . ventas_reales_where_clause('v') . "
+    GROUP BY v.metodo_pago ORDER BY total DESC", [$EMP_ID, $SUC_ID, $hoy]);
 
-// 7. Canal de origen hoy
-$canalesHoy = q($pdo, "SELECT COALESCE(canal_origen,'POS') as canal, COUNT(*) as cnt, COALESCE(SUM(total),0) as total
-    FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? AND DATE(fecha)=?
-    GROUP BY canal_origen ORDER BY cnt DESC", [$EMP_ID, $SUC_ID, $hoy]);
+// 7. Canal de origen hoy (solo positivos)
+$canalesHoy = q($pdo, "SELECT COALESCE(v.canal_origen,'POS') as canal, COUNT(*) as cnt, COALESCE(SUM(v.total),0) as total
+    FROM ventas_cabecera v
+    $sqlDateJoin
+    WHERE v.id_empresa=? AND v.id_sucursal=? AND $sqlAccountingDate=?
+      AND v.total > 0
+      AND " . ventas_reales_where_clause('v') . "
+    GROUP BY v.canal_origen ORDER BY cnt DESC", [$EMP_ID, $SUC_ID, $hoy]);
 
 // 8. Comandas cocina hoy
 $cocinaPendiente = 0; $cocinaElaboracion = 0; $cocinaTerminado = 0;
@@ -118,11 +151,15 @@ try {
     $cajasAbiertas = q($pdo, "SELECT nombre_cajero, monto_inicial, fecha_apertura FROM caja_sesiones WHERE estado='ABIERTA'");
 } catch (Exception $e) {}
 
-// 10. Última venta
+// 10. Última venta (solo positivos, no devoluciones)
 $ultimaVenta = null;
 try {
-    $s = $pdo->prepare("SELECT fecha, total, metodo_pago, tipo_servicio, cliente_nombre
-        FROM ventas_cabecera WHERE id_empresa=? AND id_sucursal=? ORDER BY fecha DESC LIMIT 1");
+    $s = $pdo->prepare("SELECT v.fecha, v.total, v.metodo_pago, v.tipo_servicio, v.cliente_nombre
+        FROM ventas_cabecera v
+        WHERE v.id_empresa=? AND v.id_sucursal=?
+          AND v.total > 0
+          AND " . ventas_reales_where_clause('v') . "
+        ORDER BY v.fecha DESC LIMIT 1");
     $s->execute([$EMP_ID, $SUC_ID]);
     $ultimaVenta = $s->fetch(PDO::FETCH_ASSOC);
 } catch (Exception $e) {}

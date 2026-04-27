@@ -5,6 +5,7 @@
 ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'accounting_helpers.php';
+require_once 'business_metrics.php';
 
 
 // ---------------------------------------------------------
@@ -59,117 +60,44 @@ if ($isGlobal) {
 }
 
 // Filtros de Fecha
-$start = $_GET['start'] ?? date('Y-m-01'); // Inicio de mes
-$end   = $_GET['end']   ?? date('Y-m-t');  // Fin de mes
+$start = $_GET['start'] ?? date('Y-m-01');
+$end   = $_GET['end']   ?? date('Y-m-t');
 
 try {
-    // =========================================================
-    // 2. CÁLCULOS DEL ESTADO DE RESULTADOS (P&L)
-    // =========================================================
+    $m = bm_calcular($pdo, [
+        'fecha_inicio' => $start,
+        'fecha_fin'    => $end,
+        'id_empresa'   => $EMP_ID,
+        'id_sucursal'  => $isGlobal ? null : $SUC_ID,
+        'id_almacen'   => $isGlobal ? null : $ALM_ID,
+        'secciones'    => [BM_VENTAS, BM_GASTOS, BM_INVENTARIO],
+    ]);
 
-    // A. VENTAS NETAS (Filtradas por SUCURSAL o GLOBAL)
-    // CAMBIO: Filtro dinámico según modo de vista y FECHA CONTABLE
-    $sqlVentas = "SELECT SUM(v.total) 
-                  FROM ventas_cabecera v 
-                  LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
-                  WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
-                  " . ($isGlobal ? "" : " AND v.id_sucursal = $SUC_ID ") . " 
-                  AND " . ventas_reales_where_clause('v');
-    
-    $stmtVentas = $pdo->prepare($sqlVentas);
-    $stmtVentas->execute([$start, $end]);
-    $ingresosVentas = floatval($stmtVentas->fetchColumn() ?: 0);
-
-    // B. COSTO DE VENTA - COGS (Filtrado DINÁMICO y FECHA CONTABLE)
-    $sqlCogs = "SELECT SUM(d.cantidad * p.costo)
-                FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo
-                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                WHERE IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
-                " . ($isGlobal ? "" : " AND v.id_sucursal = $SUC_ID ") . " 
-                AND " . ventas_reales_where_clause('v');
-    $stmtCogs = $pdo->prepare($sqlCogs);
-    $stmtCogs->execute([$start, $end]);
-    $costoVentas = floatval($stmtCogs->fetchColumn() ?: 0);
-
-    // C. GASTOS OPERATIVOS
-    // Nota: Se asume que los gastos registrados aquí corresponden a la operación local o se muestran globales.
-    $stmtGastos = $pdo->prepare("SELECT categoria, SUM(monto) as total FROM gastos_historial WHERE fecha BETWEEN ? AND ? GROUP BY categoria");
-    $stmtGastos->execute([$start, $end]);
-    $gastosDetalle = $stmtGastos->fetchAll(PDO::FETCH_ASSOC);
-    $totalGastos = array_sum(array_column($gastosDetalle, 'total'));
-
-    // D. PÉRDIDAS POR MERMAS
-    // Mermas globales en fecha (si se requiere por sucursal, la tabla mermas debería tener id_sucursal)
-    $stmtMermas = $pdo->prepare("SELECT SUM(total_costo_perdida) FROM mermas_cabecera WHERE DATE(fecha) BETWEEN ? AND ?");
-    $stmtMermas->execute([$start, $end]);
-    $totalMermas = floatval($stmtMermas->fetchColumn() ?: 0);
-
-    // RESULTADOS
-    $utilidadBruta = $ingresosVentas - $costoVentas;
+    // Estado de Resultados (P&L)
+    // Ingresos netos = ventas brutas − devoluciones (estándar contable)
+    $ingresosVentas   = $m[BM_VENTAS]['total'] - $m[BM_VENTAS]['devoluciones']['valor'];
+    $costoVentas      = $m[BM_VENTAS]['costo'];
+    $utilidadBruta    = $ingresosVentas - $costoVentas;
+    $totalGastos      = $m[BM_GASTOS]['total'];
+    $totalMermas      = $m[BM_GASTOS]['mermas'];
     $utilidadOperativa = $utilidadBruta - $totalGastos - $totalMermas;
-    $margenNeto = ($ingresosVentas > 0) ? ($utilidadOperativa / $ingresosVentas) * 100 : 0;
+    $margenNeto       = $ingresosVentas > 0 ? ($utilidadOperativa / $ingresosVentas) * 100 : 0.0;
+    $gastosDetalle    = array_map(
+        fn($cat, $total) => ['categoria' => $cat, 'total' => $total],
+        array_keys($m[BM_GASTOS]['por_categoria']),
+        array_values($m[BM_GASTOS]['por_categoria'])
+    );
 
-    // =========================================================
-    // 3. BALANCE GENERAL (SITUACIÓN ACTUAL SNAPSHOT)
-    // =========================================================
+    // Balance (inventario snapshot)
+    $valorInventario = $m[BM_INVENTARIO]['valor_costo'];
+    $cajaEstimada    = 5000;
 
-    // ACTIVO: Inventario Valorado (Dinámico según vista)
-    if ($isGlobal) {
-        // Vista global: todo el inventario de la empresa
-        $stmtInv = $pdo->prepare("SELECT SUM(s.cantidad * p.costo) 
-                                  FROM stock_almacen s 
-                                  JOIN productos p ON s.id_producto = p.codigo 
-                                  WHERE p.id_empresa = ?");
-        $stmtInv->execute([$EMP_ID]);
-    } else {
-        // Vista local: solo el almacén de esta sucursal
-        $stmtInv = $pdo->prepare("SELECT SUM(s.cantidad * p.costo) 
-                                  FROM stock_almacen s 
-                                  JOIN productos p ON s.id_producto = p.codigo 
-                                  WHERE s.id_almacen = ? AND p.id_empresa = ?");
-        $stmtInv->execute([$ALM_ID, $EMP_ID]);
-    }
-    $valorInventario = floatval($stmtInv->fetchColumn() ?: 0);
-    
-    // ACTIVO: Caja Estimada (Placeholder)
-    $cajaEstimada = 5000; 
+    // Flujo de efectivo — compras se recalculan usando el mismo helper que bm_calcular
+    $salidaCompras = $m[BM_GASTOS]['compras'];
+    $flujoNeto     = $ingresosVentas - ($salidaCompras + $totalGastos);
 
-    // =========================================================
-    // 4. FLUJO DE EFECTIVO (ENTRADAS VS SALIDAS REALES)
-    // =========================================================
-    
-    // Salidas por Compras de Mercancía
-    $sqlCompras = "SELECT SUM(total)
-                   FROM compras_cabecera
-                   WHERE DATE(fecha) BETWEEN ? AND ?
-                     AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
-    $paramsCompras = [$start, $end];
-    if ($isGlobal) {
-        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_empresa')) {
-            $sqlCompras .= " AND id_empresa = ?";
-            $paramsCompras[] = $EMP_ID;
-        }
-    } else {
-        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_sucursal')) {
-            $sqlCompras .= " AND id_sucursal = ?";
-            $paramsCompras[] = $SUC_ID;
-        }
-        if (profitTableHasColumn($pdo, 'compras_cabecera', 'id_almacen')) {
-            $sqlCompras .= " AND id_almacen = ?";
-            $paramsCompras[] = $ALM_ID;
-        }
-    }
-    $stmtCompras = $pdo->prepare($sqlCompras);
-    $stmtCompras->execute($paramsCompras);
-    $salidaCompras = floatval($stmtCompras->fetchColumn() ?: 0);
-    
-    // Flujo Neto
-    $flujoNeto = $ingresosVentas - ($salidaCompras + $totalGastos);
-
-} catch (Exception $e) { 
-    die("Error en Reporte Financiero: " . $e->getMessage()); 
+} catch (Exception $e) {
+    die("Error en Reporte Financiero: " . $e->getMessage());
 }
 ?>
 

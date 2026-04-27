@@ -16,6 +16,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 // Cargar Configuración
 require_once 'config_loader.php';
+require_once 'business_metrics.php';
 $ALM_ID_LOCAL = intval($config['id_almacen']);
 $SUC_ID_LOCAL = intval($config['id_sucursal']);
 
@@ -84,46 +85,26 @@ $scopeCondInv = ($scope === 'global') ? "1=1" : "k.id_almacen = $ALM_ID_LOCAL";
 $scopeCondSes = ($scope === 'global') ? "1=1" : "s.id_sucursal = $SUC_ID_LOCAL";
 
 try {
-    $sqlDateLogic = "IF(v.id_sesion_caja > 0 AND s.id IS NOT NULL, s.fecha_contable, DATE(v.fecha))";
+    // 1 + 2. KPIs financieros y métodos de pago via motor central
+    $mMetrics = bm_calcular($pdo, [
+        'fecha_inicio' => $start,
+        'fecha_fin'    => $end,
+        'id_empresa'   => intval($config['id_empresa']),
+        'id_sucursal'  => ($scope === 'global') ? null : $SUC_ID_LOCAL,
+        'secciones'    => [BM_VENTAS],
+    ]);
 
-    // 1. RESUMEN FINANCIERO (VENTA TOTAL desde cabecera, COSTO desde detalle)
-    // Venta total: calculada directamente de cabecera para evitar duplicados por items
-    $sqlVentaTotal = "SELECT SUM(v.total) as venta_total 
-                      FROM ventas_cabecera v 
-                      LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id 
-                      WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'";
-    $stmtVT = $pdo->prepare($sqlVentaTotal);
-    $stmtVT->execute([$start, $end]);
-    $ventaTotal = floatval($stmtVT->fetchColumn() ?: 0);
+    $ventaTotal = $mMetrics[BM_VENTAS]['total'];
+    $costoTotal = $mMetrics[BM_VENTAS]['costo'];
+    $totalItems = 0;  // no es necesario para el HTML actual
+    $ganancia   = $mMetrics[BM_VENTAS]['ganancia_bruta'];
+    $margen     = $mMetrics[BM_VENTAS]['margen_bruto_pct'];
 
-    // Costo y cantidad: desde detalle (estos sí dependen de líneas de productos)
-    $sqlFinanzasDetalle = "SELECT
-                        SUM(d.cantidad * p.costo) as costo_total,
-                        SUM(d.cantidad) as total_items
-                    FROM ventas_detalle d
-                    JOIN productos p ON d.id_producto = p.codigo
-                    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                    LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                    WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'";
-
-    $stmtF = $pdo->prepare($sqlFinanzasDetalle);
-    $stmtF->execute([$start, $end]);
-    $finanzas = $stmtF->fetch(PDO::FETCH_ASSOC);
-
-    $costoTotal = floatval($finanzas['costo_total'] ?? 0);
-    $totalItems = floatval($finanzas['total_items'] ?? 0);
-    $ganancia   = $ventaTotal - $costoTotal;
-    $margen     = ($ventaTotal > 0) ? ($ganancia / $ventaTotal) * 100 : 0;
-
-    // 2. MÉTODOS DE PAGO
-    $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total 
-                 FROM ventas_cabecera v
-                 LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-                 WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'
-                 GROUP BY v.metodo_pago";
-    $stmtP = $pdo->prepare($sqlPagos);
-    $stmtP->execute([$start, $end]);
-    $pagos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+    // Métodos de pago adaptados al formato esperado por la vista (array de filas)
+    $pagos = [];
+    foreach ($mMetrics[BM_VENTAS]['por_metodo_pago'] as $mp => $total) {
+        $pagos[] = ['metodo_pago' => $mp, 'total' => $total];
+    }
 
     // 3. SESIONES DE CAJA
     $sqlSesiones = "SELECT s.*, 
@@ -162,35 +143,29 @@ try {
     $lastInvId = $stmtNextInv->fetchColumn();
     $nextInvoiceNum = date('Ymd') . str_pad(($lastInvId ? $lastInvId + 1 : 1), 3, '0', STR_PAD_LEFT);
 
-    // 5. DATOS PARA GRÁFICO
+    // 5. DATOS PARA GRÁFICO — serie diaria via motor central
     $chartLabels = []; $chartVentas = []; $chartGanancias = []; $chartInventario = [];
     $dataMap = [];
     $currentDate = strtotime($start);
-    $lastDate = strtotime($end);
+    $lastDate    = strtotime($end);
     while ($currentDate <= $lastDate) {
         $d = date('Y-m-d', $currentDate);
         $chartLabels[] = date('d/m', $currentDate);
-        $dataMap[$d] = ['venta' => 0, 'ganancia' => 0, 'inventario' => 0];
-        $currentDate = strtotime('+1 day', $currentDate);
+        $dataMap[$d]   = ['venta' => 0.0, 'ganancia' => 0.0, 'inventario' => 0.0];
+        $currentDate   = strtotime('+1 day', $currentDate);
     }
 
-    $stmtChart = $pdo->prepare("
-        SELECT 
-            $sqlDateLogic as dia, 
-            SUM(d.cantidad * d.precio) as venta, 
-            SUM(d.cantidad * (d.precio - p.costo)) as ganancia 
-        FROM ventas_detalle d 
-        JOIN productos p ON d.id_producto = p.codigo 
-        JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-        LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
-        WHERE $sqlDateLogic BETWEEN ? AND ? AND $scopeCondVentas AND v.total > 0 AND v.tipo_servicio != 'reserva'
-        GROUP BY dia
-    ");
-    $stmtChart->execute([$start, $end]);
-    while ($row = $stmtChart->fetch(PDO::FETCH_ASSOC)) {
-        if (isset($dataMap[$row['dia']])) {
-            $dataMap[$row['dia']]['venta'] = floatval($row['venta']);
-            $dataMap[$row['dia']]['ganancia'] = floatval($row['ganancia']);
+    $mSeries = bm_calcular($pdo, [
+        'fecha_inicio' => $start,
+        'fecha_fin'    => $end,
+        'id_empresa'   => intval($config['id_empresa']),
+        'id_sucursal'  => ($scope === 'global') ? null : $SUC_ID_LOCAL,
+        'secciones'    => [BM_SERIES],
+    ]);
+    foreach ($mSeries[BM_SERIES] as $row) {
+        if (isset($dataMap[$row['fecha']])) {
+            $dataMap[$row['fecha']]['venta']    = $row['venta'];
+            $dataMap[$row['fecha']]['ganancia'] = $row['ganancia'];
         }
     }
 

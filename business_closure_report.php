@@ -9,6 +9,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'accounting_helpers.php';
+require_once 'business_metrics.php';
 
 // --- 0. AUTO-MIGRACIÓN: CREAR TABLA DE REPORTES SI NO EXISTE ---
 try {
@@ -109,87 +110,74 @@ function business_report_ticket_session_id(array $ticket): int {
 
 // 4. OBTENER DATOS PRINCIPALES
 try {
-    // Lógica de fecha: usar fecha_contable de sesión si existe, sino fecha del ticket
-    // CAMBIO: Soporte para id_caja (estándar del sistema) e id_sesion_caja
-    $sqlDateLogic = "IF(cs.id IS NOT NULL, cs.fecha_contable, DATE(vc.fecha))";
-    $sqlJoin = " LEFT JOIN caja_sesiones cs ON (vc.id_caja = cs.id OR vc.id_sesion_caja = cs.id) ";
-
-    // DESGLOSE DIARIO (usando fecha contable)
-    $wReal   = ventas_reales_where_clause();
-    $wRealVc = ventas_reales_where_clause('vc');
-    $sqlDaily = "SELECT
-                    dates.dia,
-                    COALESCE((SELECT SUM(vc.total) FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_venta,
-                    COALESCE((SELECT COUNT(vc.id) FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as num_transacciones,
-                    COALESCE((SELECT SUM(vd.cantidad * p.costo)
-                              FROM ventas_detalle vd
-                              JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id
-                              JOIN productos p ON vd.id_producto = p.codigo
-                              $sqlJoin
-                              WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_costo,
-                    COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto,
-                    COALESCE((SELECT SUM(vp.monto)
-                              FROM ventas_pagos vp
-                              JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
-                              $sqlJoin
-                              WHERE vc.id_sucursal = ? AND $sqlDateLogic = dates.dia AND vp.metodo_pago = 'Transferencia' AND $wRealVc AND vc.tipo_servicio != 'reserva'), 0) as total_transferencia
-                 FROM (
-                    SELECT DISTINCT IFNULL(cs.fecha_contable, DATE(vc.fecha)) as dia FROM ventas_cabecera vc $sqlJoin WHERE vc.id_sucursal = ? AND $sqlDateLogic BETWEEN ? AND ? AND $wRealVc AND vc.tipo_servicio != 'reserva'
-                    UNION
-                    SELECT DISTINCT DATE(fecha) as dia FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
-                 ) as dates
-                 ORDER BY dates.dia ASC";
-    $stmt = $pdo->prepare($sqlDaily);
-    $stmt->execute([
-        $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal,
-        $id_sucursal, $fecha_inicio, $fecha_fin,
-        $id_sucursal, $fecha_inicio, $fecha_fin
+    // KPIs, series diarias, gastos y métodos de pago via motor central
+    $mMetrics = bm_calcular($pdo, [
+        'fecha_inicio' => $fecha_inicio,
+        'fecha_fin'    => $fecha_fin,
+        'id_empresa'   => intval($config['id_empresa']),
+        'id_sucursal'  => $id_sucursal,
+        'secciones'    => [BM_VENTAS, BM_GASTOS, BM_SERIES],
     ]);
-    $dailySummary = $stmt->fetchAll();
 
-    // TOTALES CONSOLIDADOS
-    $venta_total = 0;
-    $costo_total = 0;
-    $gastos_totales = 0;
-    $total_transacciones = 0;
-    $total_transferencias = 0;
-    
-    foreach($dailySummary as $row) {
-        $venta_total += floatval($row['total_venta']);
-        $costo_total += floatval($row['total_costo']);
-        $gastos_totales += floatval($row['total_gasto']);
-        $total_transacciones += intval($row['num_transacciones']);
-        $total_transferencias += floatval($row['total_transferencia']);
+    $venta_total          = $mMetrics[BM_VENTAS]['total'];
+    $costo_total          = $mMetrics[BM_VENTAS]['costo'];
+    $total_transacciones  = $mMetrics[BM_VENTAS]['count_tickets'];
+    $ganancia_bruta       = $mMetrics[BM_VENTAS]['ganancia_bruta'];
+    $pct_margen_bruto     = $mMetrics[BM_VENTAS]['margen_bruto_pct'];
+    $gastos_totales       = $mMetrics[BM_GASTOS]['total'];
+
+    // Transferencias: extraer del desglose de métodos de pago
+    $total_transferencias = 0.0;
+    foreach ($mMetrics[BM_VENTAS]['por_metodo_pago'] as $mp => $monto) {
+        if (stripos($mp, 'transferencia') !== false) $total_transferencias += $monto;
     }
 
-    $ganancia_bruta = $venta_total - $costo_total;
-    $reserva_monto = $venta_total * ($pct_reserva / 100);
+    // Métodos de pago en formato array de filas (para la vista)
+    $payments = [];
+    foreach ($mMetrics[BM_VENTAS]['por_metodo_pago'] as $mp => $total) {
+        $payments[] = ['metodo_pago' => $mp, 'total' => $total];
+    }
+
+    // Desglose de transferencias por día (columna específica de la tabla)
+    $wRealVc = ventas_reales_where_clause('vc');
+    $stmtTrf = $pdo->prepare(
+        "SELECT IFNULL(cs.fecha_contable, DATE(vc.fecha)) AS dia,
+                COALESCE(SUM(vp.monto), 0) AS total
+         FROM ventas_pagos vp
+         JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
+         LEFT JOIN caja_sesiones cs ON (vc.id_caja = cs.id OR vc.id_sesion_caja = cs.id)
+         WHERE vc.id_sucursal = ? AND vc.total > 0
+           AND IFNULL(cs.fecha_contable, DATE(vc.fecha)) BETWEEN ? AND ?
+           AND vp.metodo_pago = 'Transferencia'
+           AND $wRealVc
+         GROUP BY dia"
+    );
+    $stmtTrf->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $trfPorDia = $stmtTrf->fetchAll(PDO::FETCH_KEY_PAIR);  // ['2026-01-01' => 1234.0, ...]
+
+    // Serie diaria (para gráfico y tabla)
+    $dailySummary = [];
+    foreach ($mMetrics[BM_SERIES] as $row) {
+        $dailySummary[] = [
+            'dia'                => $row['fecha'],
+            'total_venta'        => $row['venta'],
+            'num_transacciones'  => $row['transacciones'],
+            'total_costo'        => $row['costo'],
+            'total_gasto'        => $row['gastos'],
+            'total_transferencia'=> (float)($trfPorDia[$row['fecha']] ?? 0),
+        ];
+    }
+
+    $reserva_monto  = $venta_total * ($pct_reserva / 100);
     $ganancia_limpia = $ganancia_bruta - $reserva_monto - $gastos_totales;
-    $pct_margen_bruto = $venta_total > 0 ? ($ganancia_bruta / $venta_total) * 100 : 0;
 
-    // PAGOS POR MÉTODO (usando fecha contable)
-    $sqlDateLogicVP = "IF(vc.id_sesion_caja > 0 AND cs.id IS NOT NULL, cs.fecha_contable, DATE(vc.fecha))";
-    $stmt = $pdo->prepare("SELECT vp.metodo_pago, SUM(vp.monto) as total
-                           FROM ventas_pagos vp
-                           JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
-                           LEFT JOIN caja_sesiones cs ON vc.id_sesion_caja = cs.id
-                           WHERE vc.id_sucursal = ? AND $sqlDateLogicVP BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " AND vc.tipo_servicio != 'reserva'
-                           GROUP BY vp.metodo_pago");
-    $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
-    $payments = $stmt->fetchAll();
-
-    // --- CÁLCULO DE PROMEDIOS ---
-    // Calculamos los días operativos reales (días donde hubo venta o gasto)
-    $dias_operativos = count($dailySummary);
-    if ($dias_operativos < 1) $dias_operativos = 1; // Evitar div by zero
-
-    $promedio_venta_diaria = $venta_total / $dias_operativos;
-    $promedio_ganancia_bruta_diaria = $ganancia_bruta / $dias_operativos; // Nuevo Cálculo
-    $promedio_ganancia_diaria = $ganancia_limpia / $dias_operativos;
-    $promedio_gasto_diario = $gastos_totales / $dias_operativos;
-    
-    // Ticket Promedio (Venta Total / Cantidad de Tickets)
-    $ticket_promedio = ($total_transacciones > 0) ? ($venta_total / $total_transacciones) : 0;
+    // Promedios
+    $dias_operativos = max(1, count($dailySummary));
+    $promedio_venta_diaria        = $venta_total  / $dias_operativos;
+    $promedio_ganancia_bruta_diaria = $ganancia_bruta / $dias_operativos;
+    $promedio_ganancia_diaria     = $ganancia_limpia / $dias_operativos;
+    $promedio_gasto_diario        = $gastos_totales  / $dias_operativos;
+    $ticket_promedio = $total_transacciones > 0 ? $venta_total / $total_transacciones : 0;
 
     // --- CARGAR HISTORIAL DE REPORTES ---
     $stmt = $pdo->prepare("SELECT * FROM reportes_cierre WHERE id_sucursal = ? ORDER BY fecha_fin DESC, id DESC LIMIT 20");
