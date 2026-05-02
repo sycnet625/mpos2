@@ -1495,22 +1495,25 @@ window.updateStockBadges = function() {
 
 function modifyQty(d) { 
     if(selectedIndex < 0) return; 
+    const step = d > 0 ? 1 : (d < 0 ? -1 : 0);
+    if (step === 0) return;
+
     const item = cart[selectedIndex];
     const prod = productsDB.find(x => x.codigo == item.id);
     
     // Verificacion de stock al incrementar
-    if(!invModeActive && d > 0 && prod && prod.es_servicio == 0 && (item.qty + d) > parseFloat(prod.stock)) {
+    if(!invModeActive && step > 0 && prod && prod.es_servicio == 0 && (item.qty + step) > parseFloat(prod.stock)) {
         Synth.error();
         return showToast("Sin mas stock", "error");
     }
     
-    item.qty += d; 
+    item.qty += step; 
     if(item.qty <= 0) { 
         cart.splice(selectedIndex, 1); 
         selectedIndex = -1; 
         Synth.removeCart();
     } else {
-        d > 0 ? Synth.increment() : Synth.decrement();
+        step > 0 ? Synth.increment() : Synth.decrement();
     }
     renderCart();
     saveCartState();

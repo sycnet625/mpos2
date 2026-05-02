@@ -683,10 +683,13 @@ function renderCart() {
 
 function modifyQty(d) { 
     if(selectedIndex < 0) return; 
+    const step = d > 0 ? 1 : (d < 0 ? -1 : 0);
+    if (step === 0) return;
+
     const item = cart[selectedIndex];
     const prod = productsDB.find(x => x.codigo == item.id);
-    if(d > 0 && prod && prod.es_servicio == 0 && (item.qty + d) > parseFloat(prod.stock)) return showToast("Sin más stock", "error");
-    item.qty += d; 
+    if(step > 0 && prod && prod.es_servicio == 0 && (item.qty + step) > parseFloat(prod.stock)) return showToast("Sin más stock", "error");
+    item.qty += step; 
     if(item.qty <= 0) { cart.splice(selectedIndex, 1); selectedIndex = -1; } 
     renderCart(); Synth.click(); 
 }
@@ -948,4 +951,3 @@ function deleteParkedOrder(index) {
     
     console.log('✅ Funciones de carrito envueltas para auto-guardado');
 })();
-
