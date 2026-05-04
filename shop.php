@@ -14,7 +14,8 @@ session_set_cookie_params([
     'lifetime' => 0,           // Sesión de navegador (expira al cerrar la pestaña)
     'path'     => '/',
     'domain'   => '',          // Dominio actual
-    'secure'   => true,        // Solo HTTPS
+    'secure'   => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+        || (($_SERVER['SERVER_PORT'] ?? '') === '443'),
     'httponly' => true,        // No accesible por JS
     'samesite' => 'Lax',
 ]);
@@ -45,6 +46,7 @@ if (empty($_SESSION['csrf_token'])) {
 }
 $CSRF_TOKEN = $_SESSION['csrf_token'];
 
+require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'push_notify.php';
 require_once 'shop_skins.php';
@@ -75,6 +77,50 @@ $tipoCambioMLC = floatval($config['tipo_cambio_mlc'] ?? 310);
 $systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
+
+function shop_round_price_up_to_5(float $value): float {
+    if ($value <= 0) {
+        return 0.0;
+    }
+    return (float)(ceil($value / 5) * 5);
+}
+
+function shop_apply_price_rule(float $price, array $config, ?float $wholesalePrice = null): float {
+    $mode = trim((string)($config['shop_price_mode'] ?? 'normal'));
+    $customPct = (float)($config['shop_price_custom_pct'] ?? 0);
+    $roundTo5 = !empty($config['shop_price_round_to_5']);
+    $result = $price;
+
+    if ($mode === 'mayorista') {
+        $candidate = (float)($wholesalePrice ?? 0);
+        if ($candidate > 0) {
+            $result = $candidate;
+        }
+    } elseif ($mode === 'custom') {
+        $result = $price * (1 + ($customPct / 100));
+    }
+
+    if ($roundTo5) {
+        $result = shop_round_price_up_to_5($result);
+    }
+
+    return round(max(0, $result), 2);
+}
+
+function shop_apply_price_config_to_row(array &$row, array $config): void {
+    $basePrice = (float)($row['precio_base'] ?? $row['precio'] ?? 0);
+    $wholesalePrice = (float)($row['precio_mayorista_base'] ?? 0);
+    $offerBase = (float)($row['precio_oferta_base'] ?? $row['precio_oferta'] ?? 0);
+
+    $row['precio'] = shop_apply_price_rule($basePrice, $config, $wholesalePrice);
+    $row['precio_oferta'] = $offerBase > 0
+        ? shop_apply_price_rule($offerBase, $config, $wholesalePrice)
+        : 0.0;
+
+    if ($row['precio_oferta'] > 0 && $row['precio_oferta'] >= $row['precio']) {
+        $row['precio_oferta'] = 0.0;
+    }
+}
 
 // Cache estático para evitar N+1 de file_exists (se llena una sola vez por request)
 function shop_image_meta(string $code): array {
@@ -124,8 +170,18 @@ function shop_slugify(string $text): string {
     return $text !== '' ? $text : 'producto';
 }
 
+function shop_join_url_path(string $base, string $path): string {
+    $base = rtrim($base, '/');
+    $path = ltrim($path, '/');
+
+    if ($base === '') {
+        return '/' . $path;
+    }
+
+    return $base . '/' . $path;
+}
+
 try {
-    require_once 'db.php';
     date_default_timezone_set('America/Havana');
     $pdo->exec("SET time_zone = '-05:00';");
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -239,10 +295,10 @@ $metaDesc  = "Bienvenido a " . $storeName . ", tu tienda online en La Habana. Co
 // Imagen OG 1200×630 para WhatsApp/redes — fallback al logo de empresa
 $ogImgLocal = __DIR__ . '/assets/img/og-social.png';
 $metaImg    = file_exists($ogImgLocal)
-    ? $scheme . '://' . $host . $baseDir . '/assets/img/og-social.png'
+    ? $scheme . '://' . $host . shop_join_url_path($baseDir, 'assets/img/og-social.png')
     : ($companyBrandLogo !== ''
-        ? $scheme . '://' . $host . $baseDir . '/' . ltrim($companyBrandLogo, '/')
-        : $scheme . '://' . $host . $baseDir . '/icon-shop-512.png');
+        ? $scheme . '://' . $host . shop_join_url_path($baseDir, ltrim($companyBrandLogo, '/'))
+        : $scheme . '://' . $host . shop_join_url_path($baseDir, 'icon-shop-512.png'));
 
 
 // =========================================================
@@ -297,7 +353,9 @@ if (isset($_GET['ajax_search'])) {
 
     try {
         $sql = "SELECT p.codigo, p.nombre,
-                COALESCE(ps.precio_venta, p.precio) AS precio,
+                COALESCE(ps.precio_venta, p.precio) AS precio_base,
+                COALESCE(ps.precio_mayorista, p.precio_mayorista, ps.precio_venta, p.precio) AS precio_mayorista_base,
+                COALESCE(p.precio_oferta, 0) AS precio_oferta_base,
                 p.descripcion, p.categoria, p.unidad_medida, p.color, p.es_reservable,
                 COALESCE(p.es_combo, 0) AS es_combo,
                 COALESCE((SELECT SUM(s.cantidad) FROM stock_almacen s
@@ -330,7 +388,7 @@ if (isset($_GET['ajax_search'])) {
         $results = combo_apply_product_rows($pdo, $results, $EMP_ID, $ALM_ID);
         
         foreach ($results as &$r) {
-            $r['precio'] = floatval($r['precio']);
+            shop_apply_price_config_to_row($r, $config);
             $r['stock'] = floatval($r['stock']);
             $r['hasStock']     = $r['stock'] > 0;
             $r['esReservable'] = intval($r['es_reservable'] ?? 0) === 1;
@@ -371,7 +429,9 @@ try {
 try {
     $sql = "SELECT p.*,
             COALESCE(p.es_combo, 0) AS es_combo,
-            COALESCE(ps.precio_venta, p.precio) AS precio,
+            COALESCE(ps.precio_venta, p.precio) AS precio_base,
+            COALESCE(ps.precio_mayorista, p.precio_mayorista, ps.precio_venta, p.precio) AS precio_mayorista_base,
+            COALESCE(p.precio_oferta, 0) AS precio_oferta_base,
             (SELECT COALESCE(SUM(s.cantidad), 0)
              FROM stock_almacen s
              WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock_total,
@@ -394,8 +454,6 @@ try {
 
     $sortMap = [
         'categoria_asc' => 'p.categoria ASC, p.nombre ASC',
-        'price_asc' => 'COALESCE(ps.precio_venta, p.precio) ASC',
-        'price_desc' => 'COALESCE(ps.precio_venta, p.precio) DESC',
         'popular' => '(SELECT COUNT(*) FROM vistas_productos v WHERE v.codigo_producto = p.codigo) DESC, p.nombre ASC',
     ];
     
@@ -406,6 +464,20 @@ try {
     $stmt->execute($params);
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
+    foreach ($productos as &$productoRow) {
+        shop_apply_price_config_to_row($productoRow, $config);
+    }
+    unset($productoRow);
+
+    if ($sort === 'price_asc' || $sort === 'price_desc') {
+        usort($productos, function (array $a, array $b) use ($sort): int {
+            $cmp = (float)($a['precio'] ?? 0) <=> (float)($b['precio'] ?? 0);
+            if ($cmp === 0) {
+                return strcmp((string)($a['nombre'] ?? ''), (string)($b['nombre'] ?? ''));
+            }
+            return $sort === 'price_asc' ? $cmp : -$cmp;
+        });
+    }
 
     $slugCounts = [];
     foreach ($productos as &$productoRow) {
@@ -460,7 +532,7 @@ $selectedProduct = $selectedProductCode !== '' && isset($productByCode[$selected
 
 if ($selectedProduct) {
     $selectedSlug = (string)($selectedProduct['slug'] ?? shop_slugify((string)($selectedProduct['nombre'] ?? 'producto')));
-    $siteUrl = $scheme . '://' . $host . $shopPrettyBasePath . '/' . rawurlencode($selectedSlug) . '/';
+    $siteUrl = $scheme . '://' . $host . shop_join_url_path($shopPrettyBasePath, rawurlencode($selectedSlug)) . '/';
     $metaTitle = trim((string)($selectedProduct['nombre'] ?? 'Producto')) . ' | ' . $storeName;
 
     $selectedDescription = trim((string)($selectedProduct['descripcion'] ?? ''));
@@ -472,7 +544,7 @@ if ($selectedProduct) {
 
     [$selectedHasImg, $selectedImgVersion] = shop_image_meta((string)($selectedProduct['codigo'] ?? ''));
     if ($selectedHasImg) {
-        $metaImg = $scheme . '://' . $host . $baseDir . '/image.php?code=' . rawurlencode((string)$selectedProduct['codigo']);
+        $metaImg = $scheme . '://' . $host . shop_join_url_path($baseDir, 'image.php?code=' . rawurlencode((string)$selectedProduct['codigo']));
         if ($selectedImgVersion) {
             $metaImg .= '&v=' . $selectedImgVersion;
         }
@@ -2297,8 +2369,9 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                 <?php endif; ?>
 
                 <div class="product-footer">
+                    <?php $precioOferta = floatval($p['precio_oferta'] ?? 0); ?>
+                    <?php $precioVentaShop = ($precioOferta > 0 && $precioOferta < floatval($p['precio'])) ? $precioOferta : floatval($p['precio']); ?>
                     <div class="product-price" data-cup="<?= floatval($p['precio']) ?>" data-cup-oferta="<?= floatval($p['precio_oferta'] ?? 0) ?>">
-                        <?php $precioOferta = floatval($p['precio_oferta'] ?? 0); ?>
                         <?php if ($precioOferta > 0 && $precioOferta < floatval($p['precio'])): ?>
                             <span class="price-original">$<?= number_format($p['precio'], 2) ?></span>
                             <span class="price-oferta">$<?= number_format($precioOferta, 2) ?></span>
@@ -2308,12 +2381,12 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                     </div>
                     <?php if ($hasStock): ?>
                         <button class="btn-add-cart"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)">
+                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $precioVentaShop ?>)">
                             <span data-i18n="prod.add">+ Agregar</span>
                         </button>
                     <?php elseif ($esReservable): ?>
                         <button class="btn-add-cart" style="background:#f59e0b;border-color:#f59e0b;font-size:.78rem;"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>, true)">
+                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $precioVentaShop ?>, true)">
                             <span data-i18n="prod.reserve">📅 Reservar</span>
                         </button>
                     <?php else: ?>
@@ -5436,17 +5509,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
 // ── Service Worker Tienda (scope exclusivo shop.php) ──
-const SHOP_SCOPE_PATH = <?php echo json_encode($shopPrettyBasePath . '/shop/'); ?>;
+const SHOP_SW_SCOPE = new URL('./', document.baseURI).href;
 const SHOP_SW_URL = new URL('sw-shop.js', document.baseURI).toString();
 
 if ('serviceWorker' in navigator) {
-    const ROOT_SCOPE_PATH = new URL('./', document.baseURI).href;
-    navigator.serviceWorker.getRegistration(ROOT_SCOPE_PATH)
-        .then(reg => {
-            if (reg && reg.scope === ROOT_SCOPE_PATH) return reg.unregister();
-        })
-        .catch(() => {})
-        .finally(() => navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH }))
+    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE })
         .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
         .catch(err => console.warn('[Shop PWA] SW error:', err));
 }
@@ -5581,7 +5648,7 @@ async function subscribeShopPush() {
         const resp = await fetch(SHOP_PUSH_API + '?action=vapid_key');
         const { publicKey } = await resp.json();
 
-        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
+        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE });
         const swReg = await Promise.race([
             navigator.serviceWorker.ready,
             new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
@@ -5617,7 +5684,7 @@ async function subscribeShopPush() {
 
 async function unsubscribeShopPush() {
     try {
-        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
+        const reg = await navigator.serviceWorker.getRegistration(SHOP_SW_SCOPE);
         if (!reg) return;
         const sub = await reg.pushManager.getSubscription();
         if (!sub) { updateShopBellUI('off'); return; }
@@ -5655,7 +5722,7 @@ async function handleShopBellClick() {
         alert('Las notificaciones están bloqueadas. Actívalas en la configuración del navegador.');
         return;
     }
-    const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
+    const reg = await navigator.serviceWorker.getRegistration(SHOP_SW_SCOPE);
     const sub = reg ? await reg.pushManager.getSubscription() : null;
     if (sub) {
         await unsubscribeShopPush();
@@ -5673,7 +5740,7 @@ async function initShopPush() {
         updateShopBellUI('denied'); return;
     }
     try {
-        const reg = await navigator.serviceWorker.getRegistration(SHOP_SCOPE_PATH);
+        const reg = await navigator.serviceWorker.getRegistration(SHOP_SW_SCOPE);
         const sub = reg ? await reg.pushManager.getSubscription() : null;
         updateShopBellUI(sub ? 'active' : 'off');
     } catch (e) {
@@ -5840,7 +5907,7 @@ function notifyRestock(codigo, nombre) {
         fetch('shop.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action_restock_aviso: 1, codigo, nombre: 'Cliente', telefono: tel })
+            body: JSON.stringify({ action_restock_aviso: 1, codigo, nombre, telefono: tel })
         }).then(() => showToast('🔔 ¡Te avisamos cuando llegue!')).catch(() => {});
     }
 }

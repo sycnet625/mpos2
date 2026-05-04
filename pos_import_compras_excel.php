@@ -172,6 +172,14 @@ function purchase_import_load_locations(PDO $pdo): array
     ];
 }
 
+function purchase_import_sucursal_almacen_ids(PDO $pdo, int $sucursalId): array
+{
+    $stmt = $pdo->prepare("SELECT id FROM almacenes WHERE id_sucursal = ? AND COALESCE(activo, 1) = 1 ORDER BY id ASC");
+    $stmt->execute([$sucursalId]);
+    $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    return array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
+}
+
 function purchase_import_resolve_empresa(string $value, array $maps): ?array
 {
     if ($value === '') {
@@ -262,6 +270,20 @@ function purchase_import_default_sale(float $cost): float
 function purchase_import_default_wholesale(float $cost): float
 {
     return round($cost * 1.10, 2);
+}
+
+function purchase_import_next_version_row(PDO $pdo, int $empresaId): int
+{
+    static $cache = [];
+    if (isset($cache[$empresaId])) {
+        return $cache[$empresaId]++;
+    }
+
+    $stmt = $pdo->prepare("SELECT COALESCE(MAX(version_row), 0) + 1 FROM productos WHERE id_empresa = ?");
+    $stmt->execute([$empresaId]);
+    $next = max(1, (int)$stmt->fetchColumn());
+    $cache[$empresaId] = $next + 1;
+    return $next;
 }
 
 function purchase_import_generate_next_sku(PDO $pdo, int $empresaId, array &$reserved = []): string
@@ -573,7 +595,7 @@ function purchase_import_restore_product(PDO $pdo, array $rowLog): void
             $previous['precio_mayorista'],
             $previous['categoria'],
             $previous['activo'],
-            time(),
+            purchase_import_next_version_row($pdo, $empresaId),
             $targetSku,
             $empresaId,
         ]);
@@ -586,14 +608,27 @@ function purchase_import_restore_product(PDO $pdo, array $rowLog): void
     } catch (Throwable $e) {
         if (is_array($current) && !empty($current)) {
             $stmt = $pdo->prepare("UPDATE productos SET activo = 0, version_row = ? WHERE codigo = ? AND id_empresa = ?");
-            $stmt->execute([time(), $targetSku, $empresaId]);
+            $stmt->execute([purchase_import_next_version_row($pdo, $empresaId), $targetSku, $empresaId]);
         }
     }
 }
 
 function purchase_import_fetch_stock(PDO $pdo, string $sku, int $almacenId): float
 {
-    $stmt = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? LIMIT 1");
+    $stmtAlm = $pdo->prepare("SELECT id_sucursal FROM almacenes WHERE id = ? LIMIT 1");
+    $stmtAlm->execute([$almacenId]);
+    $sucursalId = (int)$stmtAlm->fetchColumn();
+    if ($sucursalId > 0) {
+        $almacenIds = purchase_import_sucursal_almacen_ids($pdo, $sucursalId);
+        if (!empty($almacenIds)) {
+            $placeholders = implode(',', array_fill(0, count($almacenIds), '?'));
+            $stmt = $pdo->prepare("SELECT COALESCE(SUM(cantidad), 0) FROM stock_almacen WHERE id_producto = ? AND id_almacen IN ($placeholders)");
+            $stmt->execute(array_merge([$sku], $almacenIds));
+            return (float)$stmt->fetchColumn();
+        }
+    }
+
+    $stmt = $pdo->prepare("SELECT COALESCE(SUM(cantidad), 0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
     $stmt->execute([$sku, $almacenId]);
     return (float)($stmt->fetchColumn() ?: 0);
 }
@@ -776,18 +811,18 @@ if (isset($_POST['action']) && $_POST['action'] === 'analyze_excel') {
                 if ($existing) {
                     if ($existingMode === 'full') {
                         $stmtUpdate = $pdo->prepare("UPDATE productos SET nombre = ?, costo = ?, precio = ?, precio_mayorista = ?, categoria = ?, activo = 1, version_row = ? WHERE codigo = ? AND id_empresa = ?");
-                        $stmtUpdate->execute([$row['nombre'], $row['precio_compra'], $row['precio_venta'], $row['precio_mayorista'], $row['categoria'], time(), $targetSku, $row['empresa_id']]);
+                        $stmtUpdate->execute([$row['nombre'], $row['precio_compra'], $row['precio_venta'], $row['precio_mayorista'], $row['categoria'], purchase_import_next_version_row($pdo, (int)$row['empresa_id']), $targetSku, $row['empresa_id']]);
                     } elseif ($existingMode === 'stock_cost') {
                         $stmtUpdate = $pdo->prepare("UPDATE productos SET costo = ?, precio = ?, precio_mayorista = ?, activo = 1, version_row = ? WHERE codigo = ? AND id_empresa = ?");
-                        $stmtUpdate->execute([$row['precio_compra'], $row['precio_venta'], $row['precio_mayorista'], time(), $targetSku, $row['empresa_id']]);
+                        $stmtUpdate->execute([$row['precio_compra'], $row['precio_venta'], $row['precio_mayorista'], purchase_import_next_version_row($pdo, (int)$row['empresa_id']), $targetSku, $row['empresa_id']]);
                     } else {
                         $stmtUpdate = $pdo->prepare("UPDATE productos SET costo = ?, activo = 1, version_row = ? WHERE codigo = ? AND id_empresa = ?");
-                        $stmtUpdate->execute([$row['precio_compra'], time(), $targetSku, $row['empresa_id']]);
+                        $stmtUpdate->execute([$row['precio_compra'], purchase_import_next_version_row($pdo, (int)$row['empresa_id']), $targetSku, $row['empresa_id']]);
                     }
                     $updatedProducts++;
                 } else {
                     $stmtInsert = $pdo->prepare("INSERT INTO productos (codigo, nombre, precio, costo, precio_mayorista, categoria, activo, id_empresa, version_row) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)");
-                    $stmtInsert->execute([$targetSku, $row['nombre'], $row['precio_venta'], $row['precio_compra'], $row['precio_mayorista'], $row['categoria'], $row['empresa_id'], time()]);
+                    $stmtInsert->execute([$targetSku, $row['nombre'], $row['precio_venta'], $row['precio_compra'], $row['precio_mayorista'], $row['categoria'], $row['empresa_id'], purchase_import_next_version_row($pdo, (int)$row['empresa_id'])]);
                     product_image_pipeline_ensure_placeholder($targetSku, (string)$row['nombre']);
                     $createdProducts++;
                 }

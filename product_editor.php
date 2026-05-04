@@ -6,6 +6,18 @@ require_once 'db.php';
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 
+function product_editor_next_version_row(PDO $pdo, int $empId): int {
+    static $cache = [];
+    if (isset($cache[$empId])) {
+        return $cache[$empId]++;
+    }
+    $stmt = $pdo->prepare("SELECT COALESCE(MAX(version_row), 0) + 1 FROM productos WHERE id_empresa = ?");
+    $stmt->execute([$empId]);
+    $next = max(1, (int)$stmt->fetchColumn());
+    $cache[$empId] = $next + 1;
+    return $next;
+}
+
 function product_editor_ensure_barcode_columns(PDO $pdo): void {
     static $ready = false;
     if ($ready) return;
@@ -108,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             isset($_POST['es_suc4'])         ? 1 : 0,
             isset($_POST['es_suc5'])         ? 1 : 0,
             isset($_POST['es_suc6'])         ? 1 : 0,
-            time(),
+            product_editor_next_version_row($pdo, $EMP_ID),
             $sku,
             $EMP_ID
         ]);

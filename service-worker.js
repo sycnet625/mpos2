@@ -3,12 +3,13 @@
 // Versión 8.5 - Cache individual + ping offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v85';
+const CACHE_NAME = 'palweb-pos-v86';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
+    './',
     './pos/',
     './pos.php',
     './clock.php',
@@ -16,15 +17,14 @@ const OFFLINE_ASSETS = [
     './clock.css',
     './clock.js',
     './simple_weather.php',
-    './pos1.js',                               // CORREGIDO: era pos.js (no existe)
+    './pos1.js',
     './pos-offline-system.js',
     './manifest-pos.php',
     './icon-192.png',
     './icon-512.png',
-    './assets/css/bootstrap.min.css',          // LOCAL: era CDN
-    './assets/css/all.min.css',                // LOCAL: era CDN
-    './assets/js/bootstrap.bundle.min.js',     // LOCAL: era CDN
-    // WebFonts de FontAwesome (referenciados por all.min.css)
+    './assets/css/bootstrap.min.css',
+    './assets/css/all.min.css',
+    './assets/js/bootstrap.bundle.min.js',
     './assets/webfonts/fa-solid-900.woff2',
     './assets/webfonts/fa-regular-400.woff2',
     './assets/webfonts/fa-brands-400.woff2',

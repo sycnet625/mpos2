@@ -6,6 +6,7 @@ require_once 'db.php';
 require_once 'kardex_engine.php';
 require_once 'inventory_suite_layout.php';
 session_start();
+ob_start();
 
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
@@ -17,6 +18,18 @@ $ALM_ID = intval($config['id_almacen']);
 $SUC_ID = intval($config['id_sucursal']);
 $EMP_ID = intval($config['id_empresa']);
 
+function bt_json_exit(array $payload, int $statusCode = 200): void {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    if (!headers_sent()) {
+        http_response_code($statusCode);
+        header('Content-Type: application/json; charset=utf-8');
+    }
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // --- OBTENER INFO DE SUCURSAL ORIGEN ---
 $stmtOrig = $pdo->prepare("SELECT * FROM sucursales WHERE id = ?");
 $stmtOrig->execute([$SUC_ID]);
@@ -24,7 +37,6 @@ $sucOrigData = $stmtOrig->fetch(PDO::FETCH_ASSOC);
 
 // --- API: BUSCADOR DE PRODUCTOS CON STOCK ---
 if (isset($_GET['action']) && $_GET['action'] === 'search') {
-    header('Content-Type: application/json');
     $q = $_GET['q'] ?? '';
     $searchAlmID = isset($_GET['alm_id']) ? intval($_GET['alm_id']) : $ALM_ID;
     try {
@@ -35,18 +47,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'search') {
                 LIMIT 15";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$searchAlmID, "%$q%", "%$q%", $EMP_ID]);
-        echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-    } catch (Exception $e) { echo json_encode([]); }
+        bt_json_exit($stmt->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Exception $e) { bt_json_exit([]); }
     exit;
 }
 
 // --- API: OBTENER INFO DE SUCURSAL DESTINO ---
 if (isset($_GET['action']) && $_GET['action'] === 'get_suc_info') {
-    header('Content-Type: application/json');
     $id = intval($_GET['id']);
     $stmtS = $pdo->prepare("SELECT * FROM sucursales WHERE id = ?");
     $stmtS->execute([$id]);
-    echo json_encode($stmtS->fetch(PDO::FETCH_ASSOC));
+    bt_json_exit($stmtS->fetch(PDO::FETCH_ASSOC) ?: []);
     exit;
 }
 
@@ -69,8 +80,6 @@ try {
 // --- PROCESAR TRANSFERENCIA (POST) ---
 $input = json_decode(file_get_contents('php://input'), true);
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['action'] === 'process_transfer') {
-    header('Content-Type: application/json');
-    
     try {
         $pdo->beginTransaction();
         
@@ -137,18 +146,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
         }
 
         $pdo->commit();
-        echo json_encode(['status' => 'success', 'id' => $idTransf, 'id_factura' => $idFactura]);
+        bt_json_exit(['status' => 'success', 'id' => $idTransf, 'id_factura' => $idFactura]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        bt_json_exit(['status' => 'error', 'msg' => $e->getMessage()]);
     }
     exit;
 }
 
 // --- PROCESAR TRANSFERENCIA INTRA-SUCURSAL (POST) ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['action'] === 'process_intra_transfer') {
-    header('Content-Type: application/json');
-    
     try {
         $pdo->beginTransaction();
         
@@ -186,10 +193,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($input['action']) && $input['
         }
 
         $pdo->commit();
-        echo json_encode(['status' => 'success', 'id' => $idTransf]);
+        bt_json_exit(['status' => 'success', 'id' => $idTransf]);
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
-        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        bt_json_exit(['status' => 'error', 'msg' => $e->getMessage()]);
     }
     exit;
 }

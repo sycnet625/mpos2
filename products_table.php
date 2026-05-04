@@ -2,6 +2,7 @@
 // ARCHIVO: products_table.php v3.2 (MEJORAS DE AUDITORÍA, KPI, IMPORT/EXPORT, MOBILE)
 ini_set('display_errors', 0);
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+ob_start();
 
 // Si es AJAX, registrar un manejador de errores que devuelva JSON
 if (isset($_GET['ajax_load'])) {
@@ -27,18 +28,36 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 $localPath = __DIR__ . '/assets/product_images/';
 
-function ptable_scope_sql(string $alias, int $sucursalId, int $almacenId): string {
+function ptable_sucursal_almacen_ids(PDO $pdo, int $sucursalId): array {
+    $stmt = $pdo->prepare("SELECT id FROM almacenes WHERE id_sucursal = ? AND COALESCE(activo, 1) = 1 ORDER BY id ASC");
+    try {
+        $stmt->execute([$sucursalId]);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        return array_values(array_filter($ids, static fn(int $id): bool => $id > 0));
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function ptable_scope_sql(string $alias, int $sucursalId, array $almacenIds): string {
     $sucursalId = (int)$sucursalId;
-    $almacenId = (int)$almacenId;
+    $almacenIds = array_values(array_filter(array_map('intval', $almacenIds), static fn(int $id): bool => $id > 0));
+    $almacenSql = !empty($almacenIds) ? implode(',', $almacenIds) : '0';
     return "(
         COALESCE({$alias}.id_sucursal_origen, 0) = {$sucursalId}
         OR EXISTS (
             SELECT 1
             FROM stock_almacen sa_scope
             WHERE sa_scope.id_producto = {$alias}.codigo
-              AND sa_scope.id_almacen = {$almacenId}
+              AND sa_scope.id_almacen IN ({$almacenSql})
         )
     )";
+}
+
+function ptable_stock_total_sql(string $alias, array $almacenIds): string {
+    $almacenIds = array_values(array_filter(array_map('intval', $almacenIds), static fn(int $id): bool => $id > 0));
+    $almacenSql = !empty($almacenIds) ? implode(',', $almacenIds) : '0';
+    return "(SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = {$alias}.codigo AND s.id_almacen IN ({$almacenSql}))";
 }
 
 function ptable_dir_is_really_writable(string $path): bool {
@@ -53,6 +72,75 @@ function ptable_dir_is_really_writable(string $path): bool {
         @unlink($probe);
     }
     return $ok;
+}
+
+function ptable_clone_product_images(string $sourceCode, string $targetCode): int {
+    $sourceSafe = product_image_pipeline_safe_code($sourceCode);
+    $targetSafe = product_image_pipeline_safe_code($targetCode);
+    if ($sourceSafe === '' || $targetSafe === '') {
+        return 0;
+    }
+
+    product_image_pipeline_ensure_dir();
+    $suffixes = ['', '_extra1', '_extra2'];
+    $exts = ['.avif', '.webp', '.jpg', '.jpeg', '.png', '_thumb.avif', '_thumb.webp', '_thumb.jpg', '_thumb.jpeg', '_thumb.png', '_w800.avif', '_w800.webp', '_w800.jpg', '_w800.jpeg', '_w800.png', '_w400.avif', '_w400.webp', '_w400.jpg', '_w400.jpeg', '_w400.png', '_w200.avif', '_w200.webp', '_w200.jpg', '_w200.jpeg', '_w200.png', '_w192.avif', '_w192.webp', '_w192.jpg', '_w192.jpeg', '_w192.png', '_w96.avif', '_w96.webp', '_w96.jpg', '_w96.jpeg', '_w96.png'];
+    $copied = 0;
+
+    foreach ($suffixes as $suffix) {
+        $srcBase = product_image_pipeline_base_path($sourceSafe . $suffix);
+        $dstBase = product_image_pipeline_base_path($targetSafe . $suffix);
+        $hasAny = false;
+        foreach ($exts as $ext) {
+            $srcFile = $srcBase . $ext;
+            if (!is_file($srcFile)) {
+                continue;
+            }
+            $hasAny = true;
+            if (@copy($srcFile, $dstBase . $ext)) {
+                $copied++;
+            }
+        }
+        if ($hasAny && !is_dir(dirname($dstBase))) {
+            @mkdir(dirname($dstBase), 0777, true);
+        }
+    }
+
+    return $copied;
+}
+
+function ptable_clone_product_prices(PDO $pdo, string $sourceCode, string $targetCode): int {
+    $stmt = $pdo->prepare("
+        SELECT id_sucursal, precio_costo, precio_venta, precio_mayorista
+        FROM productos_precios_sucursal
+        WHERE codigo_producto = ?
+    ");
+    $stmt->execute([$sourceCode]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return 0;
+    }
+
+    $stmtUp = $pdo->prepare("
+        INSERT INTO productos_precios_sucursal (codigo_producto, id_sucursal, precio_costo, precio_venta, precio_mayorista)
+        VALUES (?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            precio_costo = VALUES(precio_costo),
+            precio_venta = VALUES(precio_venta),
+            precio_mayorista = VALUES(precio_mayorista)
+    ");
+
+    $count = 0;
+    foreach ($rows as $row) {
+        $stmtUp->execute([
+            $targetCode,
+            intval($row['id_sucursal'] ?? 0),
+            ($row['precio_costo'] ?? null) !== null ? $row['precio_costo'] : null,
+            ($row['precio_venta'] ?? null) !== null ? $row['precio_venta'] : null,
+            ($row['precio_mayorista'] ?? null) !== null ? $row['precio_mayorista'] : null,
+        ]);
+        $count += $stmtUp->rowCount() >= 0 ? 1 : 0;
+    }
+    return $count;
 }
 
 function ptable_detect_upload_image_extension(string $tmpPath, string $originalName = ''): string {
@@ -202,6 +290,19 @@ function ptable_get_product_row(PDO $pdo, int $empId, string $sku): array {
     return $row ?: [];
 }
 
+function ptable_next_version_row(PDO $pdo, int $empId): int {
+    static $cache = [];
+    if (isset($cache[$empId])) {
+        return $cache[$empId]++;
+    }
+
+    $stmt = $pdo->prepare("SELECT COALESCE(MAX(version_row), 0) + 1 FROM productos WHERE id_empresa = ?");
+    $stmt->execute([$empId]);
+    $next = max(1, (int)$stmt->fetchColumn());
+    $cache[$empId] = $next + 1;
+    return $next;
+}
+
 function ptable_log_change(PDO $pdo, string $action, string $actor, array $payload): void {
     log_audit($pdo, $action, $actor, $payload);
 }
@@ -224,6 +325,9 @@ function ptable_like_patterns(string $sku): array {
 }
 
 function ptable_json_exit(array $payload, int $statusCode = 200): void {
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     if (!headers_sent()) {
         http_response_code($statusCode);
         header('Content-Type: application/json; charset=utf-8');
@@ -255,14 +359,100 @@ function ptable_register_upload_shutdown(): void {
 
 $allowedCategories = ptable_fetch_categories($pdo);
 ptable_ensure_barcode_columns($pdo);
+$SUC_ALM_IDS = ptable_sucursal_almacen_ids($pdo, $SUC_ID);
+if (empty($SUC_ALM_IDS) && $ALM_ID > 0) {
+    $SUC_ALM_IDS = [$ALM_ID];
+}
+$selectedAlmId = isset($_GET['alm']) && ctype_digit((string)$_GET['alm']) ? (int)$_GET['alm'] : 0;
+if ($selectedAlmId > 0 && !in_array($selectedAlmId, $SUC_ALM_IDS, true)) {
+    $selectedAlmId = 0;
+}
+$SCOPE_ALM_IDS = $selectedAlmId > 0 ? [$selectedAlmId] : $SUC_ALM_IDS;
+$viewMode = ($_GET['view'] ?? 'list') === 'cards' ? 'cards' : 'list';
+
+$almacenesSucursal = [];
+try {
+    if (!empty($SUC_ALM_IDS)) {
+        $in = implode(',', array_fill(0, count($SUC_ALM_IDS), '?'));
+        $stmtAlm = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id IN ($in) ORDER BY nombre ASC");
+        $stmtAlm->execute($SUC_ALM_IDS);
+        $almacenesSucursal = $stmtAlm->fetchAll(PDO::FETCH_ASSOC);
+    }
+} catch (Throwable $e) {
+    $almacenesSucursal = [];
+}
 
 // ---------------------------------------------------------
 // 2. FUNCIÓN DE RENDERIZADO (CORE)
 // ---------------------------------------------------------
-function renderProductRows($rows, $localPath) {
+function renderProductRows($rows, $localPath, string $viewMode = 'list') {
     ob_start();
+    if ($viewMode === 'cards') {
+        if (empty($rows)): ?>
+            <div class="text-center py-5 text-muted">No se encontraron productos.</div>
+        <?php else: ?>
+            <div class="products-cards-grid">
+                <?php foreach ($rows as $p):
+                    [$hasImg, $mtime] = ptable_image_meta((string)$p['codigo']);
+                    $imgV = $mtime ? '&v=' . $mtime : '';
+                    $stock = floatval($p['stock_total']);
+                    $isActive = intval($p['activo'] ?? 1);
+                ?>
+                <article class="product-mini-card <?php echo $isActive ? '' : 'card-inactive'; ?>">
+                    <div class="product-mini-image">
+                        <img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>"
+                             class="product-mini-img" data-code="<?php echo $p['codigo']; ?>"
+                             onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"
+                             alt="<?php echo htmlspecialchars($p['nombre']); ?>">
+                        <?php if (!$isActive): ?>
+                            <span class="product-mini-badge">INACTIVO</span>
+                        <?php endif; ?>
+                        <div class="product-mini-stock-badge <?php echo $stock > 0 ? 'ok' : 'bad'; ?>">
+                            <?php echo $stock > 0 ? 'Stock ' . number_format($stock, 1) : 'Sin stock'; ?>
+                        </div>
+                    </div>
+                    <div class="product-mini-body">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="flex-grow-1">
+                                <div class="product-mini-sku"><?php echo htmlspecialchars($p['codigo']); ?></div>
+                                <h3 class="product-mini-name"><?php echo htmlspecialchars($p['nombre']); ?></h3>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary product-mini-iconbtn" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit"></i></button>
+                        </div>
+                        <div class="product-mini-meta">
+                            <span><?php echo htmlspecialchars((string)($p['categoria'] ?? '')); ?></span>
+                            <span><?php echo $p['es_web'] ? 'Web activa' : 'Solo POS'; ?></span>
+                        </div>
+                        <div class="product-mini-price">
+                            $<?php echo number_format((float)($p['precio'] ?? 0), 2); ?>
+                            <?php if (!empty($p['precio_mayorista'])): ?>
+                                <small>Mayorista $<?php echo number_format((float)$p['precio_mayorista'], 2); ?></small>
+                            <?php endif; ?>
+                        </div>
+                        <div class="product-mini-flags">
+                            <?php if($p['es_materia_prima']): ?><span>MP</span><?php endif; ?>
+                            <?php if($p['es_servicio']): ?><span>Servicio</span><?php endif; ?>
+                            <?php if($p['es_cocina']): ?><span>Cocina</span><?php endif; ?>
+                            <?php if($p['es_reservable'] ?? false): ?><span>Reservable</span><?php endif; ?>
+                            <?php if($p['es_web']): ?><span>Web</span><?php endif; ?>
+                        </div>
+                        <div class="product-mini-actions">
+                            <button class="btn btn-sm btn-outline-primary" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')"><i class="fas fa-sliders-h me-1"></i>Editar</button>
+                            <button class="btn btn-sm btn-outline-success" type="button" onclick="toggleWeb('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-globe me-1"></i>WEB</button>
+                            <button class="btn btn-sm btn-outline-info" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')"><i class="fas fa-bell me-1"></i>S.Min</button>
+                            <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleReservable('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-calendar-check me-1"></i>Res.</button>
+                            <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleActive('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-power-off me-1"></i>Activo</button>
+                            <button class="btn btn-sm btn-outline-dark" type="button" onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')"><i class="fas fa-balance-scale me-1"></i>Kardex</button>
+                        </div>
+                    </div>
+                </article>
+                <?php endforeach; ?>
+            </div>
+        <?php endif;
+        return ob_get_clean();
+    }
     if(empty($rows)): ?>
-        <tr><td colspan="11" class="text-center py-5 text-muted">No se encontraron productos.</td></tr>
+        <tr><td colspan="20" class="text-center py-5 text-muted">No se encontraron productos.</td></tr>
     <?php else: 
         foreach($rows as $p):
             [$hasImg, $mtime] = ptable_image_meta((string)$p['codigo']);
@@ -274,9 +464,14 @@ function renderProductRows($rows, $localPath) {
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"></td>
-        <td class="small font-monospace"><?php echo $p['codigo']; ?></td>
-        <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;">
+        <td class="ps-2 no-print col-img"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"></td>
+        
+        <td class="small font-monospace col-sku"><?php echo $p['codigo']; ?></td>
+        
+        <td class="col-barcode_1 small text-muted"><?php echo htmlspecialchars($p['codigo_barra_1'] ?? ''); ?></td>
+        <td class="col-barcode_2 small text-muted"><?php echo htmlspecialchars($p['codigo_barra_2'] ?? ''); ?></td>
+
+        <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;" class="col-nombre">
             <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
             <div class="d-flex mt-1 opacity-75">
                 <?php if($p['es_materia_prima']): ?><span class="emoji-span" title="Materia Prima">🧱</span><?php endif; ?>
@@ -286,7 +481,11 @@ function renderProductRows($rows, $localPath) {
                 <?php if(!$isActive): ?><span class="badge bg-danger text-white border ms-1" style="font-size:0.6rem;">INACTIVO</span><?php endif; ?>
             </div>
         </td>
-        <td class="text-center">
+
+        <td class="col-materia_prima text-center"><?php echo $p['es_materia_prima'] ? '✅' : '❌'; ?></td>
+        <td class="col-cocina text-center"><?php echo $p['es_cocina'] ? '✅' : '❌'; ?></td>
+
+        <td class="text-center col-web_reserv">
             <div class="form-check form-switch d-flex justify-content-center" title="Visible en tienda web">
                 <input class="form-check-input" type="checkbox" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
             </div>
@@ -297,9 +496,10 @@ function renderProductRows($rows, $localPath) {
                 <span class="ms-1" style="font-size:0.6rem; line-height:1; color:#9ca3af;">📅</span>
             </div>
         </td>
-        <td class="small text-muted"><?php echo $p['categoria']; ?></td>
+        <td class="small text-muted col-categoria"><?php echo $p['categoria']; ?></td>
+        <td class="small text-muted col-unidad"><?php echo htmlspecialchars($p['unidad_medida'] ?? 'UNIDAD'); ?></td>
         
-        <td class="text-center">
+        <td class="text-center col-stock">
             <div class="d-flex align-items-center justify-content-center">
                 <button class="btn btn-sm btn-outline-warning border-0 me-1 p-0 px-1 no-print" style="font-size: 0.7rem;" 
                         onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')" title="Ajustar Stock">
@@ -310,20 +510,29 @@ function renderProductRows($rows, $localPath) {
                 </div>
             </div>
         </td>
+
+        <td class="text-center col-stock_min small"><?php echo number_format($p['stock_minimo'] ?? 0, 1); ?></td>
         
-        <td class="text-end fw-bold editable-cell" data-sku="<?php echo $p['codigo']; ?>" data-field="price" data-value="<?php echo $p['precio']; ?>">
+        <td class="text-end fw-bold editable-cell col-precio" data-sku="<?php echo $p['codigo']; ?>" data-field="price" data-value="<?php echo $p['precio']; ?>">
             $<?php echo number_format($p['precio'], 2); ?>
             <i class="fas fa-history history-btn" onclick="showHistory('<?php echo $p['codigo']; ?>')"></i>
         </td>
-        <td class="text-end col-cost-mayorista">
-            <span class="val-costo">$<?php echo number_format($p['costo'], 2); ?></span>
-            <span class="val-mayorista d-none">$<?php echo number_format($p['precio_mayorista'], 2); ?></span>
-        </td>
+
+        <td class="text-end col-costo text-muted">$<?php echo number_format($p['costo'], 2); ?></td>
+        <td class="text-end col-mayorista text-muted">$<?php echo number_format($p['precio_mayorista'], 2); ?></td>
         
-        <td class="text-end fw-bold text-success bg-light col-utilidad">
-            <span class="val-util-pct"><?php echo number_format($p['ganancia_pct'] ?? 0, 1); ?>%</span>
-            <span class="val-util-neta d-none">$<?php echo number_format($p['ganancia_neta'], 2); ?></span>
+        <td class="text-end fw-bold text-success bg-light col-utilidad_pct">
+            <span><?php echo number_format($p['ganancia_pct'] ?? 0, 1); ?>%</span>
         </td>
+        <td class="text-end fw-bold text-success bg-light col-utilidad_neta">
+            <span>$<?php echo number_format($p['ganancia_neta'], 2); ?></span>
+        </td>
+
+        <td class="col-descripcion small text-truncate" style="max-width: 150px;" title="<?php echo htmlspecialchars($p['descripcion'] ?? ''); ?>">
+            <?php echo htmlspecialchars($p['descripcion'] ?? ''); ?>
+        </td>
+        <td class="col-peso small text-center"><?php echo number_format($p['peso'] ?? 0, 2); ?></td>
+
         <td class="text-center no-print">
         <div class="btn-group">
                 <button class="btn btn-outline-secondary btn-action" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar">
@@ -433,7 +642,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
                 )
                 SELECT
-                    ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                    ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, ?,
                     categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
                     unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
                     es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
@@ -441,7 +650,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 FROM productos
                 WHERE codigo = ? AND id_empresa = ?
             ");
-            $stmt->execute([$newSku, $sku, $EMP_ID]);
+            $stmt->execute([$newSku, ptable_next_version_row($pdo, $EMP_ID), $sku, $EMP_ID]);
 
             if ($stmt->rowCount() < 1) throw new Exception('No se pudo clonar el producto.');
 
@@ -681,6 +890,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     break;
                 case 'clone_selected':
                     $created = [];
+                    $copyImages = !empty($_POST['clone_copy_images']);
+                    $copyPrices = !empty($_POST['clone_copy_prices']);
                     $pdo->beginTransaction();
                     $stmtClone = $pdo->prepare("
                         INSERT INTO productos (
@@ -691,7 +902,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                             uuid, etiqueta_web, etiqueta_color, precio_oferta, favorito
                         )
                         SELECT
-                            ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, 0,
+                            ?, id_empresa, CONCAT(nombre, ' (Copia)'), precio, costo, precio_mayorista, activo, ?,
                             categoria, stock_minimo, fecha_vencimiento, es_elaborado, es_materia_prima, es_servicio, es_cocina,
                             unidad_medida, descripcion, impuesto, peso, color, es_web, es_reservable, es_pos, tiene_variantes, variantes_json,
                             es_suc1, es_suc2, es_suc3, es_suc4, es_suc5, es_suc6, sucursales_web, id_sucursal_origen,
@@ -704,13 +915,21 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                         $src = trim((string)$sku);
                         if ($src === '') continue;
                         $newSku = ptable_next_product_code($pdo, $EMP_ID, $SUC_ID, $ALM_ID);
-                        $stmtClone->execute([$newSku, $src, $EMP_ID]);
+                        $stmtClone->execute([$newSku, ptable_next_version_row($pdo, $EMP_ID), $src, $EMP_ID]);
                         if ($stmtClone->rowCount() < 1) throw new Exception("No se pudo clonar SKU $src.");
+                        if ($copyImages) {
+                            ptable_clone_product_images($src, $newSku);
+                        }
+                        if ($copyPrices) {
+                            ptable_clone_product_prices($pdo, $src, $newSku);
+                        }
                         $created[] = $newSku;
                         ptable_log_change($pdo, 'PRODUCTO_CLONADO', ptable_get_actor(), [
                             'sku_origen' => $src,
                             'sku_nuevo' => $newSku,
-                            'modo' => 'bulk'
+                            'modo' => 'bulk',
+                            'copio_imagenes' => $copyImages ? 1 : 0,
+                            'copio_precios_sucursal' => $copyPrices ? 1 : 0
                         ]);
                     }
                     $pdo->commit();
@@ -718,7 +937,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                         'accion_masiva' => 'clone_selected',
                         'cantidad' => count($created),
                         'creados' => $created,
-                        'origenes' => $skus
+                        'origenes' => $skus,
+                        'copio_imagenes' => $copyImages ? 1 : 0,
+                        'copio_precios_sucursal' => $copyPrices ? 1 : 0
                     ]);
                     echo json_encode(['status' => 'success', 'mode' => 'clone', 'count' => count($created), 'created' => $created]);
                     exit;
@@ -889,7 +1110,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                     $stmtUpdate->execute([
                         $name, $categoria, $precio, $costo, $precioMayorista, $stockMin, $unidad,
                         $activo, $es_web, $es_pos, $es_mat, $es_serv, $es_coc, $es_res,
-                        $descripcion, $impuesto, $peso, $color, time(), $sku, $EMP_ID
+                        $descripcion, $impuesto, $peso, $color, ptable_next_version_row($pdo, $EMP_ID), $sku, $EMP_ID
                     ]);
                     ptable_log_change($pdo, 'PRODUCTO_IMPORT_UPDATE', $actor, [
                         'sku' => $sku,
@@ -981,7 +1202,7 @@ if (isset($_GET['action'])) {
             ));
             $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode($logs);
-        } catch(Exception $e) { echo json_encode([]); }
+        } catch(Exception $e) { ptable_json_exit([]); }
         exit;
     }
 
@@ -994,7 +1215,7 @@ if (isset($_GET['action'])) {
             $filterStockRange = trim((string)($_GET['stock_range'] ?? ''));
             $onlyProd = isset($_GET['only_prod']);
 
-            $whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $ALM_ID)];
+            $whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS)];
             $params = [];
 
             if ($filterStatus === 'active') $whereClauses[] = "p.activo = 1";
@@ -1024,7 +1245,7 @@ if (isset($_GET['action'])) {
                         p.stock_minimo, p.unidad_medida, p.activo, p.es_web, p.es_pos,
                         p.es_materia_prima, p.es_servicio, p.es_cocina, p.es_reservable,
                         p.descripcion, p.impuesto, p.peso, p.color,
-                        (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $ALM_ID) AS stock_total
+                        " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " AS stock_total
                         FROM productos p
                         WHERE $whereSQL
                         $havingClause";
@@ -1075,17 +1296,16 @@ if (isset($_GET['action'])) {
     }
 
     if ($action === 'get_full_active_list') {
-        header('Content-Type: application/json');
         try {
             $sql = "SELECT p.codigo, p.nombre, p.categoria, 
-                    (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = :alm) as stock_total
+                    " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " as stock_total
                     FROM productos p 
-                    WHERE p.id_empresa = :emp AND " . ptable_scope_sql('p', $SUC_ID, $ALM_ID) . " AND p.activo = 1 
+                    WHERE p.id_empresa = :emp AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . " AND p.activo = 1 
                     ORDER BY p.categoria ASC, p.nombre ASC";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':emp' => $EMP_ID, ':alm' => $ALM_ID]);
-            echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
-        } catch(Exception $e) { echo json_encode([]); }
+            $stmt->execute([':emp' => $EMP_ID]);
+            ptable_json_exit($stmt->fetchAll(PDO::FETCH_ASSOC));
+        } catch(Exception $e) { ptable_json_exit([]); }
         exit;
     }
 }
@@ -1094,6 +1314,7 @@ if (isset($_GET['action'])) {
 // 5. CONSULTA DE DATOS (COMÚN PARA HTML Y AJAX)
 // ---------------------------------------------------------
 $isAjax = isset($_GET['ajax_load']);
+$ajaxViewMode = ($_GET['view'] ?? 'list') === 'cards' ? 'cards' : 'list';
 
 // Filtros
 $filterCode  = $_GET['code'] ?? '';
@@ -1102,6 +1323,8 @@ $filterStatus = $_GET['status'] ?? 'active';
 $filterStockRange = $_GET['stock_range'] ?? '';
 $onlyLatest  = isset($_GET['latest']);
 $onlyProd    = isset($_GET['only_prod']);
+$onlyWithStock = isset($_GET['with_stock']) && (string)$_GET['with_stock'] !== '0';
+$integrityAlertCount = 0;
 
 // Paginación y Ordenamiento
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
@@ -1118,15 +1341,22 @@ $dir = strtoupper($_GET['dir'] ?? 'ASC');
 if ($dir !== 'ASC' && $dir !== 'DESC') $dir = 'ASC';
 
 // WHERE
-$whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $ALM_ID)];
+$whereClauses = ["p.id_empresa = $EMP_ID", ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS)];
 $params = [];
 
 if ($filterStatus === 'active') $whereClauses[] = "p.activo = 1";
 elseif ($filterStatus === 'inactive') $whereClauses[] = "p.activo = 0";
 
 if ($onlyProd) $whereClauses[] = "p.es_materia_prima = 0 AND p.es_servicio = 0";
-if ($filterCode) { $whereClauses[] = "p.codigo LIKE :c"; $params[':c'] = "%$filterCode%"; }
+if ($filterCode) { $whereClauses[] = "(p.codigo LIKE :c OR p.codigo_barra_1 LIKE :c OR p.codigo_barra_2 LIKE :c)"; $params[':c'] = "%$filterCode%"; }
 if ($filterName) { $whereClauses[] = "p.nombre LIKE :n"; $params[':n'] = "%$filterName%"; }
+if ($onlyWithStock) { $whereClauses[] = ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " > 0"; }
+
+// Soporte para sincronización incremental
+if (isset($_GET['since'])) {
+    $whereClauses[] = "p.updated_at > :since";
+    $params[':since'] = $_GET['since'];
+}
 
 $whereSQL = implode(" AND ", $whereClauses);
 
@@ -1148,7 +1378,7 @@ if ($filterStockRange !== '') {
 
 // QUERY DATOS
 $sqlBase = "SELECT p.*, 
-            (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = $ALM_ID) as stock_total,
+            " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " as stock_total,
             (p.precio - p.costo) as ganancia_neta,
             (CASE WHEN p.precio > 0 THEN ((p.precio - p.costo) / p.precio) * 100 ELSE 0 END) as ganancia_pct,
             p.precio_mayorista
@@ -1167,7 +1397,8 @@ $kpiData = [
     'total_empresa' => 0,
     'activos' => 0,
     'inactivos' => 0,
-    'sin_stock' => 0
+    'sin_stock' => 0,
+    'bajo_stock' => 0
 ];
 try {
     $stmtKpi = $pdo->prepare("
@@ -1177,7 +1408,7 @@ try {
             SUM(CASE WHEN activo = 0 THEN 1 ELSE 0 END) AS inactivos
         FROM productos
         WHERE id_empresa = ?
-          AND " . str_replace('p.', '', ptable_scope_sql('productos', $SUC_ID, $ALM_ID)) . "
+          AND " . str_replace('p.', '', ptable_scope_sql('productos', $SUC_ID, $SCOPE_ALM_IDS)) . "
     ");
     $stmtKpi->execute([$EMP_ID]);
     $k = $stmtKpi->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -1185,32 +1416,76 @@ try {
         'total_empresa' => (int)($k['total_empresa'] ?? 0),
         'activos' => (int)($k['activos'] ?? 0),
         'inactivos' => (int)($k['inactivos'] ?? 0),
-        'sin_stock' => 0
+        'sin_stock' => 0,
+        'bajo_stock' => 0
     ];
     $stmtSinStock = $pdo->prepare("
         SELECT COUNT(*)
         FROM productos p
         WHERE p.id_empresa = ?
-          AND " . ptable_scope_sql('p', $SUC_ID, $ALM_ID) . "
-          AND (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = p.codigo AND s.id_almacen = ?) <= 0
+        AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . "
+          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " <= 0
     ");
-    $stmtSinStock->execute([$EMP_ID, $ALM_ID]);
+    $stmtSinStock->execute([$EMP_ID]);
     $kpiData['sin_stock'] = (int)$stmtSinStock->fetchColumn();
+    $stmtBajoStock = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM productos p
+        WHERE p.id_empresa = ?
+          AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . "
+          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " > 0
+          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " <= COALESCE(p.stock_minimo, 0)
+    ");
+    $stmtBajoStock->execute([$EMP_ID]);
+    $kpiData['bajo_stock'] = (int)$stmtBajoStock->fetchColumn();
+    $stmtIntegrity = $pdo->prepare("
+        SELECT COUNT(*) FROM (
+            SELECT codigo FROM productos p
+            WHERE p.id_empresa = ?
+              AND (COALESCE(p.precio,0) <= 0 OR TRIM(COALESCE(p.nombre,'')) = '' OR TRIM(COALESCE(p.categoria,'')) = '')
+              OR EXISTS (
+                  SELECT 1 FROM stock_almacen s
+                  WHERE s.id_producto = p.codigo AND s.id_almacen IN (" . (!empty($SCOPE_ALM_IDS) ? implode(',', array_map('intval', $SCOPE_ALM_IDS)) : '0') . ")
+                  AND s.cantidad < 0
+              )
+              OR EXISTS (
+                  SELECT 1 FROM productos p2
+                  WHERE p2.id_empresa = p.id_empresa
+                    AND p2.codigo_barra_1 IS NOT NULL
+                    AND p2.codigo_barra_1 <> ''
+                    AND p2.codigo_barra_1 = p.codigo_barra_1
+                    AND p2.codigo <> p.codigo
+              )
+        ) x
+    ");
+    $stmtIntegrity->execute([$EMP_ID]);
+    $integrityAlertCount = (int)$stmtIntegrity->fetchColumn();
 } catch (Exception $e) {
     // no-op, deja valores por defecto
 }
 
 // QUERY VALOR TOTAL (Global)
-$stmtValor = $pdo->prepare("SELECT SUM(s.cantidad * p.costo) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.id_almacen = ? AND p.id_empresa = ?");
-$stmtValor->execute([$ALM_ID, $EMP_ID]);
+$almIdsCsv = !empty($SUC_ALM_IDS) ? implode(',', array_map('intval', $SUC_ALM_IDS)) : '0';
+$stmtValor = $pdo->prepare("SELECT SUM(s.cantidad * p.costo) FROM stock_almacen s JOIN productos p ON s.id_producto = p.codigo WHERE s.id_almacen IN ($almIdsCsv) AND p.id_empresa = ?");
+$stmtValor->execute([$EMP_ID]);
 $valorInventario = floatval($stmtValor->fetchColumn() ?: 0);
 
 // --- RESPUESTA AJAX ---
 if ($isAjax) {
     try {
-        echo json_encode([
+        if (isset($_GET['sync_mode'])) {
+            // Modo sincronización: Devolver datos crudos para IndexedDB
+            ptable_json_exit([
+                'status' => 'success',
+                'products' => $allRows,
+                'server_time' => date('Y-m-d H:i:s'),
+                'kpi' => $kpiData
+            ]);
+        }
+
+        ptable_json_exit([
             'status' => 'success',
-            'html' => renderProductRows($productosPagina, $localPath),
+            'html' => renderProductRows($productosPagina, $localPath, $ajaxViewMode),
             'total' => $totalProducts,
             'page' => $page,
             'pages' => $totalPages,
@@ -1218,7 +1493,7 @@ if ($isAjax) {
             'kpi' => $kpiData
         ]);
     } catch (Throwable $e) {
-        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        ptable_json_exit(['status' => 'error', 'msg' => $e->getMessage()]);
     }
     exit;
 }
@@ -1228,6 +1503,7 @@ if ($isAjax) {
 <head>
     <meta charset="UTF-8">
     <title>Inventario & Web</title>
+    <link rel="manifest" href="manifest-products.php">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
@@ -1250,6 +1526,36 @@ if ($isAjax) {
         .editable-cell:hover::after { content: '✎'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #3b82f6; font-size: 0.8rem; opacity: 0.5; }
         .history-btn { font-size: 0.7rem; color: #64748b; cursor: pointer; margin-left: 5px; }
         .history-btn:hover { color: #3b82f6; }
+        .products-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:1rem; padding:1rem; }
+        .product-mini-card { background:#fff; border:1px solid #e2e8f0; border-radius:18px; overflow:hidden; box-shadow:0 8px 24px rgba(15,23,42,.06); display:flex; flex-direction:column; min-height:100%; }
+        .product-mini-card.card-inactive { opacity:.8; filter:saturate(.75); }
+        .product-mini-image { position:relative; aspect-ratio:1/1; background:#f8fafc; }
+        .product-mini-img { width:100%; height:100%; object-fit:cover; cursor:pointer; }
+        .product-mini-badge { position:absolute; top:10px; left:10px; background:#dc2626; color:#fff; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; }
+        .product-mini-stock-badge { position:absolute; bottom:10px; right:10px; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; box-shadow:0 8px 16px rgba(15,23,42,.12); }
+        .product-mini-stock-badge.ok { background:#dcfce7; color:#166534; }
+        .product-mini-stock-badge.bad { background:#fee2e2; color:#b91c1c; }
+        .product-mini-iconbtn { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; }
+        .product-mini-body { padding:.9rem .95rem 1rem; display:flex; flex-direction:column; gap:.55rem; }
+        .product-mini-sku { font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:#64748b; font-weight:700; }
+        .product-mini-name { font-size:1rem; font-weight:800; margin:0; color:#0f172a; line-height:1.2; }
+        .product-mini-meta { display:flex; justify-content:space-between; gap:.5rem; flex-wrap:wrap; font-size:.78rem; color:#64748b; }
+        .product-mini-price { font-size:1.15rem; font-weight:900; color:#0f172a; display:flex; flex-direction:column; line-height:1.1; }
+        .product-mini-price small { font-size:.72rem; color:#64748b; font-weight:600; margin-top:.15rem; }
+        .product-mini-flags { display:flex; gap:.35rem; flex-wrap:wrap; }
+        .product-mini-flags span { background:#f1f5f9; border:1px solid #e2e8f0; color:#475569; border-radius:999px; padding:.2rem .45rem; font-size:.68rem; font-weight:700; }
+        .product-mini-actions { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.15rem; }
+        .product-mini-actions .btn { flex:1 1 48%; }
+        @media (max-width: 767px) {
+            .products-cards-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); padding:.75rem; gap:.75rem; }
+            .product-mini-body { padding:.75rem .8rem .85rem; gap:.45rem; }
+            .product-mini-actions .btn { flex:1 1 100%; }
+            .product-mini-price { font-size:1.05rem; }
+            .product-mini-name { font-size:.95rem; }
+        }
+        @media (min-width: 1200px) {
+            .products-cards-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+        }
         #printableArea .table > :not(caption) > * > * { background: transparent; }
         @media (max-width: 991px) {
             .inventory-products-shell { padding-top: 1rem !important; padding-bottom: 1.5rem !important; }
@@ -1332,75 +1638,353 @@ if ($isAjax) {
     $filterNameEsc = htmlspecialchars((string)$filterName, ENT_QUOTES, 'UTF-8');
     $totalProductsInt = (int)$totalProducts;
     $pageInt = (int)$page;
-    $toolbarFilterForm = <<<HTML
-<form id="filterForm" class="inventory-toolbar__filter-grid" onsubmit="event.preventDefault(); loadData(1);">
-    <div><label class="small fw-bold text-muted mb-1">SKU</label><input type="text" id="f_code" class="form-control form-control-sm" value="{$filterCodeEsc}"></div>
-    <div><label class="small fw-bold text-muted mb-1">Nombre</label><input type="text" id="f_name" class="form-control form-control-sm" value="{$filterNameEsc}"></div>
-    <div><label class="small fw-bold text-muted mb-1">Estado</label><select id="f_status" class="form-select form-select-sm"><option value="active">✅ Activos</option><option value="inactive">❌ Inactivos</option><option value="all">♾️ Todos</option></select></div>
-    <div><label class="small fw-bold text-muted mb-1">Rango Stock</label><input type="text" id="f_stock" class="form-control form-control-sm" placeholder="Ej: <5, >10, 0, 10-20"></div>
-    <div><label class="small fw-bold text-muted mb-1">Mostrar</label><select id="f_limit" class="form-select form-select-sm" onchange="loadData(1)"><option value="10">10 por pág</option><option value="20">20 por pág</option><option value="50">50 por pág</option><option value="100">100 por pág</option></select></div>
-    <div class="inventory-toolbar__stack"><button type="submit" class="btn btn-dark btn-sm inventory-btn w-100"><i class="fas fa-filter me-1"></i>Filtrar</button><button type="button" class="btn btn-success btn-sm inventory-btn w-100 mt-2" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus me-1"></i>Nuevo</button></div>
-    <div class="inventory-toolbar__stack"><button type="button" class="btn btn-outline-primary btn-sm inventory-btn w-100" onclick="openCategoriesModal()"><i class="fas fa-tags me-1"></i>Categorías</button><button type="button" class="btn btn-outline-secondary btn-sm inventory-btn w-100 mt-2" onclick="exportCsv()"><i class="fas fa-file-export me-1"></i>Exportar CSV</button></div>
-    <div class="inventory-toolbar__stack"><button type="button" class="btn btn-outline-info btn-sm inventory-btn w-100" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import me-1"></i>Importar CSV</button><select id="importMode" class="form-select form-select-sm mt-2"><option value="update_create">Actualizar o crear</option><option value="update_only">Solo actualizar</option></select></div>
-</form>
-HTML;
-    $toolbarBulk = <<<HTML
-<div class="inventory-toolbar__bulk-row">
-    <div class="form-check"><input class="form-check-input" type="checkbox" id="selectAll"><label class="form-check-label small fw-bold" for="selectAll">Todos</label></div>
-    <div class="vr"></div>
-    <select class="form-select form-select-sm" style="max-width: 220px;" id="bulkActionSelect"><option value="">-- Acción Masiva --</option><option value="print_labels">🏷️ Imprimir Etiquetas</option><option value="web_on">🌐 Activar en WEB</option><option value="web_off">🚫 Ocultar de WEB</option><option value="reservable_on">📅 Activar Reservable</option><option value="reservable_off">📅 Desactivar Reservable</option><option value="pos_on">🧾 Mostrar en POS</option><option value="pos_off">🧾 Ocultar en POS</option><option value="active_on">✅ Activar Producto</option><option value="active_off">❌ Desactivar Producto</option><option value="set_stock_min">📌 Cambiar Stock Mínimo</option><option value="change_cat">📂 Cambiar Categoría</option><option value="clone_selected">📑 Clonar Seleccionados</option></select>
-    <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría" style="max-width: 150px;">
-    <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="Stock mínimo" style="max-width: 150px;">
-    <datalist id="bulk_cat_list"></datalist>
-    <button class="btn btn-secondary btn-sm inventory-btn" onclick="applyBulkAction()">Aplicar</button>
-    <div class="ms-auto text-muted small"><strong id="selectedCount">0 sel</strong> | Total: <strong id="totalCountDisplay">{$totalProductsInt}</strong> | Pág <span id="currentPageDisplay">{$pageInt}</span></div>
+
+    $kpiTotal    = number_format($kpiData['total_empresa'] ?? 0, 0);
+    $kpiActivos  = number_format($kpiData['activos'] ?? 0, 0);
+    $kpiInactivos= number_format($kpiData['inactivos'] ?? 0, 0);
+$kpiSinStock = number_format($kpiData['sin_stock'] ?? 0, 0);
+$kpiBajoStock = number_format($kpiData['bajo_stock'] ?? 0, 0);
+$kpiValorInv = number_format($valorInventario, 2);
+$kpiIntegrity = number_format($integrityAlertCount ?? 0, 0);
+$viewModeLabelText = $viewMode === 'cards' ? 'Tarjetas' : 'Listado';
+$warehouseOptionsHtml = '<option value="0">Todos los almacenes</option>';
+foreach ($almacenesSucursal as $alm) {
+    $almId = (int)($alm['id'] ?? 0);
+    $almName = htmlspecialchars((string)($alm['nombre'] ?? ''), ENT_QUOTES, 'UTF-8');
+    $selectedAttr = $almId === $selectedAlmId ? ' selected' : '';
+    $warehouseOptionsHtml .= '<option value="' . $almId . '"' . $selectedAttr . '>' . $almName . '</option>';
+}
+$integrityAlertHtml = '';
+if ((int)$integrityAlertCount > 0) {
+    $integrityAlertHtml = '<div class="alert alert-warning mx-3 mb-0"><strong>' . (int)$integrityAlertCount . ' alertas de catálogo.</strong> Revisa productos con precio cero, datos vacíos, barras duplicadas o stock negativo.</div>';
+}
+
+    $toolbarSaaS = <<<HTML
+<style>
+/* ── SaaS Premium Toolbar ───────────────────────────────────────── */
+.pt-sbar { background:rgba(255,255,255,.72); backdrop-filter:blur(14px); border:1px solid rgba(226,232,240,.8); border-radius:18px; box-shadow:0 10px 40px rgba(15,23,42,.06); overflow:hidden; }
+.pt-kpi-row { display:flex; gap:1px; background:rgba(226,232,240,.6); }
+.pt-kpi { flex:1; background:#fff; padding:14px 10px; text-align:center; transition:background .2s; cursor:default; }
+.pt-kpi:hover { background:#f8fafc; }
+.pt-kpi-val { font-size:1.35rem; font-weight:800; line-height:1; letter-spacing:-.02em; }
+.pt-kpi-lbl { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; margin-top:4px; opacity:.65; }
+.pt-kpi-total { color:#0f172a; }
+.pt-kpi-active { color:#059669; }
+.pt-kpi-inactive { color:#ef4444; }
+.pt-kpi-nostock { color:#f59e0b; }
+.pt-kpi-money  { color:#3b82f6; }
+
+.pt-command { padding:18px 22px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.pt-search-wrap { flex:1 1 320px; position:relative; }
+.pt-search-wrap i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:1rem; pointer-events:none; }
+.pt-search-wrap input { width:100%; padding:11px 14px 11px 38px; border:1.5px solid #e2e8f0; border-radius:12px; font-size:.92rem; background:#fff; transition:all .2s; }
+.pt-search-wrap input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.12); outline:none; }
+
+.pt-filter-drawer { display:none; padding:0 22px 18px; animation:ptSlideDown .25s ease; }
+.pt-filter-drawer.open { display:block; }
+@keyframes ptSlideDown { from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);} }
+
+.pt-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+.pt-filter-grid label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#64748b; margin-bottom:4px; display:block; }
+.pt-filter-grid input, .pt-filter-grid select { width:100%; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; transition:all .2s; }
+.pt-filter-grid input:focus, .pt-filter-grid select:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.10); outline:none; }
+
+.pt-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.pt-btn { display:inline-flex; align-items:center; gap:6px; padding:10px 16px; border-radius:10px; font-size:.85rem; font-weight:600; border:none; cursor:pointer; transition:all .2s; white-space:nowrap; }
+.pt-btn i { font-size:.9rem; }
+.pt-btn:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.08); }
+.pt-btn:active { transform:translateY(0); }
+.pt-btn-pri  { background:#0f172a; color:#fff; }
+.pt-btn-sec  { background:#fff; color:#334155; border:1.5px solid #e2e8f0; }
+.pt-btn-sec:hover { border-color:#cbd5e1; background:#f8fafc; }
+.pt-btn-dang { background:#fff; color:#ef4444; border:1.5px solid #fecaca; }
+.pt-btn-dang:hover { background:#fef2f2; }
+.pt-btn-ghost{ background:transparent; color:#64748b; padding:10px 12px; }
+.pt-btn-ghost:hover { background:#f1f5f9; color:#0f172a; }
+
+.pt-bulk-bar { background:#f8fafc; border-top:1px solid #e2e8f0; padding:14px 22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.pt-bulk-left { display:flex; align-items:center; gap:10px; }
+.pt-bulk-check { width:20px; height:20px; accent-color:#0f172a; cursor:pointer; }
+.pt-bulk-label { font-size:.85rem; font-weight:700; color:#334155; cursor:pointer; user-select:none; }
+.pt-bulk-select { padding:8px 28px 8px 12px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; min-width:200px; cursor:pointer; }
+.pt-bulk-input { padding:8px 12px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; width:160px; }
+.pt-bulk-apply { background:#0f172a; color:#fff; padding:8px 18px; border-radius:10px; font-size:.85rem; font-weight:600; border:none; cursor:pointer; transition:all .2s; }
+.pt-bulk-apply:hover { background:#1e293b; }
+.pt-bulk-meta { margin-left:auto; font-size:.8rem; color:#64748b; }
+.pt-bulk-meta strong { color:#0f172a; }
+
+.pt-chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 22px 10px; }
+.pt-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#f1f5f9; border-radius:20px; font-size:.75rem; color:#475569; border:1px solid #e2e8f0; }
+.pt-chip button { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:.7rem; padding:0; line-height:1; }
+.pt-chip button:hover { color:#ef4444; }
+
+@media (max-width: 768px) {
+    .pt-kpi-row { flex-wrap:wrap; }
+    .pt-kpi { flex:1 1 45%; }
+    .pt-command { padding:14px; }
+    .pt-filter-grid { grid-template-columns:1fr; }
+    .pt-bulk-bar { padding:12px 14px; gap:10px; }
+    .pt-bulk-meta { width:100%; text-align:right; margin-left:0; margin-top:4px; }
+}
+</style>
+
+<div class="pt-sbar mb-4 no-print inventory-fade-in">
+    <!-- KPIs -->
+    <div class="pt-kpi-row">
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-total">{$kpiTotal}</div><div class="pt-kpi-lbl">Total Catálogo</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiActivos}</div><div class="pt-kpi-lbl">Activos</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-inactive">{$kpiInactivos}</div><div class="pt-kpi-lbl">Inactivos</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock">{$kpiSinStock}</div><div class="pt-kpi-lbl">Sin Stock</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiBajoStock}</div><div class="pt-kpi-lbl">Bajo Stock</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-money">\${$kpiValorInv}</div><div class="pt-kpi-lbl">Valor Inventario</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock">{$kpiIntegrity}</div><div class="pt-kpi-lbl">Alertas</div></div>
+    </div>
+
+    <!-- Command Bar -->
+    <div class="pt-command">
+        <div class="pt-search-wrap">
+            <i class="fas fa-search"></i>
+            <input type="text" id="f_name" placeholder="Buscar por nombre de producto..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
+        </div>
+        <div class="pt-actions">
+            <select class="pt-bulk-select" id="warehouseSelect" onchange="changeWarehouseScope()" style="min-width:210px"><?php echo $warehouseOptionsHtml; ?></select>
+            <button type="button" class="pt-btn pt-btn-pri" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
+            <button type="button" class="pt-btn pt-btn-sec" onclick="toggleFilterDrawer()"><i class="fas fa-sliders-h"></i> Filtros</button>
+            <button type="button" class="pt-btn pt-btn-sec" onclick="exportCsv()"><i class="fas fa-file-export"></i> Exportar</button>
+            <button type="button" class="pt-btn pt-btn-sec" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import"></i> Importar</button>
+            <button type="button" class="pt-btn pt-btn-sec" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
+            <button type="button" class="pt-btn pt-btn-sec" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Con stock</span></button>
+            <button type="button" class="pt-btn pt-btn-sec" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel"><?php echo $viewModeLabelText; ?></span></button>
+        </div>
+    </div>
+    <?php echo $integrityAlertHtml; ?>
+
+    <!-- Chips de filtros activos -->
+    <div class="pt-chips" id="activeFilterChips"></div>
+
+    <!-- Filtros Avanzados (Drawer) -->
+    <div class="pt-filter-drawer" id="filterDrawer">
+        <form id="filterForm" onsubmit="event.preventDefault(); loadData(1);">
+            <div class="pt-filter-grid">
+                <div>
+                    <label>SKU / Código</label>
+                    <input type="text" id="f_code" placeholder="Ej: 230001" value="{$filterCodeEsc}">
+                </div>
+                <div>
+                    <label>Estado</label>
+                    <select id="f_status"><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select>
+                </div>
+                <div>
+                    <label>Rango Stock</label>
+                    <input type="text" id="f_stock" placeholder="Ej: <5, >10, 0, 10-20">
+                </div>
+                <div>
+                    <label>Por página</label>
+                    <select id="f_limit" onchange="loadData(1)"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>
+                </div>
+                <div>
+                    <label>Modo Import</label>
+                    <select id="importMode"><option value="update_create">Actualizar o crear</option><option value="update_only">Solo actualizar</option></select>
+                </div>
+                <div style="display:flex; align-items:flex-end;">
+                    <button type="submit" class="pt-btn pt-btn-pri" style="width:100%; justify-content:center;"><i class="fas fa-filter"></i> Aplicar Filtros</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Bulk Actions Bar -->
+    <div class="pt-bulk-bar">
+        <div class="pt-bulk-left">
+            <input class="pt-bulk-check" type="checkbox" id="selectAll">
+            <label class="pt-bulk-label" for="selectAll">Todos los visibles</label>
+        </div>
+        <select class="pt-bulk-select" id="bulkActionSelect">
+            <option value="">-- Acción Masiva --</option>
+            <option value="print_labels">🏷️ Imprimir Etiquetas</option>
+            <option value="web_on">🌐 Activar en WEB</option>
+            <option value="web_off">🚫 Ocultar de WEB</option>
+            <option value="reservable_on">📅 Activar Reservable</option>
+            <option value="reservable_off">📅 Desactivar Reservable</option>
+            <option value="pos_on">🧾 Mostrar en POS</option>
+            <option value="pos_off">🧾 Ocultar en POS</option>
+            <option value="active_on">✅ Activar Producto</option>
+            <option value="active_off">❌ Desactivar Producto</option>
+            <option value="set_stock_min">📌 Cambiar Stock Mínimo</option>
+            <option value="change_cat">📂 Cambiar Categoría</option>
+            <option value="clone_selected">📑 Clonar Seleccionados</option>
+        </select>
+        <input type="text" class="pt-bulk-input d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría">
+        <input type="number" step="0.01" class="pt-bulk-input d-none" id="bulkStockMinInput" placeholder="Stock mínimo">
+        <datalist id="bulk_cat_list"></datalist>
+        <button class="pt-bulk-apply" onclick="applyBulkAction()">Aplicar</button>
+        <div class="pt-bulk-meta"><strong id="selectedCount">0</strong> seleccionados · Total <strong id="totalCountDisplay">{$totalProductsInt}</strong> · Pág <strong id="currentPageDisplay">{$pageInt}</strong></div>
+    </div>
 </div>
+
+<div class="modal fade" id="cloneOptionsModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fas fa-copy me-2"></i>Clonación avanzada</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">Elige qué datos adicionales copiar al clonar los productos seleccionados.</p>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="cloneCopyImages" checked>
+                    <label class="form-check-label" for="cloneCopyImages">Copiar imágenes principales y extras</label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" id="cloneCopyPrices" checked>
+                    <label class="form-check-label" for="cloneCopyPrices">Copiar precios por sucursal</label>
+                </div>
+                <div class="alert alert-warning py-2 px-3 mb-0 small">
+                    El clon mantendrá nombre, categoría, estado, visibilidad web/POS, stock mínimo y etiquetas del producto original.
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary" id="confirmCloneAdvancedBtn">Clonar ahora</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleFilterDrawer() {
+    const d = document.getElementById('filterDrawer');
+    d.classList.toggle('open');
+}
+function getViewMode() {
+    return localStorage.getItem('pt_view_mode') || '<?php echo $viewMode; ?>';
+}
+function getWithStockMode() {
+    return localStorage.getItem('pt_with_stock') === '1';
+}
+function setWithStockMode(enabled) {
+    localStorage.setItem('pt_with_stock', enabled ? '1' : '0');
+    const btn = document.getElementById('btnWithStock');
+    const label = document.getElementById('withStockLabel');
+    if (btn) {
+        btn.style.background = enabled ? '#16a34a' : '';
+        btn.style.color = enabled ? '#fff' : '';
+        btn.style.borderColor = enabled ? '#16a34a' : '';
+    }
+    if (label) label.textContent = enabled ? 'Solo con stock' : 'Todos';
+}
+function setViewMode(mode) {
+    const next = mode === 'cards' ? 'cards' : 'list';
+    localStorage.setItem('pt_view_mode', next);
+    const table = document.getElementById('productsTable');
+    const cards = document.getElementById('cardsView');
+    const label = document.getElementById('viewModeLabel');
+    if (table) table.classList.toggle('d-none', next === 'cards');
+    if (cards) cards.classList.toggle('d-none', next !== 'cards');
+    if (label) label.textContent = next === 'cards' ? 'Tarjetas' : 'Listado';
+}
+function toggleViewMode() {
+    setViewMode(getViewMode() === 'cards' ? 'list' : 'cards');
+    loadData(1);
+}
+function toggleWithStock() {
+    setWithStockMode(!getWithStockMode());
+    loadData(1);
+}
+function getWarehouseScope() {
+    return parseInt(localStorage.getItem('pt_warehouse_scope') || '<?php echo (int)$selectedAlmId; ?>', 10) || 0;
+}
+function setWarehouseScope(id) {
+    const val = parseInt(id || '0', 10) || 0;
+    localStorage.setItem('pt_warehouse_scope', String(val));
+    const sel = document.getElementById('warehouseSelect');
+    if (sel) sel.value = String(val);
+}
+function changeWarehouseScope() {
+    const sel = document.getElementById('warehouseSelect');
+    setWarehouseScope(sel ? sel.value : 0);
+    loadData(1);
+}
+// Restaurar estado del drawer si hay filtros activos
+(function() {
+    const hasFilters = document.getElementById('f_code').value || document.getElementById('f_stock').value;
+    if (hasFilters) document.getElementById('filterDrawer').classList.add('open');
+    setViewMode(getViewMode());
+    setWithStockMode(getWithStockMode());
+    setWarehouseScope(getWarehouseScope());
+})();
+</script>
 HTML;
-    inventory_suite_render_toolbar([
-        'title' => 'Filtros y acciones',
-        'subtitle' => 'Búsqueda operativa, importación y acciones masivas sobre el catálogo.',
-        'class' => 'mb-4 products-toolbar no-print inventory-fade-in',
-        'left' => [
-            $toolbarFilterForm,
-            $toolbarBulk,
-        ],
-    ]);
+
+    echo $toolbarSaaS;
     ?>
 
     <div class="card card-table shadow-sm" id="printableArea">
+        <div class="p-3 d-flex justify-content-between align-items-center no-print border-bottom bg-light">
+            <h6 class="mb-0 fw-bold text-muted"><i class="fas fa-list me-2"></i>Listado de Productos</h6>
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="dropdownCols" data-bs-toggle="dropdown" aria-expanded="false" data-bs-auto-close="outside">
+                    <i class="fas fa-columns me-1"></i> Columnas
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-3" aria-labelledby="dropdownCols" style="min-width: 250px; max-height: 400px; overflow-y: auto;">
+                    <h6 class="dropdown-header ps-0">Visibilidad de Columnas</h6>
+                    <div id="colToggles">
+                        <!-- Se genera dinámicamente con JS -->
+                    </div>
+                    <div class="dropdown-divider"></div>
+                    <button class="btn btn-xs btn-link text-primary p-0" onclick="resetColumns()">Restablecer vista</button>
+                </div>
+            </div>
+        </div>
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0" id="productsTable">
+            <table class="table table-hover align-middle mb-0 <?php echo $viewMode === 'cards' ? 'd-none' : ''; ?>" id="productsTable">
                 <thead class="bg-light">
                     <tr>
                         <th class="no-print" style="width: 30px;">#</th>
                         <th class="text-center no-print" style="width: 50px;">Hist</th>
-                        <th class="ps-2 no-print" style="width: 60px;">Img</th>
+                        <th class="ps-2 no-print col-img" style="width: 60px;">Img</th>
                         
-                        <th onclick="sortBy('codigo')" style="cursor:pointer">SKU <i id="icon_codigo" class="fas fa-sort text-muted small"></i></th>
-                        <th onclick="sortBy('nombre')" style="cursor:pointer">Producto <i id="icon_nombre" class="fas fa-sort-up text-primary small"></i></th>
+                        <th onclick="sortBy('codigo')" style="cursor:pointer" class="col-sku">SKU <i id="icon_codigo" class="fas fa-sort text-muted small"></i></th>
                         
-                        <th class="text-center" style="width: 80px;" title="Web visible / 📅 Reservable sin stock">Web / 📅</th>
+                        <th class="col-barcode_1">Barras 1</th>
+                        <th class="col-barcode_2">Barras 2</th>
+
+                        <th onclick="sortBy('nombre')" style="cursor:pointer" class="col-nombre">Producto <i id="icon_nombre" class="fas fa-sort-up text-primary small"></i></th>
                         
-                        <th onclick="sortBy('categoria')" style="cursor:pointer">Categoría <i id="icon_categoria" class="fas fa-sort text-muted small"></i></th>
-                        <th onclick="sortBy('stock_total')" style="cursor:pointer" class="text-center">Stock <i id="icon_stock_total" class="fas fa-sort text-muted small"></i></th>
-                        <th onclick="sortBy('precio')" style="cursor:pointer" class="text-end">Venta <i id="icon_precio" class="fas fa-sort text-muted small"></i></th>
-                        <th onclick="handlePriceSort()" style="cursor:pointer" class="text-end">
-                            <span id="header-price" onclick="event.stopPropagation(); togglePriceColumn()">Costo <i class="fas fa-exchange-alt small opacity-50 ms-1"></i></span>
-                            <i id="icon_price_col" class="fas fa-sort text-muted small"></i>
-                        </th>
-                        <th onclick="handleUtilSort()" style="cursor:pointer" class="text-end bg-light">
-                            <span id="header-util" onclick="event.stopPropagation(); toggleUtilColumn()">% Utilidad <i class="fas fa-exchange-alt small opacity-50 ms-1"></i></span>
-                            <i id="icon_util_col" class="fas fa-sort text-muted small"></i>
-                        </th>
+                        <th class="col-materia_prima text-center">MP</th>
+                        <th class="col-cocina text-center">Cocina</th>
+
+                        <th class="text-center col-web_reserv" style="width: 80px;" title="Web visible / 📅 Reservable sin stock">Web / 📅</th>
                         
+                        <th onclick="sortBy('categoria')" style="cursor:pointer" class="col-categoria">Categoría <i id="icon_categoria" class="fas fa-sort text-muted small"></i></th>
+                        <th class="col-unidad">Unidad</th>
+
+                        <th onclick="sortBy('stock_total')" style="cursor:pointer" class="text-center col-stock">Stock <i id="icon_stock_total" class="fas fa-sort text-muted small"></i></th>
+                        <th class="col-stock_min text-center">S.Min</th>
+
+                        <th onclick="sortBy('precio')" style="cursor:pointer" class="text-end col-precio">Venta <i id="icon_precio" class="fas fa-sort text-muted small"></i></th>
+                        
+                        <th onclick="sortBy('costo')" style="cursor:pointer" class="text-end col-costo">Costo <i id="icon_costo" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="sortBy('precio_mayorista')" style="cursor:pointer" class="text-end col-mayorista">Mayorista <i id="icon_precio_mayorista" class="fas fa-sort text-muted small"></i></th>
+
+                        <th onclick="sortBy('ganancia_pct')" style="cursor:pointer" class="text-end bg-light col-utilidad_pct">% Util <i id="icon_ganancia_pct" class="fas fa-sort text-muted small"></i></th>
+                        <th onclick="sortBy('ganancia_neta')" style="cursor:pointer" class="text-end bg-light col-utilidad_neta">$ Util <i id="icon_ganancia_neta" class="fas fa-sort text-muted small"></i></th>
+                        
+                        <th class="col-descripcion">Descripción</th>
+                        <th class="col-peso text-center">Peso</th>
+
                         <th class="text-center no-print" style="width: 50px;">Acción</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white" id="tableBody">
-                    <?php echo renderProductRows($productosPagina, $localPath); ?>
+                    <?php echo renderProductRows($productosPagina, $localPath, 'list'); ?>
                 </tbody>
             </table>
         </div>
+    </div>
+
+    <div id="cardsView" class="<?php echo $viewMode === 'cards' ? '' : 'd-none'; ?>">
+        <?php echo renderProductRows($productosPagina, $localPath, 'cards'); ?>
     </div>
 
     <nav class="mt-4 no-print" id="paginationNav">
@@ -1610,44 +2194,74 @@ function renderKpi(kpi) {
     if (kNoStock) kNoStock.innerText = Number(kpi.sin_stock || 0).toLocaleString('en-US');
 }
 
-// --- TOGGLES DE COLUMNAS (Costo/Mayorista y % Utilidad/Utilidad) ---
-let showCosto = localStorage.getItem('pt_show_costo') !== 'false'; // default true
-let showUtilPct = localStorage.getItem('pt_show_util_pct') !== 'false'; // default true
+// --- GESTIÓN DE COLUMNAS DINÁMICAS ---
+const columnConfig = {
+    'col-img': { label: 'Miniatura', default: true },
+    'col-sku': { label: 'Código (SKU)', default: true },
+    'col-barcode_1': { label: 'Cód. Barras 1', default: false },
+    'col-barcode_2': { label: 'Cód. Barras 2', default: false },
+    'col-nombre': { label: 'Nombre Producto', default: true },
+    'col-materia_prima': { label: 'Materia Prima', default: false },
+    'col-cocina': { label: 'Para Cocina', default: false },
+    'col-web_reserv': { label: 'Web/Reservas', default: true },
+    'col-categoria': { label: 'Categoría', default: true },
+    'col-unidad': { label: 'Unidad Medida', default: false },
+    'col-stock': { label: 'Stock Actual', default: true },
+    'col-stock_min': { label: 'Stock Mínimo', default: false },
+    'col-precio': { label: 'Precio Venta', default: true },
+    'col-costo': { label: 'Costo', default: true },
+    'col-mayorista': { label: 'Precio Mayorista', default: false },
+    'col-utilidad_pct': { label: '% Utilidad', default: true },
+    'col-utilidad_neta': { label: '$ Utilidad', default: false },
+    'col-descripcion': { label: 'Descripción', default: false },
+    'col-peso': { label: 'Peso', default: false }
+};
 
-function togglePriceColumn() {
-    showCosto = !showCosto;
-    localStorage.setItem('pt_show_costo', showCosto);
+let userPrefs = JSON.parse(localStorage.getItem('pt_column_prefs')) || {};
+
+function initColumnToggles() {
+    const container = document.getElementById('colToggles');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    Object.keys(columnConfig).forEach(id => {
+        const conf = columnConfig[id];
+        const isVisible = userPrefs[id] !== undefined ? userPrefs[id] : conf.default;
+        
+        const div = document.createElement('div');
+        div.className = 'form-check mb-1';
+        div.innerHTML = `
+            <input class="form-check-input" type="checkbox" value="${id}" id="chk_${id}" ${isVisible ? 'checked' : ''} onchange="toggleColumnVisibility('${id}', this.checked)">
+            <label class="form-check-label small" for="chk_${id}">${conf.label}</label>
+        `;
+        container.appendChild(div);
+    });
     applyColumnVisibility();
 }
 
-function toggleUtilColumn() {
-    showUtilPct = !showUtilPct;
-    localStorage.setItem('pt_show_util_pct', showUtilPct);
+function toggleColumnVisibility(id, isVisible) {
+    userPrefs[id] = isVisible;
+    localStorage.setItem('pt_column_prefs', JSON.stringify(userPrefs));
     applyColumnVisibility();
 }
 
 function applyColumnVisibility() {
-    const hPrice = document.getElementById('header-price');
-    if (hPrice) hPrice.innerText = showCosto ? 'Costo' : 'Mayorista';
-    
-    const hUtil = document.getElementById('header-util');
-    if (hUtil) hUtil.innerHTML = (showUtilPct ? '% Utilidad' : 'Utilidad') + ' <i class="fas fa-exchange-alt small opacity-50 ms-1"></i>';
-
-    document.querySelectorAll('.val-costo').forEach(el => el.classList.toggle('d-none', !showCosto));
-    document.querySelectorAll('.val-mayorista').forEach(el => el.classList.toggle('d-none', showCosto));
-    
-    document.querySelectorAll('.val-util-pct').forEach(el => el.classList.toggle('d-none', !showUtilPct));
-    document.querySelectorAll('.val-util-neta').forEach(el => el.classList.toggle('d-none', showUtilPct));
+    Object.keys(columnConfig).forEach(id => {
+        const conf = columnConfig[id];
+        const isVisible = userPrefs[id] !== undefined ? userPrefs[id] : conf.default;
+        document.querySelectorAll('.' + id).forEach(el => el.style.display = isVisible ? '' : 'none');
+    });
 }
 
-function handleUtilSort() {
-    const field = showUtilPct ? 'ganancia_pct' : 'ganancia_neta';
-    sortBy(field);
-}
-
-function handlePriceSort() {
-    const field = showCosto ? 'costo' : 'precio_mayorista';
-    sortBy(field);
+function resetColumns() {
+    userPrefs = {};
+    localStorage.removeItem('pt_column_prefs');
+    const chks = document.querySelectorAll('#colToggles input');
+    chks.forEach(chk => {
+        const id = chk.value;
+        chk.checked = columnConfig[id].default;
+    });
+    applyColumnVisibility();
 }
 
 // Modificar loadData para aplicar visibilidad después de cargar
@@ -1658,10 +2272,16 @@ async function loadData(page) {
     const name = document.getElementById('f_name').value;
     const status = document.getElementById('f_status').value;
     const stockRange = document.getElementById('f_stock').value;
+    const view = getViewMode();
+    const withStock = getWithStockMode() ? '1' : '0';
+    const alm = getWarehouseScope();
 
-    const url = `products_table.php?ajax_load=1&page=${page}&limit=${limit}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}`;
+    const url = `products_table.php?ajax_load=1&page=${page}&limit=${limit}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}&view=${view}&with_stock=${withStock}&alm=${alm}`;
     
-    document.getElementById('tableBody').style.opacity = '0.5';
+    const tableBody = document.getElementById('tableBody');
+    const cardsView = document.getElementById('cardsView');
+    if (tableBody) tableBody.style.opacity = '0.5';
+    if (cardsView) cardsView.style.opacity = '0.5';
     
     try {
         const res = await fetch(url);
@@ -1672,7 +2292,11 @@ async function loadData(page) {
             return;
         }
 
-        document.getElementById('tableBody').innerHTML = data.html;
+        if (view === 'cards') {
+            if (cardsView) cardsView.innerHTML = data.html;
+        } else if (tableBody) {
+            tableBody.innerHTML = data.html;
+        }
         document.getElementById('totalCountDisplay').innerText = data.total;
         document.getElementById('currentPageDisplay').innerText = data.page;
         document.getElementById('totalValueDisplay').innerText = '$' + data.valor;
@@ -1685,16 +2309,18 @@ async function loadData(page) {
         
         renderPagination(data.page, data.pages);
         
-        document.getElementById('tableBody').style.opacity = '1';
+        if (tableBody) tableBody.style.opacity = '1';
+        if (cardsView) cardsView.style.opacity = '1';
         initInlineEdit();
-        applyColumnVisibility(); // Aplicar después de renderizar
+        applyColumnVisibility(); 
         updateSortIcons();
         
     } catch(e) { 
         console.error(e); 
         showToast('❌ Error cargando datos'); 
     } finally {
-        document.getElementById('tableBody').style.opacity = '1';
+        if (tableBody) tableBody.style.opacity = '1';
+        if (cardsView) cardsView.style.opacity = '1';
     }
 }
 
@@ -1704,7 +2330,7 @@ function exportCsv() {
     const name = document.getElementById('f_name').value;
     const status = document.getElementById('f_status').value;
     const stockRange = document.getElementById('f_stock').value;
-    const url = `products_table.php?action=export_csv&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}&limit=${limit}`;
+    const url = `products_table.php?action=export_csv&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}&limit=${limit}&alm=${getWarehouseScope()}&with_stock=${getWithStockMode() ? '1' : '0'}`;
     window.location.href = url;
 }
 
@@ -1747,6 +2373,36 @@ function sortBy(field) {
     loadData(1);
 }
 
+async function toggleActive(sku, button) {
+    const oldLabel = button?.innerHTML || '';
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>...';
+    }
+    try {
+        const row = button?.closest('tr, .product-mini-card');
+        const isInactive = row?.classList.contains('row-inactive') || row?.classList.contains('card-inactive');
+        const formData = new FormData();
+        formData.append('bulk_action', isInactive ? 'active_on' : 'active_off');
+        formData.append('skus', JSON.stringify([sku]));
+        const res = await fetch('products_table.php', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.status === 'success') {
+            showToast(isInactive ? '✅ Producto activado' : '✅ Producto desactivado');
+            loadData(currentPage);
+        } else {
+            showToast('❌ Error: ' + (data.msg || 'desconocido'));
+        }
+    } catch (e) {
+        showToast('❌ Error de conexión');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = oldLabel;
+        }
+    }
+}
+
 function updateSortIcons() {
     // Resetear todos
     document.querySelectorAll('.fa-sort, .fa-sort-up, .fa-sort-down').forEach(i => {
@@ -1756,12 +2412,6 @@ function updateSortIcons() {
     });
     // Activar el actual
     let targetId = 'icon_' + currentSort;
-    if (currentSort === 'ganancia_neta' || currentSort === 'ganancia_pct') {
-        targetId = 'icon_util_col';
-    } else if (currentSort === 'costo' || currentSort === 'precio_mayorista') {
-        targetId = 'icon_price_col';
-    }
-    
     const activeIcon = document.getElementById(targetId);
     if (activeIcon) {
         activeIcon.className = `fas fa-sort-${currentDir === 'ASC' ? 'up' : 'down'} text-primary small`;
@@ -1915,7 +2565,18 @@ if(bulkSelect) {
     });
 }
 
-async function applyBulkAction() {
+let cloneOptionsModalInstance = null;
+function openCloneOptionsModal() {
+    const modalEl = document.getElementById('cloneOptionsModal');
+    if (!cloneOptionsModalInstance && modalEl) {
+        cloneOptionsModalInstance = new bootstrap.Modal(modalEl);
+    }
+    if (cloneOptionsModalInstance) {
+        cloneOptionsModalInstance.show();
+    }
+}
+
+async function submitBulkAction(extraFormData = null) {
     const action = document.getElementById('bulkActionSelect').value;
     const selected = Array.from(document.querySelectorAll('.bulk-check:checked')).map(c => c.value);
     if(selected.length === 0) return showToast("⚠️ Selecciona productos.");
@@ -1925,6 +2586,11 @@ async function applyBulkAction() {
         const copiesInt = Math.min(Math.max(parseInt(copies || '1', 10), 1), 10);
         const url = `print_labels.php?skus=${selected.join(',')}&copies=${copiesInt}`;
         window.open(url, 'Etiquetas', 'width=800,height=600');
+        return;
+    }
+
+    if(action === 'clone_selected' && !extraFormData) {
+        openCloneOptionsModal();
         return;
     }
 
@@ -1939,13 +2605,20 @@ async function applyBulkAction() {
         if(val === '') return showToast('⚠️ Ingrese el stock mínimo.');
         formData.append('new_stock_min_val', val);
     }
-    if(action === 'clone_selected') {
-        if(!confirm(`¿Clonar ${selected.length} productos como copias?`)) return;
+    if (action === 'clone_selected') {
+        const opts = extraFormData || {};
+        formData.append('clone_copy_images', opts.clone_copy_images ? '1' : '0');
+        formData.append('clone_copy_prices', opts.clone_copy_prices ? '1' : '0');
     }
-
     try {
         const res = await fetch('products_table.php', { method: 'POST', body: formData });
-        const data = await res.json();
+        const raw = await res.text();
+        let data;
+        try {
+            data = JSON.parse(raw);
+        } catch (parseErr) {
+            throw new Error(raw && raw.trim() ? raw.trim().slice(0, 220) : 'Respuesta inválida del servidor.');
+        }
         if(data.status === 'success') {
             if(data.mode === 'clone') showToast(`✅ ${data.count} productos clonados.`);
             else showToast("✅ Listo");
@@ -1953,7 +2626,16 @@ async function applyBulkAction() {
         } else {
             showToast("❌ Error: " + data.msg);
         }
-    } catch(e) { showToast("❌ Error conexión"); }
+    } catch(e) { showToast("❌ Error conexión: " + (e.message || 'desconocido')); }
+}
+
+async function applyBulkAction() {
+    const action = document.getElementById('bulkActionSelect').value;
+    if (action === 'clone_selected') {
+        openCloneOptionsModal();
+        return;
+    }
+    return submitBulkAction();
 }
 
 async function cloneProduct(sku) {
@@ -2300,8 +2982,23 @@ function productoCreadoExito(nuevoProducto) { loadData(1); }
 
 // Imprimir conteo (Listado para conteo manual ordenado por categoría y nombre)
 async function printInventoryCount() {
-    const res = await fetch('products_table.php?action=get_full_active_list');
-    const products = await res.json();
+    const res = await fetch('products_table.php?action=get_full_active_list', {
+        headers: { 'Accept': 'application/json' },
+        cache: 'no-store'
+    });
+    const raw = await res.text();
+    let products;
+    try {
+        products = JSON.parse(raw);
+    } catch (parseErr) {
+        console.error('Respuesta inválida del conteo:', raw);
+        showToast('❌ El conteo devolvió HTML en lugar de JSON. Revisa sesión o error del servidor.');
+        return;
+    }
+    if (!res.ok || !Array.isArray(products)) {
+        showToast('❌ No se pudo cargar el conteo.');
+        return;
+    }
     
     let html = `
     <html>
@@ -2408,9 +3105,93 @@ async function forceImageCacheReset() {
     showToast(`✅ Caché de imágenes limpiada. Elementos eliminados: ${deleted}`);
 }
 
+
+// --- MARINERO SYNC: OFFLINE-FIRST ENGINE ---
+const DB_NAME = 'PalWebInventory';
+const DB_VERSION = 1;
+const SYNC_KEY = 'last_products_sync';
+
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains('products')) {
+                db.createObjectStore('products', { keyPath: 'codigo' });
+            }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function saveProductsLocal(products) {
+    const db = await openDB();
+    const tx = db.transaction('products', 'readwrite');
+    const store = tx.objectStore('products');
+    products.forEach(p => store.put(p));
+    return new Promise((resolve) => tx.oncomplete = resolve);
+}
+
+async function getProductsLocal() {
+    const db = await openDB();
+    const tx = db.transaction('products', 'readonly');
+    const store = tx.objectStore('products');
+    const request = store.getAll();
+    return new Promise((resolve) => request.onsuccess = () => resolve(request.result));
+}
+
+async function marineroSync() {
+    if (!navigator.onLine) return;
+    const lastSync = localStorage.getItem(SYNC_KEY) || '2000-01-01 00:00:00';
+    console.log('Sincronizando desde:', lastSync);
+    
+    try {
+        const res = await fetch(`products_table.php?ajax_load=1&sync_mode=1&since=${encodeURIComponent(lastSync)}`);
+        const data = await res.json();
+        if (data.status === 'success' && data.products.length > 0) {
+            await saveProductsLocal(data.products);
+            localStorage.setItem(SYNC_KEY, data.server_time);
+            console.log(`Sincronizados ${data.products.length} productos nuevos/cambiados.`);
+            return true;
+        }
+    } catch (e) {
+        console.warn('Error en sincronización incremental:', e);
+    }
+    return false;
+}
+
+// Sobrescribir loadData para usar el motor Offline-First
+const originalLoadData = loadData;
+loadData = async function(page = 1) {
+    const tableBody = document.getElementById('tableBody');
+    
+    // 1. Mostrar lo que tenemos localmente de inmediato (si es la primera carga o búsqueda vacía)
+    const localProds = await getProductsLocal();
+    if (localProds.length > 0 && page === 1) {
+        // Aquí podríamos filtrar localmente, pero por ahora dejamos que el servidor mande la página
+        // Sin embargo, si no hay internet, mostramos lo local.
+        if (!navigator.onLine) {
+            showToast('⚠️ Modo Offline: Mostrando datos locales');
+        }
+    }
+
+    // 2. Intentar cargar desde el servidor
+    try {
+        await originalLoadData(page);
+        // 3. Después de cargar, sincronizar en segundo plano lo que falta
+        marineroSync();
+    } catch (e) {
+        if (localProds.length > 0) {
+            showToast('Conexión perdida. Usando base de datos local.');
+            // Implementar renderizado local si el servidor falla
+        }
+    }
+};
+
 // Inicializar
 document.addEventListener('DOMContentLoaded', function() {
-    applyColumnVisibility();
+    initColumnToggles();
     initInlineEdit();
     updateCount();
     // Marcar el ícono por defecto (Nombre ASC)
@@ -2426,6 +3207,24 @@ document.addEventListener('DOMContentLoaded', function() {
     if (limitEl) limitEl.value = '<?php echo (int)$limit; ?>';
     const stockEl = document.getElementById('f_stock');
     if (stockEl) stockEl.value = '<?php echo htmlspecialchars($filterStockRange, ENT_QUOTES, 'UTF-8'); ?>';
+    const cloneBtn = document.getElementById('confirmCloneAdvancedBtn');
+    if (cloneBtn) {
+        cloneBtn.addEventListener('click', async () => {
+            const opts = {
+                clone_copy_images: document.getElementById('cloneCopyImages') ? document.getElementById('cloneCopyImages').checked : true,
+                clone_copy_prices: document.getElementById('cloneCopyPrices') ? document.getElementById('cloneCopyPrices').checked : true
+            };
+            if (cloneOptionsModalInstance) cloneOptionsModalInstance.hide();
+            await submitBulkAction(opts);
+        });
+    }
+
+    // Registrar Service Worker Independiente
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw-products.js')
+            .then(reg => console.log('Gestor de Inventario Offline listo'))
+            .catch(err => console.warn('Error registrando SW de Inventario', err));
+    }
 });
 
 async function reloadCategorySelects() {
