@@ -9,7 +9,7 @@ header("Alt-Svc: h2=\":443\"; ma=86400");
 header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload");
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
-header("X-XSS-Protection: 1; mode=block");
+// X-XSS-Protection obsoleto — reemplazado por CSP
 header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
 header("Pragma: no-cache");
 header("Expires: 0");
@@ -341,7 +341,8 @@ if (isset($_GET['load_products'])) {
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
                      FROM stock_almacen s
-                     WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
+                     WHERE s.id_producto = p.codigo AND s.id_almacen = ?
+                       AND EXISTS (SELECT 1 FROM productos ep WHERE ep.codigo = s.id_producto AND ep.id_empresa = ?)) as stock
                     FROM productos p
                     LEFT JOIN productos_precios_sucursal ps
                            ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
@@ -349,7 +350,7 @@ if (isset($_GET['load_products'])) {
                     ORDER BY p.nombre";
 
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtProd->execute(array_merge([$almacenID, $sucursalID], $params));
+        $stmtProd->execute(array_merge([$almacenID, (int)$ctxConfig['id_empresa'], $sucursalID], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
         $prods = combo_apply_product_rows($pdo, $prods, (int)$ctxConfig['id_empresa'], $almacenID);
 
@@ -774,13 +775,14 @@ try {
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
                  FROM stock_almacen s
-                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?) as stock
+                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?
+                   AND EXISTS (SELECT 1 FROM productos ep WHERE ep.codigo = s.id_producto AND ep.id_empresa = ?)) as stock
                 FROM productos p
                 WHERE $where
                 ORDER BY p.nombre";
 
     $stmtProd = $pdo->prepare($sqlProd);
-    $stmtProd->execute(array_merge([$almacenID], $params));
+    $stmtProd->execute(array_merge([$almacenID, (int)($config['id_empresa'] ?? 1)], $params));
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
     $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa'] ?? 1), $almacenID);
 
@@ -808,11 +810,16 @@ foreach ($prods as &$p) {
 
 // Query de más vendidos (para sugerencias cuando no hay favoritos)
 $mostSoldCodes = [];
+$mostSoldEmpId = (int)($config['id_empresa'] ?? 1);
+$mostSoldSucId = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
 try {
-    $stmtMs = $pdo->query(
-        "SELECT id_producto FROM ventas_detalle
-         GROUP BY id_producto ORDER BY SUM(cantidad) DESC LIMIT 10"
+    $stmtMs = $pdo->prepare(
+        "SELECT d.id_producto FROM ventas_detalle d
+         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+         WHERE v.id_empresa = ? AND v.id_sucursal = ?
+         GROUP BY d.id_producto ORDER BY SUM(d.cantidad) DESC LIMIT 10"
     );
+    $stmtMs->execute([$mostSoldEmpId, $mostSoldSucId]);
     $mostSoldCodes = $stmtMs->fetchAll(PDO::FETCH_COLUMN);
 } catch (Exception $e) { $mostSoldCodes = []; }
 ?>
@@ -1270,7 +1277,7 @@ try {
 <base href="<?php echo htmlspecialchars($posDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
 <link rel="manifest" href="manifest-pos.php">
 <meta name="theme-color" content="#2c3e50">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -1279,16 +1286,11 @@ try {
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            const posScope = <?php echo json_encode($posScopePath); ?>;
-            const rootScope = new URL('./', document.baseURI).href;
-            navigator.serviceWorker.getRegistration(rootScope)
-                .then(reg => {
-                    if (reg && reg.scope === rootScope) return reg.unregister();
-                })
-                .catch(() => {})
-                .finally(() => navigator.serviceWorker.register('service-worker.js', { scope: posScope }))
-                .then(reg => console.log('SW registrado: ', reg))
-                .catch(err => console.log('SW error: ', err));
+            // Registramos en la raíz para que el SW controle tanto /pos/ como /assets/
+            const swScope = '<?php echo $posDocumentBase; ?>';
+            navigator.serviceWorker.register('service-worker.js', { scope: swScope })
+                .then(reg => console.log('SW POS registrado en scope:', reg.scope))
+                .catch(err => console.warn('Error registrando SW de POS', err));
         });
     }
 </script>
@@ -1479,7 +1481,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 
         <div class="px-3 py-2 bg-light border-top totals-area">
             <div class="d-flex justify-content-between align-items-end">
-                <div class="small text-muted">Items: <span id="totalItems">0</span> &nbsp;Prod: <span id="totalProds">0</span></div>
+                <div class="small text-muted">Items: <span id="totalItems">0</span> &nbsp;Líneas: <span id="totalLines">0</span></div>
                 <div class="fs-3 fw-bold text-dark text-end" id="totalAmount">$0.00</div>
             </div>
         </div>
@@ -1700,7 +1702,15 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         <div class="modal-content">
             <div class="modal-header bg-info text-white py-2">
                 <h5 class="modal-title"><i class="fas fa-history me-2"></i>Historial de Tickets - Sesión Actual</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <div class="d-flex align-items-center gap-2">
+                    <small id="historialRefreshState" class="text-white-50 fw-bold d-none" style="font-size:0.72rem;">
+                        <i class="fas fa-pause me-1"></i>PAUSADO
+                    </small>
+                    <button type="button" id="btnRefreshHistorial" class="btn btn-sm btn-light text-info fw-bold" onclick="refreshHistorialModal()" title="Refrescar historial">
+                        <i class="fas fa-sync-alt me-1"></i><span class="refresh-label">Refrescar</span>
+                    </button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
             </div>
             <div class="modal-body p-0" id="historialModalBody">
                 <div class="text-center p-4">
@@ -1747,6 +1757,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     ?>;
     const MOST_SOLD_CODES = <?php echo json_encode($mostSoldCodes); ?>;
     let CLIENTS_DATA = <?php echo json_encode($clientsData); ?>; // Lista inicial
+    window.CLIENTS_DATA = CLIENTS_DATA;
     const MESSENGERS_DATA = <?php echo json_encode($mensajeros ?? []); ?>;
     // Almacenes disponibles por sucursal (id_sucursal → [{id, nombre}])
     // Usado para el selector multi-almacén en la pantalla de login con PIN
@@ -1821,6 +1832,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         .then(res => {
             if(res.status === 'success') {
                 CLIENTS_DATA.push(res.client);
+                window.CLIENTS_DATA = CLIENTS_DATA;
                 const list = document.getElementById('cliName');
                 if (list) {
                     const opt = document.createElement('option');
@@ -1874,23 +1886,31 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     // Mostrar el banner si aplica
     function maybeShowBanner() {
         if (isPwaInstalled()) return; // ya instalado, no mostrar nada
-        if (sessionStorage.getItem('pwa_banner_dismissed')) return; // el usuario lo cerró esta sesión
+        if (sessionStorage.getItem('pwa_banner_dismissed')) return; 
 
         const banner   = document.getElementById('pwaBanner');
         const iosSteps = document.getElementById('pwaIosSteps');
         const installBtn = document.getElementById('btnInstallPwa');
+        const subText = document.getElementById('pwaSubText');
         if (!banner) return;
 
         if (isIos() && !navigator.standalone) {
-            // iOS: mostrar instrucciones manuales
+            // iOS: instrucciones manuales
             iosSteps.style.display = 'block';
-            installBtn.style.display = 'none'; // no hay API de install en iOS
+            installBtn.style.display = 'none'; 
             banner.style.display = 'block';
         } else if (_deferredPrompt) {
-            // Chrome/Android/Edge: botón de instalación disponible
+            // Chrome/Android con evento capturado: Botón directo
+            iosSteps.style.display = 'none';
+            installBtn.style.display = 'block';
+            banner.style.display = 'block';
+        } else {
+            // Browser soporta PWA pero no disparó el evento (o no lo soporta)
+            // Mostramos un mensaje de ayuda en lugar de ocultar todo
+            installBtn.style.display = 'none';
+            subText.innerHTML = 'Para usar offline: Abre el menú de tu navegador y selecciona <b>"Instalar aplicación"</b> o <b>"Agregar a pantalla de inicio"</b>.';
             banner.style.display = 'block';
         }
-        // Si no hay deferredPrompt y no es iOS → browser no soporta o ya instalado → no mostrar
     }
 
     // Capturar el evento nativo de instalación (Chrome, Edge, Android)
