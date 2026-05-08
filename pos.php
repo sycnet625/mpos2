@@ -2293,12 +2293,13 @@ window.updateCartBackground = function (sucursalId) {
         const data = await res.json();
         const tbody = document.getElementById('selfOrdersTableBody');
         tbody.innerHTML = '';
+        const orders = Array.isArray(data.orders) ? data.orders : [];
         
-        if(data.orders.length === 0) {
+        if (orders.length === 0) {
             tbody.innerHTML = '<tr><td colspan="5" class="text-center py-4 text-muted">No hay pedidos pendientes</td></tr>';
         }
 
-        data.orders.forEach(o => {
+        orders.forEach(o => {
             const safeId     = parseInt(o.id, 10);
             const safeNombre = escapeHtml(o.cliente_nombre);
             const safeHora   = escapeHtml(o.fecha.split(' ')[1] ?? '');
@@ -2344,7 +2345,7 @@ window.updateCartBackground = function (sucursalId) {
         if(data.status === 'success') {
             data.items.forEach(it => {
                 // Buscar producto real en el catálogo local del POS
-                const product = productsDB.find(p => p.codigo === it.codigo);
+                const product = productsDB.find(p => String(p.codigo) === String(it.codigo));
                 if(product) {
                     // Pasar la cantidad real (puede ser decimal, ej: 2.5 kg)
                     window.addToCart(product, parseFloat(it.cantidad) || 1);
