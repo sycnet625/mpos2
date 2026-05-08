@@ -2,23 +2,28 @@
 // ARCHIVO: /var/www/palweb/api/ticket_view.php
 header('Content-Type: text/html; charset=utf-8');
 ini_set('display_errors', 0);
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
 require_once 'db.php';
 
 require_once 'config_loader.php';
 
 $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die("ID inválido.");
-$priceView = strtolower(trim((string)($_GET['price_view'] ?? 'venta')));
+
+// ── Preferencias persistidas en localStorage ──────────────────────────────────
+// Se leen de GET (explícito) o se cargan desde localStorage (recuerda entre sesiones)
+$priceView = strtolower(trim((string)($_GET['price_view'] ?? '')));
 if (!in_array($priceView, ['venta', 'mayorista'], true)) {
-    $priceView = 'venta';
+    $priceView = ''; // vacío = usar localStorage
 }
 $markupPct = isset($_GET['markup_pct']) ? round(floatval($_GET['markup_pct']), 2) : 0.0;
 if ($markupPct < -99.99) $markupPct = -99.99;
 $markupFactor = 1 + ($markupPct / 100);
 $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
-$printFormat = strtolower(trim((string)($_GET['format'] ?? '80mm')));
+$printFormat = strtolower(trim((string)($_GET['format'] ?? '')));
 if (!in_array($printFormat, ['58mm', '80mm', 'a4'], true)) {
-    $printFormat = '80mm';
+    $printFormat = ''; // vacío = usar localStorage
 }
 
 try {
@@ -37,7 +42,7 @@ try {
 
     $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto,
                       COALESCE(p.nombre, CONCAT('Art: ', d.id_producto)) AS nombre_producto,
-                      COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual
+                      COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual
                FROM ventas_detalle d
                LEFT JOIN productos p ON d.id_producto = p.codigo
                LEFT JOIN productos_precios_sucursal ps
@@ -281,42 +286,174 @@ if ($priceView === 'mayorista') {
 <body<?php echo $viaQr ? ' class="qr-mode"' : ''; ?>>
 <div class="ticket-paper">
     <div class="no-print border-bottom mb-2" style="padding:8px 10px; background:#f8f9fa; text-align:center;">
-        <div style="font-size:10px; color:#888; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Opciones de impresión</div>
+        <div style="font-size:10px; color:#888; font-weight:700; text-transform:uppercase; letter-spacing:.05em; margin-bottom:8px;">Opciones de impresión <span id="savedBadge" style="display:none; font-size:9px; background:#dcfce7; color:#166534; padding:2px 6px; border-radius:10px; margin-left:6px; font-weight:700;">✓ Guardado</span></div>
         <div class="toolbar-grid">
             <div class="toolbar-group">
                 <label for="printFormatSelect">Tipo de impresora</label>
-                <select id="printFormatSelect">
-                    <option value="58mm" <?php echo $printFormat === '58mm' ? 'selected' : ''; ?>>Térmica 58mm</option>
-                    <option value="80mm" <?php echo $printFormat === '80mm' ? 'selected' : ''; ?>>Térmica 80mm</option>
-                    <option value="a4" <?php echo $printFormat === 'a4' ? 'selected' : ''; ?>>A4 Deskjet</option>
+                <select id="printFormatSelect" data-pref="printFormat">
+                    <option value="58mm">Térmica 58mm</option>
+                    <option value="80mm">Térmica 80mm</option>
+                    <option value="a4">A4 Deskjet</option>
                 </select>
             </div>
             <div class="toolbar-group">
                 <label for="printDocumentSelect">Documento</label>
-                <select id="printDocumentSelect">
-                    <option value="ticket" selected>Ticket</option>
+                <select id="printDocumentSelect" data-pref="printDocument">
+                    <option value="ticket">Ticket</option>
                     <option value="factura">Factura</option>
                     <option value="comprobante">Comprobante Premium</option>
                 </select>
             </div>
             <div class="toolbar-group">
                 <label for="printPriceSelect">Precio visual</label>
-                <select id="printPriceSelect">
-                    <option value="normal" <?php echo $pricePreset === 'normal' ? 'selected' : ''; ?>>Precio normal</option>
-                    <option value="minus10" <?php echo $pricePreset === 'minus10' ? 'selected' : ''; ?>>Bajar 10%</option>
-                    <option value="plus10" <?php echo $pricePreset === 'plus10' ? 'selected' : ''; ?>>Subir 10%</option>
-                    <option value="plus20" <?php echo $pricePreset === 'plus20' ? 'selected' : ''; ?>>Subir 20%</option>
-                    <option value="plus50" <?php echo $pricePreset === 'plus50' ? 'selected' : ''; ?>>Subir 50%</option>
-                    <option value="mayorista" <?php echo $pricePreset === 'mayorista' ? 'selected' : ''; ?>>Precio mayorista</option>
+                <select id="printPriceSelect" data-pref="printPrice">
+                    <option value="normal">Precio normal</option>
+                    <option value="minus10">Bajar 10%</option>
+                    <option value="plus10">Subir 10%</option>
+                    <option value="plus20">Subir 20%</option>
+                    <option value="plus50">Subir 50%</option>
+                    <option value="mayorista">Precio mayorista</option>
                 </select>
             </div>
             <div class="toolbar-actions">
                 <button class="btn-print-main" onclick="printSelectedDocument()">🖨️ Imprimir</button>
+                <button style="background:#2F75B5; color:white; border:none; border-radius:6px; padding:7px 10px; font-size:11px; font-weight:bold; cursor:pointer;"
+                        onclick="openDuoPrintModal()">🖨️ Dúplex (2 Tickets)</button>
                 <button class="btn-wa" onclick="openWhatsAppModal(<?= $idVenta ?>)">💬 Enviar por WhatsApp</button>
                 <button class="btn-close-mini" onclick="window.close()">✕ Cerrar</button>
             </div>
         </div>
     </div>
+
+    <script>
+    // ── Preferencias persistidas (localStorage) ───────────────────────────
+    const LS_KEY = 'ticket_view_prefs';
+    var _savedTimer = null;
+
+    function loadPrefs() {
+        try {
+            return JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+        } catch(e) { return {}; }
+    }
+
+    function savePrefs(prefs) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(prefs)); } catch(e) {}
+    }
+
+    function getEffectiveValue(el, prefs) {
+        // Si el URL tiene parámetro explícito para esta preference, úsalo
+        // (viene del GET, ya reflejado en value del select por PHP)
+        return el.value;
+    }
+
+    function showSavedBadge() {
+        const b = document.getElementById('savedBadge');
+        if (!b) return;
+        b.style.display = 'inline-block';
+        clearTimeout(_savedTimer);
+        _savedTimer = setTimeout(() => { b.style.display = 'none'; }, 2000);
+    }
+
+    function persistSelect(el) {
+        if (!el || !el.dataset.pref) return;
+        const prefs = loadPrefs();
+        prefs[el.dataset.pref] = el.value;
+        savePrefs(prefs);
+        showSavedBadge();
+    }
+
+    function applyPrefsFromStorage() {
+        const prefs = loadPrefs();
+        const url = new URL(window.location.href);
+
+        // Para cada select con data-pref, restaurar valor desde localStorage
+        // solo si NO vino un parámetro GET explícito (el value ya está seteado por PHP)
+        document.querySelectorAll('select[data-pref]').forEach(function(el) {
+            const key = el.dataset.pref;
+            const hasGetParam = (
+                (key === 'printFormat' && url.searchParams.has('format')) ||
+                (key === 'printPrice' && (url.searchParams.has('price_view') || url.searchParams.has('markup_pct'))) ||
+                (key === 'printDocument' && false) // nunca viene por GET
+            );
+            if (!hasGetParam && prefs[key]) {
+                el.value = prefs[key];
+            }
+        });
+    }
+
+    // Al cambiar cualquier select, guardar en localStorage
+    document.querySelectorAll('select[data-pref]').forEach(function(el) {
+        el.addEventListener('change', function() { persistSelect(el); });
+    });
+
+    // Al cargar la página, restaurar prefs desde localStorage si no hay GET
+    applyPrefsFromStorage();
+
+    // Actualizar el notice de precio según la selección (toolbar ya lista)
+    function applyNoticeFromSelect() {
+        const sel = document.getElementById('printPriceSelect');
+        if (!sel) return;
+        const noticeEl = document.getElementById('priceNoticeDynamic');
+        if (!noticeEl) return;
+        const v = sel.value;
+        var title = '', body = '';
+        if (v === 'mayorista') {
+            title = 'IMPRESION ESPECIAL: PRECIO MAYORISTA';
+            body = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+        } else if (v === 'minus10') {
+            title = 'IMPRESION ESPECIAL: PRECIOS CON -10%';
+            body = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+        } else if (v === 'plus10') {
+            title = 'IMPRESION ESPECIAL: PRECIOS CON +10%';
+            body = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+        } else if (v === 'plus20') {
+            title = 'IMPRESION ESPECIAL: PRECIOS CON +20%';
+            body = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+        } else if (v === 'plus50') {
+            title = 'IMPRESION ESPECIAL: PRECIOS CON +50%';
+            body = 'Solo visual. La venta y la contabilidad conservan el precio original del POS.';
+        } else {
+            title = '';
+            body = '';
+        }
+        if (title) {
+            noticeEl.innerHTML = '<div style="margin:8px 0; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">' + title + '<br><span style="font-weight:normal;">' + body + '</span></div>';
+            noticeEl.style.display = 'block';
+        } else {
+            noticeEl.style.display = 'none';
+        }
+    }
+
+    // Al cambiar la selección de precio, actualizar notice y guardar
+    document.getElementById('printPriceSelect').addEventListener('change', function() {
+        persistSelect(this);
+        applyNoticeFromSelect();
+    });
+
+    // Al cargar, sincronizar notice con lo que se mostró (GET params)
+    (function syncNoticeOnLoad() {
+        const url = new URL(window.location.href);
+        const pricePreset = '<?php echo $pricePreset; ?>';
+        if (pricePreset && pricePreset !== 'normal') {
+            applyNoticeFromSelect();
+        }
+    })();
+    </script>
+
+    <!-- Script para Dúplex -->
+    <script>
+    function openDuoPrintModal() {
+        const id1 = <?= $idVenta ?>;
+        const id2 = prompt("Ingresa el ID del SEGUNDO ticket para imprimir en la misma hoja (o deja vacío para duplicar el actual):", "");
+        if (id2 === null) return; // cancelado
+        
+        let url = `ticket_duo_invoice.php?id1=${id1}`;
+        if (id2.trim() !== "") {
+            url += `&id2=${parseInt(id2)}`;
+        }
+        window.open(url, '_blank', 'width=900,height=800');
+    }
+    </script>
 
     <div class="text-center">
         <?php
@@ -334,10 +471,12 @@ if ($priceView === 'mayorista') {
         <small><?php echo htmlspecialchars($config['direccion']); ?></small><br>
         <small>Tel: <?php echo htmlspecialchars($config['telefono']); ?></small>
         <?php if ($priceNoticeTitle !== ''): ?>
-        <div style="margin-top:6px; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">
+        <div id="priceNoticeDynamic" style="margin-top:6px; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">
             <?php echo htmlspecialchars($priceNoticeTitle); ?><br>
             <span style="font-weight:normal;"><?php echo htmlspecialchars($priceNoticeBody); ?></span>
         </div>
+        <?php else: ?>
+        <div id="priceNoticeDynamic" style="display:none;"></div>
         <?php endif; ?>
     </div>
 
@@ -676,6 +815,9 @@ window.addEventListener('load', function () {
 function openWhatsAppModal(idVenta) {
     const currentDoc = (document.getElementById('printDocumentSelect') || {}).value || 'ticket';
     const currentPrice = (document.getElementById('printPriceSelect') || {}).value || 'normal';
+    const ticketPhone = String(<?= json_encode((string)($venta['cliente_telefono'] ?? '')) ?> || '').trim();
+    const ticketClientName = String(<?= json_encode((string)($venta['cliente_nombre'] ?? '')) ?> || '').trim();
+    const ticketClientId = <?= (int)($venta['id_cliente'] ?? 0) ?>;
     const modal = document.createElement('div');
     modal.id = 'whatsappModal';
     modal.style.cssText = `
@@ -759,7 +901,11 @@ function openWhatsAppModal(idVenta) {
     }
 
     // Cargar contactos
-    cargarContactosWhatsApp();
+    cargarContactosWhatsApp(idVenta, {
+        ticketPhone,
+        ticketClientName,
+        ticketClientId
+    });
 }
 
 function cerrarWhatsAppModal() {
@@ -767,25 +913,83 @@ function cerrarWhatsAppModal() {
     if (modal) modal.remove();
 }
 
-function cargarContactosWhatsApp() {
-    fetch('ticket_whatsapp_send.php?action=get_contacts')
-        .then(r => r.json())
+function cargarContactosWhatsApp(idVenta, ticketInfo = {}) {
+    const select = document.getElementById('contactoWhatsApp');
+    if (!select) return;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 12000);
+    const url = 'whatsapp_contacts.php';
+
+    fetch(url, { signal: controller.signal })
+        .then(async r => {
+            const txt = await r.text();
+            try {
+                return JSON.parse(txt);
+            } catch (e) {
+                throw new Error('Respuesta inválida del servidor');
+            }
+        })
         .then(data => {
+            clearTimeout(timeout);
+            const select = document.getElementById('contactoWhatsApp');
+            if (!select) return;
             if (data.status === 'success') {
-                const select = document.getElementById('contactoWhatsApp');
                 select.innerHTML = '<option value="">Selecciona un contacto...</option>';
 
-                (data.contactos || []).forEach(c => {
+                const ticketDigits = String(ticketInfo.ticketPhone || '').replace(/\D+/g, '');
+                const ticketName = String(ticketInfo.ticketClientName || '').trim();
+                const ticketId = parseInt(ticketInfo.ticketClientId || 0, 10) || 0;
+                const contactos = Array.isArray(data.contactos) ? data.contactos.slice() : [];
+                if (ticketDigits) {
+                    contactos.sort((a, b) => {
+                        const aDigits = String(a.whatsapp || '').replace(/\D+/g, '');
+                        const bDigits = String(b.whatsapp || '').replace(/\D+/g, '');
+                        const aMatch = aDigits === ticketDigits ? 0 : 1;
+                        const bMatch = bDigits === ticketDigits ? 0 : 1;
+                        if (aMatch !== bMatch) return aMatch - bMatch;
+                        if (ticketId > 0) {
+                            const aName = String(a.nombre || '').toLowerCase();
+                            const bName = String(b.nombre || '').toLowerCase();
+                            const tName = ticketName.toLowerCase();
+                            const aNameMatch = aName.includes(tName) ? 0 : 1;
+                            const bNameMatch = bName.includes(tName) ? 0 : 1;
+                            if (aNameMatch !== bNameMatch) return aNameMatch - bNameMatch;
+                        }
+                        return String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es');
+                    });
+                }
+
+                contactos.forEach(c => {
                     const option = document.createElement('option');
                     option.value = c.whatsapp;
                     option.textContent = `${c.nombre} (${c.whatsapp})`;
                     select.appendChild(option);
                 });
+
+                if (!contactos.length) {
+                    select.innerHTML = '<option value="">No hay contactos con WhatsApp</option>';
+                } else if (ticketDigits) {
+                    const preferred = Array.from(select.options).find(opt => {
+                        const digits = String(opt.value || '').replace(/\D+/g, '');
+                        return digits === ticketDigits;
+                    });
+                    if (preferred) {
+                        select.value = preferred.value;
+                    }
+                }
+            } else {
+                select.innerHTML = '<option value="">Error: ' + (data.msg || 'sin contactos') + '</option>';
+                console.error('WhatsApp contacts error:', data.msg || data);
             }
         })
         .catch(e => {
+            clearTimeout(timeout);
             const select = document.getElementById('contactoWhatsApp');
-            select.innerHTML = '<option value="">Error cargando contactos</option>';
+            if (select) {
+                const msg = (e.name === 'AbortError') ? 'Tiempo de espera agotado' : 'Error de conexión';
+                select.innerHTML = '<option value="">' + msg + '</option>';
+            }
             console.error('Error:', e);
         });
 }
