@@ -919,9 +919,11 @@ function cargarContactosWhatsApp(idVenta, ticketInfo = {}) {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 12000);
-    const url = 'whatsapp_contacts.php';
+    const url = new URL('whatsapp_contacts.php', window.location.href);
+    if (idVenta) url.searchParams.set('id_venta', String(idVenta));
+    if (ticketInfo.ticketClientId) url.searchParams.set('client_id', String(ticketInfo.ticketClientId));
 
-    fetch(url, { signal: controller.signal })
+    fetch(url.toString(), { signal: controller.signal })
         .then(async r => {
             const txt = await r.text();
             try {
