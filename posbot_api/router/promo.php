@@ -47,20 +47,26 @@ if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_chats') {
 if ($_SERVER['REQUEST_METHOD']==='GET' && $action==='promo_products') {
     $q = trim((string)($_GET['q'] ?? ''));
     $lim = max(1, min(30, (int)($_GET['limit'] ?? 20)));
-    $like = '%' . $q . '%';
+    // Fix #1: escapar wildcards de LIKE para evitar inyección
+    $like = '%' . addcslashes($q, '%_\\') . '%';
     $hasWholesale = bot_has_column($pdo, 'productos', 'precio_mayorista');
     $idEmpresa = (int)($config['id_empresa'] ?? 0);
-    $sql = "SELECT codigo,nombre,precio," . ($hasWholesale ? "COALESCE(precio_mayorista,0)" : "0") . " AS precio_mayorista
-            FROM productos
-            WHERE activo=1";
-    $params = [];
+    $idSucursal = (int)($config['id_sucursal'] ?? 0);
+    $sql = "SELECT p.codigo, p.nombre,
+                    COALESCE(ps.precio_venta, p.precio) AS precio,
+                    " . ($hasWholesale ? "COALESCE(ps.precio_mayorista, p.precio_mayorista, 0)" : "0") . " AS precio_mayorista
+            FROM productos p
+            LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+            WHERE p.activo=1";
+    $params = [$idSucursal];
+    // Fix #2: filtrar por empresa siempre
     if ($idEmpresa > 0) {
-        $sql .= " AND id_empresa=?";
+        $sql .= " AND p.id_empresa=?";
         $params[] = $idEmpresa;
     }
-    $sql .= " AND (nombre LIKE ? OR codigo LIKE ?)
-            ORDER BY nombre ASC
-            LIMIT {$lim}";
+    $sql .= " AND (p.nombre LIKE ? OR p.codigo LIKE ?)
+            ORDER BY p.nombre ASC
+            LIMIT " . $lim;
     $st = $pdo->prepare($sql);
     $params[] = $like;
     $params[] = $like;
@@ -384,6 +390,12 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
     foreach ($jobs as &$job) {
         if ((string)($job['id'] ?? '') !== $jobId) continue;
         $found = true;
+        // Fix #15: rate limit — mínimo 5 min entre forzados manuales
+        $lastForced = strtotime((string)($job['forced_at'] ?? '')) ?: 0;
+        if ($lastForced > 0 && ($now - $lastForced) < 300) {
+            $waitSec = 300 - ($now - $lastForced);
+            echo json_encode(['status'=>'error','msg'=>'Espera ' . $waitSec . 's antes de forzar esta campaña de nuevo.']); exit;
+        }
         foreach ($jobs as $otherJob) {
             if ((string)($otherJob['id'] ?? '') === $jobId) continue;
             $otherStatus = (string)($otherJob['status'] ?? '');
@@ -396,6 +408,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
         }
         $wasDone = (($job['status'] ?? '') === 'done');
         $reachedEnd = ((int)($job['current_index'] ?? 0) >= count((array)($job['targets'] ?? [])));
+        
+        // ACTUALIZAR PRECIOS E IMÁGENES DESDE BD ANTES DE LANZAR
+        bot_update_job_product_data($pdo, $job);
+
         $job['status'] = 'queued';
         $job['next_run_at'] = $now;
         $job['forced_at'] = date('c', $now);
@@ -405,6 +421,10 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_force_now') {
             $job['current_index'] = 0;
         }
         if (!is_array($job['log'] ?? null)) $job['log'] = [];
+        // Fix #7: truncar log si crece demasiado (mantener últimas 300)
+        if (count($job['log']) > 500) {
+            $job['log'] = array_slice($job['log'], -300);
+        }
         $job['log'][] = [
             'at' => date('c', $now),
             'type' => 'forced_start',
@@ -608,13 +628,19 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
 
     if ($templateId !== '' && ($text === '' || count($products) === 0)) {
         $tplData = bot_repo_read('promo_templates_file', ['rows' => []]);
+        $tplFound = false;
         foreach (($tplData['rows'] ?? []) as $tpl) {
             if ((string)($tpl['id'] ?? '') !== $templateId) continue;
+            $tplFound = true;
             if ($text === '') $text = trim((string)($tpl['text'] ?? ''));
             if (count($products) === 0 && is_array($tpl['products'] ?? null)) $products = $tpl['products'];
             if (count($bannerImages) === 0 && is_array($tpl['banner_images'] ?? null)) $bannerImages = $tpl['banner_images'];
             if ($campaignName === '') $campaignName = substr(trim((string)($tpl['name'] ?? '')), 0, 120);
             break;
+        }
+        // Fix #12: advertir si template_id no existe
+        if (!$tplFound) {
+            echo json_encode(['status'=>'error','msg'=>'Plantilla no encontrada: ' . $templateId]); exit;
         }
     }
 
@@ -622,6 +648,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && $action==='promo_create') {
     foreach ($targets as $t) {
         $id = substr(trim((string)($t['id'] ?? $t)), 0, 120);
         if ($id === '') continue;
+        // Fix #18: validar formato — debe ser teléfono (dígitos+@s.whatsapp.net) o grupo (@g.us) o email-like
+        if (!preg_match('/^[\w.:@\-]{3,120}$/', $id)) continue;
         $name = substr(trim((string)($t['name'] ?? $id)), 0, 200);
         $cleanTargetsMap[$id] = $name !== '' ? $name : $id;
     }

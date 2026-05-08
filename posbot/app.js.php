@@ -109,8 +109,8 @@ async function parseApiResponse(r){
   }
 }
 async function g(u){const sep=u.includes('?')?'&':'?';const r=await fetch(`${u}${sep}_ts=${Date.now()}`,{credentials:'same-origin',cache:'no-store'});return parseApiResponse(r)}
-async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});return parseApiResponse(r)}
-async function uploadPromoBanner(file){const fd=new FormData();fd.append('image',file);const r=await fetch(API+'?action=promo_upload_image',{method:'POST',credentials:'same-origin',body:fd});return parseApiResponse(r)}
+async function p(u,d){const r=await fetch(u,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},body:JSON.stringify(d)});return parseApiResponse(r)}
+async function uploadPromoBanner(file){const fd=new FormData();fd.append('image',file);const r=await fetch(API+'?action=promo_upload_image',{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},body:fd});return parseApiResponse(r)}
 function renderBotTonePreview(){
   const box=document.getElementById('botTonePreview');
   if(!box) return;

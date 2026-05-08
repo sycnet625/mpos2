@@ -100,7 +100,7 @@ function bot_write_json_file(string $file, array $data): bool {
 
     // Asegurarse que el directorio existe
     $dir = dirname($file);
-    if (!is_dir($dir) && !@mkdir($dir, 0777, true)) {
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true)) {
         return false;
     }
 
@@ -170,7 +170,8 @@ function bot_catalog_for_campaigns(PDO $pdo, array $config): array {
             LEFT JOIN stock_almacen s ON s.id_producto = p.codigo AND s.id_almacen = ?
             WHERE p.activo = 1 AND p.id_empresa = ?
             GROUP BY p.codigo, p.nombre, p.precio, p.es_reservable
-            ORDER BY p.nombre ASC";
+            ORDER BY p.nombre ASC
+            LIMIT 500";
     $st = $pdo->prepare($sql);
     $st->execute([$idAlmacen, $idEmpresa]);
     return $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -232,7 +233,8 @@ function bot_sanitize_shell_output(string $text): string {
 function bot_is_bridge_process_running(): bool {
     $out = [];
     $code = 1;
-    @exec('pgrep -f "wa_web_bridge/bridge.js" 2>/dev/null', $out, $code);
+    $pattern = escapeshellarg('wa_web_bridge/bridge.js');
+    @exec('pgrep -f ' . $pattern . ' 2>/dev/null', $out, $code);
     return $code === 0 && !empty($out);
 }
 
@@ -243,10 +245,13 @@ function bot_normalize_banner_images($input): array {
     foreach ($items as $img) {
         $url = trim((string)($img['url'] ?? $img));
         if ($url === '') continue;
+        // Fix #19: validar URL — solo http/https
+        if (!preg_match('~^https?://~i', $url)) continue;
+        if (strlen($url) > 500) $url = substr($url, 0, 500);
         if (!empty($hasSeen[$url])) continue;
         $hasSeen[$url] = true;
         $out[] = [
-            'url' => substr($url, 0, 500),
+            'url' => $url,
             'name' => substr(trim((string)($img['name'] ?? basename(parse_url($url, PHP_URL_PATH) ?: 'banner'))), 0, 180)
         ];
         if (count($out) >= 3) break;
@@ -388,8 +393,12 @@ function bot_ensure_tables(PDO $pdo): void {
 }
 
 function bot_cfg(PDO $pdo): array {
-    $c = $pdo->query("SELECT * FROM pos_bot_config WHERE id=1")->fetch(PDO::FETCH_ASSOC);
-    return $c ?: [];
+    try {
+        $c = $pdo->query("SELECT * FROM pos_bot_config WHERE id=1")->fetch(PDO::FETCH_ASSOC);
+        return $c ?: [];
+    } catch (Throwable $e) {
+        return [];
+    }
 }
 
 function bot_session_exists(PDO $pdo, string $wa): bool {
@@ -543,25 +552,103 @@ function bot_validate_bridge_for_campaign(): array {
     $statusFile = bot_bridge_status_file();
     $bridgeState = 'unknown';
     $bridgeMsg = 'Sin información';
+    $sessionOk = false;
     if (is_file($statusFile)) {
         $raw = @file_get_contents($statusFile);
         $data = json_decode((string)$raw, true);
         if (is_array($data)) {
             $bridgeState = (string)($data['state'] ?? 'unknown');
-            $bridgeMsg = (string)($data['msg'] ?? $bridgeMsg);
+            $bridgeMsg = (string)($data['msg'] ?? $data['message'] ?? $data['reason'] ?? $bridgeMsg);
+            $sessionOk = !empty($data['session_ok']);
             $updatedAt = strtotime((string)($data['updated_at'] ?? '')) ?: 0;
             if ($updatedAt > 0 && (time() - $updatedAt) > 45) {
                 $bridgeState = 'stale';
                 $bridgeMsg = 'Estado desactualizado (>45s)';
+                $sessionOk = false;
             }
         }
     }
+    $readyStates = ['ready', 'connected', 'authenticated'];
     return [
-        'ok' => $running && $bridgeState === 'connected',
+        'ok' => $running && in_array($bridgeState, $readyStates, true) && $sessionOk,
         'running' => $running,
         'state' => $bridgeState,
-        'msg' => $bridgeMsg
+        'msg' => $bridgeMsg,
+        'session_ok' => $sessionOk
     ];
+}
+
+function bot_update_job_product_data(PDO $pdo, array &$job): bool {
+    if (empty($job['products']) || !is_array($job['products'])) return false;
+    
+    $skus = [];
+    foreach ($job['products'] as $p) {
+        if (!empty($p['id'])) $skus[] = $p['id'];
+    }
+    if (empty($skus)) return false;
+
+    $placeholders = implode(',', array_fill(0, count($skus), '?'));
+    $hasWholesale = bot_has_column($pdo, 'productos', 'precio_mayorista');
+    // Fix #6: filtrar por id_empresa para multi-tenant
+    global $config;
+    $idEmpresa = (int)($config['id_empresa'] ?? 0);
+    $sql = "SELECT codigo, precio " . ($hasWholesale ? ", COALESCE(precio_mayorista, 0) AS precio_mayorista" : "") . " 
+            FROM productos 
+            WHERE codigo IN ($placeholders)";
+    $params = $skus;
+    if ($idEmpresa > 0) {
+        $sql .= " AND id_empresa = ?";
+        $params[] = $idEmpresa;
+    }
+    
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    $dbProducts = [];
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        $dbProducts[$row['codigo']] = $row;
+    }
+
+    $changed = false;
+    foreach ($job['products'] as &$p) {
+        $sku = $p['id'] ?? '';
+        if (isset($dbProducts[$sku])) {
+            $dbP = $dbProducts[$sku];
+            
+            // Actualizar precio minorista si cambió
+            $newRetail = (float)$dbP['precio'];
+            if ($newRetail > 0 && abs(($p['retail_price'] ?? 0) - $newRetail) > 0.01) {
+                $p['retail_price'] = $newRetail;
+                $changed = true;
+            }
+
+            // Actualizar precio mayorista si cambió
+            if ($hasWholesale) {
+                $newWholesale = (float)$dbP['precio_mayorista'];
+                if ($newWholesale > 0 && abs(($p['wholesale_price'] ?? 0) - $newWholesale) > 0.01) {
+                    $p['wholesale_price'] = $newWholesale;
+                    $changed = true;
+                }
+            }
+
+            // El campo 'price' depende del 'price_mode'
+            $mode = $p['price_mode'] ?? 'retail';
+            $newPrice = ($mode === 'wholesale' && $hasWholesale) ? (float)$dbP['precio_mayorista'] : (float)$dbP['precio'];
+            if ($newPrice > 0 && abs(($p['price'] ?? 0) - $newPrice) > 0.01) {
+                $p['price'] = $newPrice;
+                $changed = true;
+            }
+            
+            // Actualizar imagen para forzar refresco de caché (mtime)
+            $newImage = bot_public_product_image($sku);
+            // Agregamos un timestamp para que el bridge descargue la versión más reciente
+            $newImage .= "&t=" . time();
+            if (($p['image'] ?? '') !== $newImage) {
+                $p['image'] = $newImage;
+                $changed = true;
+            }
+        }
+    }
+    return $changed;
 }
 
 function bot_process_scheduled_campaigns(PDO $pdo, array $cfg): array {
@@ -604,6 +691,10 @@ function bot_process_scheduled_campaigns(PDO $pdo, array $cfg): array {
             continue;
         }
         if (!empty($job['retry_count']) && $job['retry_count'] >= 3) continue;
+
+        // ACTUALIZAR PRECIOS E IMÁGENES ANTES DE ENCOLAR
+        bot_update_job_product_data($pdo, $job);
+
         $job['status'] = 'queued';
         $job['next_run_at'] = $now;
         $job['queue_note'] = 'Activada por scheduler';
