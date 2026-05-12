@@ -1242,6 +1242,8 @@ try {
         #sessionLoginModal .modal-body {
             padding: 1rem 1rem 1.1rem;
             background: #f8fafc;
+            overflow-y: auto;
+            max-height: calc(100vh - 5.5rem);
         }
         #sessionLoginModal .mini-login-copy {
             font-size: 0.82rem;
@@ -1264,6 +1266,11 @@ try {
         }
         #sessionLoginModal .mini-pin-grid .pin-btn {
             min-height: 56px;
+            width: 100%;
+            color: #0f172a;
+            font-weight: 700;
+            font-size: 1.4rem;
+            line-height: 1;
         }
         #sessionLoginReason {
             font-size: 0.78rem;
@@ -1369,7 +1376,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 </div>
 
 <div class="modal fade" id="sessionLoginModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" style="max-width:360px; max-height:calc(100vh - 1rem);">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title fw-bold mb-0"><i class="fas fa-user-shield me-2"></i>Inicio de sesion requerido</h5>
@@ -1999,6 +2006,42 @@ window.updateCartBackground = function (sucursalId) {
         picker.style.display = 'block';
     };
 
+    window.showProgressOverlay = function (message, detail, percent) {
+        const overlay = document.getElementById('progressOverlay');
+        const title   = document.getElementById('progressMessage');
+        const bar     = document.getElementById('progressBar');
+        const info    = document.getElementById('progressDetail');
+        if (!overlay || !title || !bar || !info) return;
+
+        title.textContent = String(message || 'Cargando...');
+        info.textContent = String(detail || '');
+
+        const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        bar.style.width = safePercent + '%';
+        bar.textContent = safePercent + '%';
+        overlay.classList.add('active');
+    };
+
+    window.setProgressOverlay = function (percent, detail) {
+        const overlay = document.getElementById('progressOverlay');
+        const bar     = document.getElementById('progressBar');
+        const info    = document.getElementById('progressDetail');
+        if (!overlay || !bar || !info) return;
+
+        const safePercent = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+        bar.style.width = safePercent + '%';
+        bar.textContent = safePercent + '%';
+        if (typeof detail === 'string') {
+            info.textContent = detail;
+        }
+        overlay.classList.add('active');
+    };
+
+    window.hideProgressOverlay = function () {
+        const overlay = document.getElementById('progressOverlay');
+        if (overlay) overlay.classList.remove('active');
+    };
+
     window.confirmAlmacenSelection = async function () {
         const sel    = document.getElementById('almacenSelect');
         const picker = document.getElementById('almacenPicker');
@@ -2012,30 +2055,58 @@ window.updateCartBackground = function (sucursalId) {
         const almBadge = document.getElementById('ctxAlmacenBadge');
         if (almBadge) almBadge.innerText = almNombre;
 
-        // Persistir en sesión PHP solo cuando el login realmente creó sesión en backend.
-        if (navigator.onLine && _pickerContext && _pickerContext.serverAuthenticated === true) {
-            try {
-                const resp = await fetch('pos.php?set_almacen=1', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ id_almacen: almId }),
-                    signal: AbortSignal.timeout(5000)
-                });
-                if (!resp.ok) {
-                    console.warn('No se pudo persistir el almacén en la sesión del servidor');
-                }
-            } catch (e) { /* sin conexión — el contexto JS ya fue actualizado */ }
+        if (typeof window.showProgressOverlay === 'function') {
+            window.showProgressOverlay('Cargando POS', 'Aplicando el almacén seleccionado...', 12);
         }
 
-        // Restaurar teclado y ocultar picker
-        if (picker) picker.style.display = 'none';
-        if (grid)   grid.style.display   = '';
-
         const cb = _pickerCallback;
-        _pickerCallback = null;
-        _pickerContext  = null;
-        if (cb) cb(almId, almNombre);
+
+        try {
+            // Persistir en sesión PHP solo cuando el login realmente creó sesión en backend.
+            if (navigator.onLine && _pickerContext && _pickerContext.serverAuthenticated === true) {
+                try {
+                    const resp = await fetch('pos.php?set_almacen=1', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id_almacen: almId }),
+                        signal: AbortSignal.timeout(5000)
+                    });
+                    if (!resp.ok) {
+                        console.warn('No se pudo persistir el almacén en la sesión del servidor');
+                    }
+                } catch (e) { /* sin conexión — el contexto JS ya fue actualizado */ }
+            }
+
+            if (typeof window.setProgressOverlay === 'function') {
+                window.setProgressOverlay(32, 'Preparando sesión de trabajo...');
+            }
+
+            // Mantener oculto el teclado PIN mientras termina la carga.
+            if (picker) picker.style.display = 'none';
+            if (grid)   grid.style.display   = 'none';
+
+            _pickerCallback = null;
+            _pickerContext  = null;
+            if (cb) {
+                await cb(almId, almNombre);
+            } else if (typeof window.hideProgressOverlay === 'function') {
+                window.hideProgressOverlay();
+            }
+        } catch (e) {
+            console.error('Error confirmando almacén:', e);
+            if (picker) picker.style.display = 'block';
+            if (grid)   grid.style.display   = 'none';
+            if (typeof window.hideProgressOverlay === 'function') {
+                window.hideProgressOverlay();
+            }
+            showToast('No se pudo cargar el almacén seleccionado', 'error');
+        } finally {
+            if (picker) picker.style.display = 'none';
+            if (grid)   grid.style.display   = 'none';
+            _pickerCallback = null;
+            _pickerContext  = null;
+        }
     };
 })();
 // ─────────────────────────────────────────────────────────────────────────────
