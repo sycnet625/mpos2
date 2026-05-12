@@ -397,6 +397,10 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
                     $imgV = $mtime ? '&v=' . $mtime : '';
                     $stock = floatval($p['stock_total']);
                     $isActive = intval($p['activo'] ?? 1);
+                    
+                    $stockClass = 'ok';
+                    if ($stock <= 0) $stockClass = 'bad';
+                    elseif ($stock <= floatval($p['stock_minimo'] ?? 0)) $stockClass = 'low';
                 ?>
                 <article class="product-mini-card <?php echo $isActive ? '' : 'card-inactive'; ?>">
                     <div class="product-mini-image">
@@ -407,42 +411,32 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
                         <?php if (!$isActive): ?>
                             <span class="product-mini-badge">INACTIVO</span>
                         <?php endif; ?>
-                        <div class="product-mini-stock-badge <?php echo $stock > 0 ? 'ok' : 'bad'; ?>">
-                            <?php echo $stock > 0 ? 'Stock ' . number_format($stock, 1) : 'Sin stock'; ?>
+                        <div class="product-mini-stock-badge <?php echo $stockClass; ?>">
+                            <i class="fas fa-box-open me-1"></i><?php echo number_format($stock, 1); ?>
                         </div>
                     </div>
                     <div class="product-mini-body">
-                        <div class="d-flex justify-content-between align-items-start gap-2">
-                            <div class="flex-grow-1">
-                                <div class="product-mini-sku"><?php echo htmlspecialchars($p['codigo']); ?></div>
-                                <h3 class="product-mini-name"><?php echo htmlspecialchars($p['nombre']); ?></h3>
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="product-mini-sku"><?php echo htmlspecialchars($p['codigo']); ?></span>
+                            <div class="dropdown">
+                                <button class="btn btn-sm btn-link text-muted p-0" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-v"></i></button>
+                                <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0">
+                                    <li><a class="dropdown-item" href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>"><i class="fas fa-history me-2"></i>Historial</a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="cloneProduct('<?php echo $p['codigo']; ?>')"><i class="fas fa-clone me-2"></i>Clonar</a></li>
+                                    <li><a class="dropdown-item text-danger" href="pos_shrinkage.php?prefill_sku=<?php echo urlencode($p['codigo']); ?>"><i class="fas fa-trash-alt me-2"></i>Registrar Merma</a></li>
+                                </ul>
                             </div>
-                            <button class="btn btn-sm btn-outline-secondary product-mini-iconbtn" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit"></i></button>
                         </div>
-                        <div class="product-mini-meta">
-                            <span><?php echo htmlspecialchars((string)($p['categoria'] ?? '')); ?></span>
-                            <span><?php echo $p['es_web'] ? 'Web activa' : 'Solo POS'; ?></span>
-                        </div>
-                        <div class="product-mini-price">
+                        <h3 class="product-mini-name mb-1"><?php echo htmlspecialchars($p['nombre']); ?></h3>
+                        <p class="text-muted small mb-3"><?php echo htmlspecialchars((string)($p['categoria'] ?? 'Sin categoría')); ?></p>
+                        
+                        <div class="product-mini-price mb-3">
                             $<?php echo number_format((float)($p['precio'] ?? 0), 2); ?>
-                            <?php if (!empty($p['precio_mayorista'])): ?>
-                                <small>Mayorista $<?php echo number_format((float)$p['precio_mayorista'], 2); ?></small>
-                            <?php endif; ?>
                         </div>
-                        <div class="product-mini-flags">
-                            <?php if($p['es_materia_prima']): ?><span>MP</span><?php endif; ?>
-                            <?php if($p['es_servicio']): ?><span>Servicio</span><?php endif; ?>
-                            <?php if($p['es_cocina']): ?><span>Cocina</span><?php endif; ?>
-                            <?php if($p['es_reservable'] ?? false): ?><span>Reservable</span><?php endif; ?>
-                            <?php if($p['es_web']): ?><span>Web</span><?php endif; ?>
-                        </div>
-                        <div class="product-mini-actions">
-                            <button class="btn btn-sm btn-outline-primary" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')"><i class="fas fa-sliders-h me-1"></i>Editar</button>
-                            <button class="btn btn-sm btn-outline-success" type="button" onclick="toggleWeb('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-globe me-1"></i>WEB</button>
-                            <button class="btn btn-sm btn-outline-info" type="button" onclick="openEditor('<?php echo $p['codigo']; ?>')"><i class="fas fa-bell me-1"></i>S.Min</button>
-                            <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleReservable('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-calendar-check me-1"></i>Res.</button>
-                            <button class="btn btn-sm btn-outline-warning" type="button" onclick="toggleActive('<?php echo $p['codigo']; ?>', this)"><i class="fas fa-power-off me-1"></i>Activo</button>
-                            <button class="btn btn-sm btn-outline-dark" type="button" onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')"><i class="fas fa-balance-scale me-1"></i>Kardex</button>
+
+                        <div class="product-mini-actions mt-auto">
+                            <button class="btn btn-sm btn-outline-primary" onclick="openEditor('<?php echo $p['codigo']; ?>')"><i class="fas fa-edit me-1"></i>Editar</button>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')"><i class="fas fa-balance-scale me-1"></i>Stock</button>
                         </div>
                     </div>
                 </article>
@@ -459,87 +453,80 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
             $imgV = $mtime ? '&v=' . $mtime : '';
             $stock = floatval($p['stock_total']);
             $isActive = intval($p['activo'] ?? 1);
-            $rowClass = $isActive ? '' : 'row-inactive';
+            $rowClass = $isActive ? '' : 'table-danger opacity-75';
     ?>
     <tr class="<?php echo $rowClass; ?>">
         <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
-        <td class="text-center no-print"><a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-secondary btn-action border-0" title="Kardex"><i class="fas fa-history"></i></a></td>
-        <td class="ps-2 no-print col-img"><img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" class="prod-img-table" data-code="<?php echo $p['codigo']; ?>" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"></td>
+        <td class="text-center no-print">
+            <a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-sm btn-outline-secondary border-0" title="Historial"><i class="fas fa-history"></i></a>
+        </td>
+        <td class="no-print col-img">
+            <img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" 
+                 class="prod-img-table" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"
+                 style="cursor:pointer">
+        </td>
         
-        <td class="small font-monospace col-sku"><?php echo $p['codigo']; ?></td>
+        <td class="small font-monospace col-sku text-muted"><?php echo $p['codigo']; ?></td>
         
         <td class="col-barcode_1 small text-muted"><?php echo htmlspecialchars($p['codigo_barra_1'] ?? ''); ?></td>
         <td class="col-barcode_2 small text-muted"><?php echo htmlspecialchars($p['codigo_barra_2'] ?? ''); ?></td>
 
         <td onclick="openEditor('<?php echo $p['codigo']; ?>')" style="cursor:pointer;" class="col-nombre">
-            <div class="fw-bold text-primary"><?php echo $p['nombre']; ?></div>
-            <div class="d-flex mt-1 opacity-75">
-                <?php if($p['es_materia_prima']): ?><span class="emoji-span" title="Materia Prima">🧱</span><?php endif; ?>
-                <?php if($p['es_servicio']): ?><span class="emoji-span" title="Servicio">🛠️</span><?php endif; ?>
-                <?php if($p['es_cocina']): ?><span class="emoji-span" title="Cocina">👨‍🍳</span><?php endif; ?>
-                <?php if($p['es_reservable'] ?? false): ?><span class="emoji-span" title="Reservable (sin stock)">📅</span><?php endif; ?>
-                <?php if(!$isActive): ?><span class="badge bg-danger text-white border ms-1" style="font-size:0.6rem;">INACTIVO</span><?php endif; ?>
+            <div class="fw-bold text-dark"><?php echo htmlspecialchars($p['nombre']); ?></div>
+            <div class="d-flex gap-1 mt-1">
+                <?php if($p['es_materia_prima']): ?><span class="badge bg-secondary-subtle text-secondary small" style="font-size:0.6rem">MP</span><?php endif; ?>
+                <?php if($p['es_servicio']): ?><span class="badge bg-info-subtle text-info small" style="font-size:0.6rem">SERV</span><?php endif; ?>
+                <?php if($p['es_cocina']): ?><span class="badge bg-warning-subtle text-warning small" style="font-size:0.6rem">COC</span><?php endif; ?>
+                <?php if(!$isActive): ?><span class="badge bg-danger text-white small" style="font-size:0.6rem">INACTIVO</span><?php endif; ?>
             </div>
         </td>
 
-        <td class="col-materia_prima text-center"><?php echo $p['es_materia_prima'] ? '✅' : '❌'; ?></td>
-        <td class="col-cocina text-center"><?php echo $p['es_cocina'] ? '✅' : '❌'; ?></td>
+        <td class="col-materia_prima text-center"><?php echo $p['es_materia_prima'] ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-light"></i>'; ?></td>
+        <td class="col-cocina text-center"><?php echo $p['es_cocina'] ? '<i class="fas fa-check text-success"></i>' : '<i class="fas fa-times text-light"></i>'; ?></td>
 
         <td class="text-center col-web_reserv">
-            <div class="form-check form-switch d-flex justify-content-center" title="Visible en tienda web">
+            <div class="form-check form-switch d-flex justify-content-center mb-1" title="Visible en WEB">
                 <input class="form-check-input" type="checkbox" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
             </div>
-            <div class="form-check form-switch d-flex justify-content-center align-items-center mt-1" title="Aceptar reservas sin stock">
-                <input class="form-check-input" type="checkbox" style="<?php echo ($p['es_reservable'] ?? 0) ? 'background-color:#f59e0b;border-color:#d97706;' : ''; ?>"
-                       onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)"
-                       <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
-                <span class="ms-1" style="font-size:0.6rem; line-height:1; color:#9ca3af;">📅</span>
+            <div class="form-check form-switch d-flex justify-content-center" title="Aceptar reservas sin stock">
+                <input class="form-check-input bg-warning border-warning" type="checkbox" onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)" <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
             </div>
         </td>
-        <td class="small text-muted col-categoria"><?php echo $p['categoria']; ?></td>
+
+        <td class="small text-muted col-categoria"><?php echo htmlspecialchars($p['categoria']); ?></td>
         <td class="small text-muted col-unidad"><?php echo htmlspecialchars($p['unidad_medida'] ?? 'UNIDAD'); ?></td>
         
         <td class="text-center col-stock">
-            <div class="d-flex align-items-center justify-content-center">
-                <button class="btn btn-sm btn-outline-warning border-0 me-1 p-0 px-1 no-print" style="font-size: 0.7rem;" 
-                        onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')" title="Ajustar Stock">
-                    <i class="fas fa-tools"></i>
-                </button>
-                <div class="editable-cell flex-grow-1" data-sku="<?php echo $p['codigo']; ?>" data-field="stock" data-value="<?php echo $stock; ?>">
-                    <span class="badge badge-stock <?php echo ($stock <= 0) ? 'bg-danger' : 'bg-success-subtle text-success'; ?>"><?php echo number_format($stock, 1); ?></span>
-                </div>
-            </div>
+            <?php 
+                $stockBadgeClass = 'bg-success-subtle text-success';
+                if ($stock <= 0) $stockBadgeClass = 'bg-danger-subtle text-danger';
+                elseif ($stock <= floatval($p['stock_minimo'] ?? 0)) $stockBadgeClass = 'bg-warning-subtle text-warning';
+            ?>
+            <span class="badge <?php echo $stockBadgeClass; ?> p-2 px-3 rounded-pill fw-bold" style="cursor:pointer" 
+                  onclick="openKardexAdj('<?php echo $p['codigo']; ?>', '<?php echo addslashes($p['nombre']); ?>')">
+                <?php echo number_format($stock, 1); ?>
+            </span>
         </td>
 
-        <td class="text-center col-stock_min small"><?php echo number_format($p['stock_minimo'] ?? 0, 1); ?></td>
+        <td class="text-center col-stock_min small text-muted"><?php echo number_format($p['stock_minimo'] ?? 0, 1); ?></td>
         
-        <td class="text-end fw-bold editable-cell col-precio" data-sku="<?php echo $p['codigo']; ?>" data-field="price" data-value="<?php echo $p['precio']; ?>">
-            $<?php echo number_format($p['precio'], 2); ?>
-            <i class="fas fa-history history-btn" onclick="showHistory('<?php echo $p['codigo']; ?>')"></i>
-        </td>
-
-        <td class="text-end col-costo text-muted">$<?php echo number_format($p['costo'], 2); ?></td>
-        <td class="text-end col-mayorista text-muted">$<?php echo number_format($p['precio_mayorista'], 2); ?></td>
+        <td class="text-end fw-bold col-precio">$<?php echo number_format($p['precio'], 2); ?></td>
+        <td class="text-end col-costo text-muted small">$<?php echo number_format($p['costo'], 2); ?></td>
+        <td class="text-end col-mayorista text-muted small">$<?php echo number_format($p['precio_mayorista'] ?? 0, 2); ?></td>
         
-        <td class="text-end fw-bold text-success bg-light col-utilidad_pct">
-            <span><?php echo number_format($p['ganancia_pct'] ?? 0, 1); ?>%</span>
-        </td>
-        <td class="text-end fw-bold text-success bg-light col-utilidad_neta">
-            <span>$<?php echo number_format($p['ganancia_neta'], 2); ?></span>
-        </td>
+        <td class="text-end fw-bold text-success col-utilidad_pct"><?php echo number_format($p['ganancia_pct'] ?? 0, 1); ?>%</td>
+        <td class="text-end fw-bold text-success col-utilidad_neta">$<?php echo number_format($p['ganancia_neta'] ?? 0, 2); ?></td>
 
-        <td class="col-descripcion small text-truncate" style="max-width: 150px;" title="<?php echo htmlspecialchars($p['descripcion'] ?? ''); ?>">
+        <td class="col-descripcion small text-muted text-truncate" style="max-width: 120px;" title="<?php echo htmlspecialchars($p['descripcion'] ?? ''); ?>">
             <?php echo htmlspecialchars($p['descripcion'] ?? ''); ?>
         </td>
-        <td class="col-peso small text-center"><?php echo number_format($p['peso'] ?? 0, 2); ?></td>
+        <td class="col-peso small text-center text-muted"><?php echo number_format($p['peso'] ?? 0, 2); ?></td>
 
         <td class="text-center no-print">
-        <div class="btn-group">
-                <button class="btn btn-outline-secondary btn-action" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar">
-                    <i class="fas fa-clone"></i>
-                </button>
-                <button class="btn btn-outline-primary btn-action" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit"></i></button>
-                <a href="pos_shrinkage.php?prefill_sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-outline-danger btn-action" title="Merma"><i class="fas fa-trash-alt"></i></a>
+            <div class="btn-group shadow-sm rounded-pill overflow-hidden border">
+                <button class="btn btn-sm btn-white border-0" onclick="openEditor('<?php echo $p['codigo']; ?>')" title="Editar"><i class="fas fa-edit text-primary"></i></button>
+                <button class="btn btn-sm btn-white border-0" onclick="cloneProduct('<?php echo $p['codigo']; ?>')" title="Clonar"><i class="fas fa-clone text-secondary"></i></button>
+                <a href="pos_shrinkage.php?prefill_sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-sm btn-white border-0" title="Merma"><i class="fas fa-trash-alt text-danger"></i></a>
             </div>
         </td>
     </tr>
@@ -1511,192 +1498,388 @@ if ($isAjax) {
         :root {
             --pt-ink: #0f172a;
             --pt-ink-soft: #475569;
-            --pt-line: rgba(148, 163, 184, .26);
-            --pt-line-strong: rgba(148, 163, 184, .38);
-            --pt-surface: rgba(255, 255, 255, .9);
-            --pt-surface-strong: #ffffff;
+            --pt-line: rgba(148, 163, 184, .18);
+            --pt-line-strong: rgba(148, 163, 184, .32);
+            --pt-surface: #ffffff;
             --pt-surface-muted: #f8fafc;
             --pt-accent: #2563eb;
-            --pt-accent-2: #7c3aed;
-            --pt-success: #059669;
-            --pt-warning: #d97706;
-            --pt-danger: #dc2626;
+            --pt-accent-soft: #eff6ff;
+            --pt-success: #10b981;
+            --pt-warning: #f59e0b;
+            --pt-danger: #ef4444;
+            --pt-radius-sm: 8px;
+            --pt-radius-md: 12px;
+            --pt-radius-lg: 20px;
+            --pt-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+            --pt-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --pt-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
         }
+
         body.inventory-suite {
-            font-family: 'Segoe UI', sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             color: var(--pt-ink);
-            padding-bottom: 80px;
-            background:
-                radial-gradient(circle at top left, rgba(37, 99, 235, .06), transparent 28%),
-                linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
+            background: #f1f5f9;
+            padding-bottom: 40px;
         }
-        .inventory-products-shell { max-width: 1600px; }
-        .filter-section { background: var(--pt-surface-strong); padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--pt-line); }
-        .card-table {
-            border: 1px solid var(--pt-line);
-            border-radius: 24px;
+
+        /* --- SaaS Toolbar Enhancements --- */
+        .pt-sbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--pt-line-strong);
+            border-radius: var(--pt-radius-lg);
+            box-shadow: var(--pt-shadow-lg);
             overflow: hidden;
-            background: var(--pt-surface);
-            box-shadow: 0 20px 55px rgba(15, 23, 42, .09);
-            backdrop-filter: blur(10px);
+            margin-bottom: 2rem;
         }
-        .table-responsive {
-            -webkit-overflow-scrolling: touch;
-            overflow-x: auto;
+
+        .pt-kpi-row {
+            display: flex;
+            flex-wrap: wrap;
+            border-bottom: 1px solid var(--pt-line);
+            background: var(--pt-surface-muted);
         }
-        .table thead th {
-            font-size: 0.7rem;
+
+        .pt-kpi {
+            flex: 1 1 140px;
+            padding: 1.25rem 1rem;
+            text-align: center;
+            border-right: 1px solid var(--pt-line);
+            transition: background 0.2s;
+        }
+
+        .pt-kpi:last-child { border-right: none; }
+        .pt-kpi:hover { background: #fff; }
+
+        .pt-kpi-val {
+            font-size: 1.35rem;
+            font-weight: 800;
+            color: var(--pt-ink);
+            display: block;
+        }
+
+        .pt-kpi-lbl {
+            font-size: 0.65rem;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            padding: 13px 12px;
-            background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
-            color: #475569;
-            border-bottom: 1px solid rgba(226, 232, 240, .9);
-            white-space: nowrap;
+            letter-spacing: 0.05em;
+            color: var(--pt-ink-soft);
+            margin-top: 0.35rem;
+            font-weight: 600;
         }
-        .table tbody td {
-            vertical-align: middle;
-            border-color: rgba(226, 232, 240, .65);
+
+        .pt-command {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            align-items: center;
         }
-        .table-hover > tbody > tr {
-            transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+
+        .pt-search-wrap {
+            position: relative;
+            flex-grow: 1;
         }
-        .table-hover > tbody > tr:hover {
-            background: #f8fbff;
-            box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, .025);
+
+        .pt-search-wrap i {
+            position: absolute;
+            left: 1.25rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--pt-ink-soft);
         }
-        .prod-img-table {
-            width: 48px;
-            height: 48px;
-            object-fit: cover;
-            border-radius: 12px;
-            border: 1px solid rgba(226, 232, 240, .95);
+
+        .pt-search-input {
+            width: 100%;
+            padding: 0.85rem 1rem 0.85rem 3rem;
+            border: 1px solid var(--pt-line-strong);
+            border-radius: var(--pt-radius-md);
+            font-size: 0.95rem;
+            background: #fff;
+            transition: all 0.2s;
+        }
+
+        .pt-search-input:focus {
+            border-color: var(--pt-accent);
+            box-shadow: 0 0 0 4px var(--pt-accent-soft);
+            outline: none;
+        }
+
+        .pt-actions {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .pt-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.75rem 1.25rem;
+            border-radius: var(--pt-radius-md);
+            font-weight: 600;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+            border: 1px solid transparent;
             cursor: pointer;
-            transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-            box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
         }
-        .prod-img-table:hover {
-            transform: scale(1.36);
-            border-color: rgba(37, 99, 235, .55);
-            box-shadow: 0 12px 28px rgba(37, 99, 235, .16);
-            z-index: 2;
+
+        .pt-btn-primary {
+            background: var(--pt-ink);
+            color: #fff;
+        }
+
+        .pt-btn-primary:hover {
+            background: #1e293b;
+            transform: translateY(-1px);
+        }
+
+        .pt-btn-secondary {
+            background: #fff;
+            color: var(--pt-ink);
+            border-color: var(--pt-line-strong);
+        }
+
+        .pt-btn-secondary:hover {
+            background: var(--pt-surface-muted);
+            border-color: var(--pt-ink-soft);
+        }
+
+        /* --- Grid & Cards --- */
+        .products-cards-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.5rem;
+            padding: 0.5rem;
+        }
+
+        .product-mini-card {
+            background: #fff;
+            border: 1px solid var(--pt-line);
+            border-radius: var(--pt-radius-lg);
+            overflow: hidden;
+            box-shadow: var(--pt-shadow-md);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
             position: relative;
         }
-        .badge-stock { padding: 5px 10px; border-radius: 999px; font-weight: 700; font-size: 0.78rem; }
-        .kpi-row { margin-bottom: 1rem; }
-        .kpi-card {
-            border: 1px solid var(--pt-line);
-            border-radius: 18px;
-            padding: 0.95rem 1rem;
-            background: rgba(255,255,255,.9);
-            box-shadow: 0 10px 24px rgba(15,23,42,.05);
+
+        .product-mini-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--pt-shadow-lg);
+            border-color: var(--pt-accent);
         }
-        .context-badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1); }
-        .row-inactive { background-color: rgba(248, 113, 113, 0.045) !important; opacity: 0.92; }
-        .row-inactive td { color: #64748b; }
-        .editable-cell { position: relative; cursor: cell; transition: background 0.2s, box-shadow 0.2s; border-radius: 10px; }
-        .editable-cell:hover { background-color: #eef4ff; box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .16); }
-        .editable-cell:hover::after { content: '✎'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #2563eb; font-size: 0.75rem; opacity: 0.75; }
-        .history-btn { font-size: 0.72rem; color: #64748b; cursor: pointer; margin-left: 5px; transition: color .15s ease; }
-        .history-btn:hover { color: var(--pt-accent); }
-        .products-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:1rem; padding:1rem; }
-        .product-mini-card { background:#fff; border:1px solid rgba(226,232,240,.9); border-radius:18px; overflow:hidden; box-shadow:0 10px 28px rgba(15,23,42,.06); display:flex; flex-direction:column; min-height:100%; transition: transform .18s ease, box-shadow .18s ease; }
-        .product-mini-card:hover { transform: translateY(-2px); box-shadow:0 16px 36px rgba(15,23,42,.1); }
-        .product-mini-card.card-inactive { opacity:.8; filter:saturate(.75); }
-        .product-mini-image { position:relative; aspect-ratio:1/1; background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
-        .product-mini-img { width:100%; height:100%; object-fit:cover; cursor:pointer; }
-        .product-mini-badge { position:absolute; top:10px; left:10px; background:#b91c1c; color:#fff; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; box-shadow:0 8px 18px rgba(185,28,28,.2); }
-        .product-mini-stock-badge { position:absolute; bottom:10px; right:10px; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; box-shadow:0 8px 16px rgba(15,23,42,.12); }
-        .product-mini-stock-badge.ok { background:#dcfce7; color:#166534; }
-        .product-mini-stock-badge.bad { background:#fee2e2; color:#b91c1c; }
-        .product-mini-iconbtn { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; }
-        .product-mini-body { padding:.95rem 1rem 1rem; display:flex; flex-direction:column; gap:.55rem; }
-        .product-mini-sku { font-size:.7rem; text-transform:uppercase; letter-spacing:.12em; color:#64748b; font-weight:800; }
-        .product-mini-name { font-size:1rem; font-weight:800; margin:0; color:#0f172a; line-height:1.22; }
-        .product-mini-meta { display:flex; justify-content:space-between; gap:.5rem; flex-wrap:wrap; font-size:.78rem; color:#64748b; }
-        .product-mini-price { font-size:1.15rem; font-weight:900; color:#0f172a; display:flex; flex-direction:column; line-height:1.1; }
-        .product-mini-price small { font-size:.72rem; color:#64748b; font-weight:600; margin-top:.15rem; }
-        .product-mini-flags { display:flex; gap:.35rem; flex-wrap:wrap; }
-        .product-mini-flags span { background:#f8fafc; border:1px solid rgba(226,232,240,.95); color:#475569; border-radius:999px; padding:.2rem .45rem; font-size:.68rem; font-weight:700; }
+
+        .product-mini-image {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            background: var(--pt-surface-muted);
+            overflow: hidden;
+        }
+
+        .product-mini-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s;
+        }
+
+        .product-mini-card:hover .product-mini-img {
+            transform: scale(1.05);
+        }
+
+        .product-mini-body {
+            padding: 1.25rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            flex-grow: 1;
+        }
+
+        .product-mini-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--pt-ink);
+            margin: 0;
+            line-height: 1.4;
+        }
+
+        .product-mini-sku {
+            font-size: 0.75rem;
+            font-family: monospace;
+            color: var(--pt-ink-soft);
+            background: var(--pt-surface-muted);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            display: inline-block;
+        }
+
+        .product-mini-price {
+            font-size: 1.25rem;
+            font-weight: 800;
+            color: var(--pt-ink);
+        }
+
+        .product-mini-stock-badge {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            backdrop-filter: blur(8px);
+            box-shadow: var(--pt-shadow-sm);
+        }
+
+        .product-mini-stock-badge.ok {
+            background: rgba(16, 185, 129, 0.9);
+            color: #fff;
+        }
+
+        .product-mini-stock-badge.low {
+            background: rgba(245, 158, 11, 0.9);
+            color: #fff;
+        }
+
+        .product-mini-stock-badge.bad {
+            background: rgba(239, 68, 68, 0.9);
+            color: #fff;
+        }
+
         .product-mini-actions {
-            display:grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap:.4rem;
-            margin-top:.15rem;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.5rem;
+            margin-top: auto;
         }
-        .product-mini-actions .btn {
-            width:100%;
-            min-width:0;
-            max-width:100%;
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-            gap:.25rem;
-            overflow:hidden;
-            text-overflow:ellipsis;
-            white-space:nowrap;
+
+        .product-mini-btn {
+            padding: 0.6rem;
+            font-size: 0.75rem;
+            border-radius: var(--pt-radius-md);
+            font-weight: 600;
         }
-        .product-mini-actions .btn i { flex:0 0 auto; margin-right:0 !important; }
-        @media (max-width: 767px) {
-            .products-cards-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); padding:.75rem; gap:.75rem; }
-            .product-mini-body { padding:.75rem .8rem .85rem; gap:.45rem; }
-            .product-mini-actions { grid-template-columns: 1fr; }
-            .product-mini-price { font-size:1.05rem; }
-            .product-mini-name { font-size:.95rem; }
+
+        /* --- Table Styling --- */
+        .card-table {
+            background: #fff;
+            border-radius: var(--pt-radius-lg);
+            border: 1px solid var(--pt-line);
+            box-shadow: var(--pt-shadow-md);
+            overflow: hidden;
         }
-        @media (min-width: 1200px) {
-            .products-cards-grid { grid-template-columns:repeat(4, minmax(0, 1fr)); }
+
+        .table thead th {
+            background: var(--pt-surface-muted);
+            color: var(--pt-ink-soft);
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 1rem;
+            border-bottom: 2px solid var(--pt-line);
         }
-        #printableArea .table > :not(caption) > * > * { background: transparent; }
-        @media (max-width: 991px) {
-            .inventory-products-shell { padding-top: 1rem !important; padding-bottom: 1.5rem !important; }
-            .inventory-products-shell .inventory-hero { border-radius: 20px; }
-            .inventory-products-shell .inventory-hero h1 { font-size: 1.5rem; }
-            .inventory-products-shell .inventory-toolbar { padding: .85rem .9rem; }
-            .inventory-products-shell .inventory-toolbar .btn,
-            .inventory-products-shell .inventory-toolbar .form-control,
-            .inventory-products-shell .inventory-toolbar .form-select { min-height: 40px; }
-            .card-table { border-radius: 18px; }
+
+        .table tbody td {
+            padding: 1rem;
+            vertical-align: middle;
+            border-bottom: 1px solid var(--pt-line);
         }
-        @media (max-width: 767px) {
-            .inventory-products-shell .inventory-hero { padding: 1rem !important; }
-            .inventory-products-shell .kpi-chip { font-size: .78rem; padding: .3rem .6rem; }
-            .kpi-card { border-radius: 14px; padding: .7rem .8rem; }
-            .card-table { border-radius: 14px; }
-            #productsTable th, #productsTable td { font-size: .81rem; }
-            .prod-img-table { width: 40px; height: 40px; }
-            .inventory-toolbar__bulk-row { gap: .5rem; }
-            .inventory-toolbar__bulk-row .form-select,
-            .inventory-toolbar__bulk-row .form-control,
-            .inventory-toolbar__bulk-row .btn { width: 100%; max-width: none !important; }
+
+        .prod-img-table {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--pt-radius-sm);
+            object-fit: cover;
+            box-shadow: var(--pt-shadow-sm);
         }
-        @media print { .no-print { display: none !important; } }
+
+        /* --- Connection Status --- */
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-online .status-dot { background: #10b981; box-shadow: 0 0 8px #10b981; animation: pulse-green 2s infinite; }
+        .status-offline .status-dot { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+        
+        @keyframes pulse-green {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* --- Responsive Adjustments --- */
+        @media (max-width: 1024px) {
+            .pt-command {
+                grid-template-columns: 1fr;
+            }
+            .pt-actions {
+                justify-content: flex-start;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .products-cards-grid {
+                grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+                gap: 1rem;
+            }
+            .pt-kpi {
+                flex: 1 1 50%;
+            }
+            .inventory-hero h1 {
+                font-size: 1.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .products-cards-grid {
+                grid-template-columns: 1fr;
+            }
+            .pt-btn {
+                flex: 1;
+            }
+            .pt-actions {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
 
 <div class="container-fluid shell inventory-shell inventory-products-shell py-4 py-lg-5">
-    <section class="glass-card inventory-hero p-4 p-lg-5 mb-4 inventory-fade-in no-print">
-    <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
-        <div>
-            <div class="section-title text-white-50 mb-2">Catalogo / Inventario</div>
-            <h1 class="h2 fw-bold mb-2"><i class="fas fa-boxes me-2"></i>Inventario</h1>
-            <p class="mb-3 text-white-50">Gestion de productos, stock, precios, importaciones y operaciones masivas.</p>
+    <section class="bg-primary bg-gradient p-4 p-lg-5 mb-4 rounded-4 shadow-sm text-white inventory-fade-in no-print position-relative overflow-hidden">
+        <div class="position-relative z-1 d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
+            <div>
+                <div class="text-white-50 small text-uppercase fw-bold mb-2" style="letter-spacing: .1em;">Catálogo / Inventario</div>
+                <h1 class="display-6 fw-bold mb-2"><i class="fas fa-boxes me-2"></i>Inventario</h1>
+                <p class="mb-3 text-white-50 lead fs-6">Gestión inteligente de productos, stock y comercio omnicanal.</p>
+                <div class="d-flex flex-wrap gap-2">
+                    <span class="badge bg-white bg-opacity-10 border border-white border-opacity-25 p-2 px-3 rounded-pill"><i class="fas fa-building me-1"></i>Suc <?= (int)$SUC_ID ?></span>
+                    <span class="badge bg-white bg-opacity-10 border border-white border-opacity-25 p-2 px-3 rounded-pill"><i class="fas fa-warehouse me-1"></i>Alm <?= (int)$ALM_ID ?></span>
+                    <span class="badge bg-white bg-opacity-10 border border-white border-opacity-25 p-2 px-3 rounded-pill"><i class="fas fa-dollar-sign me-1"></i>Valor: <strong id="totalValueDisplay" class="ms-1">$<?= number_format($valorInventario, 2) ?></strong></span>
+                    <span id="connectionBadge" class="badge bg-white bg-opacity-10 border border-white border-opacity-25 p-2 px-3 rounded-pill status-online">
+                        <span class="status-dot"></span><span id="connectionText">Online</span>
+                    </span>
+                </div>
+            </div>
             <div class="d-flex flex-wrap gap-2">
-                <span class="kpi-chip"><i class="fas fa-building me-1"></i>Suc <?= (int)$SUC_ID ?></span>
-                <span class="kpi-chip"><i class="fas fa-warehouse me-1"></i>Alm <?= (int)$ALM_ID ?></span>
-                <span class="kpi-chip"><i class="fas fa-dollar-sign me-1"></i>Valor <strong id="totalValueDisplay" class="ms-1">$<?= number_format($valorInventario, 2) ?></strong></span>
+                <a href="inventory_report.php" class="btn btn-light fw-bold px-3"><i class="fas fa-chart-line me-1"></i>Reporte</a>
+                <button onclick="forceImageCacheReset()" class="btn btn-outline-light px-3" title="Limpia caché de imágenes"><i class="fas fa-sync me-1"></i>Caché</button>
+                <button onclick="printInventoryCount()" class="btn btn-warning text-dark fw-bold px-3"><i class="fas fa-clipboard-list me-1"></i>Conteo</button>
+                <a href="dashboard.php" class="btn btn-dark px-3"><i class="fas fa-home"></i></a>
             </div>
         </div>
-        <div class="d-flex flex-wrap gap-2 mt-1 mt-lg-0">
-            <a href="inventory_report.php" class="btn btn-light"><i class="fas fa-chart-pie me-1"></i>Informe</a>
-            <button onclick="forceImageCacheReset()" class="btn btn-outline-light" title="Limpia caché de imágenes y recarga miniaturas"><i class="fas fa-broom me-1"></i>Limpiar cache</button>
-            <button onclick="printInventoryCount()" class="btn btn-warning text-dark"><i class="fas fa-clipboard-list me-1"></i>Conteo</button>
-            <button onclick="printTable()" class="btn btn-outline-light"><i class="fas fa-print me-1"></i>Lista</button>
-            <a href="dashboard.php" class="btn btn-primary"><i class="fas fa-home"></i></a>
+        <!-- Decorative elements -->
+        <div class="position-absolute bottom-0 end-0 opacity-10" style="transform: translate(20%, 20%);">
+            <i class="fas fa-box-open" style="font-size: 15rem;"></i>
         </div>
-    </div>
-</section>
+    </section>
     <div class="row g-2 kpi-row inventory-fade-in d-none">
         <div class="col-6 col-md-3">
             <div class="kpi-card">
@@ -1756,313 +1939,138 @@ $viewModeJs = json_encode($viewMode, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUO
 $selectedAlmIdJs = (string)(int)$selectedAlmId;
 
     $toolbarSaaS = <<<HTML
-<style>
-/* ── SaaS Premium Toolbar ───────────────────────────────────────── */
-.pt-sbar {
-    background: rgba(255,255,255,.82);
-    backdrop-filter: blur(16px);
-    border: 1px solid rgba(226,232,240,.9);
-    border-radius: 22px;
-    box-shadow: 0 16px 46px rgba(15,23,42,.07);
-    overflow: hidden;
-}
-.pt-kpi-row {
-    display:grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 1px;
-    background: rgba(226,232,240,.72);
-}
-.pt-kpi {
-    background:#fff;
-    padding: 14px 10px;
-    text-align:center;
-    transition: background .2s ease;
-    cursor: default;
-}
-.pt-kpi:hover { background:#f8fafc; }
-.pt-kpi-val { font-size:1.28rem; font-weight:800; line-height:1; letter-spacing:0; }
-.pt-kpi-lbl { font-size:.67rem; text-transform:uppercase; letter-spacing:.08em; margin-top:5px; opacity:.68; }
-.pt-kpi-total { color:#0f172a; }
-.pt-kpi-active { color:#059669; }
-.pt-kpi-inactive { color:#dc2626; }
-.pt-kpi-nostock { color:#d97706; }
-.pt-kpi-money  { color:#2563eb; }
-
-.pt-command {
-    padding: 18px 22px 16px;
-    display:grid;
-    grid-template-columns: minmax(280px, 1.25fr) minmax(0, 1fr);
-    gap: 14px;
-    align-items: stretch;
-}
-.pt-command-search,
-.pt-tool-group {
-    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
-    border: 1px solid rgba(226,232,240,.95);
-    border-radius: 18px;
-    padding: 14px;
-    box-shadow: 0 8px 20px rgba(15,23,42,.04);
-}
-.pt-tool-label {
-    font-size: .68rem;
-    text-transform: uppercase;
-    letter-spacing: .1em;
-    color: #64748b;
-    font-weight: 800;
-    margin-bottom: 8px;
-}
-.pt-command-side {
-    display:grid;
-    grid-template-columns: 220px minmax(0, 1fr);
-    gap: 12px;
-    align-items: stretch;
-}
-.pt-search-wrap { position:relative; }
-.pt-search-wrap i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:1rem; pointer-events:none; }
-.pt-search-wrap input {
-    width:100%;
-    min-height: 48px;
-    padding: 12px 14px 12px 38px;
-    border: 1.5px solid #dbe4ee;
-    border-radius: 14px;
-    font-size: .94rem;
-    background: #fff;
-    transition: all .2s ease;
-}
-.pt-search-wrap input:focus {
-    border-color: #2563eb;
-    box-shadow: 0 0 0 3px rgba(37,99,235,.12);
-    outline: none;
-}
-.pt-tool-group .pt-bulk-select,
-.pt-tool-group .pt-bulk-input,
-.pt-tool-group .form-select {
-    min-height: 44px;
-    border-radius: 12px;
-    border: 1.5px solid #dbe4ee;
-    box-shadow: none;
-}
-.pt-tool-group .pt-bulk-select:focus,
-.pt-tool-group .pt-bulk-input:focus,
-.pt-tool-group .form-select:focus {
-    border-color:#2563eb;
-    box-shadow:0 0 0 3px rgba(37,99,235,.1);
-}
-.pt-actions { display:flex; gap:8px; flex-wrap:wrap; }
-.pt-btn {
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:6px;
-    padding: 10px 14px;
-    border-radius: 12px;
-    font-size: .84rem;
-    font-weight: 700;
-    border: 1px solid transparent;
-    cursor: pointer;
-    transition: all .18s ease;
-    white-space: nowrap;
-    min-width: 0;
-    max-width: 100%;
-}
-.pt-btn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pt-btn i { font-size:.9rem; }
-.pt-btn:hover { transform: translateY(-1px); box-shadow:0 8px 18px rgba(15,23,42,.08); }
-.pt-btn:active { transform: translateY(0); }
-.pt-btn-pri  { background:#0f172a; color:#fff; }
-.pt-btn-pri:hover { background:#111827; }
-.pt-btn-sec  { background:#fff; color:#334155; border-color:#dbe4ee; }
-.pt-btn-sec:hover { border-color:#c7d2e0; background:#f8fafc; }
-.pt-btn-dang { background:#fff; color:#dc2626; border-color:#fecaca; }
-.pt-btn-dang:hover { background:#fef2f2; }
-.pt-btn-ghost{ background:transparent; color:#64748b; padding:10px 12px; }
-.pt-btn-ghost:hover { background:#f1f5f9; color:#0f172a; }
-
-.pt-filter-drawer { display:none; padding:0 22px 18px; animation:ptSlideDown .22s ease; }
-.pt-filter-drawer.open { display:block; }
-@keyframes ptSlideDown { from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);} }
-
-.pt-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
-.pt-filter-grid label { font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; color:#64748b; margin-bottom:4px; display:block; }
-.pt-filter-grid input, .pt-filter-grid select {
-    width:100%;
-    padding:10px 12px;
-    border:1.5px solid #dbe4ee;
-    border-radius:12px;
-    font-size:.86rem;
-    background:#fff;
-    transition:all .2s ease;
-}
-.pt-filter-grid input:focus, .pt-filter-grid select:focus { border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.1); outline:none; }
-
-.pt-bulk-bar {
-    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-    border-top:1px solid rgba(226,232,240,.95);
-    padding:14px 22px;
-    display:flex;
-    align-items:center;
-    gap:14px;
-    flex-wrap:wrap;
-}
-.pt-bulk-left { display:flex; align-items:center; gap:10px; }
-.pt-bulk-check { width:20px; height:20px; accent-color:#0f172a; cursor:pointer; }
-.pt-bulk-label { font-size:.84rem; font-weight:800; color:#334155; cursor:pointer; user-select:none; }
-.pt-bulk-select { padding:9px 28px 9px 12px; border:1.5px solid #dbe4ee; border-radius:12px; font-size:.84rem; background:#fff; min-width:210px; cursor:pointer; }
-.pt-bulk-input { padding:9px 12px; border:1.5px solid #dbe4ee; border-radius:12px; font-size:.84rem; background:#fff; width:170px; }
-.pt-bulk-apply {
-    background:#0f172a;
-    color:#fff;
-    padding:9px 18px;
-    border-radius:12px;
-    font-size:.84rem;
-    font-weight:700;
-    border:none;
-    cursor:pointer;
-    transition:all .18s ease;
-}
-.pt-bulk-apply:hover { background:#1e293b; box-shadow:0 8px 18px rgba(15,23,42,.12); }
-.pt-bulk-meta { margin-left:auto; font-size:.8rem; color:#64748b; }
-.pt-bulk-meta strong { color:#0f172a; }
-
-.pt-chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 22px 10px; }
-.pt-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#f8fafc; border-radius:999px; font-size:.74rem; color:#475569; border:1px solid #e2e8f0; }
-.pt-chip button { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:.7rem; padding:0; line-height:1; }
-.pt-chip button:hover { color:#dc2626; }
-
-@media (max-width: 1200px) {
-    .pt-kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .pt-command { grid-template-columns: 1fr; }
-    .pt-command-side { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 768px) {
-    .pt-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .pt-command { padding:14px; }
-    .pt-command-side { grid-template-columns: 1fr; }
-    .pt-actions { gap: 10px; }
-    .pt-actions .pt-btn { width: 100%; justify-content: center; }
-    .pt-filter-grid { grid-template-columns:1fr; }
-    .pt-bulk-bar { padding:12px 14px; gap:10px; }
-    .pt-bulk-bar > * { width:100%; }
-    .pt-bulk-left { justify-content: space-between; }
-    .pt-bulk-select,
-    .pt-bulk-input,
-    .pt-bulk-apply { width:100%; min-width:0; }
-    .pt-bulk-meta { width:100%; text-align:right; margin-left:0; margin-top:4px; }
-}
-@media (max-width: 575.98px) {
-    .pt-kpi-row { grid-template-columns: 1fr; }
-    .pt-command-search,
-    .pt-tool-group { padding: 12px; border-radius: 16px; }
-    .pt-search-wrap input { min-height: 46px; font-size: .92rem; }
-    .pt-actions { flex-direction: column; }
-    .pt-actions .pt-btn { width: 100%; justify-content: center; }
-    .pt-bulk-bar { flex-direction: column; align-items: stretch; }
-    .pt-bulk-left { width:100%; }
-    .pt-bulk-label { flex:1; }
-    .pt-bulk-check { flex:0 0 auto; }
-    .pt-chips { padding:0 14px 10px; }
-    .products-cards-grid { grid-template-columns:1fr; padding:.75rem; gap:.75rem; }
-}
-</style>
-
-<div class="pt-sbar mb-4 no-print inventory-fade-in">
-    <div class="pt-kpi-row">
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-total" id="kpiTotal">{$kpiTotal}</div><div class="pt-kpi-lbl">Total catálogo</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active" id="kpiActive">{$kpiActivos}</div><div class="pt-kpi-lbl">Activos</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-inactive" id="kpiInactive">{$kpiInactivos}</div><div class="pt-kpi-lbl">Inactivos</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock" id="kpiNoStock">{$kpiSinStock}</div><div class="pt-kpi-lbl">Sin stock</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiBajoStock}</div><div class="pt-kpi-lbl">Bajo stock</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-money">\${$kpiValorInv}</div><div class="pt-kpi-lbl">Valor inventario</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock">{$kpiIntegrity}</div><div class="pt-kpi-lbl">Alertas</div></div>
+<div class="pt-sbar no-print inventory-fade-in shadow-sm border-0">
+    <div class="pt-kpi-row bg-white">
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-primary" id="kpiTotal">{$kpiTotal}</span>
+            <span class="pt-kpi-lbl">Productos</span>
+        </div>
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-success" id="kpiActive">{$kpiActivos}</span>
+            <span class="pt-kpi-lbl">Activos</span>
+        </div>
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-danger" id="kpiInactive">{$kpiInactivos}</span>
+            <span class="pt-kpi-lbl">Inactivos</span>
+        </div>
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-warning" id="kpiNoStock">{$kpiSinStock}</span>
+            <span class="pt-kpi-lbl">Sin Stock</span>
+        </div>
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-info">{$kpiBajoStock}</span>
+            <span class="pt-kpi-lbl">Bajo Stock</span>
+        </div>
+        <div class="pt-kpi">
+            <span class="pt-kpi-val text-dark">\${$kpiValorInv}</span>
+            <span class="pt-kpi-lbl">Valor Total</span>
+        </div>
     </div>
 
-    <div class="pt-command">
-        <div class="pt-command-search">
-            <div class="pt-tool-label">Búsqueda</div>
-            <div class="pt-search-wrap">
+    <div class="pt-command bg-light p-3 border-top">
+        <div class="d-flex flex-grow-1 gap-2 align-items-center">
+            <div class="pt-search-wrap flex-grow-1">
                 <i class="fas fa-search"></i>
-                <input type="text" id="f_name" placeholder="Buscar por nombre de producto..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
+                <input type="text" class="pt-search-input form-control border-0 shadow-sm" id="f_name" placeholder="Buscar por nombre, SKU o código de barras..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
             </div>
+            <select class="form-select border-0 shadow-sm w-auto" id="warehouseSelect" onchange="changeWarehouseScope()">
+                {$warehouseOptionsHtml}
+            </select>
         </div>
-        <div class="pt-command-side">
-            <div class="pt-tool-group">
-                <div class="pt-tool-label">Alcance</div>
-                <select class="pt-bulk-select" id="warehouseSelect" onchange="changeWarehouseScope()" style="min-width:210px">{$warehouseOptionsHtml}</select>
-            </div>
-            <div class="pt-tool-group">
-                <div class="pt-tool-label">Acciones rápidas</div>
-                <div class="pt-actions">
-                    <button type="button" class="pt-btn pt-btn-pri" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="toggleFilterDrawer()"><i class="fas fa-sliders-h"></i> Filtros</button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="resetAllFilters()"><i class="fas fa-undo"></i> Reset</button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="exportCsv()"><i class="fas fa-file-export"></i> Exportar</button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import"></i> Importar</button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
-                    <button type="button" class="pt-btn pt-btn-sec" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Con stock</span></button>
-                    <button type="button" class="pt-btn pt-btn-sec" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel">{$viewModeLabelText}</span></button>
-                </div>
+        <div class="pt-actions ms-lg-3 mt-3 mt-lg-0">
+            <button class="pt-btn pt-btn-primary shadow-sm" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
+            <button class="pt-btn pt-btn-secondary shadow-sm" onclick="toggleFilterDrawer()"><i class="fas fa-filter"></i> Filtros</button>
+            <button class="pt-btn pt-btn-secondary shadow-sm" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Todos</span></button>
+            <button class="pt-btn pt-btn-secondary shadow-sm" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel">{$viewModeLabelText}</span></button>
+            <div class="dropdown d-inline-block">
+                <button class="pt-btn pt-btn-secondary shadow-sm" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-h"></i></button>
+                <ul class="dropdown-menu shadow-lg border-0">
+                    <li><a class="dropdown-item" href="#" onclick="exportCsv()"><i class="fas fa-download me-2"></i>Exportar CSV</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import me-2"></i>Importar CSV</a></li>
+                    <li><a class="dropdown-item" href="#" onclick="openCategoriesModal()"><i class="fas fa-tags me-2"></i>Categorías</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item text-danger" href="#" onclick="resetAllFilters()"><i class="fas fa-undo me-2"></i>Restablecer todo</a></li>
+                </ul>
             </div>
         </div>
     </div>
-    {$integrityAlertHtml}
+</div>
+HTML;
+echo $toolbarSaaS;
+echo $integrityAlertHtml;
+?>
 
-    <div class="pt-chips" id="activeFilterChips"></div>
+    <div class="pt-chips px-2 mb-2" id="activeFilterChips"></div>
 
-    <div class="pt-filter-drawer" id="filterDrawer">
+    <div class="pt-filter-drawer bg-white border rounded-4 p-4 mb-3 shadow-sm mx-2 no-print" id="filterDrawer">
         <form id="filterForm" onsubmit="event.preventDefault(); loadData(1);">
-            <div class="pt-filter-grid">
-                <div>
-                    <label>SKU / Código</label>
-                    <input type="text" id="f_code" placeholder="Ej: 230001" value="{$filterCodeEsc}">
+            <div class="row g-3">
+                <div class="col-md-2 col-6">
+                    <label class="form-label small fw-bold text-muted">SKU / Cód. Barras</label>
+                    <input type="text" class="form-control" id="f_code" placeholder="Ej: 230001" value="<?= $filterCodeEsc ?>">
                 </div>
-                <div>
-                    <label>Estado</label>
-                    <select id="f_status"><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select>
+                <div class="col-md-2 col-6">
+                    <label class="form-label small fw-bold text-muted">Estado</label>
+                    <select class="form-select" id="f_status">
+                        <option value="active">Activos</option>
+                        <option value="inactive">Inactivos</option>
+                        <option value="all">Todos</option>
+                    </select>
                 </div>
-                <div>
-                    <label>Rango stock</label>
-                    <input type="text" id="f_stock" placeholder="Ej: <5, >10, 0, 10-20">
+                <div class="col-md-2 col-6">
+                    <label class="form-label small fw-bold text-muted">Rango stock</label>
+                    <input type="text" class="form-control" id="f_stock" placeholder="Ej: <5, >10, 0">
                 </div>
-                <div>
-                    <label>Por página</label>
-                    <select id="f_limit" onchange="loadData(1)"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>
+                <div class="col-md-2 col-6">
+                    <label class="form-label small fw-bold text-muted">Por página</label>
+                    <select class="form-select" id="f_limit" onchange="loadData(1)">
+                        <option value="10">10</option>
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                    </select>
                 </div>
-                <div>
-                    <label>Modo import</label>
-                    <select id="importMode"><option value="update_create">Actualizar o crear</option><option value="update_only">Solo actualizar</option></select>
+                <div class="col-md-2 col-12">
+                    <label class="form-label small fw-bold text-muted">Modo import</label>
+                    <select class="form-select" id="importMode">
+                        <option value="update_create">Actualizar o crear</option>
+                        <option value="update_only">Solo actualizar</option>
+                    </select>
                 </div>
-                <div style="display:flex; align-items:flex-end;">
-                    <button type="submit" class="pt-btn pt-btn-pri" style="width:100%; justify-content:center;"><i class="fas fa-filter"></i> Aplicar filtros</button>
+                <div class="col-md-2 col-12 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary w-100 fw-bold"><i class="fas fa-search me-1"></i> Filtrar</button>
                 </div>
             </div>
         </form>
     </div>
 
-    <div class="pt-bulk-bar">
-        <div class="pt-bulk-left">
-            <input class="pt-bulk-check" type="checkbox" id="selectAll">
-            <label class="pt-bulk-label" for="selectAll">Todos los visibles</label>
+    <div class="bg-white border rounded-4 p-3 mb-4 shadow-sm mx-2 no-print d-flex flex-wrap align-items-center gap-3">
+        <div class="d-flex align-items-center gap-2">
+            <input class="form-check-input" type="checkbox" id="selectAll" style="width:20px;height:20px">
+            <label class="small fw-bold text-muted cursor-pointer mb-0" for="selectAll">Seleccionar todo</label>
         </div>
-        <select class="pt-bulk-select" id="bulkActionSelect">
-            <option value="">-- Acción masiva --</option>
-            <option value="print_labels">🏷️ Imprimir etiquetas</option>
-            <option value="web_on">🌐 Activar en WEB</option>
-            <option value="web_off">🚫 Ocultar de WEB</option>
-            <option value="reservable_on">📅 Activar reservable</option>
-            <option value="reservable_off">📅 Desactivar reservable</option>
-            <option value="pos_on">🧾 Mostrar en POS</option>
-            <option value="pos_off">🧾 Ocultar en POS</option>
-            <option value="active_on">✅ Activar producto</option>
-            <option value="active_off">❌ Desactivar producto</option>
-            <option value="set_stock_min">📌 Cambiar stock mínimo</option>
-            <option value="change_cat">📂 Cambiar categoría</option>
-            <option value="clone_selected">📑 Clonar seleccionados</option>
-        </select>
-        <input type="text" class="pt-bulk-input d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva categoría">
-        <input type="number" step="0.01" class="pt-bulk-input d-none" id="bulkStockMinInput" placeholder="Stock mínimo">
-        <datalist id="bulk_cat_list"></datalist>
-        <button class="pt-bulk-apply" onclick="applyBulkAction()">Aplicar</button>
-        <div class="pt-bulk-meta"><strong id="selectedCount">0</strong> seleccionados · Total <strong id="totalCountDisplay">{$totalProductsInt}</strong> · Pág <strong id="currentPageDisplay">{$pageInt}</strong></div>
+        
+        <div class="d-flex flex-grow-1 flex-wrap gap-2">
+            <select class="form-select form-select-sm w-auto border-0 bg-light fw-bold" id="bulkActionSelect" style="min-width:200px">
+                <option value="">-- Acción masiva --</option>
+                <option value="print_labels">🏷️ Imprimir etiquetas</option>
+                <option value="web_on">🌐 Activar en WEB</option>
+                <option value="web_off">🚫 Ocultar de WEB</option>
+                <option value="active_on">✅ Activar producto</option>
+                <option value="active_off">❌ Desactivar producto</option>
+                <option value="set_stock_min">📌 Cambiar stock mínimo</option>
+                <option value="change_cat">📂 Cambiar categoría</option>
+                <option value="clone_selected">📑 Clonar seleccionados</option>
+            </select>
+            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva categoría" style="width:150px">
+            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="S.Min" style="width:100px">
+            <button class="btn btn-dark btn-sm fw-bold px-3" onclick="applyBulkAction()">Aplicar</button>
+        </div>
+
+        <div class="ms-auto small text-muted">
+            <span class="badge bg-primary rounded-pill me-1" id="selectedCount">0</span> seleccionados · 
+            Total <strong id="totalCountDisplay"><?= $totalProductsInt ?></strong>
+        </div>
     </div>
 </div>
 
@@ -2096,6 +2104,25 @@ $selectedAlmIdJs = (string)(int)$selectedAlmId;
 </div>
 
 <script>
+function updateOnlineStatus() {
+    const badge = document.getElementById('connectionBadge');
+    const text = document.getElementById('connectionText');
+    if (!badge || !text) return;
+    
+    if (navigator.onLine) {
+        badge.classList.remove('status-offline');
+        badge.classList.add('status-online');
+        text.innerText = 'Online';
+    } else {
+        badge.classList.remove('status-online');
+        badge.classList.add('status-offline');
+        text.innerText = 'Offline';
+    }
+}
+window.addEventListener('online', updateOnlineStatus);
+window.addEventListener('offline', updateOnlineStatus);
+updateOnlineStatus();
+
 function toggleFilterDrawer() {
     const d = document.getElementById('filterDrawer');
     d.classList.toggle('open');
@@ -2233,10 +2260,6 @@ function changeWarehouseScope() {
     }
 })();
 </script>
-HTML;
-
-    echo $toolbarSaaS;
-    ?>
 
     <div class="card card-table shadow-sm" id="printableArea">
         <div class="p-3 d-flex justify-content-between align-items-center no-print border-bottom bg-light">
@@ -2309,9 +2332,9 @@ HTML;
         <?php echo renderProductRows($productosPagina, $localPath, 'cards'); ?>
     </div>
 
-    <nav class="mt-4 no-print" id="paginationNav">
-        <?php if($totalPages > 1): ?>
-        <ul class="pagination justify-content-center">
+    <nav class="mt-4 no-print d-flex justify-content-center align-items-center gap-3" id="paginationNav">
+        <?php if($totalPages >= 1): ?>
+        <ul class="pagination mb-0">
             <li class="page-item <?php echo $page<=1?'disabled':''; ?>">
                 <button class="page-link" onclick="loadData(<?php echo $page-1; ?>)">Anterior</button>
             </li>
@@ -2320,6 +2343,15 @@ HTML;
                 <button class="page-link" onclick="loadData(<?php echo $page+1; ?>)">Siguiente</button>
             </li>
         </ul>
+        <div class="d-flex align-items-center gap-2 ms-3">
+            <span class="small text-muted fw-bold text-uppercase" style="font-size: 0.65rem;">Ver:</span>
+            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" onchange="syncLimit(this.value)">
+                <option value="10" <?php echo $limit==10?'selected':''; ?>>10</option>
+                <option value="20" <?php echo $limit==20?'selected':''; ?>>20</option>
+                <option value="50" <?php echo $limit==50?'selected':''; ?>>50</option>
+                <option value="100" <?php echo $limit==100?'selected':''; ?>>100</option>
+            </select>
+        </div>
         <?php endif; ?>
     </nav>
 </div>
@@ -2741,13 +2773,37 @@ function updateSortIcons() {
     }
 }
 
+function syncLimit(val) {
+    const limitEl = document.getElementById('f_limit');
+    if (limitEl) limitEl.value = val;
+    loadData(1);
+}
+
 function renderPagination(curr, total) {
-    let html = '<ul class="pagination justify-content-center">';
+    const limit = document.getElementById('f_limit') ? document.getElementById('f_limit').value : '10';
+    let html = `<ul class="pagination mb-0">`;
     if(curr > 1) html += `<li class="page-item"><button class="page-link" onclick="loadData(${curr-1})">Anterior</button></li>`;
     html += `<li class="page-item disabled"><span class="page-link">Pág ${curr} de ${total}</span></li>`;
     if(curr < total) html += `<li class="page-item"><button class="page-link" onclick="loadData(${curr+1})">Siguiente</button></li>`;
     html += '</ul>';
-    document.getElementById('paginationNav').innerHTML = html;
+    
+    html += `
+        <div class="d-flex align-items-center gap-2 ms-3">
+            <span class="small text-muted fw-bold text-uppercase" style="font-size: 0.65rem;">Ver:</span>
+            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" onchange="syncLimit(this.value)">
+                <option value="10" ${limit === '10' ? 'selected' : ''}>10</option>
+                <option value="20" ${limit === '20' ? 'selected' : ''}>20</option>
+                <option value="50" ${limit === '50' ? 'selected' : ''}>50</option>
+                <option value="100" ${limit === '100' ? 'selected' : ''}>100</option>
+            </select>
+        </div>
+    `;
+    
+    const nav = document.getElementById('paginationNav');
+    if (nav) {
+        nav.innerHTML = html;
+        nav.className = "mt-4 no-print d-flex justify-content-center align-items-center gap-3";
+    }
 }
 
 // --- 2. EDICIÓN EN LÍNEA ---
