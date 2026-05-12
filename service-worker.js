@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.5 - Cache individual + ping offline fix
+// Versión 8.6 - Cache individual + ping offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v86';
+const CACHE_NAME = 'palweb-pos-v87';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -20,8 +20,8 @@ const OFFLINE_ASSETS = [
     './pos1.js',
     './pos-offline-system.js',
     './manifest-pos.php',
-    './icon-192.png',
-    './icon-512.png',
+    './icon-pos-192.png',
+    './icon-pos-512.png',
     './assets/css/bootstrap.min.css',
     './assets/css/all.min.css',
     './assets/js/bootstrap.bundle.min.js',
@@ -35,7 +35,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.5...');
+    console.log('[SW-POS] Instalando Service Worker v8.6...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -62,7 +62,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.5...');
+    console.log('[SW-POS] Activando Service Worker v8.6...');
     
     event.waitUntil(
         caches.keys()
@@ -252,11 +252,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v83-online-first' });
+        event.ports[0].postMessage({ version: 'v87-online-first' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.5 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.6 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS
@@ -292,8 +292,8 @@ self.addEventListener('push', event => {
                 
                 const options = {
                     body:    data.cuerpo || '',
-                    icon:    appUrl('icon-192.png'),
-                    badge:   appUrl('icon-192.png'),
+                    icon:    appUrl('icon-pos-192.png'),
+                    badge:   appUrl('icon-pos-192.png'),
                     data:    { 
                         url: data.url || POS_START_URL,
                         chat_id: data.chat_id || null, // Guardar chat_id para acciones

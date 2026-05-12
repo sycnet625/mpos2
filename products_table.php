@@ -1508,48 +1508,139 @@ if ($isAjax) {
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
     <style>
-        body.inventory-suite { font-family: 'Segoe UI', sans-serif; color: #1e293b; padding-bottom: 80px; }
-        .inventory-products-shell { max-width: 1520px; }
-        .filter-section { background: #ffffff; padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #e2e8f0; }
-        .card-table { border: 1px solid var(--pw-line); border-radius: 24px; overflow: hidden; background: var(--pw-card); box-shadow: 0 18px 45px rgba(15, 23, 42, .08); }
-        .table thead th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 12px; background: rgba(248, 250, 252, .88); }
-        .prod-img-table { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; border: 1px solid #eee; cursor: pointer; transition: transform 0.2s; }
-        .prod-img-table:hover { transform: scale(1.5); border-color: #3b82f6; }
-        .badge-stock { padding: 5px 10px; border-radius: 15px; font-weight: 700; font-size: 0.8rem; }
+        :root {
+            --pt-ink: #0f172a;
+            --pt-ink-soft: #475569;
+            --pt-line: rgba(148, 163, 184, .26);
+            --pt-line-strong: rgba(148, 163, 184, .38);
+            --pt-surface: rgba(255, 255, 255, .9);
+            --pt-surface-strong: #ffffff;
+            --pt-surface-muted: #f8fafc;
+            --pt-accent: #2563eb;
+            --pt-accent-2: #7c3aed;
+            --pt-success: #059669;
+            --pt-warning: #d97706;
+            --pt-danger: #dc2626;
+        }
+        body.inventory-suite {
+            font-family: 'Segoe UI', sans-serif;
+            color: var(--pt-ink);
+            padding-bottom: 80px;
+            background:
+                radial-gradient(circle at top left, rgba(37, 99, 235, .06), transparent 28%),
+                linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
+        }
+        .inventory-products-shell { max-width: 1600px; }
+        .filter-section { background: var(--pt-surface-strong); padding: 15px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--pt-line); }
+        .card-table {
+            border: 1px solid var(--pt-line);
+            border-radius: 24px;
+            overflow: hidden;
+            background: var(--pt-surface);
+            box-shadow: 0 20px 55px rgba(15, 23, 42, .09);
+            backdrop-filter: blur(10px);
+        }
+        .table-responsive {
+            -webkit-overflow-scrolling: touch;
+            overflow-x: auto;
+        }
+        .table thead th {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            padding: 13px 12px;
+            background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+            color: #475569;
+            border-bottom: 1px solid rgba(226, 232, 240, .9);
+            white-space: nowrap;
+        }
+        .table tbody td {
+            vertical-align: middle;
+            border-color: rgba(226, 232, 240, .65);
+        }
+        .table-hover > tbody > tr {
+            transition: transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+        }
+        .table-hover > tbody > tr:hover {
+            background: #f8fbff;
+            box-shadow: inset 0 0 0 9999px rgba(37, 99, 235, .025);
+        }
+        .prod-img-table {
+            width: 48px;
+            height: 48px;
+            object-fit: cover;
+            border-radius: 12px;
+            border: 1px solid rgba(226, 232, 240, .95);
+            cursor: pointer;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, .08);
+        }
+        .prod-img-table:hover {
+            transform: scale(1.36);
+            border-color: rgba(37, 99, 235, .55);
+            box-shadow: 0 12px 28px rgba(37, 99, 235, .16);
+            z-index: 2;
+            position: relative;
+        }
+        .badge-stock { padding: 5px 10px; border-radius: 999px; font-weight: 700; font-size: 0.78rem; }
         .kpi-row { margin-bottom: 1rem; }
-        .kpi-card { border: 1px solid var(--pw-line); border-radius: 18px; padding: 0.85rem 1rem; background: rgba(255,255,255,.72); box-shadow: 0 8px 18px rgba(15,23,42,.06); }
+        .kpi-card {
+            border: 1px solid var(--pt-line);
+            border-radius: 18px;
+            padding: 0.95rem 1rem;
+            background: rgba(255,255,255,.9);
+            box-shadow: 0 10px 24px rgba(15,23,42,.05);
+        }
         .context-badge { background: rgba(255,255,255,0.15); padding: 4px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(255,255,255,0.1); }
-        .row-inactive { background-color: rgba(248, 113, 113, 0.05) !important; opacity: 0.95; }
+        .row-inactive { background-color: rgba(248, 113, 113, 0.045) !important; opacity: 0.92; }
         .row-inactive td { color: #64748b; }
-        .editable-cell { position: relative; cursor: cell; transition: background 0.2s; }
-        .editable-cell:hover { background-color: #eef2ff; }
-        .editable-cell:hover::after { content: '✎'; position: absolute; right: 5px; top: 50%; transform: translateY(-50%); color: #3b82f6; font-size: 0.8rem; opacity: 0.5; }
-        .history-btn { font-size: 0.7rem; color: #64748b; cursor: pointer; margin-left: 5px; }
-        .history-btn:hover { color: #3b82f6; }
+        .editable-cell { position: relative; cursor: cell; transition: background 0.2s, box-shadow 0.2s; border-radius: 10px; }
+        .editable-cell:hover { background-color: #eef4ff; box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .16); }
+        .editable-cell:hover::after { content: '✎'; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); color: #2563eb; font-size: 0.75rem; opacity: 0.75; }
+        .history-btn { font-size: 0.72rem; color: #64748b; cursor: pointer; margin-left: 5px; transition: color .15s ease; }
+        .history-btn:hover { color: var(--pt-accent); }
         .products-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:1rem; padding:1rem; }
-        .product-mini-card { background:#fff; border:1px solid #e2e8f0; border-radius:18px; overflow:hidden; box-shadow:0 8px 24px rgba(15,23,42,.06); display:flex; flex-direction:column; min-height:100%; }
+        .product-mini-card { background:#fff; border:1px solid rgba(226,232,240,.9); border-radius:18px; overflow:hidden; box-shadow:0 10px 28px rgba(15,23,42,.06); display:flex; flex-direction:column; min-height:100%; transition: transform .18s ease, box-shadow .18s ease; }
+        .product-mini-card:hover { transform: translateY(-2px); box-shadow:0 16px 36px rgba(15,23,42,.1); }
         .product-mini-card.card-inactive { opacity:.8; filter:saturate(.75); }
-        .product-mini-image { position:relative; aspect-ratio:1/1; background:#f8fafc; }
+        .product-mini-image { position:relative; aspect-ratio:1/1; background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%); }
         .product-mini-img { width:100%; height:100%; object-fit:cover; cursor:pointer; }
-        .product-mini-badge { position:absolute; top:10px; left:10px; background:#dc2626; color:#fff; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; }
+        .product-mini-badge { position:absolute; top:10px; left:10px; background:#b91c1c; color:#fff; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; box-shadow:0 8px 18px rgba(185,28,28,.2); }
         .product-mini-stock-badge { position:absolute; bottom:10px; right:10px; font-size:.68rem; font-weight:800; padding:.28rem .5rem; border-radius:999px; box-shadow:0 8px 16px rgba(15,23,42,.12); }
         .product-mini-stock-badge.ok { background:#dcfce7; color:#166534; }
         .product-mini-stock-badge.bad { background:#fee2e2; color:#b91c1c; }
         .product-mini-iconbtn { width:34px; height:34px; display:inline-flex; align-items:center; justify-content:center; }
-        .product-mini-body { padding:.9rem .95rem 1rem; display:flex; flex-direction:column; gap:.55rem; }
-        .product-mini-sku { font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; color:#64748b; font-weight:700; }
-        .product-mini-name { font-size:1rem; font-weight:800; margin:0; color:#0f172a; line-height:1.2; }
+        .product-mini-body { padding:.95rem 1rem 1rem; display:flex; flex-direction:column; gap:.55rem; }
+        .product-mini-sku { font-size:.7rem; text-transform:uppercase; letter-spacing:.12em; color:#64748b; font-weight:800; }
+        .product-mini-name { font-size:1rem; font-weight:800; margin:0; color:#0f172a; line-height:1.22; }
         .product-mini-meta { display:flex; justify-content:space-between; gap:.5rem; flex-wrap:wrap; font-size:.78rem; color:#64748b; }
         .product-mini-price { font-size:1.15rem; font-weight:900; color:#0f172a; display:flex; flex-direction:column; line-height:1.1; }
         .product-mini-price small { font-size:.72rem; color:#64748b; font-weight:600; margin-top:.15rem; }
         .product-mini-flags { display:flex; gap:.35rem; flex-wrap:wrap; }
-        .product-mini-flags span { background:#f1f5f9; border:1px solid #e2e8f0; color:#475569; border-radius:999px; padding:.2rem .45rem; font-size:.68rem; font-weight:700; }
-        .product-mini-actions { display:flex; gap:.35rem; flex-wrap:wrap; margin-top:.15rem; }
-        .product-mini-actions .btn { flex:1 1 48%; }
+        .product-mini-flags span { background:#f8fafc; border:1px solid rgba(226,232,240,.95); color:#475569; border-radius:999px; padding:.2rem .45rem; font-size:.68rem; font-weight:700; }
+        .product-mini-actions {
+            display:grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap:.4rem;
+            margin-top:.15rem;
+        }
+        .product-mini-actions .btn {
+            width:100%;
+            min-width:0;
+            max-width:100%;
+            display:inline-flex;
+            align-items:center;
+            justify-content:center;
+            gap:.25rem;
+            overflow:hidden;
+            text-overflow:ellipsis;
+            white-space:nowrap;
+        }
+        .product-mini-actions .btn i { flex:0 0 auto; margin-right:0 !important; }
         @media (max-width: 767px) {
             .products-cards-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); padding:.75rem; gap:.75rem; }
             .product-mini-body { padding:.75rem .8rem .85rem; gap:.45rem; }
-            .product-mini-actions .btn { flex:1 1 100%; }
+            .product-mini-actions { grid-template-columns: 1fr; }
             .product-mini-price { font-size:1.05rem; }
             .product-mini-name { font-size:.95rem; }
         }
@@ -1606,29 +1697,29 @@ if ($isAjax) {
         </div>
     </div>
 </section>
-    <div class="row g-2 kpi-row inventory-fade-in">
+    <div class="row g-2 kpi-row inventory-fade-in d-none">
         <div class="col-6 col-md-3">
             <div class="kpi-card">
                 <div class="small text-muted">Total productos</div>
-                <div class="h5 mb-0" id="kpiTotal">0</div>
+                <div class="h5 mb-0" id="kpiTotalLegacy">0</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
             <div class="kpi-card">
                 <div class="small text-muted">Activos</div>
-                <div class="h5 mb-0 text-success" id="kpiActive">0</div>
+                <div class="h5 mb-0 text-success" id="kpiActiveLegacy">0</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
             <div class="kpi-card">
                 <div class="small text-muted">Inactivos</div>
-                <div class="h5 mb-0 text-danger" id="kpiInactive">0</div>
+                <div class="h5 mb-0 text-danger" id="kpiInactiveLegacy">0</div>
             </div>
         </div>
         <div class="col-6 col-md-3">
             <div class="kpi-card">
                 <div class="small text-muted">Sin stock</div>
-                <div class="h5 mb-0 text-warning" id="kpiNoStock">0</div>
+                <div class="h5 mb-0 text-warning" id="kpiNoStockLegacy">0</div>
             </div>
         </div>
     </div>
@@ -1647,6 +1738,8 @@ $kpiBajoStock = number_format($kpiData['bajo_stock'] ?? 0, 0);
 $kpiValorInv = number_format($valorInventario, 2);
 $kpiIntegrity = number_format($integrityAlertCount ?? 0, 0);
 $viewModeLabelText = $viewMode === 'cards' ? 'Tarjetas' : 'Listado';
+$userPrefsKeySeed = (string)($_SESSION['user_id'] ?? $_SESSION['admin_name'] ?? $_SESSION['admin_logged_in'] ?? 'guest');
+$userPrefsKey = 'pt_prefs_' . md5($userPrefsKeySeed . '|' . $EMP_ID . '|' . $SUC_ID);
 $warehouseOptionsHtml = '<option value="0">Todos los almacenes</option>';
 foreach ($almacenesSucursal as $alm) {
     $almId = (int)($alm['id'] ?? 0);
@@ -1658,111 +1751,263 @@ $integrityAlertHtml = '';
 if ((int)$integrityAlertCount > 0) {
     $integrityAlertHtml = '<div class="alert alert-warning mx-3 mb-0"><strong>' . (int)$integrityAlertCount . ' alertas de catálogo.</strong> Revisa productos con precio cero, datos vacíos, barras duplicadas o stock negativo.</div>';
 }
+$userPrefsKeyJs = json_encode($userPrefsKey, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+$viewModeJs = json_encode($viewMode, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+$selectedAlmIdJs = (string)(int)$selectedAlmId;
 
     $toolbarSaaS = <<<HTML
 <style>
 /* ── SaaS Premium Toolbar ───────────────────────────────────────── */
-.pt-sbar { background:rgba(255,255,255,.72); backdrop-filter:blur(14px); border:1px solid rgba(226,232,240,.8); border-radius:18px; box-shadow:0 10px 40px rgba(15,23,42,.06); overflow:hidden; }
-.pt-kpi-row { display:flex; gap:1px; background:rgba(226,232,240,.6); }
-.pt-kpi { flex:1; background:#fff; padding:14px 10px; text-align:center; transition:background .2s; cursor:default; }
+.pt-sbar {
+    background: rgba(255,255,255,.82);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(226,232,240,.9);
+    border-radius: 22px;
+    box-shadow: 0 16px 46px rgba(15,23,42,.07);
+    overflow: hidden;
+}
+.pt-kpi-row {
+    display:grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 1px;
+    background: rgba(226,232,240,.72);
+}
+.pt-kpi {
+    background:#fff;
+    padding: 14px 10px;
+    text-align:center;
+    transition: background .2s ease;
+    cursor: default;
+}
 .pt-kpi:hover { background:#f8fafc; }
-.pt-kpi-val { font-size:1.35rem; font-weight:800; line-height:1; letter-spacing:-.02em; }
-.pt-kpi-lbl { font-size:.68rem; text-transform:uppercase; letter-spacing:.08em; margin-top:4px; opacity:.65; }
+.pt-kpi-val { font-size:1.28rem; font-weight:800; line-height:1; letter-spacing:0; }
+.pt-kpi-lbl { font-size:.67rem; text-transform:uppercase; letter-spacing:.08em; margin-top:5px; opacity:.68; }
 .pt-kpi-total { color:#0f172a; }
 .pt-kpi-active { color:#059669; }
-.pt-kpi-inactive { color:#ef4444; }
-.pt-kpi-nostock { color:#f59e0b; }
-.pt-kpi-money  { color:#3b82f6; }
+.pt-kpi-inactive { color:#dc2626; }
+.pt-kpi-nostock { color:#d97706; }
+.pt-kpi-money  { color:#2563eb; }
 
-.pt-command { padding:18px 22px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-.pt-search-wrap { flex:1 1 320px; position:relative; }
+.pt-command {
+    padding: 18px 22px 16px;
+    display:grid;
+    grid-template-columns: minmax(280px, 1.25fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+}
+.pt-command-search,
+.pt-tool-group {
+    background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+    border: 1px solid rgba(226,232,240,.95);
+    border-radius: 18px;
+    padding: 14px;
+    box-shadow: 0 8px 20px rgba(15,23,42,.04);
+}
+.pt-tool-label {
+    font-size: .68rem;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: #64748b;
+    font-weight: 800;
+    margin-bottom: 8px;
+}
+.pt-command-side {
+    display:grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 12px;
+    align-items: stretch;
+}
+.pt-search-wrap { position:relative; }
 .pt-search-wrap i { position:absolute; left:14px; top:50%; transform:translateY(-50%); color:#94a3b8; font-size:1rem; pointer-events:none; }
-.pt-search-wrap input { width:100%; padding:11px 14px 11px 38px; border:1.5px solid #e2e8f0; border-radius:12px; font-size:.92rem; background:#fff; transition:all .2s; }
-.pt-search-wrap input:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.12); outline:none; }
-
-.pt-filter-drawer { display:none; padding:0 22px 18px; animation:ptSlideDown .25s ease; }
-.pt-filter-drawer.open { display:block; }
-@keyframes ptSlideDown { from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);} }
-
-.pt-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
-.pt-filter-grid label { font-size:.7rem; font-weight:700; text-transform:uppercase; letter-spacing:.06em; color:#64748b; margin-bottom:4px; display:block; }
-.pt-filter-grid input, .pt-filter-grid select { width:100%; padding:8px 10px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; transition:all .2s; }
-.pt-filter-grid input:focus, .pt-filter-grid select:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,.10); outline:none; }
-
+.pt-search-wrap input {
+    width:100%;
+    min-height: 48px;
+    padding: 12px 14px 12px 38px;
+    border: 1.5px solid #dbe4ee;
+    border-radius: 14px;
+    font-size: .94rem;
+    background: #fff;
+    transition: all .2s ease;
+}
+.pt-search-wrap input:focus {
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37,99,235,.12);
+    outline: none;
+}
+.pt-tool-group .pt-bulk-select,
+.pt-tool-group .pt-bulk-input,
+.pt-tool-group .form-select {
+    min-height: 44px;
+    border-radius: 12px;
+    border: 1.5px solid #dbe4ee;
+    box-shadow: none;
+}
+.pt-tool-group .pt-bulk-select:focus,
+.pt-tool-group .pt-bulk-input:focus,
+.pt-tool-group .form-select:focus {
+    border-color:#2563eb;
+    box-shadow:0 0 0 3px rgba(37,99,235,.1);
+}
 .pt-actions { display:flex; gap:8px; flex-wrap:wrap; }
-.pt-btn { display:inline-flex; align-items:center; gap:6px; padding:10px 16px; border-radius:10px; font-size:.85rem; font-weight:600; border:none; cursor:pointer; transition:all .2s; white-space:nowrap; }
+.pt-btn {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: .84rem;
+    font-weight: 700;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all .18s ease;
+    white-space: nowrap;
+    min-width: 0;
+    max-width: 100%;
+}
+.pt-btn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pt-btn i { font-size:.9rem; }
-.pt-btn:hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.08); }
-.pt-btn:active { transform:translateY(0); }
+.pt-btn:hover { transform: translateY(-1px); box-shadow:0 8px 18px rgba(15,23,42,.08); }
+.pt-btn:active { transform: translateY(0); }
 .pt-btn-pri  { background:#0f172a; color:#fff; }
-.pt-btn-sec  { background:#fff; color:#334155; border:1.5px solid #e2e8f0; }
-.pt-btn-sec:hover { border-color:#cbd5e1; background:#f8fafc; }
-.pt-btn-dang { background:#fff; color:#ef4444; border:1.5px solid #fecaca; }
+.pt-btn-pri:hover { background:#111827; }
+.pt-btn-sec  { background:#fff; color:#334155; border-color:#dbe4ee; }
+.pt-btn-sec:hover { border-color:#c7d2e0; background:#f8fafc; }
+.pt-btn-dang { background:#fff; color:#dc2626; border-color:#fecaca; }
 .pt-btn-dang:hover { background:#fef2f2; }
 .pt-btn-ghost{ background:transparent; color:#64748b; padding:10px 12px; }
 .pt-btn-ghost:hover { background:#f1f5f9; color:#0f172a; }
 
-.pt-bulk-bar { background:#f8fafc; border-top:1px solid #e2e8f0; padding:14px 22px; display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+.pt-filter-drawer { display:none; padding:0 22px 18px; animation:ptSlideDown .22s ease; }
+.pt-filter-drawer.open { display:block; }
+@keyframes ptSlideDown { from{opacity:0; transform:translateY(-8px);} to{opacity:1; transform:translateY(0);} }
+
+.pt-filter-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:12px; }
+.pt-filter-grid label { font-size:.68rem; font-weight:800; text-transform:uppercase; letter-spacing:.09em; color:#64748b; margin-bottom:4px; display:block; }
+.pt-filter-grid input, .pt-filter-grid select {
+    width:100%;
+    padding:10px 12px;
+    border:1.5px solid #dbe4ee;
+    border-radius:12px;
+    font-size:.86rem;
+    background:#fff;
+    transition:all .2s ease;
+}
+.pt-filter-grid input:focus, .pt-filter-grid select:focus { border-color:#2563eb; box-shadow:0 0 0 3px rgba(37,99,235,.1); outline:none; }
+
+.pt-bulk-bar {
+    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+    border-top:1px solid rgba(226,232,240,.95);
+    padding:14px 22px;
+    display:flex;
+    align-items:center;
+    gap:14px;
+    flex-wrap:wrap;
+}
 .pt-bulk-left { display:flex; align-items:center; gap:10px; }
 .pt-bulk-check { width:20px; height:20px; accent-color:#0f172a; cursor:pointer; }
-.pt-bulk-label { font-size:.85rem; font-weight:700; color:#334155; cursor:pointer; user-select:none; }
-.pt-bulk-select { padding:8px 28px 8px 12px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; min-width:200px; cursor:pointer; }
-.pt-bulk-input { padding:8px 12px; border:1.5px solid #e2e8f0; border-radius:10px; font-size:.85rem; background:#fff; width:160px; }
-.pt-bulk-apply { background:#0f172a; color:#fff; padding:8px 18px; border-radius:10px; font-size:.85rem; font-weight:600; border:none; cursor:pointer; transition:all .2s; }
-.pt-bulk-apply:hover { background:#1e293b; }
+.pt-bulk-label { font-size:.84rem; font-weight:800; color:#334155; cursor:pointer; user-select:none; }
+.pt-bulk-select { padding:9px 28px 9px 12px; border:1.5px solid #dbe4ee; border-radius:12px; font-size:.84rem; background:#fff; min-width:210px; cursor:pointer; }
+.pt-bulk-input { padding:9px 12px; border:1.5px solid #dbe4ee; border-radius:12px; font-size:.84rem; background:#fff; width:170px; }
+.pt-bulk-apply {
+    background:#0f172a;
+    color:#fff;
+    padding:9px 18px;
+    border-radius:12px;
+    font-size:.84rem;
+    font-weight:700;
+    border:none;
+    cursor:pointer;
+    transition:all .18s ease;
+}
+.pt-bulk-apply:hover { background:#1e293b; box-shadow:0 8px 18px rgba(15,23,42,.12); }
 .pt-bulk-meta { margin-left:auto; font-size:.8rem; color:#64748b; }
 .pt-bulk-meta strong { color:#0f172a; }
 
 .pt-chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 22px 10px; }
-.pt-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#f1f5f9; border-radius:20px; font-size:.75rem; color:#475569; border:1px solid #e2e8f0; }
+.pt-chip { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; background:#f8fafc; border-radius:999px; font-size:.74rem; color:#475569; border:1px solid #e2e8f0; }
 .pt-chip button { background:none; border:none; color:#94a3b8; cursor:pointer; font-size:.7rem; padding:0; line-height:1; }
-.pt-chip button:hover { color:#ef4444; }
+.pt-chip button:hover { color:#dc2626; }
 
+@media (max-width: 1200px) {
+    .pt-kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .pt-command { grid-template-columns: 1fr; }
+    .pt-command-side { grid-template-columns: 1fr 1fr; }
+}
 @media (max-width: 768px) {
-    .pt-kpi-row { flex-wrap:wrap; }
-    .pt-kpi { flex:1 1 45%; }
+    .pt-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .pt-command { padding:14px; }
+    .pt-command-side { grid-template-columns: 1fr; }
+    .pt-actions { gap: 10px; }
+    .pt-actions .pt-btn { width: 100%; justify-content: center; }
     .pt-filter-grid { grid-template-columns:1fr; }
     .pt-bulk-bar { padding:12px 14px; gap:10px; }
+    .pt-bulk-bar > * { width:100%; }
+    .pt-bulk-left { justify-content: space-between; }
+    .pt-bulk-select,
+    .pt-bulk-input,
+    .pt-bulk-apply { width:100%; min-width:0; }
     .pt-bulk-meta { width:100%; text-align:right; margin-left:0; margin-top:4px; }
+}
+@media (max-width: 575.98px) {
+    .pt-kpi-row { grid-template-columns: 1fr; }
+    .pt-command-search,
+    .pt-tool-group { padding: 12px; border-radius: 16px; }
+    .pt-search-wrap input { min-height: 46px; font-size: .92rem; }
+    .pt-actions { flex-direction: column; }
+    .pt-actions .pt-btn { width: 100%; justify-content: center; }
+    .pt-bulk-bar { flex-direction: column; align-items: stretch; }
+    .pt-bulk-left { width:100%; }
+    .pt-bulk-label { flex:1; }
+    .pt-bulk-check { flex:0 0 auto; }
+    .pt-chips { padding:0 14px 10px; }
+    .products-cards-grid { grid-template-columns:1fr; padding:.75rem; gap:.75rem; }
 }
 </style>
 
 <div class="pt-sbar mb-4 no-print inventory-fade-in">
-    <!-- KPIs -->
     <div class="pt-kpi-row">
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-total">{$kpiTotal}</div><div class="pt-kpi-lbl">Total Catálogo</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiActivos}</div><div class="pt-kpi-lbl">Activos</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-inactive">{$kpiInactivos}</div><div class="pt-kpi-lbl">Inactivos</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock">{$kpiSinStock}</div><div class="pt-kpi-lbl">Sin Stock</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiBajoStock}</div><div class="pt-kpi-lbl">Bajo Stock</div></div>
-        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-money">\${$kpiValorInv}</div><div class="pt-kpi-lbl">Valor Inventario</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-total" id="kpiTotal">{$kpiTotal}</div><div class="pt-kpi-lbl">Total catálogo</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active" id="kpiActive">{$kpiActivos}</div><div class="pt-kpi-lbl">Activos</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-inactive" id="kpiInactive">{$kpiInactivos}</div><div class="pt-kpi-lbl">Inactivos</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock" id="kpiNoStock">{$kpiSinStock}</div><div class="pt-kpi-lbl">Sin stock</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-active">{$kpiBajoStock}</div><div class="pt-kpi-lbl">Bajo stock</div></div>
+        <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-money">\${$kpiValorInv}</div><div class="pt-kpi-lbl">Valor inventario</div></div>
         <div class="pt-kpi"><div class="pt-kpi-val pt-kpi-nostock">{$kpiIntegrity}</div><div class="pt-kpi-lbl">Alertas</div></div>
     </div>
 
-    <!-- Command Bar -->
     <div class="pt-command">
-        <div class="pt-search-wrap">
-            <i class="fas fa-search"></i>
-            <input type="text" id="f_name" placeholder="Buscar por nombre de producto..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
+        <div class="pt-command-search">
+            <div class="pt-tool-label">Búsqueda</div>
+            <div class="pt-search-wrap">
+                <i class="fas fa-search"></i>
+                <input type="text" id="f_name" placeholder="Buscar por nombre de producto..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
+            </div>
         </div>
-        <div class="pt-actions">
-            <select class="pt-bulk-select" id="warehouseSelect" onchange="changeWarehouseScope()" style="min-width:210px"><?php echo $warehouseOptionsHtml; ?></select>
-            <button type="button" class="pt-btn pt-btn-pri" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
-            <button type="button" class="pt-btn pt-btn-sec" onclick="toggleFilterDrawer()"><i class="fas fa-sliders-h"></i> Filtros</button>
-            <button type="button" class="pt-btn pt-btn-sec" onclick="exportCsv()"><i class="fas fa-file-export"></i> Exportar</button>
-            <button type="button" class="pt-btn pt-btn-sec" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import"></i> Importar</button>
-            <button type="button" class="pt-btn pt-btn-sec" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
-            <button type="button" class="pt-btn pt-btn-sec" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Con stock</span></button>
-            <button type="button" class="pt-btn pt-btn-sec" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel"><?php echo $viewModeLabelText; ?></span></button>
+        <div class="pt-command-side">
+            <div class="pt-tool-group">
+                <div class="pt-tool-label">Alcance</div>
+                <select class="pt-bulk-select" id="warehouseSelect" onchange="changeWarehouseScope()" style="min-width:210px">{$warehouseOptionsHtml}</select>
+            </div>
+            <div class="pt-tool-group">
+                <div class="pt-tool-label">Acciones rápidas</div>
+                <div class="pt-actions">
+                    <button type="button" class="pt-btn pt-btn-pri" onclick="openProductCreator(productoCreadoExito)"><i class="fas fa-plus"></i> Nuevo</button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="toggleFilterDrawer()"><i class="fas fa-sliders-h"></i> Filtros</button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="resetAllFilters()"><i class="fas fa-undo"></i> Reset</button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="exportCsv()"><i class="fas fa-file-export"></i> Exportar</button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import"></i> Importar</button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="openCategoriesModal()"><i class="fas fa-tags"></i> Categorías</button>
+                    <button type="button" class="pt-btn pt-btn-sec" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Con stock</span></button>
+                    <button type="button" class="pt-btn pt-btn-sec" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel">{$viewModeLabelText}</span></button>
+                </div>
+            </div>
         </div>
     </div>
-    <?php echo $integrityAlertHtml; ?>
+    {$integrityAlertHtml}
 
-    <!-- Chips de filtros activos -->
     <div class="pt-chips" id="activeFilterChips"></div>
 
-    <!-- Filtros Avanzados (Drawer) -->
     <div class="pt-filter-drawer" id="filterDrawer">
         <form id="filterForm" onsubmit="event.preventDefault(); loadData(1);">
             <div class="pt-filter-grid">
@@ -1775,7 +2020,7 @@ if ((int)$integrityAlertCount > 0) {
                     <select id="f_status"><option value="active">Activos</option><option value="inactive">Inactivos</option><option value="all">Todos</option></select>
                 </div>
                 <div>
-                    <label>Rango Stock</label>
+                    <label>Rango stock</label>
                     <input type="text" id="f_stock" placeholder="Ej: <5, >10, 0, 10-20">
                 </div>
                 <div>
@@ -1783,38 +2028,37 @@ if ((int)$integrityAlertCount > 0) {
                     <select id="f_limit" onchange="loadData(1)"><option value="10">10</option><option value="20">20</option><option value="50">50</option><option value="100">100</option></select>
                 </div>
                 <div>
-                    <label>Modo Import</label>
+                    <label>Modo import</label>
                     <select id="importMode"><option value="update_create">Actualizar o crear</option><option value="update_only">Solo actualizar</option></select>
                 </div>
                 <div style="display:flex; align-items:flex-end;">
-                    <button type="submit" class="pt-btn pt-btn-pri" style="width:100%; justify-content:center;"><i class="fas fa-filter"></i> Aplicar Filtros</button>
+                    <button type="submit" class="pt-btn pt-btn-pri" style="width:100%; justify-content:center;"><i class="fas fa-filter"></i> Aplicar filtros</button>
                 </div>
             </div>
         </form>
     </div>
 
-    <!-- Bulk Actions Bar -->
     <div class="pt-bulk-bar">
         <div class="pt-bulk-left">
             <input class="pt-bulk-check" type="checkbox" id="selectAll">
             <label class="pt-bulk-label" for="selectAll">Todos los visibles</label>
         </div>
         <select class="pt-bulk-select" id="bulkActionSelect">
-            <option value="">-- Acción Masiva --</option>
-            <option value="print_labels">🏷️ Imprimir Etiquetas</option>
+            <option value="">-- Acción masiva --</option>
+            <option value="print_labels">🏷️ Imprimir etiquetas</option>
             <option value="web_on">🌐 Activar en WEB</option>
             <option value="web_off">🚫 Ocultar de WEB</option>
-            <option value="reservable_on">📅 Activar Reservable</option>
-            <option value="reservable_off">📅 Desactivar Reservable</option>
+            <option value="reservable_on">📅 Activar reservable</option>
+            <option value="reservable_off">📅 Desactivar reservable</option>
             <option value="pos_on">🧾 Mostrar en POS</option>
             <option value="pos_off">🧾 Ocultar en POS</option>
-            <option value="active_on">✅ Activar Producto</option>
-            <option value="active_off">❌ Desactivar Producto</option>
-            <option value="set_stock_min">📌 Cambiar Stock Mínimo</option>
-            <option value="change_cat">📂 Cambiar Categoría</option>
-            <option value="clone_selected">📑 Clonar Seleccionados</option>
+            <option value="active_on">✅ Activar producto</option>
+            <option value="active_off">❌ Desactivar producto</option>
+            <option value="set_stock_min">📌 Cambiar stock mínimo</option>
+            <option value="change_cat">📂 Cambiar categoría</option>
+            <option value="clone_selected">📑 Clonar seleccionados</option>
         </select>
-        <input type="text" class="pt-bulk-input d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva Categoría">
+        <input type="text" class="pt-bulk-input d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva categoría">
         <input type="number" step="0.01" class="pt-bulk-input d-none" id="bulkStockMinInput" placeholder="Stock mínimo">
         <datalist id="bulk_cat_list"></datalist>
         <button class="pt-bulk-apply" onclick="applyBulkAction()">Aplicar</button>
@@ -1856,8 +2100,75 @@ function toggleFilterDrawer() {
     const d = document.getElementById('filterDrawer');
     d.classList.toggle('open');
 }
+function getUserPrefs() {
+    try {
+        return JSON.parse(localStorage.getItem({$userPrefsKeyJs}) || '{}') || {};
+    } catch (e) {
+        return {};
+    }
+}
+function setUserPrefs(patch) {
+    const current = getUserPrefs();
+    const next = Object.assign({}, current, patch || {});
+    localStorage.setItem({$userPrefsKeyJs}, JSON.stringify(next));
+    return next;
+}
+function clearUserPrefs() {
+    localStorage.removeItem({$userPrefsKeyJs});
+}
+function syncPrefsToInputs() {
+    const prefs = getUserPrefs();
+    if (prefs.f_name !== undefined && document.getElementById('f_name')) document.getElementById('f_name').value = prefs.f_name;
+    if (prefs.f_code !== undefined && document.getElementById('f_code')) document.getElementById('f_code').value = prefs.f_code;
+    if (prefs.f_status !== undefined && document.getElementById('f_status')) document.getElementById('f_status').value = prefs.f_status;
+    if (prefs.f_stock !== undefined && document.getElementById('f_stock')) document.getElementById('f_stock').value = prefs.f_stock;
+    if (prefs.f_limit !== undefined && document.getElementById('f_limit')) document.getElementById('f_limit').value = prefs.f_limit;
+    if (prefs.view_mode !== undefined) setViewMode(prefs.view_mode);
+    if (prefs.with_stock !== undefined) setWithStockMode(!!prefs.with_stock);
+    if (prefs.warehouse_scope !== undefined) setWarehouseScope(prefs.warehouse_scope);
+}
+function persistFilters() {
+    const prefs = {
+        f_name: document.getElementById('f_name') ? document.getElementById('f_name').value : '',
+        f_code: document.getElementById('f_code') ? document.getElementById('f_code').value : '',
+        f_status: document.getElementById('f_status') ? document.getElementById('f_status').value : 'active',
+        f_stock: document.getElementById('f_stock') ? document.getElementById('f_stock').value : '',
+        f_limit: document.getElementById('f_limit') ? document.getElementById('f_limit').value : '10',
+        view_mode: getViewMode(),
+        with_stock: getWithStockMode(),
+        warehouse_scope: getWarehouseScope()
+    };
+    setUserPrefs(prefs);
+}
+function resetAllFilters() {
+    if (!confirm('Se borrarán búsqueda, filtros, vista y almacén guardados. ¿Continuar?')) return;
+    clearUserPrefs();
+    localStorage.removeItem('pt_view_mode');
+    localStorage.removeItem('pt_with_stock');
+    localStorage.removeItem('pt_warehouse_scope');
+    const fName = document.getElementById('f_name');
+    const fCode = document.getElementById('f_code');
+    const fStatus = document.getElementById('f_status');
+    const fStock = document.getElementById('f_stock');
+    const fLimit = document.getElementById('f_limit');
+    const bulkSelect = document.getElementById('bulkActionSelect');
+    const drawer = document.getElementById('filterDrawer');
+    if (fName) fName.value = '';
+    if (fCode) fCode.value = '';
+    if (fStatus) fStatus.value = 'active';
+    if (fStock) fStock.value = '';
+    if (fLimit) fLimit.value = '10';
+    if (bulkSelect) bulkSelect.value = '';
+    setViewMode({$viewModeJs});
+    setWithStockMode(false);
+    setWarehouseScope(0);
+    if (drawer) drawer.classList.remove('open');
+    loadData(1);
+}
 function getViewMode() {
-    return localStorage.getItem('pt_view_mode') || '<?php echo $viewMode; ?>';
+    const saved = localStorage.getItem('pt_view_mode');
+    if (saved) return saved;
+    return window.matchMedia && window.matchMedia('(max-width: 991px)').matches ? 'cards' : {$viewModeJs};
 }
 function getWithStockMode() {
     return localStorage.getItem('pt_with_stock') === '1';
@@ -1885,14 +2196,16 @@ function setViewMode(mode) {
 }
 function toggleViewMode() {
     setViewMode(getViewMode() === 'cards' ? 'list' : 'cards');
+    persistFilters();
     loadData(1);
 }
 function toggleWithStock() {
     setWithStockMode(!getWithStockMode());
+    persistFilters();
     loadData(1);
 }
 function getWarehouseScope() {
-    return parseInt(localStorage.getItem('pt_warehouse_scope') || '<?php echo (int)$selectedAlmId; ?>', 10) || 0;
+    return parseInt(localStorage.getItem('pt_warehouse_scope') || {$selectedAlmIdJs}, 10) || 0;
 }
 function setWarehouseScope(id) {
     const val = parseInt(id || '0', 10) || 0;
@@ -1903,15 +2216,21 @@ function setWarehouseScope(id) {
 function changeWarehouseScope() {
     const sel = document.getElementById('warehouseSelect');
     setWarehouseScope(sel ? sel.value : 0);
+    persistFilters();
     loadData(1);
 }
 // Restaurar estado del drawer si hay filtros activos
 (function() {
-    const hasFilters = document.getElementById('f_code').value || document.getElementById('f_stock').value;
-    if (hasFilters) document.getElementById('filterDrawer').classList.add('open');
-    setViewMode(getViewMode());
-    setWithStockMode(getWithStockMode());
-    setWarehouseScope(getWarehouseScope());
+    syncPrefsToInputs();
+    const prefs = getUserPrefs();
+    const hasFilters = !!(prefs.f_name || prefs.f_code || prefs.f_stock || (prefs.f_status && prefs.f_status !== 'active'));
+    if (hasFilters) {
+        const drawer = document.getElementById('filterDrawer');
+        if (drawer) drawer.classList.add('open');
+    }
+    if (!prefs.view_mode && window.matchMedia && window.matchMedia('(max-width: 991px)').matches) {
+        setViewMode('cards');
+    }
 })();
 </script>
 HTML;
@@ -1921,7 +2240,10 @@ HTML;
 
     <div class="card card-table shadow-sm" id="printableArea">
         <div class="p-3 d-flex justify-content-between align-items-center no-print border-bottom bg-light">
-            <h6 class="mb-0 fw-bold text-muted"><i class="fas fa-list me-2"></i>Listado de Productos</h6>
+            <div>
+                <div class="small text-uppercase fw-bold text-muted" style="letter-spacing:.08em;">Catálogo</div>
+                <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-list me-2 text-primary"></i>Listado de productos</h6>
+            </div>
             <div class="dropdown">
                 <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" id="dropdownCols" data-bs-toggle="dropdown" aria-expanded="false" data-bs-auto-close="outside">
                     <i class="fas fa-columns me-1"></i> Columnas
@@ -2275,6 +2597,7 @@ async function loadData(page) {
     const view = getViewMode();
     const withStock = getWithStockMode() ? '1' : '0';
     const alm = getWarehouseScope();
+    persistFilters();
 
     const url = `products_table.php?ajax_load=1&page=${page}&limit=${limit}&code=${encodeURIComponent(code)}&name=${encodeURIComponent(name)}&status=${status}&stock_range=${encodeURIComponent(stockRange)}&sort=${currentSort}&dir=${currentDir}&view=${view}&with_stock=${withStock}&alm=${alm}`;
     
@@ -3207,6 +3530,17 @@ document.addEventListener('DOMContentLoaded', function() {
     if (limitEl) limitEl.value = '<?php echo (int)$limit; ?>';
     const stockEl = document.getElementById('f_stock');
     if (stockEl) stockEl.value = '<?php echo htmlspecialchars($filterStockRange, ENT_QUOTES, 'UTF-8'); ?>';
+    const nameEl = document.getElementById('f_name');
+    const codeEl = document.getElementById('f_code');
+    const statusEl2 = document.getElementById('f_status');
+    const stockEl2 = document.getElementById('f_stock');
+    const limitEl2 = document.getElementById('f_limit');
+    const warehouseEl = document.getElementById('warehouseSelect');
+    [nameEl, codeEl, statusEl2, stockEl2, limitEl2, warehouseEl].forEach(el => {
+        if (!el) return;
+        el.addEventListener('change', persistFilters);
+        el.addEventListener('input', persistFilters);
+    });
     const cloneBtn = document.getElementById('confirmCloneAdvancedBtn');
     if (cloneBtn) {
         cloneBtn.addEventListener('click', async () => {
@@ -3221,8 +3555,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Registrar Service Worker Independiente
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw-products.js')
-            .then(reg => console.log('Gestor de Inventario Offline listo'))
+        navigator.serviceWorker.register('sw-products.js', { scope: './', updateViaCache: 'none' })
+            .then(reg => {
+                reg.update();
+                console.log('Gestor de Inventario Offline listo');
+            })
             .catch(err => console.warn('Error registrando SW de Inventario', err));
     }
 });
