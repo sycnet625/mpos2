@@ -592,7 +592,7 @@ async function refreshProducts(almId = null) {
     if (btn) { btn.innerHTML = '<i class="fas fa-spin fa-spinner"></i>'; btn.disabled = true; }
 
     const loadAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-    const loadTimeoutMs = 12000;
+    const loadTimeoutMs = 60000;
     let loadTimeoutId = null;
 
     try {
@@ -634,11 +634,15 @@ async function refreshProducts(almId = null) {
             renderProducts('all', document.getElementById('searchInput')?.value || ''); 
             showToast('Catalogo actualizado (' + result.products.length + ' productos)'); 
         }
-    } catch(e) { 
-        console.error('Error actualizando productos:', e);
+    } catch(e) {
         const msg = (e && e.name === 'AbortError')
             ? 'La carga de productos tardó demasiado. Se continuará con el POS.'
             : 'Error al actualizar: ' + e.message;
+        if (e && e.name === 'AbortError') {
+            console.warn('Timeout actualizando productos:', e);
+        } else {
+            console.error('Error actualizando productos:', e);
+        }
         showToast(msg, 'warning');
     } finally { 
         if (loadTimeoutId) clearTimeout(loadTimeoutId);
