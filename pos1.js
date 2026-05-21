@@ -254,6 +254,7 @@ const INACTIVITY_MS = 15 * 60 * 1000; // 15 minutos de inactividad
 let pinEntryMode = 'overlay';
 let pendingSessionRetry = null;
 let sessionLoginModalInstance = null;
+let terminalLockModalInstance = null;
 
 // ==========================================
 // INICIALIZACION
@@ -270,6 +271,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const reasonEl = document.getElementById('sessionLoginReason');
             if (reasonEl) reasonEl.innerText = '';
         });
+    }
+    const terminalLockModalEl = document.getElementById('terminalLockModal');
+    if (terminalLockModalEl) {
+        terminalLockModalInstance = bootstrap.Modal.getOrCreateInstance(terminalLockModalEl);
+        const unlockBtn = document.getElementById('btnUnlockTerminal');
+        if (unlockBtn && !unlockBtn.dataset.bound) {
+            unlockBtn.dataset.bound = '1';
+            unlockBtn.addEventListener('click', () => {
+                if (terminalLockModalInstance) terminalLockModalInstance.hide();
+                openSessionLoginModal('Inicio de sesion requerido tras bloqueo por inactividad.', pendingSessionRetry);
+            });
+        }
     }
     _applyPriceModeUI();
     clearSearchAndRefreshProductList(false);
@@ -578,6 +591,10 @@ async function refreshProducts(almId = null) {
     const btn = document.getElementById('btnRefresh');
     if (btn) { btn.innerHTML = '<i class="fas fa-spin fa-spinner"></i>'; btn.disabled = true; }
 
+    const loadAbort = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+    const loadTimeoutMs = 12000;
+    let loadTimeoutId = null;
+
     try {
         localStorage.removeItem(CACHE_KEY);
 
@@ -591,10 +608,14 @@ async function refreshProducts(almId = null) {
         }
 
         const almParam = almId ? '&alm=' + parseInt(almId, 10) : '';
+        if (loadAbort) {
+            loadTimeoutId = setTimeout(() => loadAbort.abort(), loadTimeoutMs);
+        }
         const response = await fetch('pos.php?load_products=1&t=' + Date.now() + almParam, {
             method: 'GET',
             cache: 'no-store',
-            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' },
+            signal: loadAbort ? loadAbort.signal : undefined
         });
         
         if (!response.ok) throw new Error('Error del servidor: ' + response.status);
@@ -615,8 +636,12 @@ async function refreshProducts(almId = null) {
         }
     } catch(e) { 
         console.error('Error actualizando productos:', e);
-        showToast("Error al actualizar: " + e.message, "error"); 
+        const msg = (e && e.name === 'AbortError')
+            ? 'La carga de productos tardó demasiado. Se continuará con el POS.'
+            : 'Error al actualizar: ' + e.message;
+        showToast(msg, 'warning');
     } finally { 
+        if (loadTimeoutId) clearTimeout(loadTimeoutId);
         if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.disabled = false; } 
     }
 }
@@ -797,6 +822,13 @@ function openSessionLoginModal(message, retryFn) {
     enteredPin = '';
     pinEntryMode = 'modal';
     updatePinDisplay();
+    const gridEl = modalEl.querySelector('.mini-pin-grid');
+    if (gridEl) gridEl.style.display = 'grid';
+    const bodyEl = modalEl.querySelector('.modal-body');
+    if (bodyEl) {
+        bodyEl.scrollTop = 0;
+        bodyEl.style.overflowY = 'auto';
+    }
     const reasonEl = document.getElementById('sessionLoginReason');
     if (reasonEl) reasonEl.innerText = String(message || 'Inicio de sesion requerido');
     sessionLoginModalInstance = sessionLoginModalInstance || bootstrap.Modal.getOrCreateInstance(modalEl);
@@ -889,33 +921,52 @@ async function verifyPin() {
 
         // Función que completa el login tras confirmar almacén
         const finalizarLogin = async function (almId, almNombre) {
-            // Actualizar contexto con el almacén elegido
-            if (almId && loginContext) loginContext.id_almacen = almId;
-
-            // Actualizar fondo del carrito con el banner de la sucursal
-            const sucId = loginContext ? loginContext.id_sucursal : null;
-            if (sucId && typeof window.updateCartBackground === 'function') {
-                window.updateCartBackground(sucId);
-            }
-
-            // Releer productos pasando el almacén como parámetro URL para garantizar
-            // que se usa el correcto incluso si el POST set_almacen no llegó al servidor.
-            if (navigator.onLine) {
-                try { await refreshProducts(almId || null); } catch (e) {}
-            }
-
-            Synth.tada();
-            applyRoleRestrictions();
-            startInactivityTimer();
-            if (isSessionReauth) {
-                closeSessionLoginModal();
-                const retryFn = pendingSessionRetry;
-                pendingSessionRetry = null;
-                if (typeof retryFn === 'function') {
-                    setTimeout(() => retryFn(), 120);
+            try {
+                if (typeof window.setProgressOverlay === 'function') {
+                    window.setProgressOverlay(45, 'Cargando productos del almacén...');
                 }
-            } else {
-                unlockPos();
+
+                // Actualizar contexto con el almacén elegido
+                if (almId && loginContext) loginContext.id_almacen = almId;
+
+                // Actualizar fondo del carrito con el banner de la sucursal
+                const sucId = loginContext ? loginContext.id_sucursal : null;
+                if (sucId && typeof window.updateCartBackground === 'function') {
+                    window.updateCartBackground(sucId);
+                }
+
+                // Releer productos pasando el almacén como parámetro URL para garantizar
+                // que se usa el correcto incluso si el POST set_almacen no llegó al servidor.
+                if (navigator.onLine) {
+                    await refreshProducts(almId || null);
+                }
+
+                if (typeof window.setProgressOverlay === 'function') {
+                    window.setProgressOverlay(86, 'Finalizando acceso...');
+                }
+
+                Synth.tada();
+                applyRoleRestrictions();
+                startInactivityTimer();
+                if (isSessionReauth) {
+                    closeSessionLoginModal();
+                    const retryFn = pendingSessionRetry;
+                    pendingSessionRetry = null;
+                    if (typeof retryFn === 'function') {
+                        setTimeout(() => retryFn(), 120);
+                    }
+                } else {
+                    unlockPos();
+                }
+            } finally {
+                if (typeof window.setProgressOverlay === 'function') {
+                    window.setProgressOverlay(100, 'Listo');
+                }
+                setTimeout(() => {
+                    if (typeof window.hideProgressOverlay === 'function') {
+                        window.hideProgressOverlay();
+                    }
+                }, 180);
             }
         };
 
@@ -1071,7 +1122,20 @@ function lockPos() {
     updatePinDisplay();
     showPinAttemptDots();
     const overlay = document.getElementById('pinOverlay');
-    if (overlay) overlay.style.display = 'flex';
+    if (overlay) overlay.style.display = 'none';
+    const modalEl = document.getElementById('sessionLoginModal');
+    if (modalEl) {
+        const gridEl = modalEl.querySelector('.mini-pin-grid');
+        if (gridEl) gridEl.style.display = 'grid';
+        const sessionModal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        sessionModal.hide();
+    }
+    if (terminalLockModalInstance) {
+        terminalLockModalInstance.show();
+    } else {
+        const terminalLockModalEl = document.getElementById('terminalLockModal');
+        if (terminalLockModalEl) bootstrap.Modal.getOrCreateInstance(terminalLockModalEl).show();
+    }
     // Re-aplicar restricciones (ocultar botones de supervisor/admin)
     applyRoleRestrictions();
     showToast('Sesión cerrada por inactividad', 'warning');
@@ -1399,7 +1463,8 @@ function renderCart() {
     if (!c) return;
     c.innerHTML = '';
     let sub = 0; 
-    let items = 0;
+    let totalQty = 0;
+    const productLines = cart.length;
     
     if(cart.length === 0) {
         c.innerHTML = '<div class="text-center text-muted mt-5 pt-5"><i class="fas fa-shopping-basket fa-2x mb-2 opacity-25"></i><p class="small">Carrito Vacio</p></div>';
@@ -1408,7 +1473,7 @@ function renderCart() {
     cart.forEach((i, idx) => {
         const lineT = (i.price * (1 - i.discountPct/100)) * i.qty;
         sub += lineT; 
-        items += i.qty;
+        totalQty += i.qty;
         const d = document.createElement('div'); 
         d.className = 'cart-item' + (idx === selectedIndex ? ' selected' : '');
         d.onclick = () => { selectedIndex = idx; renderCart(); };
@@ -1437,7 +1502,9 @@ function renderCart() {
     }
     
     const itemsEl = document.getElementById('totalItems');
-    if (itemsEl) itemsEl.innerText = items;
+    if (itemsEl) itemsEl.innerText = totalQty;
+    const linesEl = document.getElementById('totalLines');
+    if (linesEl) linesEl.innerText = productLines;
 }
 
 // NUEVA FUNCIÓN: Actualizar badges de stock en tiempo real
@@ -1495,7 +1562,7 @@ window.updateStockBadges = function() {
 
 function modifyQty(d) { 
     if(selectedIndex < 0) return; 
-    const step = d > 0 ? 1 : (d < 0 ? -1 : 0);
+    const step = Number(d) || 0;
     if (step === 0) return;
 
     const item = cart[selectedIndex];
@@ -2002,6 +2069,149 @@ function deleteParkedOrder(index) {
 // ==========================================
 // HISTORIAL DE TICKETS (RECTIFICADO: LLAMA A MODAL_HISTORY.PHP)
 // ==========================================
+async function loadHistorialModalContent() {
+    const body = document.getElementById('historialModalBody');
+    if (!body) return;
+
+    body.innerHTML = '<div class="text-center p-5"><i class="fas fa-spinner fa-spin fa-2x text-primary"></i><p class="mt-2">Cargando historial...</p></div>';
+
+    try {
+        const response = await fetch('modal_history.php?render_mode=1&t=' + Date.now(), {
+            cache: 'no-store',
+            credentials: 'same-origin'
+        });
+        const html = await response.text();
+        body.innerHTML = html;
+    } catch (error) {
+        console.error('Error cargando historial:', error);
+        body.innerHTML = '<div class="p-5 text-center text-danger"><i class="fas fa-wifi fa-2x mb-2"></i><br>Error de conexión al cargar historial.</div>';
+    }
+}
+
+let historialRefreshTimer = null;
+let historialHoverActivo = false;
+let historialScrollActivo = false;
+let historialScrollResetTimer = null;
+
+function historialTieneDetalleAbierto() {
+    return !!document.querySelector('#historialModal .collapse.show');
+}
+
+function historialPuedeRefrescar() {
+    return !historialHoverActivo && !historialScrollActivo && !historialTieneDetalleAbierto();
+}
+
+function updateHistorialRefreshState() {
+    const stateEl = document.getElementById('historialRefreshState');
+    if (!stateEl) return;
+    stateEl.classList.toggle('d-none', historialPuedeRefrescar());
+}
+
+function startHistorialAutoRefresh() {
+    stopHistorialAutoRefresh();
+    updateHistorialRefreshState();
+    historialRefreshTimer = setInterval(() => {
+        const modalEl = document.getElementById('historialModal');
+        if (!modalEl || !modalEl.classList.contains('show')) {
+            stopHistorialAutoRefresh();
+            return;
+        }
+        if (!historialPuedeRefrescar()) {
+            updateHistorialRefreshState();
+            return;
+        }
+        updateHistorialRefreshState();
+        loadHistorialModalContent();
+    }, 30000);
+}
+
+function stopHistorialAutoRefresh() {
+    if (historialRefreshTimer) {
+        clearInterval(historialRefreshTimer);
+        historialRefreshTimer = null;
+    }
+    if (historialScrollResetTimer) {
+        clearTimeout(historialScrollResetTimer);
+        historialScrollResetTimer = null;
+    }
+    historialHoverActivo = false;
+    historialScrollActivo = false;
+    updateHistorialRefreshState();
+}
+
+function bindHistorialInteracciones() {
+    const modalEl = document.getElementById('historialModal');
+    const bodyEl = document.getElementById('historialModalBody');
+    if (!modalEl || !bodyEl || modalEl._historialInteractionBound) return;
+
+    modalEl._historialInteractionBound = true;
+
+    bodyEl.addEventListener('mouseenter', function() {
+        historialHoverActivo = true;
+        updateHistorialRefreshState();
+    });
+
+    bodyEl.addEventListener('mouseleave', function() {
+        historialHoverActivo = false;
+        updateHistorialRefreshState();
+    });
+
+    bodyEl.addEventListener('scroll', function() {
+        historialScrollActivo = true;
+        updateHistorialRefreshState();
+        if (historialScrollResetTimer) clearTimeout(historialScrollResetTimer);
+        historialScrollResetTimer = setTimeout(() => {
+            historialScrollActivo = false;
+            historialScrollResetTimer = null;
+            updateHistorialRefreshState();
+        }, 1200);
+    }, { passive: true });
+}
+
+function setHistorialRefreshLoading(isLoading) {
+    const btn = document.getElementById('btnRefreshHistorial');
+    if (!btn) return;
+
+    btn.disabled = !!isLoading;
+    const icon = btn.querySelector('i');
+    const label = btn.querySelector('.refresh-label');
+    if (icon) {
+        icon.className = isLoading ? 'fas fa-circle-notch fa-spin me-1' : 'fas fa-sync-alt me-1';
+    }
+    if (label) {
+        label.textContent = isLoading ? 'Actualizando' : 'Refrescar';
+    }
+}
+
+window.refreshHistorialModal = async function() {
+    const modalEl = document.getElementById('historialModal');
+    if (modalEl && !bootstrap.Modal.getInstance(modalEl)) {
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+    setHistorialRefreshLoading(true);
+    try {
+        await loadHistorialModalContent();
+    } finally {
+        setHistorialRefreshLoading(false);
+    }
+};
+
+document.addEventListener('DOMContentLoaded', function() {
+    const modalEl = document.getElementById('historialModal');
+    if (!modalEl || modalEl._historialAutoRefreshBound) return;
+
+    modalEl._historialAutoRefreshBound = true;
+    bindHistorialInteracciones();
+    modalEl.addEventListener('shown.bs.modal', function() {
+        loadHistorialModalContent();
+        startHistorialAutoRefresh();
+    });
+    modalEl.addEventListener('hidden.bs.modal', function() {
+        stopHistorialAutoRefresh();
+        updateHistorialRefreshState();
+    });
+});
+
 window.showHistorialModal = async function() {
     let modalEl = document.getElementById('historialModal');
     
@@ -2013,19 +2223,106 @@ window.showHistorialModal = async function() {
     }
     
     const bsModal = new bootstrap.Modal(modalEl);
-    const body = document.getElementById('historialModalBody');
-    
-    body.innerHTML = '<div class="text-center p-5"><i class="fas fa-spinner fa-spin fa-2x text-primary"></i><p class="mt-2">Cargando historial...</p></div>';
     bsModal.show();
-    
+    await loadHistorialModalContent();
+};
+
+window.openHistorialWhatsappModal = async function() {
+    const modalEl = document.getElementById('historialWhatsappModal');
+    const select = document.getElementById('historialWhatsappContacto');
+    const estado = document.getElementById('historialWhatsappEstado');
+    if (!modalEl || !select) return;
+    if (estado) estado.textContent = 'Cargando contactos...';
     try {
-        // LLAMADA AL ARCHIVO EXTERNO PARA UNIFICAR CRITERIOS
-        const response = await fetch('modal_history.php?render_mode=1&t=' + Date.now());
-        const html = await response.text();
-        body.innerHTML = html;
-    } catch (error) {
-        console.error('Error cargando historial:', error);
-        body.innerHTML = '<div class="p-5 text-center text-danger"><i class="fas fa-wifi fa-2x mb-2"></i><br>Error de conexión al cargar historial.</div>';
+        const resp = await fetch('whatsapp_contacts.php', { cache: 'no-store', credentials: 'same-origin' });
+        const data = await resp.json();
+        const contactos = Array.isArray(data.contactos) ? data.contactos : [];
+        select.innerHTML = '';
+        if (!contactos.length) {
+            select.innerHTML = '<option value="">No hay contactos con WhatsApp</option>';
+        } else {
+            select.innerHTML = '<option value="">Selecciona un contacto...</option>' +
+                contactos.map(c => `<option value="${String(c.whatsapp || '').replace(/"/g, '&quot;')}">${String(c.nombre || 'Cliente')} (${String(c.whatsapp || '')})</option>`).join('');
+        }
+        if (estado) estado.textContent = '';
+    } catch (e) {
+        console.error('Error cargando contactos WhatsApp:', e);
+        if (estado) estado.textContent = 'No se pudieron cargar los contactos.';
+    }
+
+    if (modalEl.parentElement !== document.body) {
+        document.body.appendChild(modalEl);
+    }
+
+    const historialModalEl = document.getElementById('historialModal');
+    const showWhatsapp = () => bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    if (historialModalEl) {
+        const historialInst = bootstrap.Modal.getInstance(historialModalEl);
+        if (historialInst && historialModalEl.classList.contains('show')) {
+            historialModalEl.addEventListener('hidden.bs.modal', function onHidden() {
+                historialModalEl.removeEventListener('hidden.bs.modal', onHidden);
+                showWhatsapp();
+            });
+            historialInst.hide();
+            return;
+        }
+    }
+
+    showWhatsapp();
+};
+
+window.enviarHistorialPorWhatsApp = async function() {
+    const modalEl = document.getElementById('historialWhatsappModal');
+    const select = document.getElementById('historialWhatsappContacto');
+    const mensaje = document.getElementById('historialWhatsappMensaje');
+    const estado = document.getElementById('historialWhatsappEstado');
+    if (!select || !estado) return;
+    const whatsapp = String(select.value || '').trim();
+    if (!whatsapp) {
+        estado.textContent = 'Selecciona un contacto válido.';
+        return;
+    }
+    const ids = Array.from(document.querySelectorAll('#historialModal [data-ticket-id]'))
+        .map(el => parseInt(el.getAttribute('data-ticket-id'), 10))
+        .filter(id => Number.isFinite(id) && id > 0);
+    if (!ids.length) {
+        estado.textContent = 'No hay tickets cargados para enviar.';
+        return;
+    }
+
+    if (!confirm(`Se enviarán ${ids.length} PDF(s) uno por uno a ${whatsapp}. ¿Continuar?`)) {
+        return;
+    }
+
+    estado.textContent = `Preparando ${ids.length} PDF(s)...`;
+    try {
+        let ok = 0;
+        for (let i = 0; i < ids.length; i++) {
+            const idVenta = ids[i];
+            estado.textContent = `Enviando ${i + 1}/${ids.length}: factura #${idVenta}...`;
+            const formData = new FormData();
+            formData.append('id_venta', String(idVenta));
+            formData.append('tipo_doc', 'factura');
+            formData.append('whatsapp', whatsapp);
+            formData.append('mensaje', mensaje ? mensaje.value : '');
+            const resp = await fetch('ticket_whatsapp_send.php?action=send', {
+                method: 'POST',
+                credentials: 'same-origin',
+                body: formData
+            });
+            const data = await resp.json();
+            if (data.status === 'success') ok++;
+            else console.warn('Fallo envío factura', idVenta, data.msg || data);
+            await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        estado.textContent = `Proceso terminado: ${ok}/${ids.length} enviado(s).`;
+        setTimeout(() => {
+            if (modalEl) bootstrap.Modal.getInstance(modalEl)?.hide();
+        }, 1800);
+    } catch (e) {
+        console.error('Error enviando historial por WhatsApp:', e);
+        estado.textContent = e.message || 'No se pudo enviar.';
     }
 };
 
@@ -2362,6 +2659,11 @@ window.afterClientSelected = function(select) {
     const clientName = String(select?.value || '').trim();
     if (!clientName) return;
 
+    const isFinalizarVentaModal = !!select?.closest?.('#paymentModal');
+    if (isFinalizarVentaModal) {
+        return;
+    }
+
     if (cart.length === 0) {
         window.loadLastOrderForClient(clientName, { replace: true, silent: true });
         return;
@@ -2387,6 +2689,10 @@ window.toggleDetail = function(id) {
         
         row.classList.add('show');
         if(icon) { icon.classList.remove('fa-chevron-right'); icon.classList.add('fa-chevron-down'); }
+    }
+
+    if (document.getElementById('historialModal')?.classList.contains('show') && !historialTieneDetalleAbierto()) {
+        startHistorialAutoRefresh();
     }
 };
 
@@ -2532,7 +2838,10 @@ async function forceDownloadProducts() {
             }
         }
         
-        const resp = await fetch('pos.php?ping=1', { cache: 'no-store' });
+        const resp = await fetch(window.POS_PING_URL || 'pos.php?netcheck=1', {
+            cache: 'no-store',
+            credentials: 'same-origin'
+        });
         
         if (resp.ok) {
             location.reload(true);

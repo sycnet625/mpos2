@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.6 - Cache individual + ping offline fix
+// Versión 8.7 - Cache individual + netcheck offline fix
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v87';
+const CACHE_NAME = 'palweb-pos-v88';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -35,7 +35,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.6...');
+    console.log('[SW-POS] Instalando Service Worker v8.7...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -62,7 +62,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.6...');
+    console.log('[SW-POS] Activando Service Worker v8.7...');
     
     event.waitUntil(
         caches.keys()
@@ -112,9 +112,9 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // ?ping=1 — NUNCA servir desde caché: debe indicar estado real de red
+    // ?netcheck=1 / ?ping=1 — NUNCA servir desde caché: debe indicar estado real de red
     // Si está offline → JSON con offline:true para que el monitor detecte la caída
-    if (swUrl.search.includes('ping')) {
+    if (swUrl.search.includes('netcheck') || swUrl.search.includes('ping')) {
         event.respondWith(
             fetch(event.request, { credentials: 'same-origin', cache: 'no-store' })
                 .catch(() => new Response(
@@ -200,7 +200,7 @@ async function onlineFirst(request) {
         // OFFLINE: Servidor no disponible, usar caché
         console.log('[SW-POS] Offline - buscando en caché:', request.url);
 
-        // ignoreSearch permite que pos.php?ping=1 resuelva desde la caché de pos.php
+        // ignoreSearch permite que la pantalla POS resuelva desde cache al estar offline.
         const cachedResponse = await caches.match(request) ||
                                await caches.match(request, { ignoreSearch: true }) ||
                                (isPosStart ? await caches.match(appUrl('pos/')) : null) ||
@@ -252,11 +252,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v87-online-first' });
+        event.ports[0].postMessage({ version: 'v88-online-first-netcheck' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.6 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.7 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

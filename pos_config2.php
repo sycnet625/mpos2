@@ -11,6 +11,7 @@ require_once 'runtime_context.php';
 require_once 'inventory_suite_layout.php';
 require_once 'shop_skins.php';
 require_once 'product_image_pipeline.php';
+require_once 'empresa_fiscal_helpers.php';
 
 function poscfg_table_has_column(PDO $pdo, string $table, string $column): bool
 {
@@ -47,6 +48,9 @@ $defaultConfig = [
     "id_almacen" => 1,
     "email" => "",
     "website" => "",
+    "shop_price_mode" => "normal",
+    "shop_price_custom_pct" => 0,
+    "shop_price_round_to_5" => true,
     "nit" => "",
     "cuenta_bancaria" => "",
     "banco" => "",
@@ -119,6 +123,7 @@ $defaultConfig = [
     "factura_numero_prefijo"  => "F-",
     "factura_pie_texto"       => "Si tiene alguna duda respecto a esta factura, por favor contáctenos.",
     "factura_vigencia_dias"   => 15,
+    "factura_pos_auto_registro" => true,
     "oferta_vigencia_dias"    => 15,
 ];
 
@@ -325,7 +330,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $formAction = $_POST['form_action'] ?? '';
         $postedTab = (string)($_POST['active_tab'] ?? '');
-        if (in_array($postedTab, ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo'], true)) {
+        if (in_array($postedTab, ['shop', 'ticket', 'pantalla', 'finanzas', 'estructura', 'usuarios', 'cajeros', 'notificaciones', 'estilo', 'facturacion', 'fiscal'], true)) {
             $activeTab = $postedTab;
         }
 
@@ -487,6 +492,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['telefono'] = trim((string)($_POST['telefono'] ?? ''));
             $newConfig['email'] = trim((string)($_POST['email'] ?? ''));
             $newConfig['website'] = trim((string)($_POST['website'] ?? ''));
+            $shopPriceMode = trim((string)($_POST['shop_price_mode'] ?? ($currentConfig['shop_price_mode'] ?? 'normal')));
+            if (!in_array($shopPriceMode, ['normal', 'mayorista', 'custom'], true)) {
+                $shopPriceMode = 'normal';
+            }
+            $newConfig['shop_price_mode'] = $shopPriceMode;
+            $newConfig['shop_price_custom_pct'] = max(-95, min(1000, (float)($_POST['shop_price_custom_pct'] ?? ($currentConfig['shop_price_custom_pct'] ?? 0))));
+            $newConfig['shop_price_round_to_5'] = isset($_POST['shop_price_round_to_5'])
+                ? true
+                : !empty($currentConfig['shop_price_round_to_5']);
             $newConfig['nit'] = trim((string)($_POST['nit'] ?? ''));
             $newConfig['cuenta_bancaria'] = trim((string)($_POST['cuenta_bancaria'] ?? ''));
             $newConfig['banco'] = trim((string)($_POST['banco'] ?? ''));
@@ -679,6 +693,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newConfig['factura_numero_prefijo']  = trim((string)($_POST['factura_numero_prefijo'] ?? 'F-'));
             $newConfig['factura_pie_texto']        = trim((string)($_POST['factura_pie_texto'] ?? ''));
             $newConfig['factura_vigencia_dias']    = max(1, (int)($_POST['factura_vigencia_dias'] ?? 30));
+            $newConfig['factura_pos_auto_registro'] = !empty($_POST['factura_pos_auto_registro']);
             $newConfig['oferta_vigencia_dias']     = max(1, (int)($_POST['oferta_vigencia_dias'] ?? 15));
             $encoded = json_encode($newConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
             if ($encoded === false || file_put_contents($configFile, $encoded) === false) {
@@ -870,6 +885,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $currentConfig = array_merge($defaultConfig, json_decode((string)file_get_contents($configFile), true));
             $msg = 'Banners guardados correctamente.';
         }
+
+        if ($formAction === 'save_fiscal_regime') {
+            $activeTab = 'fiscal';
+            $empresaId = (int)($currentConfig['id_empresa'] ?? 1);
+            $actividades = trim((string)($_POST['fiscal_actividades_aprobadas'] ?? ''));
+            $payload = [
+                'tipo_actor_economico'     => $_POST['fiscal_tipo_actor_economico'] ?? 'MIPYME',
+                'nit'                      => $_POST['fiscal_nit'] ?? '',
+                'regimen_simplificado'     => isset($_POST['fiscal_regimen_simplificado']) ? 1 : 0,
+                'cuota_fija_mensual'       => floatval($_POST['fiscal_cuota_fija_mensual'] ?? 0),
+                'tope_gastos_deducibles_pct' => floatval($_POST['fiscal_tope_gastos_pct'] ?? 80),
+                'paga_digital'             => isset($_POST['fiscal_paga_digital']) ? 1 : 0,
+                'actividades_aprobadas'    => $actividades,
+                'fecha_inicio_operaciones' => $_POST['fiscal_fecha_inicio_operaciones'] ?? '',
+                'municipio_onat'           => $_POST['fiscal_municipio_onat'] ?? '',
+                'provincia_onat'           => $_POST['fiscal_provincia_onat'] ?? '',
+                'oficina_onat'             => $_POST['fiscal_oficina_onat'] ?? '',
+                'representante_nombre'     => $_POST['fiscal_representante_nombre'] ?? '',
+                'representante_ci'         => $_POST['fiscal_representante_ci'] ?? '',
+                'representante_cargo'      => $_POST['fiscal_representante_cargo'] ?? '',
+                'ejercicio_fiscal_inicio'  => $_POST['fiscal_ejercicio_fiscal_inicio'] ?? '01-01',
+            ];
+            if (!save_empresa_fiscal($empresaId, $payload)) {
+                throw new RuntimeException('No se pudo guardar el régimen fiscal.');
+            }
+            $msg = 'Régimen fiscal ONAT actualizado.';
+        }
     } catch (Throwable $e) {
         $msg = $e->getMessage();
         $msgType = 'danger';
@@ -903,6 +945,10 @@ if (!poscfg_table_has_column($pdo, 'sucursales', 'banner_scale')) {
 
 $allSucursales = $pdo->query("SELECT id, id_empresa, nombre, imagen_banner, banner_bg_size, banner_scale, " . ($hasSucursalActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM sucursales ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $allAlmacenes = $pdo->query("SELECT id, id_sucursal, nombre, " . ($hasAlmacenActivo ? "COALESCE(activo,1)" : "1") . " AS activo FROM almacenes ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+$fiscalRegime = get_empresa_fiscal((int)($currentConfig['id_empresa'] ?? 1));
+$fiscalActividadesText = is_array($fiscalRegime['actividades_aprobadas'])
+    ? implode(', ', $fiscalRegime['actividades_aprobadas'])
+    : (string)$fiscalRegime['actividades_aprobadas'];
 $users = $pdo->query("SELECT id, nombre, email, pin, rol, id_sucursal, activo FROM users ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 $userContexts = $pdo->query("
     SELECT
@@ -1243,6 +1289,7 @@ unset($treeCompany);
         <a class="sidebar-nav-link" data-tab="notificaciones"onclick="showCfgTab('notificaciones', this)"><i class="fas fa-bell"></i>  <span class="nav-text">🔔 Notificaciones</span></a>
         <a class="sidebar-nav-link" data-tab="estilo"        onclick="showCfgTab('estilo', this)"><i class="fas fa-palette"></i>       <span class="nav-text">🎨 Identidad</span></a>
         <a class="sidebar-nav-link" data-tab="facturacion" onclick="showCfgTab('facturacion', this)"><i class="fas fa-file-invoice-dollar"></i><span class="nav-text">🧾 Facturación</span></a>
+        <a class="sidebar-nav-link" data-tab="fiscal" onclick="showCfgTab('fiscal', this)"><i class="fas fa-file-signature"></i><span class="nav-text">📑 Régimen ONAT</span></a>
     </div>
     <div class="sidebar-footer">
         <a href="dashboard.php" class="sidebar-nav-link px-0"><i class="fas fa-arrow-left"></i><span class="nav-text">Volver al Dashboard</span></a>
@@ -1321,6 +1368,32 @@ unset($treeCompany);
                         </select>
                     </div>
                     <div class="col-md-3"><label class="form-label">Tarifa km</label><input type="number" step="0.01" name="mensajeria_tarifa_km" class="form-control" value="<?php echo htmlspecialchars((string)$currentConfig['mensajeria_tarifa_km']); ?>"></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header fw-bold text-dark">💲 Precio de venta en la web</div>
+                <div class="card-body row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Modo de precio para `shop.php`</label>
+                        <?php $shopPriceModeCur = (string)($currentConfig['shop_price_mode'] ?? 'normal'); ?>
+                        <select class="form-select" name="shop_price_mode" id="shopPriceModeSelect">
+                            <option value="normal" <?php echo $shopPriceModeCur === 'normal' ? 'selected' : ''; ?>>Normal</option>
+                            <option value="mayorista" <?php echo $shopPriceModeCur === 'mayorista' ? 'selected' : ''; ?>>Mayorista</option>
+                            <option value="custom" <?php echo $shopPriceModeCur === 'custom' ? 'selected' : ''; ?>>Porcentaje personalizado</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4" id="shopPricePctWrap">
+                        <label class="form-label">% sobre el precio base</label>
+                        <input type="number" step="0.01" name="shop_price_custom_pct" class="form-control" value="<?php echo htmlspecialchars((string)($currentConfig['shop_price_custom_pct'] ?? 0)); ?>" placeholder="Ej: 20 o -10">
+                        <div class="form-text">Usa positivo para subir y negativo para bajar. Ej: `20` = +20%, `-15` = -15%.</div>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="shop_price_round_to_5" name="shop_price_round_to_5" <?php echo !empty($currentConfig['shop_price_round_to_5']) ? 'checked' : ''; ?>>
+                            <label class="form-check-label" for="shop_price_round_to_5">Redondear por exceso para terminar en 0 o 5</label>
+                            <div class="form-text">Ejemplos: `216 → 220`, `239 → 240`, `103 → 105`.</div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="card">
@@ -2847,6 +2920,18 @@ unset($treeCompany);
                     </div>
                 </div>
             </div>
+            <div class="card mb-3">
+                <div class="card-header fw-bold text-info">🧾 POS e impresión</div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="factura_pos_auto_registro" name="factura_pos_auto_registro" value="1" <?= !empty($currentConfig['factura_pos_auto_registro']) ? 'checked' : '' ?>>
+                        <label class="form-check-label fw-semibold" for="factura_pos_auto_registro">
+                            Registrar o actualizar automáticamente la factura al imprimir desde el POS
+                        </label>
+                    </div>
+                    <div class="form-text">Si está desactivado, la impresión mantiene el formato de factura pero no crea ni actualiza registros en el módulo de facturas.</div>
+                </div>
+            </div>
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow">Guardar configuración de facturación</button>
         </form>
     </div>
@@ -2983,6 +3068,127 @@ unset($treeCompany);
                 </div>
             </div>
             <button type="submit" class="btn btn-primary btn-lg w-100 shadow"><i class="fas fa-save me-2"></i>Guardar Banners</button>
+        </form>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- TAB: RÉGIMEN FISCAL ONAT                                    -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="cfg-tab d-none" data-tab-panel="fiscal">
+        <form method="post">
+            <input type="hidden" name="form_action" value="save_fiscal_regime">
+            <input type="hidden" name="active_tab" value="fiscal">
+            <div class="card mb-4">
+                <div class="card-header fw-bold text-primary">
+                    <i class="fas fa-file-signature me-2"></i>Régimen Fiscal ONAT (Empresa actual)
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-4">Define qué tipo de actor económico es esta empresa. <strong>onat_taxes.php</strong> y el calendario fiscal usarán esta configuración para mostrar los modelos oficiales aplicables (DJ-08, DJ Utilidades, anticipos trimestrales, declaración mensual de Ventas y Territorial).</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Tipo de Actor Económico *</label>
+                            <select name="fiscal_tipo_actor_economico" class="form-select" required>
+                                <?php
+                                $tiposActor = [
+                                    'MIPYME'         => 'MIPYME (Sociedad Mercantil)',
+                                    'CNoA'           => 'Cooperativa No Agropecuaria (CNoA)',
+                                    'TCP'            => 'Trabajador por Cuenta Propia (TCP)',
+                                    'PersonaNatural' => 'Persona Natural',
+                                ];
+                                foreach ($tiposActor as $k => $label):
+                                    $sel = $fiscalRegime['tipo_actor_economico'] === $k ? 'selected' : '';
+                                ?>
+                                    <option value="<?= $k ?>" <?= $sel ?>><?= htmlspecialchars($label) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text tiny">MIPYME / CNoA → DJ Utilidades + anticipos trim.; TCP / Persona Natural → DJ-08.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">NIT</label>
+                            <input type="text" name="fiscal_nit" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['nit']) ?>" maxlength="32">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Fecha Inicio Operaciones</label>
+                            <input type="date" name="fiscal_fecha_inicio_operaciones" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['fecha_inicio_operaciones']) ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Provincia ONAT</label>
+                            <input type="text" name="fiscal_provincia_onat" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['provincia_onat']) ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Municipio ONAT</label>
+                            <input type="text" name="fiscal_municipio_onat" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['municipio_onat']) ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Oficina Tributaria</label>
+                            <input type="text" name="fiscal_oficina_onat" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['oficina_onat']) ?>">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Inicio del Ejercicio Fiscal</label>
+                            <input type="text" name="fiscal_ejercicio_fiscal_inicio" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['ejercicio_fiscal_inicio']) ?>" placeholder="MM-DD" maxlength="5">
+                            <div class="form-text tiny">Formato MM-DD. Por defecto 01-01.</div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="fiscal_regimen_simplificado" name="fiscal_regimen_simplificado" value="1" <?= !empty($fiscalRegime['regimen_simplificado']) ? 'checked' : '' ?>>
+                                <label class="form-check-label small fw-semibold" for="fiscal_regimen_simplificado">Régimen Simplificado (TCP cuota fija)</label>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Cuota Fija Mensual ($)</label>
+                            <input type="number" step="0.01" min="0" name="fiscal_cuota_fija_mensual" class="form-control" value="<?= htmlspecialchars((string)($fiscalRegime['cuota_fija_mensual'] ?? 0)) ?>">
+                            <div class="form-text tiny">Sólo aplica si el régimen es simplificado.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Tope Gastos Deducibles (%)</label>
+                            <input type="number" step="0.01" min="0" max="100" name="fiscal_tope_gastos_pct" class="form-control" value="<?= htmlspecialchars((string)($fiscalRegime['tope_gastos_deducibles_pct'] ?? 80)) ?>">
+                            <div class="form-text tiny">DJ-08: máximo de gastos deducibles según actividad (TCP típico 80%).</div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="fiscal_paga_digital" name="fiscal_paga_digital" value="1" <?= !empty($fiscalRegime['paga_digital']) ? 'checked' : '' ?>>
+                                <label class="form-check-label small fw-semibold" for="fiscal_paga_digital">Paga por canal digital (Transfermóvil/EnZona)</label>
+                            </div>
+                            <div class="form-text tiny ms-2">Aplica 3% de descuento ONAT.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-bold">Actividades Aprobadas (códigos CAE)</label>
+                            <input type="text" name="fiscal_actividades_aprobadas" class="form-control" value="<?= htmlspecialchars($fiscalActividadesText) ?>" placeholder="Ej: 4711, 5610, 9602">
+                            <div class="form-text tiny">Lista separada por comas; se almacena como JSON.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header fw-bold text-primary">
+                    <i class="fas fa-user-tie me-2"></i>Representante Legal (sólo MIPYME / CNoA)
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-5">
+                            <label class="form-label small fw-bold">Nombre Completo</label>
+                            <input type="text" name="fiscal_representante_nombre" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['representante_nombre']) ?>" maxlength="150">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small fw-bold">Carnet de Identidad</label>
+                            <input type="text" name="fiscal_representante_ci" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['representante_ci']) ?>" maxlength="20">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold">Cargo</label>
+                            <input type="text" name="fiscal_representante_cargo" class="form-control" value="<?= htmlspecialchars((string)$fiscalRegime['representante_cargo']) ?>" maxlength="80">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-lg shadow"><i class="fas fa-save me-2"></i>Guardar Régimen Fiscal</button>
+                <a href="onat_taxes.php" class="btn btn-outline-secondary btn-lg"><i class="fas fa-calculator me-2"></i>Ir a ONAT (Cálculo)</a>
+                <?php if (file_exists(__DIR__ . '/onat_calendario.php')): ?>
+                    <a href="onat_calendario.php" class="btn btn-outline-secondary btn-lg"><i class="fas fa-calendar-check me-2"></i>Calendario Fiscal</a>
+                <?php endif; ?>
+            </div>
         </form>
     </div>
 
@@ -3392,6 +3598,13 @@ function submitShopImageRebuild() {
     form.submit();
 }
 
+function toggleShopPricePctField() {
+    const modeEl = document.getElementById('shopPriceModeSelect');
+    const pctWrap = document.getElementById('shopPricePctWrap');
+    if (!modeEl || !pctWrap) return;
+    pctWrap.style.display = modeEl.value === 'custom' ? '' : 'none';
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     const rememberedTab = (() => {
         try { return localStorage.getItem('pos_config2_active_tab') || ''; } catch (e) { return ''; }
@@ -3413,6 +3626,8 @@ document.addEventListener('DOMContentLoaded', () => {
     filterUserRows();
     filterCashierRows();
     updateTicketPreview();
+    toggleShopPricePctField();
+    document.getElementById('shopPriceModeSelect')?.addEventListener('change', toggleShopPricePctField);
     ['tienda_nombre','direccion','telefono','ticket_slogan','mensaje_final'].forEach(name => {
         document.querySelector(`[name="${name}"]`)?.addEventListener('input', updateTicketPreview);
     });

@@ -216,15 +216,30 @@ if (typeof window.posOfflineLoaded === 'undefined') {
             this.latency = 0;
             this.checkInterval = null;
         }
+
+        getPingUrl() {
+            return window.POS_PING_URL || 'pos.php?netcheck=1';
+        }
+
+        fetchWithTimeout(url, timeoutMs) {
+            if (typeof AbortController === 'undefined') {
+                return fetch(url, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            return fetch(url, {
+                method: 'GET',
+                cache: 'no-store',
+                credentials: 'same-origin',
+                signal: controller.signal
+            }).finally(() => clearTimeout(timeoutId));
+        }
         
         async checkConnection() {
             try {
                 const start = performance.now();
-                const res = await fetch('pos.php?ping=1', {
-                    method: 'GET',
-                    cache: 'no-store',
-                    signal: AbortSignal.timeout(5000)
-                });
+                const res = await this.fetchWithTimeout(this.getPingUrl(), 5000);
                 if (!res.ok) throw new Error('No OK');
                 // El SW devuelve {offline:true} cuando no hay red real
                 // (evita falso positivo por la caché de pos.php)
@@ -249,6 +264,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         }
         
         start() {
+            if (this.checkInterval) return;
             this.checkConnection();
             this.checkInterval = setInterval(() => { 
                 this.checkConnection(); 
@@ -278,6 +294,8 @@ if (typeof window.posOfflineLoaded === 'undefined') {
     // INICIO
     // ==========================================
     window.initPOSOffline = async function() {
+        if (window.posOfflineInitialized) return;
+        window.posOfflineInitialized = true;
         try {
             await window.posCache.init();
             window.connectionMonitor.start();
@@ -292,4 +310,3 @@ if (typeof window.posOfflineLoaded === 'undefined') {
     });
 
 } // End if check
-

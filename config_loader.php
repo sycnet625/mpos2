@@ -136,6 +136,9 @@ if (!isset($config)) {
         "telefono" => "",
         "email" => "",
         "website" => "",
+        "shop_price_mode" => "normal",
+        "shop_price_custom_pct" => 0,
+        "shop_price_round_to_5" => true,
         "nit" => "",
         "cuenta_bancaria" => "",
         "banco" => "",
@@ -159,6 +162,8 @@ if (!isset($config)) {
         "ticket_mostrar_cajero" => true,
         "ticket_mostrar_qr" => true,
         "ticket_mostrar_items_count" => true,
+        // Facturación
+        "factura_pos_auto_registro" => true,
         // Multi-divisa y métodos de pago
         "tipo_cambio_usd"    => 385.00,
         "tipo_cambio_mlc"    => 310.00,

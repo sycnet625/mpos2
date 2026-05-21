@@ -1,7 +1,7 @@
 <?php
 // ticket_to_invoice.php
 // Renderiza un ticket de venta con el formato de factura (invoice_print.php).
-// Solo lectura / impresión — no guarda en la tabla facturas.
+// Cada render/impresion registra o actualiza una factura ligada al ticket POS.
 header('Content-Type: text/html; charset=utf-8');
 ini_set('display_errors', 0);
 require_once 'db.php';
@@ -11,6 +11,7 @@ $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die('ID de venta inválido.');
 
 $duplex = !empty($_GET['duplex']); // modo 2 facturas por hoja
+$pdfExport = isset($_GET['pdf_export']) && $_GET['pdf_export'] === '1';
 $priceView = strtolower(trim((string)($_GET['price_view'] ?? 'venta')));
 if (!in_array($priceView, ['venta', 'mayorista'], true)) {
     $priceView = 'venta';
@@ -27,9 +28,16 @@ $venta = $stmtH->fetch(PDO::FETCH_ASSOC);
 if (!$venta) die('Venta no encontrada.');
 
 // ── Ítems ─────────────────────────────────────────────────────────────────────
+$hasNotaCocina = false;
+try {
+    $stmtCol = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ventas_detalle' AND COLUMN_NAME = 'nota_cocina'");
+    $stmtCol->execute();
+    $hasNotaCocina = (bool)$stmtCol->fetchColumn();
+} catch (Throwable $e) {}
+
 $stmtD = $pdo->prepare("
-    SELECT d.cantidad, d.precio,
-           COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual,
+    SELECT d.cantidad, d.precio" . ($hasNotaCocina ? ", d.nota_cocina" : ", NULL AS nota_cocina") . ",
+           COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual,
            COALESCE(p.nombre, CONCAT('Artículo: ', d.id_producto)) AS descripcion,
            COALESCE(p.unidad_medida, 'UND') AS um
     FROM ventas_detalle d
@@ -90,6 +98,131 @@ $totalDisplay = round($subtotalDisplay + $costoEnvio, 2);
 
 // Número de factura: fecha del ticket + ID de venta
 $numFactura = date('Ymd', strtotime($venta['fecha'])) . str_pad($idVenta, 3, '0', STR_PAD_LEFT);
+
+if (!function_exists('ticket_invoice_item_description')) {
+    function ticket_invoice_item_description(array $item): string {
+        $descripcion = trim((string)($item['descripcion'] ?? ''));
+        $notaCocina = trim((string)($item['nota_cocina'] ?? ''));
+        if ($notaCocina !== '') {
+            $descripcion .= ' (' . $notaCocina . ')';
+        }
+        $descripcion = $descripcion !== '' ? $descripcion : 'Producto';
+        return substr($descripcion, 0, 200);
+    }
+}
+
+if (!function_exists('ticket_invoice_register')) {
+    function ticket_invoice_register(PDO $pdo, array $venta, array $items, array $data): int {
+        $idVenta = (int)$data['idVenta'];
+        $stmt = $pdo->prepare("SELECT id FROM facturas WHERE id_ticket_origen = ? ORDER BY id ASC LIMIT 1");
+        $stmt->execute([$idVenta]);
+        $facturaId = (int)($stmt->fetchColumn() ?: 0);
+
+        $estadoPago = (($venta['estado_pago'] ?? '') === 'confirmado') ? 'PAGADA' : 'PENDIENTE';
+        $fechaPago = $estadoPago === 'PAGADA' ? (($venta['fecha_pago'] ?? '') ?: date('Y-m-d H:i:s', strtotime((string)$venta['fecha']))) : null;
+        $creadoPor = $data['cajero'] ?: 'POS';
+        $notas = trim((string)($venta['notas'] ?? ''));
+        $vehiculo = trim((string)($venta['vehiculo'] ?? ''));
+
+        $pdo->beginTransaction();
+        try {
+            if ($facturaId > 0) {
+                $sql = "UPDATE facturas
+                        SET numero_factura = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?,
+                            cliente_telefono = ?, mensajero_nombre = ?, vehiculo = ?, subtotal = ?, total = ?,
+                            costo_envio = ?, notas = ?, estado_pago = ?, metodo_pago = ?, fecha_pago = ?, tipo = 'FACTURA'
+                        WHERE id = ?";
+                $pdo->prepare($sql)->execute([
+                    $data['numFactura'],
+                    $venta['fecha'],
+                    $data['cliNombre'],
+                    $data['cliDireccion'],
+                    $data['cliTelefono'],
+                    $venta['mensajero_nombre'] ?? '',
+                    $vehiculo,
+                    $data['subtotalDisplay'],
+                    $data['totalDisplay'],
+                    max(0, (float)$data['costoEnvio']),
+                    $notas,
+                    $estadoPago,
+                    $venta['metodo_pago'] ?? '',
+                    $fechaPago,
+                    $facturaId
+                ]);
+                $pdo->prepare("DELETE FROM facturas_detalle WHERE id_factura = ?")->execute([$facturaId]);
+            } else {
+                $sql = "INSERT INTO facturas
+                        (numero_factura, fecha_emision, id_ticket_origen, cliente_nombre, cliente_direccion,
+                         cliente_telefono, mensajero_nombre, vehiculo, subtotal, total, creado_por, estado,
+                         estado_pago, metodo_pago, fecha_pago, costo_envio, notas, tipo)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVA', ?, ?, ?, ?, ?, 'FACTURA')";
+                $pdo->prepare($sql)->execute([
+                    $data['numFactura'],
+                    $venta['fecha'],
+                    $idVenta,
+                    $data['cliNombre'],
+                    $data['cliDireccion'],
+                    $data['cliTelefono'],
+                    $venta['mensajero_nombre'] ?? '',
+                    $vehiculo,
+                    $data['subtotalDisplay'],
+                    $data['totalDisplay'],
+                    $creadoPor,
+                    $estadoPago,
+                    $venta['metodo_pago'] ?? '',
+                    $fechaPago,
+                    max(0, (float)$data['costoEnvio']),
+                    $notas
+                ]);
+                $facturaId = (int)$pdo->lastInsertId();
+            }
+
+            $stmtDet = $pdo->prepare("INSERT INTO facturas_detalle
+                (id_factura, descripcion, unidad_medida, cantidad, precio_unitario, importe)
+                VALUES (?, ?, ?, ?, ?, ?)");
+            foreach ($items as $item) {
+                $cantidad = (float)($item['cantidad'] ?? 0);
+                if ($cantidad == 0.0) continue;
+                $stmtDet->execute([
+                    $facturaId,
+                    ticket_invoice_item_description($item),
+                    $item['um'] ?? 'UND',
+                    $cantidad,
+                    (float)($item['precio_display'] ?? $item['precio'] ?? 0),
+                    (float)($item['subtotal_display'] ?? ($cantidad * (float)($item['precio'] ?? 0)))
+                ]);
+            }
+
+            $pdo->commit();
+            return $facturaId;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+    }
+}
+
+$registeredFacturaId = 0;
+$autoRegistroFacturaPos = array_key_exists('factura_pos_auto_registro', $config)
+    ? !empty($config['factura_pos_auto_registro'])
+    : true;
+if ($autoRegistroFacturaPos) {
+    try {
+        $registeredFacturaId = ticket_invoice_register($pdo, $venta, $items, [
+            'idVenta' => $idVenta,
+            'numFactura' => $numFactura,
+            'cliNombre' => $cliNombre ?: 'Mostrador',
+            'cliDireccion' => $cliDireccion,
+            'cliTelefono' => $cliTelefono,
+            'subtotalDisplay' => $subtotalDisplay,
+            'totalDisplay' => $totalDisplay,
+            'costoEnvio' => $costoEnvio,
+            'cajero' => $cajero
+        ]);
+    } catch (Throwable $e) {
+        error_log('No se pudo registrar factura POS ticket #' . $idVenta . ': ' . $e->getMessage());
+    }
+}
 
 // Filas vacías para mantener la cuadrícula de 13 líneas (solo modo normal)
 $totalRows  = 13;
@@ -271,6 +404,7 @@ if (empty($logoUrl)) {
 </head>
 <body>
 
+<?php if (!$pdfExport): ?>
 <div class="toolbar">
     <span style="opacity:.7;">Ticket #<?= $idVenta ?> → Vista Factura</span>
     <button class="btn-p" onclick="window.print()">🖨️ IMPRIMIR / PDF</button>
@@ -281,6 +415,7 @@ if (empty($logoUrl)) {
     <?php endif; ?>
     <button class="btn-c" onclick="window.close()">✕ Cerrar</button>
 </div>
+<?php endif; ?>
 
 <?php if ($duplex): ?>
 <!-- ══════════════════════ MODO DUPLEX ══════════════════════════════════════ -->
@@ -404,9 +539,14 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
             $duplex_rows = 4;
             foreach ($items as $it):
                 $importe = floatval($it['subtotal_display'] ?? ($it['cantidad'] * $it['precio']));
+                $descripcion = trim((string)($it['descripcion'] ?? ''));
+                $notaCocina  = trim((string)($it['nota_cocina'] ?? ''));
+                if ($notaCocina !== '') {
+                    $descripcion .= ' (' . $notaCocina . ')';
+                }
             ?>
             <tr>
-                <td class="left"><?= htmlspecialchars($it['descripcion']) ?></td>
+                <td class="left"><?= htmlspecialchars($descripcion) ?></td>
                 <td class="center"><?= htmlspecialchars($it['um']) ?></td>
                 <td class="center"><?= rtrim(rtrim(number_format($it['cantidad'], 2), '0'), '.') ?></td>
                 <td class="right">$<?= number_format($it['precio_display'] ?? $it['precio'], 2) ?></td>
@@ -612,9 +752,14 @@ $cfg = [
         <tbody>
             <?php foreach ($items as $it):
                 $importe = $it['subtotal_display'] ?? ($it['cantidad'] * $it['precio']);
+                $descripcion = trim((string)($it['descripcion'] ?? ''));
+                $notaCocina  = trim((string)($it['nota_cocina'] ?? ''));
+                if ($notaCocina !== '') {
+                    $descripcion .= ' (' . $notaCocina . ')';
+                }
             ?>
             <tr>
-                <td class="left"><?= htmlspecialchars($it['descripcion']) ?></td>
+                <td class="left"><?= htmlspecialchars($descripcion) ?></td>
                 <td class="center"></td>
                 <td class="center"><?= htmlspecialchars($it['um']) ?></td>
                 <td class="center"><?= rtrim(rtrim(number_format($it['cantidad'], 2), '0'), '.') ?></td>

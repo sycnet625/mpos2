@@ -17,6 +17,16 @@ header("Expires: 0");
 
 ini_set('display_errors', 0);
 $posHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
+
+// ENDPOINT: Check liviano para medir conexión/latencia del POS.
+// Debe ejecutarse antes de sesión, BD y config para no confundir dependencia lenta con internet caído.
+// Se evita el nombre "ping" porque algunos bloqueadores del navegador lo filtran.
+if (isset($_GET['netcheck']) || isset($_GET['ping'])) {
+    header('Content-Type: application/json');
+    echo json_encode(['pong' => true, 'timestamp' => time()]);
+    exit;
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_set_cookie_params([
         'lifetime' => 0,
@@ -28,6 +38,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     ]);
     session_start();
 }
+
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
@@ -396,13 +407,6 @@ if (isset($_GET['set_almacen']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $_SESSION['id_almacen'] = $almId;
     echo json_encode(['status' => 'success', 'id_almacen' => $almId]);
-    exit;
-}
-
-// ENDPOINT: Ping para medir velocidad
-if (isset($_GET['ping'])) {
-    header('Content-Type: application/json');
-    echo json_encode(['pong' => true, 'timestamp' => time()]);
     exit;
 }
 
@@ -1244,6 +1248,8 @@ try {
             background: #f8fafc;
             overflow-y: auto;
             max-height: calc(100vh - 5.5rem);
+            display: flex;
+            flex-direction: column;
         }
         #sessionLoginModal .mini-login-copy {
             font-size: 0.82rem;
@@ -1263,14 +1269,31 @@ try {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 8px;
+            margin-top: 0.25rem;
+            width: 100%;
+            visibility: visible;
         }
         #sessionLoginModal .mini-pin-grid .pin-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             min-height: 56px;
             width: 100%;
             color: #0f172a;
             font-weight: 700;
             font-size: 1.4rem;
             line-height: 1;
+            border-radius: 12px;
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+        }
+        #sessionLoginModal .modal-body .mini-login-copy,
+        #sessionLoginModal .modal-body .mini-pin-display,
+        #sessionLoginModal .modal-body #sessionLoginReason,
+        #sessionLoginModal .modal-body .mini-pin-grid {
+            position: relative;
+            z-index: 1;
         }
         #sessionLoginReason {
             font-size: 0.78rem;
@@ -1278,6 +1301,33 @@ try {
             min-height: 1.15rem;
             margin-bottom: 0.55rem;
             text-align: center;
+        }
+        #terminalLockModal .modal-content {
+            border: none;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 20px 70px rgba(0,0,0,0.32);
+        }
+        #terminalLockModal .modal-header {
+            background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+            color: #fff;
+            border-bottom: none;
+        }
+        #terminalLockModal .lock-icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.12);
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin-bottom: 0.75rem;
+        }
+        #terminalLockModal .lock-copy {
+            color: #475569;
+            font-size: 0.92rem;
+            line-height: 1.5;
         }
     </style>
 
@@ -1290,6 +1340,8 @@ try {
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
 <script>
+    window.POS_PING_URL = <?php echo json_encode($posDocumentBase . 'pos.php?netcheck=1', JSON_UNESCAPED_SLASHES); ?>;
+
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
@@ -1387,11 +1439,29 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 <div id="sessionLoginReason"></div>
                 <div class="mini-pin-display" id="sessionPinDisplay">....</div>
                 <div class="mini-pin-grid">
-                    <button class="pin-btn" onclick="typePin(1)">1</button><button class="pin-btn" onclick="typePin(2)">2</button><button class="pin-btn" onclick="typePin(3)">3</button>
-                    <button class="pin-btn" onclick="typePin(4)">4</button><button class="pin-btn" onclick="typePin(5)">5</button><button class="pin-btn" onclick="typePin(6)">6</button>
-                    <button class="pin-btn" onclick="typePin(7)">7</button><button class="pin-btn" onclick="typePin(8)">8</button><button class="pin-btn" onclick="typePin(9)">9</button>
-                    <button class="pin-btn c-red" onclick="typePin('C')">C</button><button class="pin-btn" onclick="typePin(0)">0</button><button class="pin-btn c-green" onclick="verifyPin()">OK</button>
+                    <button type="button" class="pin-btn" onclick="typePin(1)">1</button><button type="button" class="pin-btn" onclick="typePin(2)">2</button><button type="button" class="pin-btn" onclick="typePin(3)">3</button>
+                    <button type="button" class="pin-btn" onclick="typePin(4)">4</button><button type="button" class="pin-btn" onclick="typePin(5)">5</button><button type="button" class="pin-btn" onclick="typePin(6)">6</button>
+                    <button type="button" class="pin-btn" onclick="typePin(7)">7</button><button type="button" class="pin-btn" onclick="typePin(8)">8</button><button type="button" class="pin-btn" onclick="typePin(9)">9</button>
+                    <button type="button" class="pin-btn c-red" onclick="typePin('C')">C</button><button type="button" class="pin-btn" onclick="typePin(0)">0</button><button type="button" class="pin-btn c-green" onclick="verifyPin()">OK</button>
                 </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="terminalLockModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold mb-0"><i class="fas fa-lock me-2"></i>Terminal bloqueada</h5>
+            </div>
+            <div class="modal-body text-center p-4">
+                <div class="lock-icon"><i class="fas fa-user-shield"></i></div>
+                <div class="fw-bold fs-5 mb-2 text-danger">Terminal bloqueada por inactividad</div>
+                <div class="lock-copy mb-4">Pulsa <strong>Desbloquear terminal</strong> para abrir el login con PIN normal y continuar trabajando.</div>
+                <button type="button" class="btn btn-danger fw-bold px-4" id="btnUnlockTerminal">
+                    <i class="fas fa-key me-2"></i>Desbloquear terminal
+                </button>
             </div>
         </div>
     </div>
@@ -1522,6 +1592,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <button class="btn-ctrl c-teal" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
                         <button class="btn-ctrl c-blue" onclick="openOrderTemplatesModal()"><i class="fas fa-bookmark"></i> PLANT</button>
                         <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
+                        <button class="btn-ctrl c-green" onclick="modifyQty(10)" title="Sumar 10 unidades">+10</button>
                     </div>
                 </div>
                 <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
@@ -1534,6 +1605,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 <div class="action-row mb-2">
                     <button class="btn-ctrl c-yellow flex-grow-1" onclick="modifyQty(-1)" title="Restar cantidad"><i class="fas fa-minus"></i></button>
                     <button class="btn-ctrl c-green flex-grow-1" onclick="modifyQty(1)" title="Sumar cantidad"><i class="fas fa-plus"></i></button>
+                    <button class="btn-ctrl c-green flex-grow-1" onclick="modifyQty(10)" title="Sumar 10 unidades">+10</button>
                     <button class="btn-ctrl c-red flex-grow-1" onclick="clearCart()" title="Vaciar carrito">Vaciar</button>
                 </div>
                 <div class="inv-grid">
@@ -1869,8 +1941,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js"></script>
-<script src="pos-offline-system.js"></script>
+<script src="pos1.js?v=20260521-net2"></script>
+<script src="pos-offline-system.js?v=20260521-net2"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────
