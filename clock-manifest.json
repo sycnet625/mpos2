@@ -1,8 +1,9 @@
 {
   "name": "Clock LCD - Reloj",
   "short_name": "ClockLCD",
-  "start_url": "./clock.html",
-  "scope": "./",
+  "id": "/clock",
+  "start_url": "/clock/",
+  "scope": "/clock/",
   "display": "standalone",
   "orientation": "any",
   "lang": "es",
@@ -11,12 +12,12 @@
   "description": "Reloj LCD con alarmas y temporizadores",
   "icons": [
     {
-      "src": "icon-192.png",
+      "src": "/icon-192.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "icon-512.png",
+      "src": "/icon-512.png",
       "sizes": "512x512",
       "type": "image/png"
     }

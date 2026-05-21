@@ -276,6 +276,12 @@ $shopBasePath = ($baseDir !== '' ? $baseDir : '') . '/shop.php';
 $shopPrettyBasePath = $baseDir !== '' ? $baseDir : '';
 $shopDocumentBase = $scheme . '://' . $host . ($baseDir !== '' ? $baseDir . '/' : '/');
 $shopAssetPrefix = ($baseDir !== '' ? $baseDir : '') . '/';
+$shopRequestPathForRedirect = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/shop\.php$~i', $shopRequestPathForRedirect)) {
+    $shopPrettyPath = ($baseDir !== '' ? $baseDir : '') . '/shop/';
+    header('Location: ' . $shopPrettyPath, true, 302);
+    exit;
+}
 $siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $shopBasePath);
 $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $requestPathTrimmed = trim($requestPath, '/');
@@ -1094,7 +1100,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
 
     <!-- PWA Tienda -->
     <meta name="theme-color" content="#0d6efd">
-    <link rel="manifest" href="manifest-shop.php">
+    <link rel="manifest" href="manifest-shop.php?v=20260521-pwa2">
     <link rel="apple-touch-icon" href="icon-shop-192.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -5509,11 +5515,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
 // ── Service Worker Tienda (scope exclusivo shop.php) ──
-const SHOP_SW_SCOPE = new URL('./', document.baseURI).href;
+const SHOP_SW_SCOPE = new URL('shop/', document.baseURI).href;
 const SHOP_SW_URL = new URL('sw-shop.js', document.baseURI).toString();
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE })
+    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE, updateViaCache: 'none' })
         .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
         .catch(err => console.warn('[Shop PWA] SW error:', err));
 }
@@ -5648,7 +5654,7 @@ async function subscribeShopPush() {
         const resp = await fetch(SHOP_PUSH_API + '?action=vapid_key');
         const { publicKey } = await resp.json();
 
-        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE });
+        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SW_SCOPE, updateViaCache: 'none' });
         const swReg = await Promise.race([
             navigator.serviceWorker.ready,
             new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))

@@ -27,6 +27,14 @@ if (isset($_GET['netcheck']) || isset($_GET['ping'])) {
     exit;
 }
 
+$posRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/pos\.php$~i', $posRequestPath)) {
+    $posPrettyPath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/pos.php')), '/');
+    $posPrettyPath = ($posPrettyPath === '' || $posPrettyPath === '.') ? '/pos/' : $posPrettyPath . '/pos/';
+    header('Location: ' . $posPrettyPath, true, 302);
+    exit;
+}
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_set_cookie_params([
         'lifetime' => 0,
@@ -51,7 +59,7 @@ if ($posBasePath === '') {
 }
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
-$posScopePath = $posPrefix . '/pos/';
+$posScopePath = $posPrefix . '/';
 
 function pos_is_authenticated(): bool
 {
@@ -830,6 +838,7 @@ try {
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<base href="<?php echo htmlspecialchars($posDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
 <script>
@@ -1331,8 +1340,7 @@ try {
         }
     </style>
 
-<base href="<?php echo htmlspecialchars($posDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
-<link rel="manifest" href="manifest-pos.php">
+<link rel="manifest" href="manifest-pos.php?v=20260521-pwa3">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1345,9 +1353,8 @@ try {
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-            // Registramos en la raíz para que el SW controle tanto /pos/ como /assets/
-            const swScope = '<?php echo $posDocumentBase; ?>';
-            navigator.serviceWorker.register('service-worker.js', { scope: swScope })
+            const swScope = '<?php echo $posScopePath; ?>';
+            navigator.serviceWorker.register('service-worker.js', { scope: swScope, updateViaCache: 'none' })
                 .then(reg => console.log('SW POS registrado en scope:', reg.scope))
                 .catch(err => console.warn('Error registrando SW de POS', err));
         });

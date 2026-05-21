@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.7 - Cache individual + netcheck offline fix
+// Versión 8.9 - Cache individual + netcheck + PWA scopes
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v88';
+const CACHE_NAME = 'palweb-pos-v90';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -12,10 +12,6 @@ const OFFLINE_ASSETS = [
     './',
     './pos/',
     './pos.php',
-    './clock.php',
-    './clock.html',
-    './clock.css',
-    './clock.js',
     './simple_weather.php',
     './pos1.js',
     './pos-offline-system.js',
@@ -35,7 +31,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.7...');
+    console.log('[SW-POS] Instalando Service Worker v8.9...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -62,7 +58,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.7...');
+    console.log('[SW-POS] Activando Service Worker v8.9...');
     
     event.waitUntil(
         caches.keys()
@@ -101,6 +97,17 @@ self.addEventListener('fetch', (event) => {
     }
     
     const swUrl = new URL(event.request.url);
+
+    // Otras PWAs tienen sus propios service workers. No permitir que el SW del POS
+    // sirva HTML/cache de esas rutas, aunque el scope del POS sea raiz por sus APIs/assets.
+    if (
+        swUrl.pathname === appUrl('shop/').replace(swUrl.origin, '') ||
+        swUrl.pathname === appUrl('products/').replace(swUrl.origin, '') ||
+        swUrl.pathname === appUrl('clock/').replace(swUrl.origin, '')
+    ) {
+        event.respondWith(fetch(event.request, { credentials: 'same-origin', cache: 'no-store' }));
+        return;
+    }
     
     // simple_weather.php: siempre a la red, nunca cachear
     if (swUrl.pathname.includes('simple_weather.php')) {
@@ -252,11 +259,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v88-online-first-netcheck' });
+        event.ports[0].postMessage({ version: 'v90-online-first-netcheck-scopes' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.7 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v8.9 (ONLINE FIRST + offline real) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

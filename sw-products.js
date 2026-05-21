@@ -1,13 +1,16 @@
-const CACHE_NAME = 'marinero-products-v3';
+const CACHE_NAME = 'marinero-products-v5';
+const BASE_URL = new URL('./', self.location.href);
+const assetUrl = (rel) => new URL(rel, BASE_URL).toString();
 const ASSETS = [
-  'products_table.php',
-  'manifest-products.php',
-  'icon-products-192.png',
-  'icon-products-512.png',
-  'assets/css/bootstrap.min.css',
-  'assets/js/bootstrap.bundle.min.js',
-  'db.php',
-  'config_loader.php'
+  assetUrl('products/'),
+  assetUrl('products_table.php'),
+  assetUrl('manifest-products.php'),
+  assetUrl('icon-products-192.png'),
+  assetUrl('icon-products-512.png'),
+  assetUrl('assets/css/bootstrap.min.css'),
+  assetUrl('assets/css/all.min.css'),
+  assetUrl('assets/css/inventory-suite.css'),
+  assetUrl('assets/js/bootstrap.bundle.min.js')
 ];
 
 // Instalación: Cachear recursos críticos

@@ -1,7 +1,11 @@
-const CACHE_NAME = 'clock-offline-v2';
+const CACHE_NAME = 'clock-offline-v3';
 const STATIC_ASSETS = [
-  '/',
+  '/clock/',
   '/clock.php',
+  '/clock.html',
+  '/clock-manifest.json',
+  '/icon-192.png',
+  '/icon-512.png',
   '/api_sales.php'
 ];
 
@@ -18,7 +22,7 @@ self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys => {
       return Promise.all(
-        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
+        keys.filter(key => key.startsWith('clock-offline-') && key !== CACHE_NAME).map(key => caches.delete(key))
       );
     }).then(() => self.clients.claim())
   );
@@ -69,6 +73,6 @@ self.addEventListener('fetch', event => {
         }
         return fetchResponse;
       });
-    }).catch(() => caches.match('/clock.php'))
+    }).catch(() => caches.match('/clock/') || caches.match('/clock.php'))
   );
 });

@@ -3,6 +3,8 @@
 
     RewriteRule ^pos/?$ pos.php [QSA,L,NC]
     RewriteRule ^shop/?$ shop.php [QSA,L,NC]
+    RewriteRule ^products/?$ products_table.php [QSA,L,NC]
+    RewriteRule ^clock/?$ clock.php [QSA,L,NC]
 
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d

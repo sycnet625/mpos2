@@ -33,8 +33,8 @@ $manifest = [
     'description'      => 'Tienda en línea — ' . $nombre,
     'categories'       => ['shopping', 'food'],
     'icons'            => [
-        ['src' => 'icon-shop-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
-        ['src' => 'icon-shop-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable any'],
+        ['src' => $prefix . '/icon-shop-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => $prefix . '/icon-shop-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable any'],
     ],
     'screenshots'      => [
         [
@@ -62,7 +62,7 @@ $manifest = [
         [
             'name'      => 'Ver catálogo',
             'url'       => $shopScope,
-            'icons'     => [['src' => 'icon-shop-192.png', 'sizes' => '192x192']],
+            'icons'     => [['src' => $prefix . '/icon-shop-192.png', 'sizes' => '192x192']],
         ],
     ],
 ];

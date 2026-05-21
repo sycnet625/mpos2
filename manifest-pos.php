@@ -13,6 +13,7 @@ $basePath = rtrim($scriptDir === '.' ? '/' : $scriptDir, '/');
 if ($basePath === '') $basePath = '/';
 $prefix = $basePath === '/' ? '' : $basePath;
 $posScope = $prefix . '/pos/';
+$appScope = $prefix . '/';
 
 $tienda = trim((string)($cfg['marca_sistema_nombre'] ?? ($cfg['tienda_nombre'] ?? 'PalWeb POS')));
 $short = preg_split('/\s+/', $tienda)[0] ?? 'PalWeb';
@@ -22,7 +23,7 @@ $manifest = [
     'name' => $tienda,
     'short_name' => mb_substr($short, 0, 12),
     'start_url' => $posScope,
-    'scope' => $posScope,
+    'scope' => $appScope,
     'display' => 'standalone',
     'orientation' => 'any',        // Permite landscape en tablets/POS
     'lang' => 'es',
@@ -30,10 +31,10 @@ $manifest = [
     'theme_color' => '#2c3e50',
     'description' => 'Punto de venta ' . $tienda,
     'icons' => [
-        ['src' => 'icon-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
-        ['src' => 'icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => $prefix . '/icon-pos-192.png', 'sizes' => '192x192', 'type' => 'image/png', 'purpose' => 'any'],
+        ['src' => $prefix . '/icon-pos-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'any'],
         // Icono maskable: requerido por Android para instalación PWA correcta
-        ['src' => 'icon-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
+        ['src' => $prefix . '/icon-pos-512.png', 'sizes' => '512x512', 'type' => 'image/png', 'purpose' => 'maskable'],
     ],
 ];
 

@@ -1484,13 +1484,24 @@ if ($isAjax) {
     }
     exit;
 }
+$ptableScriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/products_table.php'));
+$ptableBasePath = rtrim($ptableScriptDir === '.' ? '/' : $ptableScriptDir, '/');
+if ($ptableBasePath === '') $ptableBasePath = '/';
+$ptableDocumentBase = $ptableBasePath === '/' ? '/' : $ptableBasePath . '/';
+$ptableRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/products_table\.php$~i', $ptableRequestPath)) {
+    $ptablePrettyPath = $ptableBasePath === '/' ? '/products/' : $ptableBasePath . '/products/';
+    header('Location: ' . $ptablePrettyPath, true, 302);
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <base href="<?php echo htmlspecialchars($ptableDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
     <title>Inventario & Web</title>
-    <link rel="manifest" href="manifest-products.php">
+    <link rel="manifest" href="manifest-products.php?v=20260521-pwa2">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
@@ -3611,7 +3622,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Registrar Service Worker Independiente
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw-products.js', { scope: './', updateViaCache: 'none' })
+        const productsSwUrl = new URL('sw-products.js', document.baseURI).toString();
+        const productsSwScope = new URL('products/', document.baseURI).toString();
+        navigator.serviceWorker.register(productsSwUrl, { scope: productsSwScope, updateViaCache: 'none' })
             .then(reg => {
                 reg.update();
                 console.log('Gestor de Inventario Offline listo');

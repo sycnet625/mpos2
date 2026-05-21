@@ -1,17 +1,18 @@
 // ============================================================
 // SERVICE WORKER - TIENDA PUBLICA
-// Version 3.0 - Stale-While-Revalidate + Offline Real
+// Version 3.1 - Stale-While-Revalidate + Offline Real + scope aislado
 // ============================================================
 
-const CACHE_NAME      = 'palweb-shop-v30';
+const CACHE_NAME      = 'palweb-shop-v32';
 const IMG_CACHE       = 'palweb-shop-images-v2';
-const STATIC_CACHE    = 'palweb-shop-static-v30';
+const STATIC_CACHE    = 'palweb-shop-static-v32';
 const PUSH_CACHE      = 'push-config-v1';
 const BASE_URL        = new URL('./', self.location.href);
 const assetUrl        = (rel) => new URL(rel, BASE_URL).toString();
 
 // Recursos estáticos: cacheados permanentemente, revalidados en background
 const STATIC_ASSETS = [
+    assetUrl('./'),
     assetUrl('assets/css/bootstrap.min.css'),
     assetUrl('assets/css/all.min.css'),
     assetUrl('assets/js/bootstrap.bundle.min.js'),
@@ -42,7 +43,7 @@ const AJAX_OFFLINE_JSON = { status: 'offline', offline: true };
 
 // ── Instalación ──────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-    console.log('[SW-Shop] v3.0 Instalando...');
+    console.log('[SW-Shop] v3.1 Instalando...');
     event.waitUntil(
         caches.open(STATIC_CACHE).then(async (cache) => {
             // Instalación parcial tolerante: un fallo no bloquea el SW
@@ -57,7 +58,7 @@ self.addEventListener('install', (event) => {
 
 // ── Activación — limpia cachés viejas ───────────────────────────────────────
 self.addEventListener('activate', (event) => {
-    console.log('[SW-Shop] v3.0 Activando...');
+    console.log('[SW-Shop] v3.1 Activando...');
     const keep = new Set([CACHE_NAME, IMG_CACHE, STATIC_CACHE, PUSH_CACHE]);
     event.waitUntil(
         caches.keys()

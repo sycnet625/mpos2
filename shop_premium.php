@@ -171,6 +171,7 @@ $scheme    = $https ? 'https' : 'http';
 $host      = $_SERVER['HTTP_HOST'] ?? 'palweb.net';
 $baseDir   = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/shop.php')), '/');
 $baseDir   = $baseDir === '.' ? '' : $baseDir;
+$shopDocumentBase = $scheme . '://' . $host . ($baseDir !== '' ? $baseDir . '/' : '/');
 $siteUrl   = $config['sitio_web'] ?? ($scheme . '://' . $host . $baseDir . '/shop.php');
 
 $metaTitle = $storeName . " | Tienda Online en La Habana – Productos Frescos y Entrega a Domicilio";
@@ -672,6 +673,7 @@ ob_end_flush();
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<base href="<?php echo htmlspecialchars($shopDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
 <script>
@@ -732,7 +734,7 @@ ob_end_flush();
 
     <!-- PWA Tienda -->
     <meta name="theme-color" content="#0d6efd">
-    <link rel="manifest" href="manifest-shop.php">
+    <link rel="manifest" href="manifest-shop.php?v=20260521-pwa2">
     <link rel="apple-touch-icon" href="icon-shop-192.png">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -3955,11 +3957,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 <script>
 // ── Service Worker Tienda (scope exclusivo shop.php) ──
-const SHOP_SCOPE_PATH = new URL('./', window.location.href).pathname;
-const SHOP_SW_URL = new URL('sw-shop.js', window.location.href).toString();
+const SHOP_SCOPE_PATH = new URL('shop/', document.baseURI).pathname;
+const SHOP_SW_URL = new URL('sw-shop.js', document.baseURI).toString();
 
 if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH })
+    navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH, updateViaCache: 'none' })
         .then(reg => { console.log('[Shop PWA] SW registrado, scope:', reg.scope); })
         .catch(err => console.warn('[Shop PWA] SW error:', err));
 }
@@ -4019,8 +4021,7 @@ async function subscribeShopPush() {
         const resp = await fetch(SHOP_PUSH_API + '?action=vapid_key');
         const { publicKey } = await resp.json();
 
-        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
-        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH });
+        const reg = await navigator.serviceWorker.register(SHOP_SW_URL, { scope: SHOP_SCOPE_PATH, updateViaCache: 'none' });
         const swReg = await Promise.race([
             navigator.serviceWorker.ready,
             new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))

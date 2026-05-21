@@ -1,8 +1,24 @@
+<?php
+$clockRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/clock\.php$~i', $clockRequestPath)) {
+    $clockScriptDir = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/clock.php')), '/');
+    $clockPrettyPath = ($clockScriptDir === '' || $clockScriptDir === '.') ? '/clock/' : $clockScriptDir . '/clock/';
+    header('Location: ' . $clockPrettyPath, true, 302);
+    exit;
+}
+?>
 <!doctype html>
 <html lang="es">
 <head>
   <meta charset="UTF-8">
+  <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Clock LCD con alarmas, temporizadores y modo presentacion">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="clock-manifest.json?v=20260521-pwa2">
+  <link rel="apple-touch-icon" href="icon-192.png">
   <title>Clock LCD</title>
   <style>
     @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&family=Orbitron:wght@500;700&family=Audiowide&display=swap");
@@ -2419,24 +2435,9 @@ let events = [];
     EventManager.load();
 
     if ("serviceWorker" in navigator) {
-      (async () => {
-        const swCandidates = ["./service-worker.js", "./sw.js"];
-        let lastError = null;
-
-        for (const swPath of swCandidates) {
-          try {
-            const probe = await fetch(swPath, { method: "HEAD", cache: "no-store" });
-            if (!probe.ok && probe.status !== 405) continue;
-            await navigator.serviceWorker.register(swPath, { scope: "./" });
-            console.log("Service Worker registered:", swPath);
-            return;
-          } catch (err) {
-            lastError = err;
-          }
-        }
-
-        console.log("Service Worker error:", lastError ? lastError.message : "No Service Worker script available");
-      })();
+      navigator.serviceWorker.register("sw.js", { scope: "/clock/", updateViaCache: "none" })
+        .then(reg => console.log("Clock Service Worker registered:", reg.scope))
+        .catch(err => console.log("Clock Service Worker error:", err.message));
     }
 
     let deferredPrompt = null;
