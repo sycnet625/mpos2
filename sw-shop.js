@@ -1,11 +1,11 @@
 // ============================================================
 // SERVICE WORKER - TIENDA PUBLICA
-// Version 3.1 - Stale-While-Revalidate + Offline Real + scope aislado
+// Version 3.2 - Online First + Offline Real + scope aislado
 // ============================================================
 
-const CACHE_NAME      = 'palweb-shop-v32';
+const CACHE_NAME      = 'palweb-shop-v33';
 const IMG_CACHE       = 'palweb-shop-images-v2';
-const STATIC_CACHE    = 'palweb-shop-static-v32';
+const STATIC_CACHE    = 'palweb-shop-static-v33';
 const PUSH_CACHE      = 'push-config-v1';
 const BASE_URL        = new URL('./', self.location.href);
 const assetUrl        = (rel) => new URL(rel, BASE_URL).toString();
@@ -43,7 +43,7 @@ const AJAX_OFFLINE_JSON = { status: 'offline', offline: true };
 
 // ── Instalación ──────────────────────────────────────────────────────────────
 self.addEventListener('install', (event) => {
-    console.log('[SW-Shop] v3.1 Instalando...');
+    console.log('[SW-Shop] v3.2 Instalando...');
     event.waitUntil(
         caches.open(STATIC_CACHE).then(async (cache) => {
             // Instalación parcial tolerante: un fallo no bloquea el SW
@@ -58,7 +58,7 @@ self.addEventListener('install', (event) => {
 
 // ── Activación — limpia cachés viejas ───────────────────────────────────────
 self.addEventListener('activate', (event) => {
-    console.log('[SW-Shop] v3.1 Activando...');
+    console.log('[SW-Shop] v3.2 Activando...');
     const keep = new Set([CACHE_NAME, IMG_CACHE, STATIC_CACHE, PUSH_CACHE]);
     event.waitUntil(
         caches.keys()
@@ -77,15 +77,15 @@ self.addEventListener('fetch', (event) => {
 
     const url = new URL(event.request.url);
 
-    // 1. Imágenes de producto → Cache-First con revalidación silenciosa
+    // 1. Imágenes de producto → Online first con caché offline
     if (url.pathname.endsWith('image.php') || url.pathname.includes('/product_images/')) {
-        event.respondWith(cacheFirstRevalidate(event.request, IMG_CACHE));
+        event.respondWith(networkFirstWithCache(event.request, IMG_CACHE, true));
         return;
     }
 
-    // 2. Assets estáticos (.css .js .woff2 .png .ico .webp .jpg) → Cache-First
+    // 2. Assets estáticos (.css .js .woff2 .png .ico .webp .jpg) → Online first con caché offline
     if (isStaticAsset(url)) {
-        event.respondWith(cacheFirstRevalidate(event.request, STATIC_CACHE));
+        event.respondWith(networkFirstWithCache(event.request, STATIC_CACHE, true));
         return;
     }
 
@@ -95,14 +95,14 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 4. Entrada instalada de la tienda → Stale-While-Revalidate
+    // 4. Entrada instalada de la tienda → Online first
     if ((url.pathname.endsWith('shop.php') || /\/shop\/?$/.test(url.pathname)) && !url.search) {
-        event.respondWith(staleWhileRevalidate(event.request, CACHE_NAME));
+        event.respondWith(networkFirstWithCache(event.request, CACHE_NAME));
         return;
     }
 
     // 5. Resto de páginas → Network-First con caché de emergencia
-    event.respondWith(networkFirstWithCache(event.request));
+    event.respondWith(networkFirstWithCache(event.request, CACHE_NAME));
 });
 
 // ── Estrategias de caché ─────────────────────────────────────────────────────
@@ -174,15 +174,17 @@ async function networkOnlyWithOfflineFallback(request, url) {
 }
 
 // Network-First con caché de emergencia
-async function networkFirstWithCache(request) {
-    const cache = await caches.open(CACHE_NAME);
+async function networkFirstWithCache(request, cacheName = CACHE_NAME, emptyImageFallback = false) {
+    const cache = await caches.open(cacheName);
     try {
         const response = await fetch(request, { credentials: 'same-origin' });
         if (response.ok) cache.put(request, response.clone());
         return response;
     } catch {
         const cached = await cache.match(request);
-        return cached || offlineFallbackPage();
+        if (cached) return cached;
+        if (emptyImageFallback) return new Response('', { status: 204 });
+        return offlineFallbackPage();
     }
 }
 

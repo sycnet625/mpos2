@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 8.9 - Cache individual + netcheck + PWA scopes
+// Versión 9.0 - Online first + POS offline completo
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v90';
+const CACHE_NAME = 'palweb-pos-v91';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -21,6 +21,7 @@ const OFFLINE_ASSETS = [
     './assets/css/bootstrap.min.css',
     './assets/css/all.min.css',
     './assets/js/bootstrap.bundle.min.js',
+    './assets/img/no-image-50.png',
     './assets/webfonts/fa-solid-900.woff2',
     './assets/webfonts/fa-regular-400.woff2',
     './assets/webfonts/fa-brands-400.woff2',
@@ -31,7 +32,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v8.9...');
+    console.log('[SW-POS] Instalando Service Worker v9.0...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -58,7 +59,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v8.9...');
+    console.log('[SW-POS] Activando Service Worker v9.0...');
     
     event.waitUntil(
         caches.keys()
@@ -157,6 +158,8 @@ async function onlineFirst(request) {
     const url = new URL(request.url);
     const LOCAL_NO_IMAGE = appUrl('assets/img/no-image-50.png');
     const isPosStart = /\/pos\/?$/.test(url.pathname);
+    const isPosShell = isPosStart || url.pathname.endsWith('/pos.php');
+    const isProductImage = url.pathname.endsWith('/image.php') && url.searchParams.has('code');
 
     // Sustituye placeholders externos por imagen local para evitar ruido offline.
     if (url.hostname === 'via.placeholder.com') {
@@ -186,11 +189,15 @@ async function onlineFirst(request) {
             
             // Solo cachear recursos estáticos (no PHP dinámico con parámetros)
             const shouldCache = 
-                isPosStart ||
+                isPosShell ||
+                isProductImage ||
                 request.url.endsWith('.js') ||
                 request.url.endsWith('.css') ||
                 request.url.endsWith('.jpg') ||
+                request.url.endsWith('.jpeg') ||
                 request.url.endsWith('.png') ||
+                request.url.endsWith('.webp') ||
+                request.url.endsWith('.svg') ||
                 request.url.endsWith('.woff2') ||
                 request.url.includes('bootstrap') ||
                 request.url.includes('fontawesome') ||
@@ -211,7 +218,8 @@ async function onlineFirst(request) {
         const cachedResponse = await caches.match(request) ||
                                await caches.match(request, { ignoreSearch: true }) ||
                                (isPosStart ? await caches.match(appUrl('pos/')) : null) ||
-                               (isPosStart ? await caches.match(appUrl('pos.php')) : null);
+                               (isPosShell ? await caches.match(appUrl('pos.php')) : null) ||
+                               (isProductImage ? await caches.match(LOCAL_NO_IMAGE) : null);
         
         if (cachedResponse && cachedResponse.type !== 'opaqueredirect') {
             console.log('[SW-POS] Servido desde caché:', request.url);
@@ -259,11 +267,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v90-online-first-netcheck-scopes' });
+        event.ports[0].postMessage({ version: 'v91-online-first-pos-offline' });
     }
 });
 
-console.log('[SW-POS] Service Worker v8.9 (ONLINE FIRST + offline real) cargado');
+console.log('[SW-POS] Service Worker v9.0 (ONLINE FIRST + POS offline completo) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

@@ -312,6 +312,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.productsDB = PRODUCTS_DATA;
         productsDB = window.productsDB;
         saveToCache(productsDB);
+        if (window.posCache && typeof window.posCache.saveProducts === 'function' && window.posCache.db) {
+            window.posCache.saveProducts(productsDB).catch(() => {});
+        }
         recalculateCartPrices();
         renderProducts('all');
         renderFavoritesBar();
@@ -577,6 +580,20 @@ function loadFromCacheOrRefresh() {
                 return;
             }
         } catch(e) {}
+    }
+    if (window.posCache && typeof window.posCache.getProducts === 'function') {
+        window.posCache.getProducts().then(data => {
+            if (Array.isArray(data) && data.length > 0) {
+                window.productsDB = data;
+                productsDB = window.productsDB;
+                saveToCache(data);
+                renderProducts('all');
+                console.log('Cargados ' + data.length + ' productos desde IndexedDB');
+                return;
+            }
+            refreshProducts();
+        }).catch(() => refreshProducts());
+        return;
     }
     refreshProducts();
 }

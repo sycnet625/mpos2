@@ -1948,8 +1948,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260521-net3"></script>
-<script src="pos-offline-system.js?v=20260521-net2"></script>
+<script src="pos1.js?v=20260521-offline1"></script>
+<script src="pos-offline-system.js?v=20260521-offline1"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────

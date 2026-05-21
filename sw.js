@@ -1,4 +1,4 @@
-const CACHE_NAME = 'clock-offline-v3';
+const CACHE_NAME = 'clock-offline-v4';
 const STATIC_ASSETS = [
   '/clock/',
   '/clock.php',
@@ -34,17 +34,14 @@ self.addEventListener('fetch', event => {
   if (url.pathname === '/api_sales.php') {
     event.respondWith(
       caches.open(CACHE_NAME).then(cache => {
-        return cache.match('/api_sales.php').then(cached => {
-          if (cached) return cached;
-          return fetch(event.request).then(response => {
+        return fetch(event.request).then(response => {
             if (response.ok) {
               cache.put('/api_sales.php', response.clone());
             }
             return response;
-          }).catch(() => new Response('{"total":"0.00","count":0,"clients":0}', {
+          }).catch(() => cache.match('/api_sales.php').then(cached => cached || new Response('{"total":"0.00","count":0,"clients":0}', {
             headers: { 'Content-Type': 'application/json' }
-          }));
-        });
+          })));
       })
     );
     return;
@@ -65,14 +62,12 @@ self.addEventListener('fetch', event => {
   }
 
   event.respondWith(
-    caches.match(event.request).then(response => {
-      return response || fetch(event.request).then(fetchResponse => {
-        if (fetchResponse.ok && url.pathname.endsWith('.php') || url.pathname === '/') {
+    fetch(event.request).then(fetchResponse => {
+        if (fetchResponse.ok && (url.pathname.endsWith('.php') || url.pathname === '/' || url.pathname === '/clock/' || url.pathname.endsWith('.css') || url.pathname.endsWith('.js'))) {
           const clone = fetchResponse.clone();
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
         }
         return fetchResponse;
-      });
-    }).catch(() => caches.match('/clock/') || caches.match('/clock.php'))
+    }).catch(() => caches.match(event.request) || caches.match(event.request, { ignoreSearch: true }) || caches.match('/clock/') || caches.match('/clock.php'))
   );
 });

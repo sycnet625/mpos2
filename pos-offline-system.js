@@ -50,6 +50,21 @@ if (typeof window.posOfflineLoaded === 'undefined') {
             });
         }
 
+        async hydrateProductsFromLocalStorage() {
+            try {
+                const raw = localStorage.getItem('products_cache_v1');
+                if (!raw) return 0;
+                const parsed = JSON.parse(raw);
+                const products = Array.isArray(parsed.data) ? parsed.data : [];
+                if (!products.length) return 0;
+                await this.saveProducts(products);
+                return products.length;
+            } catch (e) {
+                console.warn('No se pudo copiar catalogo local a IndexedDB:', e);
+                return 0;
+            }
+        }
+
         // PRODUCTOS
         async saveProducts(products) {
             if (!this.db) return;
@@ -298,6 +313,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         window.posOfflineInitialized = true;
         try {
             await window.posCache.init();
+            await window.posCache.hydrateProductsFromLocalStorage();
             window.connectionMonitor.start();
             console.log('Sistema offline inicializado');
         } catch(e) {
