@@ -47,6 +47,7 @@
                 </div>
             </div>
             <div class="d-flex flex-wrap gap-2">
+                <a href="pos_bot_dashboard.php" class="btn btn-warning fw-bold"><i class="fas fa-chart-column me-1"></i>Dashboard</a>
                 <button class="btn btn-light" onclick="loadAll()"><i class="fas fa-sync me-1"></i>Refrescar</button>
                 <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-arrow-left me-1"></i>Volver</a>
             </div>

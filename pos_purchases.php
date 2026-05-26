@@ -523,28 +523,32 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
     $stmtInsertProduct = $pdo->prepare(
         'INSERT INTO productos (codigo, nombre, costo, precio, precio_mayorista, categoria, activo, id_empresa) VALUES (?, ?, ?, ?, ?, ?, 1, ?)'
     );
-    $stmtUpdateProductCost = $pdo->prepare('UPDATE productos SET costo = ?, nombre = ?, categoria = ?, precio = ?, precio_mayorista = ? WHERE codigo = ? AND id_empresa = ?');
+    $stmtUpdateProductCost = $pdo->prepare('UPDATE productos SET costo = ?, nombre = ?, categoria = ?, precio = ? WHERE codigo = ? AND id_empresa = ?');
+    $warnings = [];
 
     foreach ($validatedItems as $item) {
         $existing = purchase_fetch_product($pdo, $item['sku'], $empresaId);
         $costoAnterior = $existing ? (float)$existing['costo'] : null;
+        $mayoristaAnterior = $existing ? (float)($existing['precio_mayorista'] ?? 0) : 0.0;
         $stockAntes = purchase_fetch_stock($pdo, $item['sku'], $almacenId);
         $stockDespues = $stockAntes;
         $costoResultante = $item['costo'];
         $estadoItem = 'ACTIVO';
 
         if (!$existing) {
-            $precioMayorista = $item['precio_venta'] > 0 ? round($item['precio_venta'] * 0.95, 2) : round($item['costo'] * 1.10, 2);
             $stmtInsertProduct->execute([
                 $item['sku'],
                 $item['nombre'],
                 $item['costo'],
                 $item['precio_venta'],
-                $precioMayorista,
+                0,
                 $item['categoria'],
                 $empresaId,
             ]);
+            $warnings[] = 'El producto ' . $item['sku'] . ' fue dado de alta con precio mayorista en 0. Definelo manualmente.';
             product_image_pipeline_ensure_placeholder($item['sku'], (string)$item['nombre']);
+        } elseif ($mayoristaAnterior <= 0) {
+            $warnings[] = 'El producto ' . $item['sku'] . ' ya tenia precio mayorista en 0 y no se modifico automaticamente.';
         }
 
         if ($estado === 'PROCESADA') {
@@ -553,7 +557,6 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                 $costoResultante = round((($stockAntes * $baseCost) + ($item['cantidad'] * $item['costo'])) / ($stockAntes + $item['cantidad']), 4);
             }
             $stockDespues = $stockAntes + $item['cantidad'];
-            $precioMayorista = $item['precio_venta'] > 0 ? round($item['precio_venta'] * 0.95, 2) : round($costoResultante * 1.10, 2);
 
             if ($precioScope === 'sucursal') {
                 // Actualizar solo el precio de esta sucursal
@@ -562,14 +565,13 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                      VALUES (?, ?, ?, ?, ?)
                      ON DUPLICATE KEY UPDATE
                          precio_costo     = VALUES(precio_costo),
-                         precio_venta     = VALUES(precio_venta),
-                         precio_mayorista = VALUES(precio_mayorista)"
+                         precio_venta     = VALUES(precio_venta)"
                 )->execute([
                     $item['sku'],
                     $sucursalId,
                     $costoResultante > 0 ? $costoResultante : null,
                     $item['precio_venta'] > 0 ? $item['precio_venta'] : null,
-                    $precioMayorista > 0 ? $precioMayorista : null,
+                    null,
                 ]);
 
                 // Si el precio/costo global está en 0, rellenar también para no dejarlo vacío
@@ -580,13 +582,11 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                         $pdo->prepare(
                             "UPDATE productos SET
                                 costo  = CASE WHEN costo  <= 0 THEN ? ELSE costo  END,
-                                precio = CASE WHEN precio <= 0 THEN ? ELSE precio END,
-                                precio_mayorista = CASE WHEN COALESCE(precio_mayorista,0) <= 0 THEN ? ELSE precio_mayorista END
+                                precio = CASE WHEN precio <= 0 THEN ? ELSE precio END
                              WHERE codigo = ? AND id_empresa = ?"
                         )->execute([
                             $costoResultante,
                             max(0, $item['precio_venta']),
-                            $precioMayorista,
                             $item['sku'],
                             $empresaId,
                         ]);
@@ -599,7 +599,6 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                     $item['nombre'],
                     $item['categoria'],
                     max(0, $item['precio_venta']),
-                    $precioMayorista,
                     $item['sku'],
                     $empresaId,
                 ]);
@@ -654,7 +653,7 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
     };
     log_audit($pdo, $auditAction, $actor, ['id' => $purchaseId, 'estado' => $estado, 'total' => $total]);
 
-    return [
+    $result = [
         'status' => 'success',
         'msg' => match ($estado) {
             'BORRADOR' => 'Borrador guardado #' . $purchaseId,
@@ -663,6 +662,10 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
         },
         'id' => $purchaseId,
     ];
+    if (!empty($warnings)) {
+        $result['warnings'] = array_values(array_unique($warnings));
+    }
+    return $result;
 }
 
 function purchase_process_pending(PDO $pdo, int $purchaseId, array $context): array
@@ -1825,6 +1828,9 @@ const app = new Vue({
                 if (data.status !== 'success') throw new Error(data.msg || 'No se pudo guardar');
                 this.clearDraftLocal(false);
                 this.ok(data.msg);
+                if (Array.isArray(data.warnings) && data.warnings.length) {
+                    alert(data.warnings.join('\n'));
+                }
                 setTimeout(() => window.location.reload(), 700);
             } catch (error) {
                 this.raise(error.message || 'Error guardando compra');

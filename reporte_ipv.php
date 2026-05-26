@@ -262,6 +262,10 @@ try {
             <td class="right bold" style="font-size:14px">$ <?php echo number_format($totalGlobalVenta, 2); ?></td>
         </tr>
         <tr>
+            <td class="label-cell">🏷️ VALOR PRODUCTOS</td>
+            <td class="right bold" style="font-size:14px">$ <?php echo number_format($totales['venta'], 2); ?></td>
+        </tr>
+        <tr>
             <td class="label-cell" style="color:#2F75B5;">📦 Valor Inv. Final (Costo)</td>
             <td class="right bold" style="color:#2F75B5;">$ <?php echo number_format($totales['inventario_costo'], 2); ?></td>
         </tr>

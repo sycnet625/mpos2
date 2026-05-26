@@ -14,8 +14,15 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'accounting_helpers.php';
+require_once 'empresa_fiscal_helpers.php';
 
 $EMP_ID = intval($config['id_empresa']);
+$fiscalRegime = get_empresa_fiscal($EMP_ID);
+$tipo_actor_cfg = $fiscalRegime['tipo_actor_economico'];
+// Mapeo a la lógica original de cálculo (TCP|MIPYME). CNoA y MIPYME usan la regla de utilidades 35%;
+// TCP y PersonaNatural usan el cálculo simplificado heredado.
+$tipo_entidad_calc = in_array($tipo_actor_cfg, ['TCP', 'PersonaNatural'], true) ? 'TCP' : 'MIPYME';
+$modelos_aplicables = modelos_onat_para_actor($tipo_actor_cfg, !empty($fiscalRegime['regimen_simplificado']));
 
 // --- 2. PROCESAR GUARDADO E INTEGRACIÓN CONTABLE ---
 $msg = "";
@@ -85,7 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // --- 3. PARÁMETROS GET ---
 $mes = isset($_GET['mes']) ? intval($_GET['mes']) : intval(date('m'));
 $anio = isset($_GET['anio']) ? intval($_GET['anio']) : intval(date('Y'));
-$tipo_entidad = isset($_GET['tipo']) ? $_GET['tipo'] : 'MIPYME'; 
+// El tipo de entidad ahora viene del régimen configurado en pos_config2.php (no editable desde aquí).
+$tipo_entidad = $tipo_entidad_calc;
 $gastos_nomina = isset($_GET['nomina']) ? floatval($_GET['nomina']) : 0;
 $gastos_otros  = isset($_GET['otros_gastos']) ? floatval($_GET['otros_gastos']) : 0;
 
@@ -210,11 +218,12 @@ $meses = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "A
                         </select>
                     </div>
                     <div class="col-12">
-                        <label class="form-label small fw-bold">Tipo de Entidad</label>
-                        <select name="tipo" class="form-select">
-                            <option value="MIPYME" <?= $tipo_entidad=='MIPYME'?'selected':'' ?>>MIPYME (Sociedad Mercantil)</option>
-                            <option value="TCP" <?= $tipo_entidad=='TCP'?'selected':'' ?>>Trabajador Cuenta Propia</option>
-                        </select>
+                        <label class="form-label small fw-bold">Tipo de Entidad <span class="text-muted small">(desde Régimen Fiscal)</span></label>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-primary fs-6 px-3 py-2"><?= htmlspecialchars($tipo_actor_cfg) ?></span>
+                            <a href="pos_config2.php?tab=fiscal" class="btn btn-sm btn-outline-secondary"><i class="fas fa-cog me-1"></i>Cambiar</a>
+                        </div>
+                        <div class="form-text tiny">Cálculo aplicado: <strong><?= $tipo_entidad_calc ?></strong> (35% utilidades para MIPYME/CNoA; 5% sobre ingresos para TCP/Persona Natural).</div>
                     </div>
                     <div class="col-12">
                         <label class="form-label small fw-bold text-danger">Gasto Nómina Total ($)</label>
@@ -348,6 +357,40 @@ $meses = ["", "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "A
             </div>
         </div>
     </div>
+
+    <!-- Modelos Oficiales ONAT -->
+    <section class="glass-card p-4 mt-4 inventory-fade-in no-print">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <div class="section-title">Modelos Oficiales</div>
+                <h2 class="h5 fw-bold mb-0">Generación de Documentos ONAT (<?= htmlspecialchars($tipo_actor_cfg) ?>)</h2>
+            </div>
+            <div class="d-flex gap-2">
+                <a href="onat_libro_ingresos_gastos.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-book-open me-1"></i>Libro I/G</a>
+                <a href="onat_retenciones.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-hand-holding-usd me-1"></i>Retenciones</a>
+                <a href="onat_calendario.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-calendar-check me-1"></i>Calendario</a>
+                <a href="onat_auditoria.php" class="btn btn-outline-primary btn-sm"><i class="fas fa-shield-alt me-1"></i>Auditoría</a>
+            </div>
+        </div>
+        <p class="text-muted small mb-3">Estos son los modelos oficiales que <strong><?= htmlspecialchars($tipo_actor_cfg) ?></strong> debe presentar a la ONAT. Cada generación rellena la plantilla oficial 2025/2026 y produce Excel + PDF para imprimir.</p>
+        <div class="row g-3">
+            <?php foreach ($modelos_aplicables as $m): ?>
+                <div class="col-md-6 col-xl-3">
+                    <div class="border rounded-3 p-3 h-100 d-flex flex-column">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <span class="badge bg-secondary"><?= htmlspecialchars($m['codigo']) ?></span>
+                            <span class="soft-pill text-uppercase tiny"><?= htmlspecialchars($m['periodo_tipo']) ?></span>
+                        </div>
+                        <h6 class="fw-bold mb-1"><?= htmlspecialchars($m['nombre']) ?></h6>
+                        <p class="tiny text-muted flex-grow-1"><?= htmlspecialchars($m['descripcion']) ?></p>
+                        <a href="onat_generator.php?modelo=<?= urlencode($m['codigo']) ?>&anio=<?= $anio ?>&mes=<?= $mes ?>" class="btn btn-sm btn-primary mt-2">
+                            <i class="fas fa-file-export me-1"></i>Generar
+                        </a>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </section>
 
     <!-- Historial -->
     <section class="glass-card p-4 mt-4 inventory-fade-in no-print">

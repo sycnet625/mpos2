@@ -33,6 +33,46 @@ $usuario    = $_SESSION['admin_user'] ?? $_SESSION['admin_user_name'] ?? $_SESSI
 
 $action = $_GET['action'] ?? '';
 
+// Asegurar la columna antes de cualquier carga o edición, para que las notas
+// antiguas queden visibles en el editor y no solo se creen al guardar.
+ventas_edit_ensure_nota_cocina($pdo);
+
+function ventas_edit_has_nota_cocina(PDO $pdo, bool $forceRefresh = false): bool
+{
+    static $cache = null;
+    if ($cache !== null && !$forceRefresh) {
+        return $cache;
+    }
+
+    try {
+        $stmtCol = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ventas_detalle' AND COLUMN_NAME = 'nota_cocina'");
+        $stmtCol->execute();
+        $cache = (bool)$stmtCol->fetchColumn();
+    } catch (Throwable $e) {
+        $cache = false;
+    }
+
+    return $cache;
+}
+
+function ventas_edit_ensure_nota_cocina(PDO $pdo): bool
+{
+    if (ventas_edit_has_nota_cocina($pdo)) {
+        return true;
+    }
+
+    try {
+        $pdo->exec("ALTER TABLE ventas_detalle ADD COLUMN IF NOT EXISTS nota_cocina VARCHAR(255) NULL AFTER nombre_producto");
+    } catch (Throwable $e) {
+        // Si la BD no soporta IF NOT EXISTS, intentar sin él.
+        try {
+            $pdo->exec("ALTER TABLE ventas_detalle ADD COLUMN nota_cocina VARCHAR(255) NULL AFTER nombre_producto");
+        } catch (Throwable $_e) {}
+    }
+
+    return ventas_edit_has_nota_cocina($pdo, true);
+}
+
 // ──────────────────────────────────────────────
 // GET: Cargar venta para edición
 // ──────────────────────────────────────────────
@@ -51,8 +91,10 @@ if ($action === 'load') {
     }
 
     // JOIN por codigo (PK de productos)
+    $hasNotaCocina = ventas_edit_has_nota_cocina($pdo);
+
     $stmtD = $pdo->prepare(
-        "SELECT vd.id, vd.id_producto, vd.cantidad, vd.precio,
+        "SELECT vd.id, vd.id_producto, vd.cantidad, vd.precio" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
                 vd.nombre_producto, vd.codigo_producto,
                 COALESCE(p.es_servicio, 0) AS es_servicio
          FROM ventas_detalle vd
@@ -66,6 +108,27 @@ if ($action === 'load') {
     $stmtP = $pdo->prepare("SELECT metodo_pago, monto FROM ventas_pagos WHERE id_venta_cabecera = ?");
     $stmtP->execute([$idVenta]);
     $pagos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+
+    $tipoServicioRaw = trim((string)($venta['tipo_servicio'] ?? ''));
+    $tipoServicioNorm = strtolower($tipoServicioRaw);
+    $tipoServicioMap = [
+        'mostrador'     => 'mostrador',
+        'consumir_aqui' => 'mostrador',
+        'consumir aqui' => 'mostrador',
+        'aqui'          => 'mostrador',
+        'aquí'          => 'mostrador',
+        'mesa'          => 'mostrador',
+        'llevar'        => 'llevar',
+        'para llevar'   => 'llevar',
+        'recoger'       => 'llevar',
+        'pickup'        => 'llevar',
+        'mensajeria'    => 'mensajeria',
+        'delivery'      => 'mensajeria',
+        'domicilio'     => 'mensajeria',
+        'reserva'       => 'reserva',
+    ];
+    $venta['tipo_servicio_raw'] = $tipoServicioRaw;
+    $venta['tipo_servicio'] = $tipoServicioMap[$tipoServicioNorm] ?? ($tipoServicioNorm !== '' ? $tipoServicioNorm : 'mostrador');
 
     echo json_encode([
         'status'   => 'success',
@@ -88,10 +151,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
     $newPayments   = $input['payments']                     ?? [];
     $editReason    = trim($input['edit_reason']             ?? 'Edición manual');
     $nuevoTotal    = floatval($input['total']               ?? 0);
+    $clienteId     = intval($input['id_cliente']             ?? 0);
     $clienteNombre = substr(trim($input['cliente_nombre']   ?? ''), 0, 100);
     $mensajero     = substr(trim($input['mensajero_nombre'] ?? ''), 0, 100);
     $tipoServicio  = substr(trim($input['tipo_servicio']    ?? 'mostrador'), 0, 50);
     $metodoPago    = substr(trim($input['metodo_pago']      ?? 'Efectivo'), 0, 80);
+    $hasNotaCocina = ventas_edit_ensure_nota_cocina($pdo);
 
     if (!$idVenta || empty($newItems) || $nuevoTotal <= 0) {
         die(json_encode(['status' => 'error', 'msg' => 'Datos incompletos o total inválido']));
@@ -117,9 +182,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
         $sucursal = intval($venta['id_sucursal'] ?? $idSucursal);
         $now      = date('Y-m-d H:i:s');
 
+        $clienteTelefono = '';
+        $clienteDireccion = '';
+        if ($clienteId > 0) {
+            $stmtCliente = $pdo->prepare("SELECT nombre, telefono, direccion FROM clientes WHERE id = ? AND activo = 1 LIMIT 1");
+            $stmtCliente->execute([$clienteId]);
+            $clienteRow = $stmtCliente->fetch(PDO::FETCH_ASSOC);
+            if (!$clienteRow) {
+                throw new Exception('Cliente seleccionado no encontrado o inactivo');
+            }
+            $clienteNombre = substr(trim((string)$clienteRow['nombre']), 0, 100);
+            $clienteTelefono = substr(trim((string)($clienteRow['telefono'] ?? '')), 0, 50);
+            $clienteDireccion = substr(trim((string)($clienteRow['direccion'] ?? '')), 0, 255);
+        } else {
+            $clienteNombre = $clienteNombre ?: 'Mostrador';
+        }
+
         // 2. Detalles originales — clave = codigo (varchar)
         $stmtD = $pdo->prepare(
-            "SELECT vd.id_producto, vd.cantidad,
+            "SELECT vd.id_producto, vd.cantidad" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
                     COALESCE(p.es_servicio, 0) AS es_servicio
              FROM ventas_detalle vd
              LEFT JOIN productos p ON p.codigo = vd.id_producto
@@ -185,21 +266,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
 
         // 4. Reemplazar detalles
         $pdo->prepare("DELETE FROM ventas_detalle WHERE id_venta_cabecera = ?")->execute([$idVenta]);
-        $stmtIns = $pdo->prepare(
-            "INSERT INTO ventas_detalle
-             (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto)
-             VALUES (?, ?, ?, ?, ?, ?)"
-        );
+        if ($hasNotaCocina) {
+            $stmtIns = $pdo->prepare(
+                "INSERT INTO ventas_detalle
+                 (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, nota_cocina)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            );
+        } else {
+            $stmtIns = $pdo->prepare(
+                "INSERT INTO ventas_detalle
+                 (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto)
+                 VALUES (?, ?, ?, ?, ?, ?)"
+            );
+        }
         foreach ($newItems as $ni) {
             $codigo = (string)($ni['id'] ?? '');
-            $stmtIns->execute([
-                $idVenta,
-                $codigo,                                        // varchar codigo
-                floatval($ni['qty']),
-                floatval($ni['price']),
-                substr(trim($ni['name']   ?? ''), 0, 200),
-                substr(trim($ni['codigo'] ?? $codigo), 0, 50), // fallback al mismo codigo
-            ]);
+            if ($hasNotaCocina) {
+                $stmtIns->execute([
+                    $idVenta,
+                    $codigo,
+                    floatval($ni['qty']),
+                    floatval($ni['price']),
+                    substr(trim($ni['name']   ?? ''), 0, 200),
+                    substr(trim($ni['codigo'] ?? $codigo), 0, 50),
+                    substr(trim($ni['note']   ?? ''), 0, 255),
+                ]);
+            } else {
+                $stmtIns->execute([
+                    $idVenta,
+                    $codigo,
+                    floatval($ni['qty']),
+                    floatval($ni['price']),
+                    substr(trim($ni['name']   ?? ''), 0, 200),
+                    substr(trim($ni['codigo'] ?? $codigo), 0, 50),
+                ]);
+            }
         }
 
         // 5. Reemplazar pagos
@@ -216,12 +317,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
         // 6. Actualizar cabecera
         $pdo->prepare(
             "UPDATE ventas_cabecera
-             SET total = ?, cliente_nombre = ?, mensajero_nombre = ?,
+             SET total = ?, id_cliente = ?, cliente_nombre = ?, cliente_telefono = ?, cliente_direccion = ?, mensajero_nombre = ?,
                  tipo_servicio = ?, metodo_pago = ?
              WHERE id = ?"
         )->execute([
             $nuevoTotal,
-            $clienteNombre ?: 'Mostrador',
+            $clienteId > 0 ? $clienteId : null,
+            $clienteNombre,
+            $clienteTelefono,
+            $clienteDireccion,
             $mensajero,
             $tipoServicio,
             $metodoPago,

@@ -117,6 +117,15 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
 .tk-items { width: 100%; border-collapse: collapse; margin: 4px 0; }
 .tk-items th { border-bottom: 1px solid #000; font-size: 11px; padding: 3px 4px; }
 .tk-items td { font-size: 11px; padding: 3px 4px; border-bottom: 1px dotted #ddd; }
+.tk-items td.tk-desc {
+    font-size: 12px;
+    line-height: 1.25;
+    font-weight: 700;
+}
+.tk-items td.tk-qty,
+.tk-items td.tk-money {
+    font-weight: 700;
+}
 .tk-items .r { text-align: right; white-space: nowrap; }
 .tk-total {
     text-align: center; font-weight: 700; font-size: 15px;
@@ -214,10 +223,10 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
         <tbody>
         <?php foreach ($items as $item): $sub = $item['cantidad'] * $item['precio']; ?>
             <tr>
-        <td><?= htmlspecialchars(mb_strimwidth($item['nombre_producto'], 0, 30, '…')) ?></td>
-                <td class="r"><?= rtrim(rtrim(number_format($item['cantidad'], 2), '0'), '.') ?></td>
-                <td class="r">$<?= number_format($item['precio'], 2) ?></td>
-                <td class="r">$<?= number_format($sub, 2) ?></td>
+        <td class="tk-desc"><?= htmlspecialchars(mb_strimwidth($item['nombre_producto'], 0, 30, '…')) ?></td>
+                <td class="r tk-qty"><?= rtrim(rtrim(number_format($item['cantidad'], 2), '0'), '.') ?></td>
+                <td class="r tk-money">$<?= number_format($item['precio'], 2) ?></td>
+                <td class="r tk-money">$<?= number_format($sub, 2) ?></td>
             </tr>
         <?php endforeach; ?>
         </tbody>
@@ -227,8 +236,8 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
 
     <!-- Totales -->
     <?php if ($hayEnvio): ?>
-    <div class="tk-row"><span>Subtotal:</span><span>$<?= number_format($subtotal, 2) ?></span></div>
-    <div class="tk-row"><span>Mensajería:</span><span>$<?= number_format($costoEnvio, 2) ?></span></div>
+    <div class="tk-row"><span class="tk-qty">Subtotal:</span><span class="tk-money">$<?= number_format($subtotal, 2) ?></span></div>
+    <div class="tk-row"><span class="tk-qty">Mensajería:</span><span class="tk-money">$<?= number_format($costoEnvio, 2) ?></span></div>
     <?php endif; ?>
     <div class="tk-total">TOTAL $<?= number_format($v['total'], 2) ?></div>
 

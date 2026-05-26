@@ -26,7 +26,7 @@ $SUC_ID = intval($config['id_sucursal']);
 $ALM_ID = intval($config['id_almacen']);
 
 // Agregar columna pct_formula si aún no existe
-try { $pdo->exec("ALTER TABLE recetas_detalle ADD COLUMN IF NOT EXISTS pct_formula DECIMAL(5,2) DEFAULT 0"); } catch(Exception $e) {}
+try { $pdo->exec("ALTER TABLE recetas_detalle ADD COLUMN IF NOT EXISTS pct_formula DECIMAL(7,4) DEFAULT 0.0000"); } catch(Exception $e) {}
 
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
@@ -39,24 +39,26 @@ try {
         if ($action === 'save_recipe') {
             $pdo->beginTransaction();
             if (empty($input['nombre_receta'])) throw new Exception("Nombre obligatorio.");
+            $modoCreacion = (($input['modo_creacion'] ?? 'clasico') === 'porcentual') ? 'porcentual' : 'clasico';
 
             if (empty($input['id'])) {
                 // INSERT
-                $stmt = $pdo->prepare("INSERT INTO recetas_cabecera (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion) VALUES (?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$input['id_producto_final'], $input['nombre_receta'], $input['unidades'], $input['costo_lote'], $input['costo_unitario'], $input['descripcion']]);
+                $stmt = $pdo->prepare("INSERT INTO recetas_cabecera (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion, modo_creacion) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$input['id_producto_final'], $input['nombre_receta'], $input['unidades'], $input['costo_lote'], $input['costo_unitario'], $input['descripcion'], $modoCreacion]);
                 $id = $pdo->lastInsertId();
             } else {
                 // UPDATE
                 $id = $input['id'];
-                $stmt = $pdo->prepare("UPDATE recetas_cabecera SET id_producto_final=?, nombre_receta=?, unidades_resultantes=?, costo_total_lote=?, costo_unitario=?, descripcion=? WHERE id=?");
-                $stmt->execute([$input['id_producto_final'], $input['nombre_receta'], $input['unidades'], $input['costo_lote'], $input['costo_unitario'], $input['descripcion'], $id]);
+                $stmt = $pdo->prepare("UPDATE recetas_cabecera SET id_producto_final=?, nombre_receta=?, unidades_resultantes=?, costo_total_lote=?, costo_unitario=?, descripcion=?, modo_creacion=? WHERE id=?");
+                $stmt->execute([$input['id_producto_final'], $input['nombre_receta'], $input['unidades'], $input['costo_lote'], $input['costo_unitario'], $input['descripcion'], $modoCreacion, $id]);
                 $pdo->prepare("DELETE FROM recetas_detalle WHERE id_receta = ?")->execute([$id]);
             }
 
             // Insertar Detalles
             $stmtDet = $pdo->prepare("INSERT INTO recetas_detalle (id_receta, id_ingrediente, cantidad, costo_calculado, pct_formula) VALUES (?, ?, ?, ?, ?)");
             foreach ($input['ingredientes'] as $ing) {
-                $stmtDet->execute([$id, $ing['id'], $ing['cant'], $ing['costo_total'], $ing['pct_formula'] ?? 0]);
+                $pctFormula = round((float)($ing['pct_formula'] ?? 0), 4);
+                $stmtDet->execute([$id, $ing['id'], $ing['cant'], $ing['costo_total'], $pctFormula]);
             }
             $pdo->commit();
             echo json_encode(['status' => 'success']); exit;
@@ -85,8 +87,8 @@ try {
         if ($action === 'clone_recipe') {
             $pdo->beginTransaction();
             $idOrg = $input['id'];
-            $pdo->prepare("INSERT INTO recetas_cabecera (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion) 
-                           SELECT id_producto_final, CONCAT(nombre_receta, ' (Copia)'), unidades_resultantes, costo_total_lote, costo_unitario, descripcion FROM recetas_cabecera WHERE id=?")->execute([$idOrg]);
+            $pdo->prepare("INSERT INTO recetas_cabecera (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion, modo_creacion) 
+                           SELECT id_producto_final, CONCAT(nombre_receta, ' (Copia)'), unidades_resultantes, costo_total_lote, costo_unitario, descripcion, COALESCE(modo_creacion, 'clasico') FROM recetas_cabecera WHERE id=?")->execute([$idOrg]);
             $newId = $pdo->lastInsertId();
             $pdo->prepare("INSERT INTO recetas_detalle (id_receta, id_ingrediente, cantidad, costo_calculado) 
                            SELECT ?, id_ingrediente, cantidad, costo_calculado FROM recetas_detalle WHERE id_receta=?")->execute([$newId, $idOrg]);
@@ -288,4 +290,3 @@ try {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
 ?>
-

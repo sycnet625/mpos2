@@ -185,6 +185,29 @@ $allMigrations = [
 "CREATE TABLE IF NOT EXISTS `flujo_caja_mensual` (`id` INT AUTO_INCREMENT PRIMARY KEY,`fecha` DATE NOT NULL,`concepto_key` VARCHAR(50) NOT NULL,`valor` TEXT DEFAULT NULL,`id_sucursal` INT DEFAULT 1,`updated_at` TIMESTAMP DEFAULT current_timestamp() ON UPDATE current_timestamp(),UNIQUE KEY `uk_celda` (`fecha`,`concepto_key`,`id_sucursal`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 ]],
 
+['id'=>'m043_onat_oficial','module'=>'Contabilidad','icon'=>'fa-file-signature','description'=>'Régimen fiscal por empresa y registro de modelos oficiales ONAT generados',
+'sqls'=>[
+"CREATE TABLE IF NOT EXISTS `empresas_fiscal` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_empresa` INT NOT NULL,`tipo_actor_economico` ENUM('TCP','MIPYME','CNoA','PersonaNatural') NOT NULL DEFAULT 'MIPYME',`nit` VARCHAR(32) DEFAULT NULL,`regimen_simplificado` TINYINT(1) DEFAULT 0,`actividades_aprobadas` TEXT DEFAULT NULL,`fecha_inicio_operaciones` DATE DEFAULT NULL,`municipio_onat` VARCHAR(100) DEFAULT NULL,`provincia_onat` VARCHAR(100) DEFAULT NULL,`oficina_onat` VARCHAR(100) DEFAULT NULL,`representante_nombre` VARCHAR(150) DEFAULT NULL,`representante_ci` VARCHAR(20) DEFAULT NULL,`representante_cargo` VARCHAR(80) DEFAULT NULL,`ejercicio_fiscal_inicio` CHAR(5) DEFAULT '01-01',`updated_at` TIMESTAMP DEFAULT current_timestamp() ON UPDATE current_timestamp(),UNIQUE KEY `uniq_empresa` (`id_empresa`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"CREATE TABLE IF NOT EXISTS `onat_declaraciones` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_empresa` INT NOT NULL,`modelo` VARCHAR(40) NOT NULL,`periodo_tipo` ENUM('mensual','trimestral','anual') NOT NULL,`periodo_inicio` DATE NOT NULL,`periodo_fin` DATE NOT NULL,`anio_modelo` SMALLINT NOT NULL,`archivo_xlsx` VARCHAR(255) DEFAULT NULL,`archivo_pdf` VARCHAR(255) DEFAULT NULL,`monto_total` DECIMAL(14,2) DEFAULT NULL,`estado` ENUM('borrador','generada','presentada','pagada') DEFAULT 'borrador',`fecha_generacion` DATETIME DEFAULT current_timestamp(),`fecha_presentacion` DATETIME DEFAULT NULL,`observaciones` TEXT DEFAULT NULL,KEY `idx_onatd_emp` (`id_empresa`,`anio_modelo`,`modelo`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"ALTER TABLE `empresas_fiscal` ADD COLUMN IF NOT EXISTS `cuota_fija_mensual` DECIMAL(10,2) DEFAULT 0",
+"ALTER TABLE `empresas_fiscal` ADD COLUMN IF NOT EXISTS `tope_gastos_deducibles_pct` DECIMAL(5,2) DEFAULT 80.00",
+"ALTER TABLE `empresas_fiscal` ADD COLUMN IF NOT EXISTS `paga_digital` TINYINT(1) DEFAULT 1",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `hash_xlsx` CHAR(64) DEFAULT NULL",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `hash_pdf` CHAR(64) DEFAULT NULL",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `version` INT NOT NULL DEFAULT 1",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `usuario_genera` VARCHAR(100) DEFAULT NULL",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `metodo_pago_onat` VARCHAR(40) DEFAULT NULL",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `comprobante_pago` VARCHAR(80) DEFAULT NULL",
+"ALTER TABLE `onat_declaraciones` ADD COLUMN IF NOT EXISTS `descuento_aplicado_pct` DECIMAL(5,2) DEFAULT 0",
+]],
+
+['id'=>'m044_onat_libros_retenciones','module'=>'Contabilidad','icon'=>'fa-book-open','description'=>'Libro de Ingresos/Gastos, Retenciones a terceros, Versiones de archivos ONAT',
+'sqls'=>[
+"CREATE TABLE IF NOT EXISTS `onat_libro_asientos` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_empresa` INT NOT NULL,`fecha` DATE NOT NULL,`folio` INT NOT NULL,`tipo` ENUM('INGRESO','GASTO') NOT NULL,`concepto` VARCHAR(255) DEFAULT NULL,`origen_tabla` VARCHAR(40) DEFAULT NULL,`origen_id` BIGINT DEFAULT NULL,`monto` DECIMAL(14,2) NOT NULL DEFAULT 0,`comprobante` VARCHAR(80) DEFAULT NULL,`hash_anterior` CHAR(64) DEFAULT NULL,`hash_actual` CHAR(64) DEFAULT NULL,`created_at` DATETIME DEFAULT current_timestamp(),UNIQUE KEY `uk_folio` (`id_empresa`,`fecha`,`folio`,`tipo`),KEY `idx_libro_fecha` (`id_empresa`,`fecha`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"CREATE TABLE IF NOT EXISTS `onat_retenciones` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_empresa` INT NOT NULL,`fecha` DATE NOT NULL,`beneficiario_nombre` VARCHAR(150) NOT NULL,`beneficiario_ci` VARCHAR(20) DEFAULT NULL,`beneficiario_nit` VARCHAR(32) DEFAULT NULL,`concepto` VARCHAR(200) DEFAULT NULL,`monto_bruto` DECIMAL(12,2) NOT NULL DEFAULT 0,`tasa_retencion` DECIMAL(5,2) NOT NULL DEFAULT 5.00,`monto_retenido` DECIMAL(12,2) NOT NULL DEFAULT 0,`anio` SMALLINT NOT NULL,`mes` TINYINT NOT NULL,`created_at` DATETIME DEFAULT current_timestamp(),KEY `idx_ret_periodo` (`id_empresa`,`anio`,`mes`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"CREATE TABLE IF NOT EXISTS `onat_archivos_versiones` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_declaracion` INT NOT NULL,`version` INT NOT NULL,`tipo` ENUM('xlsx','pdf') NOT NULL,`path` VARCHAR(255) NOT NULL,`hash_sha256` CHAR(64) NOT NULL,`tamano` BIGINT NOT NULL DEFAULT 0,`usuario` VARCHAR(100) DEFAULT NULL,`created_at` DATETIME DEFAULT current_timestamp(),KEY `idx_versiones_decl` (`id_declaracion`,`version`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+]],
+
 // ── MÓDULO: Recetas y Producción ──────────────────────────────────────────────
 ['id'=>'m050_recetas_produccion','module'=>'Recetas / Producción','icon'=>'fa-flask','description'=>'recetas_cabecera, recetas_detalle (con pct_formula) y producciones_historial',
 'sqls'=>[

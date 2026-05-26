@@ -42,6 +42,7 @@ const API_ORIGIN = (() => {
   try { return new URL(API_URL).origin; } catch (_) { return ''; }
 })();
 const VERIFY_TOKEN = process.env.POS_BOT_VERIFY_TOKEN || 'palweb_bot_verify';
+const INIT_WATCHDOG_MS = Math.max(30000, Math.min(300000, Number(process.env.WA_INIT_WATCHDOG_MS || 120000)));
 const SESSION_NAME = String(process.env.WA_SESSION_NAME || 'palweb-pos-bot')
   .replace(/[^a-zA-Z0-9_-]+/g, '-')
   .replace(/-+/g, '-')
@@ -55,6 +56,7 @@ const PROMO_QUEUE_FILE = process.env.WA_PROMO_QUEUE_FILE || path.join(RUNTIME_DI
 const OUTBOX_QUEUE_FILE = process.env.WA_OUTBOX_QUEUE_FILE || path.join(RUNTIME_DIR, 'palweb_wa_outbox_queue.json');
 const CONTROL_FILE = process.env.WA_CONTROL_FILE || path.join(RUNTIME_DIR, 'palweb_wa_bridge_control.json');
 const PROMO_TIMEZONE = process.env.WA_PROMO_TIMEZONE || 'America/Havana';
+const PROMO_SCHEDULE_GRACE_MINUTES = Math.max(1, Math.min(240, Number(process.env.WA_PROMO_SCHEDULE_GRACE_MINUTES || 90)));
 const LOCAL_PRODUCT_IMAGE_DIRS = [
   path.join(__dirname, '..', 'assets', 'product_images'),
   path.join(__dirname, 'assets', 'product_images')
@@ -117,8 +119,10 @@ const client = new Client({
 });
 let bgLoopsStarted = false;
 let initRetryTimer = null;
+let initWatchdogTimer = null;
 let currentBridgeState = 'starting';
 let currentStateMeta = {};
+let bridgeStatusHeartbeatTimer = null;
 const processedMessageIds = new Map();
 let controlCommandBusy = false;
 let autoreplyStateCache = { expiresAt: 0, data: null };
@@ -215,6 +219,18 @@ function setBridgeState(state, extra = {}) {
   writeStatus(state, currentStateMeta);
 }
 
+function ensureBridgeStatusHeartbeat() {
+  if (bridgeStatusHeartbeatTimer) return;
+  bridgeStatusHeartbeatTimer = setInterval(() => {
+    try {
+      writeStatus(currentBridgeState, {
+        ...currentStateMeta,
+        heartbeat_at: new Date().toISOString()
+      });
+    } catch (_) {}
+  }, 15000);
+}
+
 function getClientIdentity() {
   try {
     const info = client.info || {};
@@ -300,6 +316,29 @@ function scheduleInitRetry(delayMs) {
     initRetryTimer = null;
     safeInit();
   }, delayMs);
+}
+
+function clearInitWatchdog() {
+  if (!initWatchdogTimer) return;
+  clearTimeout(initWatchdogTimer);
+  initWatchdogTimer = null;
+}
+
+function armInitWatchdog() {
+  clearInitWatchdog();
+  initWatchdogTimer = setTimeout(async () => {
+    initWatchdogTimer = null;
+    if (!['starting', 'disconnected'].includes(String(currentBridgeState || ''))) return;
+    const msg = `init_timeout_${Math.round(INIT_WATCHDOG_MS / 1000)}s`;
+    setBridgeState('disconnected', { reason: msg, qr: '', session_ok: false });
+    console.error('[bridge] Inicializacion de WhatsApp Web sin respuesta:', msg);
+    try {
+      await client.destroy();
+    } catch (err) {
+      console.warn('[bridge] destroy init watchdog:', err.message || err);
+    }
+    scheduleInitRetry(3000);
+  }, INIT_WATCHDOG_MS);
 }
 
 async function tryRecoverBrowserLock(message) {
@@ -495,7 +534,8 @@ function localDateInfo(date = new Date()) {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false
+    hour12: false,
+    hourCycle: 'h23'
   }).formatToParts(date);
 
   const map = {};
@@ -509,10 +549,42 @@ function localDateInfo(date = new Date()) {
   const y = String(map.year || '');
   const m = String(map.month || '').padStart(2, '0');
   const d = String(map.day || '').padStart(2, '0');
-  const hh = String(map.hour || '').padStart(2, '0');
+  const hhRaw = String(map.hour || '').padStart(2, '0');
+  const hh = hhRaw === '24' ? '00' : hhRaw;
   const mm = String(map.minute || '').padStart(2, '0');
+  const minutesOfDay = (Number(hh) * 60) + Number(mm);
+  const dateKey = `${y}-${m}-${d}`;
 
-  return { day, hm: `${hh}:${mm}`, key: `${y}-${m}-${d}_${hh}:${mm}` };
+  return { day, hm: `${hh}:${mm}`, key: `${dateKey}_${hh}:${mm}`, dateKey, minutesOfDay };
+}
+
+function parseScheduleMinutes(hm) {
+  const raw = String(hm || '').trim();
+  const match = raw.match(/^(\d{2}):(\d{2})$/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return (hour * 60) + minute;
+}
+
+function scheduledCampaignDue(job, nowInfo) {
+  const days = Array.isArray(job.schedule_days) ? job.schedule_days.map((x) => Number(x)) : [];
+  if (!days.includes(nowInfo.day)) return { due: false, reason: 'day' };
+
+  const scheduleTime = String(job.schedule_time || '').trim();
+  const scheduleMinutes = parseScheduleMinutes(scheduleTime);
+  if (scheduleMinutes === null) return { due: false, reason: 'bad_time' };
+
+  const elapsedMinutes = Number(nowInfo.minutesOfDay) - scheduleMinutes;
+  if (elapsedMinutes < 0) return { due: false, reason: 'early' };
+  if (elapsedMinutes > PROMO_SCHEDULE_GRACE_MINUTES) return { due: false, reason: 'expired' };
+
+  return {
+    due: true,
+    key: `${nowInfo.dateKey}_${scheduleTime}`,
+    lateMinutes: elapsedMinutes
+  };
 }
 
 function normalizeProductImageUrl(rawUrl, productId = '') {
@@ -813,29 +885,31 @@ async function processPromoQueueTick() {
       const scheduled = Number(job.schedule_enabled || 0) === 1;
       const isCycleStart = Number(job.current_index || 0) === 0;
       if (scheduled && isCycleStart && !['running', 'queued', 'waiting'].includes(String(job.status || ''))) {
-        const timeOk = String(job.schedule_time || '') === nowInfo.hm;
-        const days = Array.isArray(job.schedule_days) ? job.schedule_days.map((x) => Number(x)) : [];
-        const dayOk = days.includes(nowInfo.day);
-        if (!(timeOk && dayOk)) {
+        const dueInfo = scheduledCampaignDue(job, nowInfo);
+        if (!dueInfo.due) {
+          job.status = 'scheduled';
+          job.next_run_at = now + 20;
+          if (dueInfo.reason === 'expired' && job.last_missed_schedule_key !== `${nowInfo.dateKey}_${String(job.schedule_time || '').trim()}`) {
+            job.last_missed_schedule_key = `${nowInfo.dateKey}_${String(job.schedule_time || '').trim()}`;
+            job.queue_note = `Horario vencido; ventana de ${PROMO_SCHEDULE_GRACE_MINUTES} min superada`;
+          }
+          changed = true;
+          continue;
+        }
+        if (String(job.last_schedule_key || '') === dueInfo.key) {
           job.status = 'scheduled';
           job.next_run_at = now + 20;
           changed = true;
           continue;
         }
-        if (String(job.last_schedule_key || '') === nowInfo.key) {
-          job.status = 'scheduled';
-          job.next_run_at = now + 20;
-          changed = true;
-          continue;
-        }
-        job.last_schedule_key = nowInfo.key;
+        job.last_schedule_key = dueInfo.key;
         if (activeJobId && activeJobId !== String(job.id || '')) {
           job.status = 'waiting';
           job.queue_note = `Aplazada: ${activeCandidates[0]?.name || activeJobId} está en ejecución`;
           job.next_run_at = now + 20;
         } else {
           job.status = 'queued';
-          job.queue_note = 'Lista para ejecutar';
+          job.queue_note = dueInfo.lateMinutes > 0 ? `Lista para ejecutar (${dueInfo.lateMinutes} min tarde)` : 'Lista para ejecutar';
           job.next_run_at = now;
           activeJobId = String(job.id || '');
         }
@@ -1117,15 +1191,18 @@ async function processIncoming(message) {
 }
 
 client.on('qr', (qr) => {
+  clearInitWatchdog();
   setBridgeState('qr_required', { qr: String(qr || ''), session_ok: false });
   console.log('\n[bridge] Escanea este QR con tu telefono (WhatsApp > Dispositivos vinculados):\n');
   qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
+  clearInitWatchdog();
   setBridgeState('ready', { qr: '', session_ok: true, ...getClientIdentity() });
   console.log('[bridge] WhatsApp Web conectado y listo.');
   ensureRuntimeLoopsStarted();
+  ensureBridgeStatusHeartbeat();
   if (!bgLoopsStarted) {
     bgLoopsStarted = true;
     refreshChatsCache();
@@ -1145,16 +1222,19 @@ client.on('ready', () => {
 });
 
 client.on('authenticated', () => {
+  clearInitWatchdog();
   setBridgeState('authenticated', { qr: '', session_ok: true, ...getClientIdentity() });
   console.log('[bridge] Sesion autenticada.');
 });
 
 client.on('auth_failure', (msg) => {
+  clearInitWatchdog();
   setBridgeState('auth_failure', { message: String(msg || ''), qr: '', session_ok: false });
   console.error('[bridge] Fallo autenticacion:', msg);
 });
 
 client.on('disconnected', (reason) => {
+  clearInitWatchdog();
   setBridgeState('disconnected', { reason: String(reason || ''), qr: '', session_ok: false });
   console.warn('[bridge] Desconectado:', reason);
 });
@@ -1223,9 +1303,11 @@ process.on('uncaughtException', (err) => {
 ensureRuntimeLoopsStarted();
 async function safeInit() {
   setBridgeState('starting', { session_ok: false });
+  armInitWatchdog();
   try {
     await client.initialize();
   } catch (err) {
+    clearInitWatchdog();
     const msg = String(err?.message || err || 'init_error');
     console.error('[bridge] initialize error:', msg);
     if (await tryRecoverBrowserLock(msg)) {

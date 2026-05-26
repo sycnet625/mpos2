@@ -1,99 +1,27 @@
 {
-  "updated_at": "2026-04-22T22:13:50.196Z",
+  "updated_at": "2026-05-26T13:16:08.025Z",
   "rows": [
     {
       "id": "17905869652079@lid",
-      "name": "FMLIA Yoeldany",
+      "name": "Yoel",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "232521090465844@lid",
-      "name": "FMLIA SayI",
+      "id": "273138562654396@lid",
+      "name": "Surereima",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "56037075861578@lid",
-      "name": "Ro CaFer",
+      "id": "18962431655945@lid",
+      "name": "Juan Carlos Ponce",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "223372675936269@lid",
-      "name": "Eddy (Marinero)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363308533081066@g.us",
-      "name": "VENTAS #1MAGUI💪😎✌️💜",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "217682095931393@lid",
-      "name": "+53 5 3542864",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363419313606665@g.us",
-      "name": "Joe Supply LLC #8(USA)- Envio Contendores a Cuba",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363045749115649@g.us",
-      "name": "Grupo de la bodega 1362",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363284472545099@g.us",
-      "name": "En el Cerro si se vende ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363320342931722@g.us",
-      "name": "Proyecto Manantial ✨",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363097952048749@g.us",
-      "name": "Sevillano Cambalache",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363295596458291@g.us",
-      "name": "1 El bodegon",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363371593990080@g.us",
-      "name": "Landy bodega 1362 y 1365",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363296068485788@g.us",
-      "name": "Grupo de venta",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363275735207600@g.us",
-      "name": "De todo un poco...sin límites",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363092735489534@g.us",
-      "name": "CRenta (LaHabana)",
+      "id": "120363405096796526@g.us",
+      "name": "Venta Variada Cerro ✨️",
       "is_group": true,
       "is_contact": false
     },
@@ -104,254 +32,512 @@
       "is_contact": false
     },
     {
-      "id": "120363154630055070@g.us",
-      "name": "Ventas Sevillano y 10 de Octubre🛍️",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363150264148584@g.us",
-      "name": "Las ventas Sevillano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363406529581714@g.us",
-      "name": "Ventas de todo tipo 🍩🎽🎁",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363381582979126@g.us",
-      "name": "Las ventas del sevillano ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363018307699587@g.us",
-      "name": "Ventas Sevillano, Mónaco, Santo Suárez, Casino Deportivo y cercanias del Municipio 10 de octubre",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417843314195@g.us",
-      "name": "Ventas en Luyano",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "141850002341944@lid",
-      "name": "+53 5 6891399",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "211621712511024@lid",
-      "name": "& Lisbet (Cafetería Di' Lis)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363272765626601@g.us",
-      "name": "La Azulita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363349471934469@g.us",
-      "name": "Proveedor de Mercancía ll",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417744793559@g.us",
-      "name": "S/B ~ Grupo 7mo1🥰🥰",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363294384459536@g.us",
-      "name": "GARAJE-🛍-ANDO                \"Por Un Sueño de ❤️\"",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363369056045854@g.us",
-      "name": "Ventas GIVENT CyC",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363163702070098@g.us",
-      "name": "Venta de Cerveza Habana Vieja 🍺🍻",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363421077901869@g.us",
-      "name": "🟢⚪️SUPER MÁS-MAYORISTA⚪️🟢",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363386055959288@g.us",
-      "name": "VENTAS SIN FRONTERA #1",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363399465225554@g.us",
-      "name": "la barra de oro",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363186740940627@g.us",
-      "name": "Mypime Por +",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363316989802283@g.us",
-      "name": "Venta de Garage Parque Ermita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363319691633869@g.us",
-      "name": "NuevoVedado#7(LOS VIDALES)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423759484549@g.us",
-      "name": "Cargas Locales  Full y Sencillo 😎",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "25074136559668@lid",
-      "name": "& Aya (Admin R",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "141493436215498@lid",
-      "name": "$ Baby (Croquetas) Cantero",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363423136418447@g.us",
-      "name": "Venta de bebidas en la Ro- Ca",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "69174843936777@lid",
-      "name": "& Choco Alexo",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363208098502354@g.us",
-      "name": "Servicio Ángel S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363418360383730@g.us",
-      "name": "Mercadito 30 - 4 ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363292278532360@g.us",
-      "name": "Ventas Nana en todo 10 de oct",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "102649852649672@lid",
-      "name": "FMLIA Gladita",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363228169190882@g.us",
-      "name": "G&G Mayorista SURL ofertas",
+      "id": "120363402579741389@g.us",
+      "name": "🌟🌟🌟\"Todo exclusivo Habana🌟🌟🌟",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363401716464984@g.us",
-      "name": "👉 OTROS y MAS...",
+      "name": "120363401716464984",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363417643096735@g.us",
-      "name": "❄️🐺 Shîrø √3nt@s +Plus",
+      "name": "120363417643096735",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363168217815182@g.us",
-      "name": "¡Las Ventas en el Sevillano !",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363421148919027@g.us",
-      "name": "De todo un poco Latino Cerro",
+      "name": "120363168217815182",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363168692888649@g.us",
-      "name": "¡Las Ventas en el Sevillano !",
+      "name": "120363168692888649",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363319505658337@g.us",
-      "name": "Bodegón de Santa Teresa 🥩🍗🧀🍟🍫",
+      "id": "120363018307699587@g.us",
+      "name": "120363018307699587",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363407016787977@g.us",
-      "name": "Pedidos Renacer",
+      "id": "120363154630055070@g.us",
+      "name": "120363154630055070",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363175125437315@g.us",
-      "name": "VENTAS SEVILLANO CONTINENTAL",
+      "name": "120363175125437315",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363406529581714@g.us",
+      "name": "120363406529581714",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363308533081066@g.us",
+      "name": "120363308533081066",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363425997858643@g.us",
+      "name": "VENTA DE CARNICOS CERRO ♥️🍗",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363316989802283@g.us",
+      "name": "120363316989802283",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363097952048749@g.us",
+      "name": "120363097952048749",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363320342931722@g.us",
+      "name": "120363320342931722",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363211559877571@g.us",
-      "name": "Lo más barato de la cuevita 🇨🇺🛻🤪",
+      "name": "120363211559877571",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363150264148584@g.us",
+      "name": "120363150264148584",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363381582979126@g.us",
+      "name": "120363381582979126",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363191920265539@g.us",
-      "name": "Información de Bodega 1376",
+      "name": "120363191920265539",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363296068485788@g.us",
+      "name": "120363296068485788",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363045749115649@g.us",
+      "name": "120363045749115649",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363284472545099@g.us",
+      "name": "120363284472545099",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363275735207600@g.us",
+      "name": "120363275735207600",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363421148919027@g.us",
+      "name": "120363421148919027",
       "is_group": true,
       "is_contact": false
     },
     {
       "id": "120363037872418602@g.us",
-      "name": "De todo un poco ",
+      "name": "120363037872418602",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363403072638777@g.us",
-      "name": "Havana_SuperMarket 🛒7️⃣",
+      "id": "120363295596458291@g.us",
+      "name": "120363295596458291",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363407494701426@g.us",
+      "name": "Semana Gratuita “El Despertar de las Jefazas 2026”",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363047257083389@g.us",
+      "name": "Melah$Boutique habana 💛",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363408464709603@g.us",
+      "name": "Pescado y mariscos KAJ",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "1100182769855@lid",
+      "name": "Yady Amirah",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363347859675806@g.us",
+      "name": "💥La Comercial 1💥",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "182734081253628@lid",
+      "name": "Maidani Baile Petróleo 🛢️",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "203543449448545@lid",
+      "name": "+53 5 2412769",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363422188710121@g.us",
+      "name": "🔍 NECESITO / BUSCO",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "100287503138859@lid",
+      "name": "Moira",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "242692042813489@lid",
+      "name": "Yaumi",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "53592803250216@lid",
+      "name": "Regina",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "178138348814337@lid",
+      "name": "Mire",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "11652749623386@lid",
+      "name": "+53 5 1749612",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "44775218655279@lid",
+      "name": "+53 5 8839870",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363198206676385@g.us",
+      "name": "Grupo#10 Ventas Mipyme Pasos Habaneros , Calle Santos Suárez 464/ Gómez y Mendoza.",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363422902717253@g.us",
+      "name": "T-shop🛍️💗",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "69501647368421@lid",
+      "name": "Mami Cell",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "271691762667529@lid",
+      "name": "Rolando Sayi",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363052168866289@g.us",
+      "name": "Envíos de diferentes países.🇲🇽🇺🇸🇨🇦🇺🇾🇪🇸🇨🇺",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363161474231884@g.us",
+      "name": "Carnicería El Batey",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "90284608241718@lid",
+      "name": "Yaritza Agrito",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363423288484798@g.us",
+      "name": "👉 LA FARMACIA",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363423028729228@g.us",
+      "name": "👉 CASAS Y ALQUILERES",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "180925514133516@lid",
+      "name": "Marty💚 Yuliet",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "100120049750184@lid",
+      "name": "Maikel Eléctrico",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "205054640398340@lid",
+      "name": "+53 5 3408192",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "3371884900385@lid",
+      "name": "+53 5 6601132",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "54481744085166@lid",
+      "name": "Caridad",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "149422382014499@lid",
+      "name": "Quiqui Antena",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "170515301961810@lid",
+      "name": "+57 304 3464065",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "221173719818454@lid",
+      "name": "Errnesto U Estados Unidos Marrero",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "81106195980525@lid",
+      "name": "Gladys Vecina",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "139255741472913@lid",
+      "name": "Leo Maria",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363301351612628@g.us",
+      "name": "La lámpara del Genio",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "41863079837886@lid",
+      "name": "Yuliet Ángel",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363420405829627@g.us",
+      "name": "👉 ASEO y COSMETICA",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "177146244894883@lid",
+      "name": "Isvietta Miami",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "90168795107542@lid",
+      "name": "Bety Baile Español",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "174809581359125@lid",
+      "name": "+53 5 8884413",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "8749150421171@lid",
+      "name": "Alejandro",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "277012639924332@lid",
+      "name": "Mari , Neki",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363425320273761@g.us",
+      "name": "Tienda Kalinka",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "121496169111742@lid",
+      "name": "Belkis",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363406891795946@g.us",
+      "name": "Damaris Venta #2",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "252045894402099@lid",
+      "name": "🔥Eloisa🔥",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "88923070050478@lid",
+      "name": "yuli Casa Edificio.",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "278859979206829@lid",
+      "name": "+53 5 8433901",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "98114400682039@lid",
+      "name": "+53 5 3752150",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "146862229160048@lid",
+      "name": "Grey Pasos Habaneros",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "225073566863449@lid",
+      "name": "Beatriz Sobrina",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "256766046679120@lid",
+      "name": "+53 5 3743461",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363405998539107@g.us",
+      "name": "VIDRIO VIVO Tienda Oficial",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "80908761706693@lid",
+      "name": "+53 5 8004712",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "269629490487322@lid",
+      "name": "Elizabeth",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363419677316664@g.us",
+      "name": "Sun ventas 🌻",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "4127530700942@lid",
+      "name": "Diane",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "216269169143993@lid",
+      "name": "Chino Entrenador",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "130425288716542@lid",
+      "name": "+53 5 2919001",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363406387891973@g.us",
+      "name": "AGENCIA IAN 🚕 TAXI # 1",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "120363156652721056@g.us",
+      "name": "D’G clientes Yadira",
       "is_group": true,
       "is_contact": false
     },
@@ -362,584 +548,200 @@
       "is_contact": false
     },
     {
-      "id": "120363400903760934@g.us",
-      "name": "VENTAS DE BEBIDAS Y ALIMENTOS SOLO POR IMPORTACIÓN < venta mínima 1 contenedor >",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363146276338458@g.us",
-      "name": "Bodegón Del Sabor ✨🥤🍹🍺",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423195249673@g.us",
-      "name": "Cafetería Ayestaran  y la Rosa",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363317972321439@g.us",
-      "name": "👉 COMIDA y BEBIDAS",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363099487930263@g.us",
-      "name": "🕊️🕊️La boutique 🌻🌻",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363178955447707@g.us",
-      "name": "Confituras rasta y más",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363165699252346@g.us",
-      "name": "💯👇👋*EL PUENTE D' VÁZQUEZ S.R.L.",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363295392149188@g.us",
-      "name": "3° “Al Pan Pan” Venta de confituras y más…!",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363401288567660@g.us",
-      "name": "Ventas Lili",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363402026168995@g.us",
-      "name": "Mayorista 10 de Octubre (1)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363214081388365@g.us",
-      "name": "La Casa del Zuko ll Ayestaran ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363398534170013@g.us",
-      "name": "D ADRIAN #2",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363420405829627@g.us",
-      "name": "👉 ASEO y COSMETICA",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363360932598727@g.us",
-      "name": "ELECTRODOMÉSTICOS NEKY",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363143811700257@g.us",
-      "name": "Ofertas Imperial #4",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363421290053315@g.us",
-      "name": "Confitura cerro👌",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363346146748512@g.us",
-      "name": "Confituras y mas Cerro 🍡🍬🍭",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363306394282339@g.us",
-      "name": "Mpm anillo del puerto",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363290425164967@g.us",
-      "name": "Mercado✨️Larga Vida✨️20 de mayo",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419458884436@g.us",
-      "name": "10deOctubre#4(LOSVIDALES)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363296328924386@g.us",
-      "name": "Kary‼️ venta mayorista y de maní 🥜.Vedado📍",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363425320273761@g.us",
-      "name": "Tienda Kalinka",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363402707510141@g.us",
-      "name": "R.I.C.O Alimentos 4",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363399656158378@g.us",
-      "name": "Mipyme Carpa Roja 240 2️⃣",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363277683119708@g.us",
-      "name": "Almacén Parque Córdoba ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363143524235744@g.us",
-      "name": "Mensajería boyeros _ Habana",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363026868701907@g.us",
-      "name": "Mayorista REMANENTE 🛒 Somos de LAS TOSCAS, STA FE🛍️🛒",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423288484798@g.us",
-      "name": "👉 LA FARMACIA",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363302048840134@g.us",
-      "name": "VENTAS AYESTARAN 8",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363286351258979@g.us",
-      "name": "C&L Venta Productos... Habana Vieja",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363285750524798@g.us",
-      "name": "5 MPM Bajo Cero Mayorista y minorista ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363319567452856@g.us",
-      "name": "\" EL MARINERO \" LA TIENDA DE TU  BARRIO.",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363166730745941@g.us",
-      "name": "Ridel Export 1 aquí 👈 Ofertas de Productos a Importar desde España hacia Cuba (Puerto Mariel)🍺🍻🇨🇺🇪🇸🇨🇴🇺🇸",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363192339176602@g.us",
-      "name": "G&G Mayorista S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "240020690587685@lid",
-      "name": "+53 5 8155233",
+      "id": "70403171065991@lid",
+      "name": "+53 5 5374900",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363419061010862@g.us",
-      "name": "Materiales de construcción y comida",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363405302927818@g.us",
-      "name": "👉 ROPA y CALZADO",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363420212749802@g.us",
-      "name": "G&G Mayorista SURL Grupo Institucional",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363047771580071@g.us",
-      "name": "Venta por cant. Luyanó",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363339394872557@g.us",
-      "name": "Burhan",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "97620764672103@lid",
-      "name": "+52 1 962 106 0925",
+      "id": "225223890698336@lid",
+      "name": "+53 5 8274896",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363248879469223@g.us",
-      "name": "Mensajeros Habana Pedidos",
+      "id": "120363409608310595@g.us",
+      "name": "DANI Pulseras",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363420901092273@g.us",
-      "name": "Debate – Mensajeros Habana",
+      "id": "120363424881460884@g.us",
+      "name": "Círculo de Jefazas Que Despiertan",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363159095069238@g.us",
-      "name": "Popi pan Ofertas Variadas",
+      "id": "201245105103089@lid",
+      "name": "Tía Melba",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "238563975254075@lid",
+      "name": "Leticia",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "183592688840882@lid",
+      "name": "Angel Hermano",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363406881224795@g.us",
+      "name": "RGTV📺📻📽️🎤",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363403243077658@g.us",
-      "name": "PEDIDOS Di' Lis ☕️🍽️🍦🍕",
+      "id": "261438971093033@lid",
+      "name": "Odalis Maestra",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "203774756974678@lid",
+      "name": "Daniel Ito Made Cangri🇨🇺",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "72159846211732@lid",
+      "name": "Regina 2",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "246973772914783@lid",
+      "name": "Yamili Mm De Melanie💙😘😘",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "171090173284521@lid",
+      "name": "J Carlos Amigo De Ponce",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "121294574084194@lid",
+      "name": "Maidani Escuela Dulces",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "231137976778905@lid",
+      "name": "Adianes Hospital Ashely",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "48954104397994@lid",
+      "name": "Anyigley",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "277541373902909@lid",
+      "name": "Indira Maestra De Marian",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "67620032225441@lid",
+      "name": "Yuneisi Ballet",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "50552335540251@lid",
+      "name": "Elian, Maestra",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "90860385480762@lid",
+      "name": "Ariel",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "56037075861578@lid",
+      "name": "Abelito  Mensajero",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "183193307246830@lid",
+      "name": "Rolando",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "22428570882119@lid",
+      "name": "Yosdan🫱🏿‍🫲🏼 Vakanera",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363427985544184@g.us",
+      "name": "🧴🧼Aseo y perfumería 🧼🧴",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "6485551657028@lid",
-      "name": "& Sune Suyen (Chocoalexa)",
+      "id": "89249453985969@lid",
+      "name": "+53 5 2444719",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363300174365924@g.us",
-      "name": "VEDADO",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363406593127478@g.us",
-      "name": "3 Tienda de reposteria M&M. Santos Suárez",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "127651259875578@lid",
-      "name": "Lisi (Taga INFINITY)",
+      "id": "46106624921831@lid",
+      "name": "Carolina Radu",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "85968132542643@lid",
-      "name": "+53 5 5664788",
+      "id": "143181408694348@lid",
+      "name": "Sandalias Panameñas",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363419597010289@g.us",
-      "name": "Comunidad Lisi 💎",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "207962417143950@lid",
-      "name": "Hector",
+      "id": "157909338058823@lid",
+      "name": "Piscina Camilo",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363179601082470@g.us",
-      "name": "Aquí hay de To'",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "112752035151972@lid",
-      "name": "+53 5 8230787",
+      "id": "274298270929073@lid",
+      "name": "Michel, Bodega.",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363402131891716@g.us",
-      "name": "Titis sabrosura",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363417756495364@g.us",
-      "name": "MYPIME CAFETERIA  AYESTARAN Y PEDRO PERZ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363422188710121@g.us",
-      "name": "🔍 NECESITO / BUSCO",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "104131935101011@lid",
-      "name": "+ 💜❤️QUEEN🤍💛",
+      "id": "233259707453689@lid",
+      "name": "+53 5 9710589",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363422678772617@g.us",
-      "name": "👉 ELECTRODOMÉSTICOS",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "126323712360692@lid",
-      "name": "& María Victoria",
+      "id": "56969134088245@lid",
+      "name": "Cliente",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "86097367453800@lid",
-      "name": "+53 5 0587352",
+      "id": "212739108696108@lid",
+      "name": "+53 5 2666554",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363213226135064@g.us",
-      "name": "MERCADITO calle Agustina",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363366177743733@g.us",
-      "name": "HELADOS CAKE DULCES. VENTAS SIN FRONTERA",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "154511951802500@lid",
-      "name": "+53 5 8871897",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363356967813207@g.us",
-      "name": "Ventas de medicamentos en la Habana",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363425581326668@g.us",
-      "name": "Delicias y Azúcar",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "28553076850824@lid",
-      "name": "+53 5 6079901",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "224811506765861@lid",
-      "name": "+53 5 3332818",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "138667901382845@lid",
-      "name": "+53 5 4951044",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "201997684737@lid",
-      "name": "Deisy (Triciclo)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "246440962064622@lid",
-      "name": "+53 5 2430347",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "101958631293096@lid",
-      "name": "+53 5 2914489",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363366620925055@g.us",
-      "name": "COMUNIDAD VENTAS SIN FRONTERAS",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "118258350952530@lid",
-      "name": "+53 63050283",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "89000765309115@lid",
-      "name": "+53 5 3092028",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363155050130975@g.us",
-      "name": "Karina:🅰️LMACEN 📍23, Vedado(2)",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363203798150754@g.us",
-      "name": "VENTAS “NOVA-MARKET”",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363050242248978@g.us",
-      "name": "➡️ MANí manía",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363330507730240@g.us",
-      "name": "G&G Mayorista S.U.R.L",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "97452908671006@lid",
-      "name": "LLG-Gudi Foods 3 (Jaime, Proveedor Alimentos, Cuba)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "5356145510-1617730906@g.us",
-      "name": "Gastronomía-32✨",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "103066447704235@lid",
-      "name": "+53 5 8075762",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "170858362486786@lid",
-      "name": "+53 5 3578965",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363031890298995@g.us",
-      "name": "PCC Química",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "189670688321569@lid",
-      "name": "$ Magy 🥰🍎 (Pregunto Por Cake)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363350818457900@g.us",
-      "name": "CAKEREY",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "109603287261358@lid",
-      "name": "Guerra ( J' Cuad",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "97259752534178@lid",
-      "name": "$ Espe",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "101417717133546@lid",
-      "name": "Palweb",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "100918896934981@lid",
-      "name": "$ Ibet",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363406953694585@g.us",
-      "name": "Inmobiliaria YAEN-CASA 2 🏘 Agentes inmobiliarios",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "92608152002683@lid",
-      "name": "$ Melbys",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "110518534713474@lid",
-      "name": "$ Heidis Gonzalez",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "104011441156230@lid",
-      "name": "+53 5 1976610",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363347859675806@g.us",
-      "name": "💥💯El bodegón de salud 💯🔥",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "260777596420178@lid",
-      "name": "+53 5 8877038",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "171472307925077@lid",
-      "name": "Amalia Alemán",
+      "id": "148391120076880@lid",
+      "name": "+53 5 6140655",
       "is_group": false,
       "is_contact": true
     },
@@ -950,212 +752,92 @@
       "is_contact": true
     },
     {
-      "id": "57960684331239@lid",
-      "name": "V034 Kenia",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "203225001156692@lid",
-      "name": "$ Clary",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "264896470077682@lid",
-      "name": "+53 5 5985401",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "12434030997611@lid",
-      "name": "FMLIA Emmita",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "203680737456212@lid",
-      "name": "+53 5 5513370",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "262083367157801@lid",
-      "name": "$ Dorita Vecina de Baby",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "275067606962309@lid",
-      "name": "$ Gleidys Mamá De Alejandra",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "281341866307698@lid",
-      "name": "$ Adriana Pablito",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "111939799744590@lid",
-      "name": "+53 5 5825229",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "59399800397955@lid",
-      "name": "+505 5865 1821",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "32860794806415@lid",
-      "name": "+53 5 2687448",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "109539600908436@lid",
-      "name": "+53 5 1481804",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "116922330935423@lid",
-      "name": "$ Aneisi",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "1482317377696@lid",
-      "name": "+53 63139611",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "135687194063052@lid",
-      "name": "+53 63743421",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "109676939243542@lid",
-      "name": "FMILIA Daniela",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "50526632857776@lid",
-      "name": "+53 5 5005512",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "46952699973759@lid",
-      "name": "LCC Leo",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "36425701576714@lid",
-      "name": "$ Trudy😘",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363402895150282@g.us",
-      "name": "#Pedidos_Magnolia",
+      "id": "120363419500755406@g.us",
+      "name": "Chicas Baile",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363301351612628@g.us",
-      "name": "La lámpara del Genio",
+      "id": "93205118890020@lid",
+      "name": "Gaby Manicuri Tata",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363401918211169@g.us",
+      "name": "Venta Damaris",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "95279554510890@lid",
-      "name": "$ May ❤️",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "270879929983224@lid",
-      "name": "Lidice (RENÉ)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "32465741701132@lid",
-      "name": "+53 5 6135663",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "84164766335105@lid",
-      "name": "+53 63167170",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "224253194567684@lid",
-      "name": "+1 (727) 504-1397",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "271691762667529@lid",
-      "name": "YO",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "60164438790263@lid",
-      "name": "$ Ramito Zayas Frutos",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363422600939507@g.us",
-      "name": "Gestion de Ventas Proveedor EGS Colombia ",
+      "id": "120363045724609321@g.us",
+      "name": "Encantos Jeka…Moda  para niños & niñas,variedades 🦄🌈🎨",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "49589994451075@lid",
-      "name": "FMILIA Ingrid",
+      "id": "55513173770436@lid",
+      "name": "Telef Tablet",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "46325701845129@lid",
-      "name": "& Yany (Después De Adrian)",
+      "id": "186027985608775@lid",
+      "name": "Jorge Feliz Perez Gil",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "77391032508560@lid",
-      "name": "$ Lourdes",
+      "id": "5353324012-1623154497@g.us",
+      "name": "MangoHabana Grupo DURO",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "5353324012-1624856375@g.us",
+      "name": "MANGO HABANA DURO",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "10599979299001@lid",
+      "name": "✨Blessed🥰 Mm De Reyman",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "237726657974514@lid",
-      "name": "+34 602 48 26 80",
+      "id": "196374545096958@lid",
+      "name": "Alex Consulado TOLEDANO",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "13812799414432@lid",
-      "name": "$ Pedro Luis (cliente)",
+      "id": "193879420743852@lid",
+      "name": "+53 5 9063625",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "252690307264754@lid",
-      "name": "$ Ivette",
+      "id": "142369794039818@lid",
+      "name": "Muchacha De La Leche Vakqnera",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "168651168714916@lid",
+      "name": "+507 6555-2816",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363423491810187@g.us",
+      "name": "Acampada Británica",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "150049195618551@lid",
+      "name": "Esnierkis Usd",
       "is_group": false,
       "is_contact": true
     },
@@ -1166,482 +848,422 @@
       "is_contact": false
     },
     {
-      "id": "272962569670809@lid",
-      "name": "+ Consuelo",
+      "id": "210625196195859@lid",
+      "name": "+53 5 0125089",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "55513173770436@lid",
-      "name": "Palweb BOT 🤖",
+      "id": "17927898165405@lid",
+      "name": "Chofer Embajada D gana",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "214074189177010@lid",
-      "name": "+ Yoama Herrera 398",
+      "id": "177317993279499@lid",
+      "name": "Miguel Camion De Destupir",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "250508346392775@lid",
-      "name": "+ Mayra",
+      "id": "53365404872785@lid",
+      "name": "+53 5 0731529",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "258827849084978@lid",
-      "name": "+ Tania",
+      "id": "168603320074291@lid",
+      "name": "Kuley Willliam",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "64905663267020@lid",
-      "name": "+ Yusel",
+      "id": "250289336615002@lid",
+      "name": "+53 5 8405486",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "150968251478089@lid",
-      "name": "+ 💕💕💕",
+      "id": "206862972666045@lid",
+      "name": "Lazaro Padrino",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "43074747121684@lid",
-      "name": "$ Vane",
+      "id": "139492014973036@lid",
+      "name": "Javier",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "8478768795887@lid",
-      "name": "+ La persona preferida 👑👑",
+      "id": "44358506168499@lid",
+      "name": "+53 5 3548906",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363307744062032@g.us",
-      "name": "Cursos Versat Online y Presencial",
+      "id": "35377813446690@lid",
+      "name": "Marcello Tonelli",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "12575714611271@lid",
+      "name": "Melikity",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "232521090465844@lid",
+      "name": "Sayi",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "241390650957825@lid",
+      "name": "Dentista Toyo",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "101417717133546@lid",
+      "name": "Yoel Petroleo",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "57960684331239@lid",
+      "name": "+53 5 2002517",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "200648758980845@lid",
+      "name": "+53 5 3244377",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "273104639131832@lid",
+      "name": "+592 707 2080",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "141321754947632@lid",
+      "name": "Piñatera Centro Habana",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "64549164187744@lid",
+      "name": "Yandel Ferrocarril",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "117291949801613@lid",
+      "name": "Daimi Laboratorio",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "146905162104968@lid",
+      "name": "Andrés Bodeguero.",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "2538443141146@lid",
+      "name": "LA MORA Escuela De Baile",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "9002570227900@lid",
+      "name": "maikel Sobrino",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363312071331956@g.us",
+      "name": "Medical Store",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363305016270034@g.us",
-      "name": "General",
+      "id": "242927695589387@lid",
+      "name": "Leandra Escuela De Baile",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "167366889582713@lid",
+      "name": "+53 63146198",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "83666046824633@lid",
+      "name": "Karlit@s 💗💗💗",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "96469830873213@lid",
+      "name": "Optica Colombiana",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "162233799696598@lid",
+      "name": "Chuchi Nena",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "200356566978711@lid",
+      "name": "+53 5 2092603",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363401186188146@g.us",
+      "name": "Gestores 🤳 Mañana será más bonito❤️‍🩹",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363202229963113@g.us",
-      "name": "Químicos del LCQ",
+      "id": "190095386783985@lid",
+      "name": "Christopher",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "277596738691283@lid",
+      "name": "Digital Arruco",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "265583698378785@lid",
+      "name": "+53 5 3602324",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363314889025864@g.us",
+      "name": "Closet tienda de ropa ",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "212691629154550@lid",
-      "name": "$ La Oshuncita💛",
+      "id": "131735354372111@lid",
+      "name": "+53 5 6134347",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "93467212558412@lid",
-      "name": "+ Maria Del Pilar Arceo Qui",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "36593255604471@lid",
-      "name": "$ Diana Rosa",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "12997292478681@lid",
-      "name": "Oscar (Padre de",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "201446985351310@lid",
-      "name": "+ Yanerys",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "235806757253257@lid",
-      "name": "$ Odalys",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "13778271871066@lid",
-      "name": "Alonso (Buscar Clientes Iglesia)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "230390887403663@lid",
-      "name": "& Ladismar",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "159326140407935@lid",
-      "name": "* Cioccolato (Jennifer)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "154180954099712@lid",
-      "name": "+ Damaris",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363420376550702@g.us",
-      "name": "La Azulita",
+      "id": "120363313666389296@g.us",
+      "name": "𝔹𝕒𝕓𝕪'𝕤 ℙ𝕒𝕟",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "122861985489087@lid",
-      "name": "& alex (Venezuela En Marianao)",
+      "id": "2297874628739@lid",
+      "name": "Nena",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "165751512117384@lid",
-      "name": "FMLIA Kin",
+      "id": "15788400447679@lid",
+      "name": "Damian Padrino",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "139436264276007@lid",
-      "name": "$ Taliana🩵",
+      "id": "118347840643200@lid",
+      "name": "Mecanico Lavadora 1",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363423028729228@g.us",
-      "name": "👉 CASAS Y ALQUILERES",
+      "id": "161585393860856@lid",
+      "name": "Rafa Mecanico Lavadora",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "2629040091140@lid",
+      "name": "Imprimir",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363421080185270@g.us",
+      "name": "Taller AVENTURAS ALADAS",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "273915901378714@lid",
-      "name": "$ Betty",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363420895986727@g.us",
-      "name": "Módulo Contabilidad",
+      "id": "120363420222650312@g.us",
+      "name": "Taller SUPERVIVENCIA",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "215568988827739@lid",
-      "name": "&Yosi González (Me Vendió Ventilador)",
+      "id": "239771246977257@lid",
+      "name": "Marlon Particular Mensajería",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "104385002643611@lid",
-      "name": "$ Ana",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363402638291251@g.us",
-      "name": "Grupo ventas al por mayor 51 entre 206 y 208",
+      "id": "120363403942471475@g.us",
+      "name": "Agencia de paqueteria ",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "272838367912072@lid",
-      "name": "$ Lulú",
+      "id": "28557438910470@lid",
+      "name": "+53 5 4744999",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "257973066702899@lid",
-      "name": "$ Daylin 2 (Virgen del Camino)",
+      "id": "111879703797983@lid",
+      "name": "+53 5 6705196",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "160159582154825@lid",
-      "name": "$ Jorge Molina Veliz",
+      "id": "37280349728900@lid",
+      "name": "+53 5 2085491",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120624592777392@lid",
-      "name": "$ Dayana Dominguez Martinez 54",
+      "id": "181191902802161@lid",
+      "name": "Chini Tia Mai",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "260846332678207@lid",
-      "name": "$ Tati",
+      "id": "147622388088967@lid",
+      "name": "Luisito Vecino",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "125945973338169@lid",
-      "name": "$ Daylin",
+      "id": "248919728632020@lid",
+      "name": "Pupi Yaumi",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363418551561805@g.us",
-      "name": "Cafeterías Restaurantes TCP Mypimes",
+      "id": "98414930997354@lid",
+      "name": "Toni Espejuelos",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363420217943292@g.us",
+      "name": "Moda SHEIN",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "20156365410355@lid",
-      "name": "V018 Maggui",
+      "id": "179581625581808@lid",
+      "name": "+53 5 4226218",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "159575399469265@lid",
-      "name": "$ Tania Olivè🌹🌹",
+      "id": "184035238260823@lid",
+      "name": "+53 5 3258880",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "216346226901087@lid",
-      "name": "$ Marbelis",
+      "id": "226847807811827@lid",
+      "name": "Jessica Peluquera",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "245543498449017@lid",
-      "name": "$ Tania",
+      "id": "19950760669420@lid",
+      "name": "+53 5 2975744",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "224266146562231@lid",
-      "name": "$ Barbara Vazquez Izada",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "46673627746368@lid",
-      "name": "& Magda",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "234651293634716@lid",
-      "name": "$ DARON....👹🤚🏿",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "226052819447837@lid",
-      "name": "$ Claudia",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "147618730659907@lid",
-      "name": "& Ernesto Gonzalez Martinez Cafetería Frente Al 430",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "93462816919698@lid",
-      "name": "$ Ana Liliam Ruiz",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "245234126569490@lid",
-      "name": "$ Eve",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363401031538137@g.us",
-      "name": "Mensajeros Habana",
+      "id": "120363312513665446@g.us",
+      "name": "Roxy Nails 💅",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "165094734442736@lid",
-      "name": "$ Mariza",
+      "id": "265038287904931@lid",
+      "name": "+53 5 5094211",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "205368659566847@lid",
-      "name": "$ Maybel Soler Deville (Croquetas Y Hamburguesas)",
+      "id": "260734831296708@lid",
+      "name": "+53 5 3137135",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "202288765382764@lid",
-      "name": "& R🧿X (Busca Suministradores De Dulces)",
+      "id": "193612981751928@lid",
+      "name": "+53 5 8171267",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "215191199428648@lid",
-      "name": "$ Cary Acosta",
+      "id": "217712009674860@lid",
+      "name": "Lourdes Parque Mqnila",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "278859979206829@lid",
-      "name": "& Julio (Dueño D",
+      "id": "236429527523568@lid",
+      "name": "Tú Casa En Venta Grupo",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "105682636390528@lid",
-      "name": "+53 63425143",
+      "id": "210286128697568@lid",
+      "name": "+53 5 9862813",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "182300608360691@lid",
-      "name": "+53 63248373",
+      "id": "87295311011861@lid",
+      "name": "+53 5 1438283",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363420849171361@g.us",
-      "name": "#PalWeb SURL",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "66018110091431@lid",
-      "name": "$ Jessica 🌟(Pedido grande de dulces)",
+      "id": "55199188164651@lid",
+      "name": "+53 5 3447757",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "211613189693588@lid",
-      "name": "$ Rosi (Interesada En Cake)",
+      "id": "274990113001486@lid",
+      "name": "Nesty93 Villar , Grabación",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "120363419939069935@g.us",
-      "name": "Mercado Shapuseros 🥩🍗🍔",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363304624212727@g.us",
-      "name": "Confituras de todos tipos",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "4209504162040@lid",
-      "name": "... Bodegón Sabor",
+      "id": "165369310380217@lid",
+      "name": "+53 5 3554517",
       "is_group": false,
       "is_contact": true
     },
     {
-      "id": "38762096644110@lid",
-      "name": "$ Dainelys (Cake Maestra Gabi)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "236197834170405@lid",
-      "name": "$ Damylakv (Interes En Cake 22cm Marianao)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "119022301507663@lid",
-      "name": "$ Raúl (Vecino)",
-      "is_group": false,
-      "is_contact": true
-    },
-    {
-      "id": "120363029357261025@g.us",
-      "name": "Ofertas Variadas POPI PAN",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423293641986@g.us",
-      "name": "La casita de Magnolia",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363422124454653@g.us",
-      "name": "Módulo Configuración",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419486738516@g.us",
-      "name": "Curso De Versat",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363419563082701@g.us",
-      "name": "Topes de Collantes Mitrans",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363421140437517@g.us",
-      "name": "♟️ Diario de un Estratega Digital ♟️",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363416849965898@g.us",
-      "name": "Conf. ¿Cómo formar el precio de venta de mi producto (bien o servicio)?",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363420557436507@g.us",
-      "name": "Enlaces de Aceña y Rodezno",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363400505440520@g.us",
-      "name": "Trabajo - carnicería ",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363346195727360@g.us",
-      "name": "GUDI FOODS CUBA, TU ALIADO +17864738273",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363325147096978@g.us",
-      "name": "Artículos de hogar",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363285258316453@g.us",
-      "name": "Transporte de paquetería",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363312658360894@g.us",
-      "name": "Alimentos",
+      "id": "120363304037175890@g.us",
+      "name": "PALWEB",
       "is_group": true,
       "is_contact": false
     },
@@ -1652,46 +1274,226 @@
       "is_contact": false
     },
     {
-      "id": "120363304037175890@g.us",
-      "name": "PALWEB",
+      "id": "109152735117421@lid",
+      "name": "+1 (702) 517-0613",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "275762787705031@lid",
+      "name": "+53 5 2893616",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "135528213131271@lid",
+      "name": "+53 5 3461747",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "53012882026509@lid",
+      "name": "After Shave",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363243060443127@g.us",
+      "name": "PregoMarket",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363256488723104@g.us",
-      "name": "Ricos cake 10/10",
+      "id": "191482577318141@lid",
+      "name": "+53 5 1060076",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "219387114053847@lid",
+      "name": "Fríovento Yosmel",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "42799466553352@lid",
+      "name": "Roger Amigo De Ale",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363172790656550@g.us",
+      "name": "🛒El Bodegón de Lacret 🛒 ",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363178627867616@g.us",
-      "name": "Mipyme Palweb ",
+      "id": "72911733960764@lid",
+      "name": "+53 5 8065592",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "104423539892475@lid",
+      "name": "Lilita Y Cachibache",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363295392149188@g.us",
+      "name": "3° “Al Pan Pan” Venta de confituras y más…!",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363159785670888@g.us",
-      "name": "Insumos para Restaurantes y Cafeterias",
+      "id": "120363232672410642@g.us",
+      "name": "𝙊𝙣𝙡𝙞𝙣𝙚 𝙎𝙝𝙤𝙥 🛒",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "5353443745-1610572478@g.us",
-      "name": "🍷Químicos Alcoholicos 🍷",
+      "id": "31362035794161@lid",
+      "name": "Yasmany Lozas Granito",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363046980319185@g.us",
+      "name": "Venta de todo",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363028510849526@g.us",
-      "name": "Ofertas Variadas POPI PAN",
+      "id": "14246909874430@lid",
+      "name": "Biukys Nuevo",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "119829654687755@lid",
+      "name": "Dámaris Prima De Yadi",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "2856237150420@lid",
+      "name": "Nadia",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363321351660216@g.us",
+      "name": "Manila PALWEB ",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363295415709556@g.us",
-      "name": "Kary‼️ venta mayorista y de maní 🥜.Vedado📍",
+      "id": "141373277782078@lid",
+      "name": "+53 5 5055161",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "124575727755416@lid",
+      "name": "Shores Cerro",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "193733559631899@lid",
+      "name": "La Casa Del Sazón Cerro",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120306412830763@lid",
+      "name": "Moni♡ Peluquera",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "145509666844699@lid",
+      "name": "+53 5 3389975",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363296374075513@g.us",
+      "name": "Online Shop🛒2",
       "is_group": true,
       "is_contact": false
+    },
+    {
+      "id": "237241309868173@lid",
+      "name": "Adriana Dependienta",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "60250287800447@lid",
+      "name": "Lachy Caché",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "6708856389863@lid",
+      "name": "Karelia Baile",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "70085309927636@lid",
+      "name": "Raúl, María Cristina Transferencia Cup",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "35248880488610@lid",
+      "name": "Alex Medicina Y Taxis Taxi Zona",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "70940075495428@lid",
+      "name": "ALBIS😍",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "151225966293242@lid",
+      "name": "Midiala EU",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "161946506637320@lid",
+      "name": "Niñita Rio Cauto",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "219103914651814@lid",
+      "name": "+53 5 6486664",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "90387720982652@lid",
+      "name": "+53 5 8362432",
+      "is_group": false,
+      "is_contact": true
+    },
+    {
+      "id": "120363268854519607@g.us",
+      "name": "Familia y amigos",
+      "is_group": true,
+      "is_contact": false
+    },
+    {
+      "id": "124524037165202@lid",
+      "name": "Alain Doctor Láser",
+      "is_group": false,
+      "is_contact": true
     },
     {
       "id": "120363305008178132@g.us",
@@ -1706,44 +1508,32 @@
       "is_contact": false
     },
     {
-      "id": "120363349486128226@g.us",
-      "name": "G&G Mayorista S.U.R.L",
+      "id": "120363410092270211@g.us",
+      "name": "Semana Gratuita “El Despertar de las Jefazas 2026”",
       "is_group": true,
       "is_contact": false
     },
     {
-      "id": "120363383140555986@g.us",
-      "name": "COMUNIDAD VENTAS SIN FRONTERAS",
-      "is_group": true,
-      "is_contact": false
+      "id": "150959527309437@lid",
+      "name": "+53 5 5092543",
+      "is_group": false,
+      "is_contact": true
     },
     {
-      "id": "120363400483701801@g.us",
-      "name": "♟️ Diario de un Estratega Digital ♟️",
-      "is_group": true,
-      "is_contact": false
+      "id": "20156365410355@lid",
+      "name": "+53 5 5824206",
+      "is_group": false,
+      "is_contact": true
     },
     {
-      "id": "120363418472063936@g.us",
-      "name": "Mensajeros Habana",
-      "is_group": true,
-      "is_contact": false
+      "id": "49589994451075@lid",
+      "name": "Ingrid Petróleo",
+      "is_group": false,
+      "is_contact": true
     },
     {
-      "id": "120363419517220634@g.us",
-      "name": "Comunidad Lisi 💎",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363422705537226@g.us",
-      "name": "La Azulita",
-      "is_group": true,
-      "is_contact": false
-    },
-    {
-      "id": "120363423237307851@g.us",
-      "name": "Curso De Versat",
+      "id": "5356134347-1625971749@g.us",
+      "name": "Estilosa Boutique",
       "is_group": true,
       "is_contact": false
     }

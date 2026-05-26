@@ -10,8 +10,10 @@ $mode = $_GET['mode'] ?? 'range';
 $title = "";
 $tickets = [];
 $summaryCats = [];
+$summaryFamilies = [];
 $finanzas = ['venta'=>0, 'costo'=>0];
 $cashSessions = [];
+$reportDays = 0;
 
 // Variables para Devoluciones
 $refundItems = [];
@@ -44,6 +46,9 @@ if ($mode === 'session') {
 } else {
     $start = $_GET['start']; $end = $_GET['end'];
     $title = "Reporte General: $start al $end";
+    $startDt = new DateTime($start);
+    $endDt = new DateTime($end);
+    $reportDays = max(1, $startDt->diff($endDt)->days + 1);
 
     $stmt = $pdo->prepare("SELECT v.*, s.nombre_cajero FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE DATE(v.fecha) BETWEEN ? AND ? ORDER BY v.id DESC");
     $stmt->execute([$start, $end]);
@@ -105,6 +110,34 @@ $sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.c
 $stmtProds = $pdo->prepare($sqlProds);
 $stmtProds->execute($params);
 $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
+
+foreach ($soldProducts as $prod) {
+    $name = trim((string)($prod['nombre'] ?? ''));
+    if ($name === '') {
+        $family = 'SIN FAMILIA';
+    } else {
+        $parts = preg_split('/\s+/u', preg_replace('/\s+/u', ' ', $name));
+        $family = trim((string)($parts[0] ?? ''));
+        $family = preg_replace('/^[^\pL\pN]+|[^\pL\pN]+$/u', '', $family);
+        if ($family === '') {
+            $family = 'SIN FAMILIA';
+        } elseif (function_exists('mb_strtoupper')) {
+            $family = mb_strtoupper($family, 'UTF-8');
+        } else {
+            $family = strtoupper($family);
+        }
+    }
+
+    if (!isset($summaryFamilies[$family])) {
+        $summaryFamilies[$family] = ['qty' => 0.0, 'total' => 0.0];
+    }
+    $summaryFamilies[$family]['qty'] += floatval($prod['total_qty'] ?? 0);
+    $summaryFamilies[$family]['total'] += floatval($prod['total_val'] ?? 0);
+}
+
+uasort($summaryFamilies, static function ($a, $b) {
+    return $b['total'] <=> $a['total'];
+});
 
 $ticketDetailsBySale = [];
 if (!empty($tickets)) {
@@ -218,8 +251,14 @@ if (!empty($tickets)) {
         .ticket-detail-table { margin-bottom: 0; font-size: 0.82rem; }
         .ticket-items { color: #555; font-size: 0.78rem; line-height: 1.45; }
         .session-total-row td { background: #f8fafc; font-weight: bold; }
+        .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 20px 0 24px; }
+        .chart-card { border: 1px solid #dbe4f0; border-radius: 8px; padding: 12px; background: #fff; page-break-inside: avoid; }
+        .chart-card h5 { margin-bottom: 10px; }
+        .chart-wrap { position: relative; width: 100%; height: 320px; }
+        .chart-wrap canvas { width: 100% !important; height: 100% !important; }
 
-        @media print { body { background: white; padding: 0; } .page { box-shadow: none; margin: 0; padding: 0; width: 100%; } .actions { display: none; } }
+        @media print { body { background: white; padding: 0; } .page { box-shadow: none; margin: 0; padding: 0; width: 100%; } .actions { display: none; } .chart-card { break-inside: avoid; } .chart-wrap { height: 280px; } }
+        @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
@@ -314,6 +353,21 @@ if (!empty($tickets)) {
             <?php endforeach; ?>
         </tbody>
     </table>
+
+    <div class="chart-grid">
+        <div class="chart-card">
+            <h5 class="fw-bold border-bottom pb-2">Subtotal por Familia de Productos</h5>
+            <div class="chart-wrap">
+                <canvas id="familyPieChart"></canvas>
+            </div>
+        </div>
+        <div class="chart-card">
+            <h5 class="fw-bold border-bottom pb-2">Subtotal por Categoría</h5>
+            <div class="chart-wrap">
+                <canvas id="categoryPieChart"></canvas>
+            </div>
+        </div>
+    </div>
 
     <h4 style="margin-top: 30px;">🧾 Detalle de Tickets</h4>
     <table>
@@ -432,6 +486,7 @@ if (!empty($tickets)) {
             <tr>
                 <th>Producto</th>
                 <th class="text-end">Cant. Total</th>
+                <th class="text-end">Prom. Diario</th>
                 <th class="text-end">Total Recaudado</th>
                 <th class="text-end">Ganancia</th>
             </tr>
@@ -439,19 +494,27 @@ if (!empty($tickets)) {
         <tbody>
             <?php 
             $currentCat = null;
+            $totalQtyGeneral = 0.0;
+            $totalValGeneral = 0.0;
+            $totalProfitGeneral = 0.0;
             if (empty($soldProducts)) {
-                echo "<tr><td colspan='4' class='text-center text-muted'>No hay productos vendidos en este periodo.</td></tr>";
+                echo "<tr><td colspan='5' class='text-center text-muted'>No hay productos vendidos en este periodo.</td></tr>";
             }
             foreach($soldProducts as $prod): 
                 // Opcional: Saltar productos con cantidad 0 si hubo devoluciones exactas
                 // if ($prod['total_qty'] == 0) continue; 
+
+                $totalQtyGeneral += floatval($prod['total_qty'] ?? 0);
+                $totalValGeneral += floatval($prod['total_val'] ?? 0);
+                $totalProfitGeneral += floatval($prod['total_profit'] ?? 0);
+                $promDiario = $reportDays > 0 ? (floatval($prod['total_qty'] ?? 0) / $reportDays) : 0;
 
                 // Imprimir Cabecera de Categoría si cambia
                 if ($prod['categoria'] !== $currentCat): 
                     $currentCat = $prod['categoria'];
             ?>
                 <tr>
-                    <td colspan="4" class="cat-header">
+                    <td colspan="5" class="cat-header">
                         📂 <?php echo htmlspecialchars($currentCat ?: 'SIN CATEGORÍA'); ?>
                     </td>
                 </tr>
@@ -460,10 +523,20 @@ if (!empty($tickets)) {
             <tr>
                 <td style="padding-left: 20px;"><?php echo htmlspecialchars($prod['nombre']); ?></td>
                 <td class="text-end"><?php echo number_format($prod['total_qty'], 2); ?></td>
+                <td class="text-end"><?php echo number_format($promDiario, 2); ?></td>
                 <td class="text-end">$<?php echo number_format($prod['total_val'], 2); ?></td>
                 <td class="text-end text-success">$<?php echo number_format($prod['total_profit'], 2); ?></td>
             </tr>
             <?php endforeach; ?>
+            <?php if (!empty($soldProducts)): ?>
+            <tr style="border-top: 2px solid #333; font-weight: bold;">
+                <td>TOTAL PRODUCTOS</td>
+                <td class="text-end"><?php echo number_format($totalQtyGeneral, 2); ?></td>
+                <td class="text-end"><?php echo $reportDays > 0 ? number_format($totalQtyGeneral / $reportDays, 2) : '0.00'; ?></td>
+                <td class="text-end">$<?php echo number_format($totalValGeneral, 2); ?></td>
+                <td class="text-end text-success">$<?php echo number_format($totalProfitGeneral, 2); ?></td>
+            </tr>
+            <?php endif; ?>
         </tbody>
     </table>
     
@@ -472,5 +545,65 @@ if (!empty($tickets)) {
     </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const familyPieLabels = <?php echo json_encode(array_keys($summaryFamilies), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const familyPieValues = <?php echo json_encode(array_map(static function ($row) { return round(floatval($row['total'] ?? 0), 2); }, array_values($summaryFamilies)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const categoryPieLabels = <?php echo json_encode(array_map(static function ($row) { return trim((string)($row['categoria'] ?? 'SIN CATEGORÍA')) ?: 'SIN CATEGORÍA'; }, $summaryCats), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+    const categoryPieValues = <?php echo json_encode(array_map(static function ($row) { return round(floatval($row['total'] ?? 0), 2); }, $summaryCats), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+
+    function buildPieChart(canvasId, labels, values) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !labels.length || !values.length) return null;
+
+        const palette = [
+            '#0d6efd', '#198754', '#dc3545', '#fd7e14', '#6f42c1',
+            '#20c997', '#0dcaf0', '#ffc107', '#6610f2', '#d63384',
+            '#adb5bd', '#343a40'
+        ];
+        const colors = labels.map((_, idx) => palette[idx % palette.length]);
+
+        return new Chart(canvas, {
+            type: 'pie',
+            data: {
+                labels,
+                datasets: [{
+                    data: values,
+                    backgroundColor: colors,
+                    borderColor: '#ffffff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            boxWidth: 12,
+                            boxHeight: 12,
+                            usePointStyle: true
+                        }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                const label = ctx.label || '';
+                                const value = Number(ctx.raw || 0);
+                                return `${label}: $${value.toFixed(2)}`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    window.addEventListener('load', function () {
+        buildPieChart('familyPieChart', familyPieLabels, familyPieValues);
+        buildPieChart('categoryPieChart', categoryPieLabels, categoryPieValues);
+    });
+</script>
 </body>
 </html>

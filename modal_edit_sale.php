@@ -73,13 +73,13 @@
                         <div class="col-sm-6">
                             <label class="small text-muted fw-bold">Cliente</label>
                             <div class="input-group input-group-sm">
-                                <input type="text" id="editSaleCliente" class="form-control"
-                                       placeholder="Consumidor Final" list="editSaleClientesList">
+                                <select id="editSaleCliente" class="form-select">
+                                    <option value="">Consumidor Final</option>
+                                </select>
                                 <button class="btn btn-outline-success" type="button" onclick="editSaleNewClient()" title="Crear Nuevo Cliente">
                                     <i class="fas fa-user-plus"></i>
                                 </button>
                             </div>
-                            <datalist id="editSaleClientesList"></datalist>
                         </div>
                         <div class="col-sm-6">
                             <label class="small text-muted fw-bold">Tipo de Servicio</label>
@@ -93,9 +93,9 @@
                         </div>
                         <div class="col-sm-6" id="editSaleDeliveryRow" style="display:none">
                             <label class="small text-muted fw-bold">Mensajero</label>
-                            <input type="text" id="editSaleMensajero" class="form-control form-control-sm"
-                                   placeholder="Nombre del mensajero" list="editSaleMensajerosList">
-                            <datalist id="editSaleMensajerosList"></datalist>
+                            <select id="editSaleMensajero" class="form-select form-select-sm">
+                                <option value="">Sin mensajero</option>
+                            </select>
                         </div>
                         <div class="col-sm-6" id="editSaleDeliveryCostRow" style="display:none">
                             <label class="small text-muted fw-bold">Costo Mensajería ($)</label>
@@ -146,6 +146,30 @@ let editSaleItems      = [];   // [{id, name, qty, price, codigo, es_servicio}]
 let editSaleBaseTotal  = 0;    // total de ítems sin mensajería
 let editSaleOrigVenta  = {};   // cabecera original (para comparar)
 
+function editSaleNormalizeTipoServicio(tipo) {
+    const raw = String(tipo || '').trim().toLowerCase();
+    if (!raw) return 'mostrador';
+
+    const map = {
+        'mostrador': 'mostrador',
+        'consumir_aqui': 'mostrador',
+        'consumir aqui': 'mostrador',
+        'aqui': 'mostrador',
+        'aquí': 'mostrador',
+        'mesa': 'mostrador',
+        'llevar': 'llevar',
+        'para llevar': 'llevar',
+        'recoger': 'llevar',
+        'pickup': 'llevar',
+        'mensajeria': 'mensajeria',
+        'delivery': 'mensajeria',
+        'domicilio': 'mensajeria',
+        'reserva': 'reserva'
+    };
+
+    return map[raw] || raw;
+}
+
 // ─────────────────────────────────────────────────────────────
 //  Abrir modal y cargar venta
 // ─────────────────────────────────────────────────────────────
@@ -185,12 +209,14 @@ window.openEditSale = async function(id) {
             price:       parseFloat(d.precio),
             codigo:      d.codigo_producto || d.id_producto || '',
             es_servicio: parseInt(d.es_servicio || 0),
+            note:        d.nota_cocina || '',
         }));
 
         // Cargar campos de cabecera
-        document.getElementById('editSaleCliente').value       = data.venta.cliente_nombre || '';
+        editSaleSetClientSelection(data.venta);
         document.getElementById('editSaleMensajero').value     = data.venta.mensajero_nombre || '';
-        document.getElementById('editSaleTipoServicio').value  = data.venta.tipo_servicio || 'mostrador';
+        document.getElementById('editSaleTipoServicio').value  = editSaleNormalizeTipoServicio(data.venta.tipo_servicio);
+        editSalePopulateLists();
 
         // Calcular costo mensajería como diferencia total - ítems
         const itemsSubtotal = editSaleItems.reduce((s, i) => s + i.qty * i.price, 0);
@@ -225,6 +251,11 @@ function editSaleRenderItems() {
         <tr>
             <td class="small fw-bold">${escHtml(item.name)}<br>
                 <span class="text-muted" style="font-size:0.7rem">${escHtml(item.codigo)}</span>
+                ${item.note ? `<div class="mt-1"><span class="badge bg-warning text-dark">📝 ${escHtml(item.note)}</span></div>` : ''}
+                <input type="text" class="form-control form-control-sm mt-1 edit-sale-note-input"
+                       placeholder="Nota de cocina"
+                       value="${escHtml(item.note || '')}"
+                       oninput="editSaleSetNote(${i}, this.value)">
             </td>
             <td class="text-center">
                 <div class="input-group input-group-sm justify-content-center" style="width:100px;margin:auto">
@@ -277,6 +308,10 @@ window.editSaleSetQty = function(i, val) {
 window.editSaleRemoveItem = function(i) {
     editSaleItems.splice(i, 1);
     editSaleRenderItems();
+};
+window.editSaleSetNote = function(i, val) {
+    if (!editSaleItems[i]) return;
+    editSaleItems[i].note = String(val || '');
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -336,7 +371,7 @@ window.editSaleAddProduct = function(id, name, price, codigo) {
     if (existing) {
         existing.qty += 1;
     } else {
-        editSaleItems.push({ id: sid, name, qty: 1, price, codigo: codigo || sid, es_servicio: 0 });
+        editSaleItems.push({ id: sid, name, qty: 1, price, codigo: codigo || sid, es_servicio: 0, note: '' });
     }
     editSaleHideSearch();
     editSaleRenderItems();
@@ -347,7 +382,8 @@ window.editSaleAddProduct = function(id, name, price, codigo) {
 // ─────────────────────────────────────────────────────────────
 window.editSaleToggleDelivery = function() {
     const t = document.getElementById('editSaleTipoServicio').value;
-    const isDelivery = (t === 'mensajeria' || t === 'delivery');
+    const currentMessenger = String(document.getElementById('editSaleMensajero')?.value || '').trim();
+    const isDelivery = (t === 'mensajeria' || t === 'delivery') || currentMessenger.length > 0;
     document.getElementById('editSaleDeliveryRow').style.display     = isDelivery ? '' : 'none';
     document.getElementById('editSaleDeliveryCostRow').style.display = isDelivery ? '' : 'none';
     if (!isDelivery) document.getElementById('editSaleDeliveryCost').value = '0';
@@ -358,23 +394,70 @@ window.editSaleRecalcDelivery = function() {
 };
 
 // ─────────────────────────────────────────────────────────────
-//  Poblar listas (Datalists)
+//  Poblar listas
 // ─────────────────────────────────────────────────────────────
+function editSaleClientsData() {
+    if (Array.isArray(window.CLIENTS_DATA)) return window.CLIENTS_DATA;
+    if (typeof CLIENTS_DATA !== 'undefined' && Array.isArray(CLIENTS_DATA)) return CLIENTS_DATA;
+    return [];
+}
+
 function editSalePopulateLists() {
-    const cliList = document.getElementById('editSaleClientesList');
-    const msjList = document.getElementById('editSaleMensajerosList');
+    const cliSelect = document.getElementById('editSaleCliente');
+    const msjSelect = document.getElementById('editSaleMensajero');
     
-    if (cliList) {
-        cliList.innerHTML = (window.CLIENTS_DATA || []).map(c => 
-            `<option value="${escHtml(c.nombre)}">${escHtml(c.nit_ci ? c.nit_ci : '')}</option>`
-        ).join('');
+    if (cliSelect) {
+        const currentValue = cliSelect.value;
+        cliSelect.innerHTML = '<option value="">Consumidor Final</option>' + editSaleClientsData().map(c => {
+            const tel = c.telefono ? ` · ${c.telefono}` : '';
+            const nit = c.nit_ci ? ` · ${c.nit_ci}` : '';
+            return `<option value="${escHtml(String(c.id || ''))}" data-name="${escHtml(c.nombre || '')}" data-tel="${escHtml(c.telefono || '')}" data-dir="${escHtml(c.direccion || '')}">${escHtml((c.nombre || 'Cliente') + tel + nit)}</option>`;
+        }).join('');
+        if (currentValue) cliSelect.value = currentValue;
     }
     
-    if (msjList) {
-        msjList.innerHTML = (window.MESSENGERS_DATA || []).map(m => 
-            `<option value="${escHtml(m)}"></option>`
+    if (msjSelect) {
+        const currentValue = String(msjSelect.value || '').trim();
+        const rawMessengers = Array.isArray(window.MESSENGERS_DATA)
+            ? window.MESSENGERS_DATA
+            : (typeof MESSENGERS_DATA !== 'undefined' && Array.isArray(MESSENGERS_DATA) ? MESSENGERS_DATA : []);
+        const uniqueMessengers = [];
+        rawMessengers.forEach(m => {
+            const name = String(m || '').trim();
+            if (name && !uniqueMessengers.includes(name)) {
+                uniqueMessengers.push(name);
+            }
+        });
+        if (currentValue && !uniqueMessengers.includes(currentValue)) {
+            uniqueMessengers.unshift(currentValue);
+        }
+        msjSelect.innerHTML = '<option value="">Sin mensajero</option>' + uniqueMessengers.map(m =>
+            `<option value="${escHtml(m)}">${escHtml(m)}</option>`
         ).join('');
+        if (currentValue) {
+            msjSelect.value = currentValue;
+        }
     }
+}
+
+function editSaleSetClientSelection(venta) {
+    const select = document.getElementById('editSaleCliente');
+    if (!select) return;
+    const idCliente = String(venta?.id_cliente || '');
+    const clienteNombre = String(venta?.cliente_nombre || '').trim();
+    editSalePopulateLists();
+    if (idCliente && Array.from(select.options).some(opt => opt.value === idCliente)) {
+        select.value = idCliente;
+        return;
+    }
+    if (clienteNombre) {
+        const found = Array.from(select.options).find(opt => (opt.getAttribute('data-name') || '').trim() === clienteNombre);
+        if (found) {
+            select.value = found.value;
+            return;
+        }
+    }
+    select.value = '';
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -463,7 +546,12 @@ window.editSaleSave = async function() {
 
     const cost     = parseFloat(document.getElementById('editSaleDeliveryCost').value) || 0;
     const total    = editSaleBaseTotal + cost;
-    const cliente  = document.getElementById('editSaleCliente').value.trim() || 'Mostrador';
+    const clienteSelect = document.getElementById('editSaleCliente');
+    const selectedClientOption = clienteSelect ? clienteSelect.options[clienteSelect.selectedIndex] : null;
+    const clienteId = clienteSelect && clienteSelect.value ? parseInt(clienteSelect.value, 10) || 0 : 0;
+    const cliente  = selectedClientOption && clienteId > 0
+        ? (selectedClientOption.getAttribute('data-name') || selectedClientOption.textContent || '').trim()
+        : 'Mostrador';
     const mensajero = document.getElementById('editSaleMensajero').value.trim();
     const tipoServ = document.getElementById('editSaleTipoServicio').value;
 
@@ -492,6 +580,7 @@ window.editSaleSave = async function() {
                 items:           editSaleItems,
                 payments:        payments,
                 total:           total,
+                id_cliente:      clienteId,
                 cliente_nombre:  cliente,
                 mensajero_nombre: mensajero,
                 tipo_servicio:   tipoServ,

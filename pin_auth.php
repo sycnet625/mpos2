@@ -221,6 +221,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
             margin-bottom: 15px;
         }
         .pin-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
             font-size: 24px;
             font-weight: 600;
@@ -324,17 +327,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         </div>
 
         <div class="pin-keypad">
-            <button class="pin-btn" onclick="addDigit('1')">1</button>
-            <button class="pin-btn" onclick="addDigit('2')">2</button>
-            <button class="pin-btn" onclick="addDigit('3')">3</button>
-            <button class="pin-btn" onclick="addDigit('4')">4</button>
-            <button class="pin-btn" onclick="addDigit('5')">5</button>
-            <button class="pin-btn" onclick="addDigit('6')">6</button>
-            <button class="pin-btn" onclick="addDigit('7')">7</button>
-            <button class="pin-btn" onclick="addDigit('8')">8</button>
-            <button class="pin-btn" onclick="addDigit('9')">9</button>
-            <button class="pin-btn btn-zero" onclick="addDigit('0')">0</button>
-            <button class="pin-btn btn-clear" onclick="clearPIN()">
+            <button type="button" class="pin-btn" onclick="addDigit('1')">1</button>
+            <button type="button" class="pin-btn" onclick="addDigit('2')">2</button>
+            <button type="button" class="pin-btn" onclick="addDigit('3')">3</button>
+            <button type="button" class="pin-btn" onclick="addDigit('4')">4</button>
+            <button type="button" class="pin-btn" onclick="addDigit('5')">5</button>
+            <button type="button" class="pin-btn" onclick="addDigit('6')">6</button>
+            <button type="button" class="pin-btn" onclick="addDigit('7')">7</button>
+            <button type="button" class="pin-btn" onclick="addDigit('8')">8</button>
+            <button type="button" class="pin-btn" onclick="addDigit('9')">9</button>
+            <button type="button" class="pin-btn btn-zero" onclick="addDigit('0')">0</button>
+            <button type="button" class="pin-btn btn-clear" onclick="clearPIN()">
                 <i class="fas fa-backspace"></i>
             </button>
         </div>
@@ -533,4 +536,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

@@ -432,7 +432,7 @@ try {
                     // Actualizar receta existente
                     $stmt = $pdo->prepare("UPDATE recetas_cabecera SET 
                         id_producto_final = ?, unidades_resultantes = ?, 
-                        costo_total_lote = ?, costo_unitario = ?, descripcion = ?
+                        costo_total_lote = ?, costo_unitario = ?, descripcion = ?, modo_creacion = ?
                         WHERE id = ?");
                     $stmt->execute([
                         $productoFinal['codigo'],
@@ -440,6 +440,7 @@ try {
                         $costoTotal,
                         $costoTotal / max($rendimiento, 1),
                         "Importado desde Excel el " . date('Y-m-d'),
+                        'clasico',
                         $existente
                     ]);
                     $recetaId = $existente;
@@ -449,15 +450,16 @@ try {
                 } else {
                     // Crear nueva receta
                     $stmt = $pdo->prepare("INSERT INTO recetas_cabecera 
-                        (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion) 
-                        VALUES (?, ?, ?, ?, ?, ?)");
+                        (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion, modo_creacion) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?)");
                     $stmt->execute([
                         $productoFinal['codigo'],
                         $nombreReceta,
                         $rendimiento,
                         $costoTotal,
                         $costoTotal / max($rendimiento, 1),
-                        "Importado desde Excel el " . date('Y-m-d')
+                        "Importado desde Excel el " . date('Y-m-d'),
+                        'clasico'
                     ]);
                     $recetaId = $pdo->lastInsertId();
                 }
@@ -468,7 +470,7 @@ try {
                     VALUES (?, ?, ?, ?, ?)");
                 
                 foreach ($ingredientes as $ing) {
-                    $pctFormula = $cantidadTotal > 0 ? ($ing['cantidad'] / $cantidadTotal) * 100 : 0;
+                    $pctFormula = $cantidadTotal > 0 ? round(($ing['cantidad'] / $cantidadTotal) * 100, 4) : 0;
                     $stmtDet->execute([
                         $recetaId,
                         $ing['codigo'],

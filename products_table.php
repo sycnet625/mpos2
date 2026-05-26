@@ -1501,7 +1501,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
     <meta charset="UTF-8">
     <base href="<?php echo htmlspecialchars($ptableDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
     <title>Inventario & Web</title>
-    <link rel="manifest" href="manifest-products.php?v=20260521-pwa2">
+    <link rel="manifest" href="manifest-products.php?v=20260522-fix1">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
@@ -1880,7 +1880,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
                 </div>
             </div>
             <div class="d-flex flex-wrap gap-2">
-                <a href="inventory_report.php" class="btn btn-light fw-bold px-3"><i class="fas fa-chart-line me-1"></i>Reporte</a>
+                <a href="inventory_report.php" target="_blank" rel="noopener" class="btn btn-light fw-bold px-3"><i class="fas fa-chart-line me-1"></i>Reporte</a>
+                <a href="inventory_report.php?view=model" target="_blank" rel="noopener" class="btn btn-outline-light fw-bold px-3"><i class="fas fa-flask me-1"></i>Modelaje</a>
                 <button onclick="forceImageCacheReset()" class="btn btn-outline-light px-3" title="Limpia caché de imágenes"><i class="fas fa-sync me-1"></i>Caché</button>
                 <button onclick="printInventoryCount()" class="btn btn-warning text-dark fw-bold px-3"><i class="fas fa-clipboard-list me-1"></i>Conteo</button>
                 <a href="dashboard.php" class="btn btn-dark px-3"><i class="fas fa-home"></i></a>
@@ -2115,6 +2116,10 @@ echo $integrityAlertHtml;
 </div>
 
 <script>
+const PT_USER_PREFS_KEY = <?php echo $userPrefsKeyJs; ?>;
+const PT_DEFAULT_VIEW_MODE = <?php echo $viewModeJs; ?>;
+const PT_DEFAULT_WAREHOUSE = <?php echo json_encode((string)(int)$selectedAlmId, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+
 function updateOnlineStatus() {
     const badge = document.getElementById('connectionBadge');
     const text = document.getElementById('connectionText');
@@ -2140,7 +2145,7 @@ function toggleFilterDrawer() {
 }
 function getUserPrefs() {
     try {
-        return JSON.parse(localStorage.getItem({$userPrefsKeyJs}) || '{}') || {};
+        return JSON.parse(localStorage.getItem(PT_USER_PREFS_KEY) || '{}') || {};
     } catch (e) {
         return {};
     }
@@ -2148,11 +2153,11 @@ function getUserPrefs() {
 function setUserPrefs(patch) {
     const current = getUserPrefs();
     const next = Object.assign({}, current, patch || {});
-    localStorage.setItem({$userPrefsKeyJs}, JSON.stringify(next));
+    localStorage.setItem(PT_USER_PREFS_KEY, JSON.stringify(next));
     return next;
 }
 function clearUserPrefs() {
-    localStorage.removeItem({$userPrefsKeyJs});
+    localStorage.removeItem(PT_USER_PREFS_KEY);
 }
 function syncPrefsToInputs() {
     const prefs = getUserPrefs();
@@ -2197,7 +2202,7 @@ function resetAllFilters() {
     if (fStock) fStock.value = '';
     if (fLimit) fLimit.value = '10';
     if (bulkSelect) bulkSelect.value = '';
-    setViewMode({$viewModeJs});
+    setViewMode(PT_DEFAULT_VIEW_MODE);
     setWithStockMode(false);
     setWarehouseScope(0);
     if (drawer) drawer.classList.remove('open');
@@ -2206,7 +2211,7 @@ function resetAllFilters() {
 function getViewMode() {
     const saved = localStorage.getItem('pt_view_mode');
     if (saved) return saved;
-    return window.matchMedia && window.matchMedia('(max-width: 991px)').matches ? 'cards' : {$viewModeJs};
+    return window.matchMedia && window.matchMedia('(max-width: 991px)').matches ? 'cards' : PT_DEFAULT_VIEW_MODE;
 }
 function getWithStockMode() {
     return localStorage.getItem('pt_with_stock') === '1';
@@ -2243,7 +2248,7 @@ function toggleWithStock() {
     loadData(1);
 }
 function getWarehouseScope() {
-    return parseInt(localStorage.getItem('pt_warehouse_scope') || {$selectedAlmIdJs}, 10) || 0;
+    return parseInt(localStorage.getItem('pt_warehouse_scope') || PT_DEFAULT_WAREHOUSE, 10) || 0;
 }
 function setWarehouseScope(id) {
     const val = parseInt(id || '0', 10) || 0;
@@ -2256,6 +2261,11 @@ function changeWarehouseScope() {
     setWarehouseScope(sel ? sel.value : 0);
     persistFilters();
     loadData(1);
+}
+
+function setTextSafe(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = value;
 }
 // Restaurar estado del drawer si hay filtros activos
 (function() {
@@ -2663,14 +2673,14 @@ async function loadData(page) {
         } else if (tableBody) {
             tableBody.innerHTML = data.html;
         }
-        document.getElementById('totalCountDisplay').innerText = data.total;
-        document.getElementById('currentPageDisplay').innerText = data.page;
-        document.getElementById('totalValueDisplay').innerText = '$' + data.valor;
+        setTextSafe('totalCountDisplay', data.total);
+        setTextSafe('currentPageDisplay', data.page);
+        setTextSafe('totalValueDisplay', '$' + data.valor);
         if (data.kpi) {
-            document.getElementById('kpiTotal').innerText = Number(data.kpi.total_empresa || 0).toLocaleString('en-US');
-            document.getElementById('kpiActive').innerText = Number(data.kpi.activos || 0).toLocaleString('en-US');
-            document.getElementById('kpiInactive').innerText = Number(data.kpi.inactivos || 0).toLocaleString('en-US');
-            document.getElementById('kpiNoStock').innerText = Number(data.kpi.sin_stock || 0).toLocaleString('en-US');
+            setTextSafe('kpiTotal', Number(data.kpi.total_empresa || 0).toLocaleString('en-US'));
+            setTextSafe('kpiActive', Number(data.kpi.activos || 0).toLocaleString('en-US'));
+            setTextSafe('kpiInactive', Number(data.kpi.inactivos || 0).toLocaleString('en-US'));
+            setTextSafe('kpiNoStock', Number(data.kpi.sin_stock || 0).toLocaleString('en-US'));
         }
         
         renderPagination(data.page, data.pages);
@@ -3622,7 +3632,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Registrar Service Worker Independiente
     if ('serviceWorker' in navigator) {
-        const productsSwUrl = new URL('sw-products.js', document.baseURI).toString();
+        const productsSwUrl = new URL('sw-products.js?v=20260522-fix1', document.baseURI).toString();
         const productsSwScope = new URL('products/', document.baseURI).toString();
         navigator.serviceWorker.register(productsSwUrl, { scope: productsSwScope, updateViaCache: 'none' })
             .then(reg => {

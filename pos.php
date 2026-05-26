@@ -1340,7 +1340,7 @@ try {
         }
     </style>
 
-<link rel="manifest" href="manifest-pos.php?v=20260521-pwa3">
+<link rel="manifest" href="manifest-pos.php?v=20260521-pwa4">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1349,6 +1349,17 @@ try {
 
 <script>
     window.POS_PING_URL = <?php echo json_encode($posDocumentBase . 'pos.php?netcheck=1', JSON_UNESCAPED_SLASHES); ?>;
+    window.POS_HISTORIAL_URL = <?php echo json_encode($posDocumentBase . 'pos_historial.php', JSON_UNESCAPED_SLASHES); ?>;
+    window.POS_HISTORIAL_FALLBACK_URL = <?php echo json_encode($posDocumentBase . 'modal_history.php?render_mode=1', JSON_UNESCAPED_SLASHES); ?>;
+    window.posFetchTimeoutSignal = function(ms) {
+        if (typeof AbortController === 'undefined') return undefined;
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+            return AbortSignal.timeout(ms);
+        }
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), ms);
+        return controller.signal;
+    };
 
     // Registro del Service Worker
     if ('serviceWorker' in navigator) {
@@ -1815,6 +1826,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     .row-efectivo { border-left-color: #198754; } 
     .row-transfer { border-left-color: #0d6efd; } 
     .row-gasto { border-left-color: #fd7e14; } 
+    .row-mixto { border-left-color: #6c757d; } 
     .row-reserva { border-left-color: #6f42c1; background-color: #f3f0ff; }
     .row-llevar { border-left-color: #0dcaf0; }
     .row-refund { border-left-color: #dc3545; background-color: #ffeaea !important; }
@@ -1845,6 +1857,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     let CLIENTS_DATA = <?php echo json_encode($clientsData); ?>; // Lista inicial
     window.CLIENTS_DATA = CLIENTS_DATA;
     const MESSENGERS_DATA = <?php echo json_encode($mensajeros ?? []); ?>;
+    window.MESSENGERS_DATA = MESSENGERS_DATA;
     // Almacenes disponibles por sucursal (id_sucursal → [{id, nombre}])
     // Usado para el selector multi-almacén en la pantalla de login con PIN
     const ALMACENES_BY_SUCURSAL = <?php echo json_encode($almacenesPorSucursal); ?>;
@@ -1948,8 +1961,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260521-offline1"></script>
-<script src="pos-offline-system.js?v=20260521-offline1"></script>
+<script src="pos1.js?v=20260521-offline2"></script>
+<script src="pos-offline-system.js?v=20260521-offline2"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────
@@ -2149,7 +2162,9 @@ window.updateCartBackground = function (sucursalId) {
                         credentials: 'same-origin',
                         headers: window.posJsonHeaders ? window.posJsonHeaders() : { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ id_almacen: almId }),
-                        signal: AbortSignal.timeout(5000)
+                        signal: typeof window.posFetchTimeoutSignal === 'function'
+                            ? window.posFetchTimeoutSignal(5000)
+                            : undefined
                     });
                     if (!resp.ok) {
                         console.warn('No se pudo persistir el almacén en la sesión del servidor');

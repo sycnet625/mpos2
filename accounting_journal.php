@@ -67,14 +67,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['api'])) {
     }
 }
 
-// Cargar ultimos movimientos para mostrar en historial
+// Cargar últimos movimientos (manual + auto) para historial
+$filterTipo = $_GET['tipo'] ?? '';
 $recentMovements = [];
 try {
-    $stmt = $pdo->query("SELECT * FROM contabilidad_diario ORDER BY id DESC LIMIT 20");
+    $whereHist = $filterTipo !== '' ? "WHERE asiento_tipo = " . $pdo->quote($filterTipo) : '';
+    $stmt = $pdo->query("SELECT * FROM contabilidad_diario $whereHist ORDER BY id DESC LIMIT 100");
     $recentMovements = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 } catch (Exception $e) {
     $recentMovements = [];
 }
+// Conteo por tipo para los filtros
+$tipoConteos = [];
+try {
+    $rows = $pdo->query("SELECT COALESCE(asiento_tipo,'MANUAL') as tipo, COUNT(*) as n FROM contabilidad_diario GROUP BY asiento_tipo ORDER BY n DESC")->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $r) $tipoConteos[$r['tipo']] = (int)$r['n'];
+} catch (Exception $e) {}
 ?><!DOCTYPE html>
 <html lang="es">
 <head>
@@ -213,16 +221,43 @@ try {
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <div>
                         <div class="section-title">Historial</div>
-                        <h2 class="h5 fw-bold mb-0">Ultimos Movimientos</h2>
+                        <h2 class="h5 fw-bold mb-0">Libro Diario <small class="text-muted fw-normal">(manual + automático)</small></h2>
                     </div>
                     <span class="soft-pill"><i class="fas fa-history me-1"></i><?= count($recentMovements) ?> registros</span>
                 </div>
 
-                <div class="table-responsive border rounded-4 bg-white" style="max-height: 500px; overflow:auto;">
-                    <table class="table align-middle mb-0">
+                <?php
+                $tipoLabels = [
+                    ''            => ['Todos',       'secondary'],
+                    'VENTA'       => ['Ventas',       'success'],
+                    'DEVOLUCION'  => ['Devoluciones', 'warning'],
+                    'COSTO'       => ['Costos',       'info'],
+                    'GASTO'       => ['Gastos',       'danger'],
+                    'COMPRA'      => ['Compras',      'primary'],
+                    'MERMA'       => ['Mermas',       'dark'],
+                    'FACTURA'     => ['Facturas',     'secondary'],
+                    'IMPUESTOS'   => ['Impuestos',    'danger'],
+                    'CAPITAL'     => ['Capital',      'success'],
+                    'AJUSTE'      => ['Ajuste',       'warning'],
+                    'CIERRE'      => ['Cierre',       'dark'],
+                ];
+                ?>
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    <?php foreach ($tipoLabels as $key => $meta): ?>
+                    <?php $cnt = ($key === '') ? array_sum($tipoConteos) : ($tipoConteos[$key] ?? 0); if ($key !== '' && $cnt === 0) continue; ?>
+                    <a href="?tipo=<?= urlencode($key) ?>"
+                       class="badge text-decoration-none <?= ($filterTipo === $key) ? "bg-{$meta[1]}" : "bg-{$meta[1]} bg-opacity-25 text-dark" ?>"
+                       style="font-size:.78rem;padding:.35em .6em">
+                        <?= $meta[0] ?> <span class="opacity-75"><?= $cnt ?></span>
+                    </a>
+                    <?php endforeach; ?>
+                </div>
+
+                <div class="table-responsive border rounded-4 bg-white" style="max-height: 480px; overflow:auto;">
+                    <table class="table align-middle mb-0 small">
                         <thead class="table-light sticky-top">
                             <tr>
-                                <th>ID</th>
+                                <th>Tipo</th>
                                 <th>Fecha</th>
                                 <th>Cuenta</th>
                                 <th>Detalle</th>
@@ -232,24 +267,40 @@ try {
                         </thead>
                         <tbody>
                             <?php if (empty($recentMovements)): ?>
-                            <tr><td colspan="6" class="text-center py-4 text-muted">Sin movimientos registrados.</td></tr>
-                            <?php else: foreach ($recentMovements as $row): ?>
+                            <tr><td colspan="6" class="text-center py-4 text-muted">Sin movimientos<?= $filterTipo ? " de tipo $filterTipo" : '' ?>.</td></tr>
+                            <?php else: foreach ($recentMovements as $row):
+                                $tipo = $row['asiento_tipo'] ?: 'MANUAL';
+                                $tipColor = match($tipo) {
+                                    'VENTA'      => 'success',
+                                    'DEVOLUCION' => 'warning',
+                                    'COSTO'      => 'info',
+                                    'GASTO'      => 'danger',
+                                    'COMPRA'     => 'primary',
+                                    'MERMA'      => 'dark',
+                                    'FACTURA'    => 'secondary',
+                                    'IMPUESTOS'  => 'danger',
+                                    'CAPITAL','RESERVA' => 'success',
+                                    'AJUSTE'     => 'warning',
+                                    default      => 'secondary',
+                                };
+                            ?>
                             <tr>
-                                <td class="tiny text-muted"><?php echo htmlspecialchars($row['asiento_id']); ?></td>
-                                <td><?php echo htmlspecialchars($row['fecha']); ?></td>
-                                <td class="fw-bold text-primary"><?php echo htmlspecialchars($row['cuenta']); ?></td>
-                                <td><?php echo htmlspecialchars($row['detalle']); ?></td>
-                                <td class="text-end"><?php echo ($row['debe'] > 0) ? number_format($row['debe'], 2) : '-'; ?></td>
-                                <td class="text-end"><?php echo ($row['haber'] > 0) ? number_format($row['haber'], 2) : '-'; ?></td>
+                                <td><span class="badge bg-<?= $tipColor ?> bg-opacity-<?= $tipo === 'MANUAL' ? '100' : '75' ?>" style="font-size:.7rem"><?= htmlspecialchars($tipo) ?></span></td>
+                                <td class="text-nowrap"><?php echo htmlspecialchars($row['fecha']); ?></td>
+                                <td class="fw-bold text-primary" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($row['cuenta']) ?>"><?php echo htmlspecialchars($row['cuenta']); ?></td>
+                                <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="<?= htmlspecialchars($row['detalle']) ?>"><?php echo htmlspecialchars($row['detalle']); ?></td>
+                                <td class="text-end <?= $row['debe'] > 0 ? 'text-primary fw-bold' : 'text-muted' ?>"><?php echo ($row['debe'] > 0) ? number_format($row['debe'], 2) : '-'; ?></td>
+                                <td class="text-end <?= $row['haber'] > 0 ? 'text-success fw-bold' : 'text-muted' ?>"><?php echo ($row['haber'] > 0) ? number_format($row['haber'], 2) : '-'; ?></td>
                             </tr>
                             <?php endforeach; endif; ?>
                         </tbody>
                     </table>
                 </div>
 
-                <div class="d-flex justify-content-end mt-3">
+                <div class="d-flex justify-content-between align-items-center mt-3">
+                    <small class="text-muted">Los asientos automáticos se generan desde <a href="pos_accounting.php">Contabilidad → Sync</a>.</small>
                     <a href="accounting_export.php?type=diario" class="btn btn-outline-secondary btn-sm">
-                        <i class="fas fa-file-csv me-1"></i> Exportar Completo (CSV)
+                        <i class="fas fa-file-csv me-1"></i> Exportar CSV
                     </a>
                 </div>
             </div>

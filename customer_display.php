@@ -99,6 +99,7 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
         .item-details { display: flex; flex-direction: column; }
         .item-name { font-size: 1.6rem; font-weight: 800; color: #222; }
         .item-price { color: #666; font-size: 1.2rem; font-weight: 700; }
+        .item-note { color: #b45309; font-size: 1rem; font-style: italic; font-weight: 700; margin-top: 2px; }
         .item-subtotal { font-weight: 900; text-align: right; font-size: 2rem; color: #000; min-width: 150px; }
 
         .summary-bar { display: flex; justify-content: space-between; padding: 15px 0; border-top: 2px solid #eee; font-size: 1.3rem; font-weight: 700; color: #777; }
@@ -605,6 +606,15 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
 
     // POS SYNC
     let lastRenderedJson = "";
+    function escapeHtml(str) {
+        if (str == null) return '';
+        return String(str)
+            .replace(/&/g,'&amp;')
+            .replace(/</g,'&lt;')
+            .replace(/>/g,'&gt;')
+            .replace(/"/g,'&quot;')
+            .replace(/'/g,'&#39;');
+    }
     function updateDisplay() {
         const cartState = JSON.parse(localStorage.getItem('pos_cart_state') || '{"cart":[], "globalDiscountPct":0}');
         const lastPayment = JSON.parse(localStorage.getItem('pos_last_payment') || 'null');
@@ -634,14 +644,19 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
             const lineTotal = item.price * item.qty * (1 - (item.discountPct || 0) / 100);
             subtotal += lineTotal; totalQty += item.qty;
             let row = listContainer.querySelector(`.item-row[data-id="${item.id}"]`);
+            const noteHtml = item.note ? `<span class="item-note">${escapeHtml(item.note)}</span>` : '';
             if (row) {
                 row.querySelector('.item-qty').innerText = item.qty + 'x';
                 row.querySelector('.item-subtotal').innerText = '$' + lineTotal.toFixed(2);
+                const detailsEl = row.querySelector('.item-details');
+                if (detailsEl) {
+                    detailsEl.innerHTML = `<span class="item-name">${escapeHtml(item.name)}</span><span class="item-price">$${parseFloat(item.price).toFixed(2)} c/u</span>${noteHtml}`;
+                }
             } else {
                 const div = document.createElement('div');
                 div.className = 'item-row new-item';
                 div.dataset.id = item.id;
-                div.innerHTML = `<div class="item-info"><img src="image.php?code=${item.id}" class="product-img-mini" onerror="this.src='assets/img/no-image.png'"><span class="item-qty">${item.qty}x</span><div class="item-details"><span class="item-name">${item.name}</span><span class="item-price">$${parseFloat(item.price).toFixed(2)} c/u</span></div></div><div class="item-subtotal">$${lineTotal.toFixed(2)}</div>`;
+                div.innerHTML = `<div class="item-info"><img src="image.php?code=${item.id}" class="product-img-mini" onerror="this.src='assets/img/no-image.png'"><span class="item-qty">${item.qty}x</span><div class="item-details"><span class="item-name">${escapeHtml(item.name)}</span><span class="item-price">$${parseFloat(item.price).toFixed(2)} c/u</span>${noteHtml}</div></div><div class="item-subtotal">$${lineTotal.toFixed(2)}</div>`;
                 listContainer.appendChild(div);
             }
         });

@@ -124,8 +124,10 @@ $mDash = bm_calcular($pdo, [
     'limite_top'   => 5,
 ]);
 
-$ventasPeriodo  = $mDash[BM_VENTAS]['total'];
+$ventasPeriodo  = $mDash[BM_VENTAS]['total'] - $mDash[BM_VENTAS]['devoluciones']['valor'];
 $gananciaPeriodo = $mDash[BM_VENTAS]['ganancia_bruta'];
+$costoMercanciasPeriodo = $mDash[BM_VENTAS]['costo'];
+$pctCostoMercancias = $ventasPeriodo > 0 ? ($costoMercanciasPeriodo / $ventasPeriodo) * 100 : 0.0;
 
 // Métodos de pago en formato array de filas
 $pagosData = [];
@@ -1070,7 +1072,7 @@ HTML;
 
             <h6 class="text-uppercase text-muted fw-bold fs-7 mb-3 ps-1"><i class="fas fa-chart-line me-2"></i> Rendimiento del Periodo</h6>
             <div class="row g-4 mb-4">
-                <div class="col-md-3">
+                <div class="col-6 col-md-4 col-xl-2">
                     <div class="card card-stat kpi-ganancia text-white h-100 shadow-sm">
                         <div class="card-body">
                             <h6 class="text-uppercase fw-bold small opacity-75">Venta Total</h6>
@@ -1079,7 +1081,7 @@ HTML;
                         </div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-4 col-xl-2">
                     <div class="card card-stat kpi-ganancia text-white h-100 shadow-sm">
                         <div class="card-body">
                             <h6 class="text-uppercase fw-bold small opacity-75">Ganancia Neta</h6>
@@ -1088,7 +1090,7 @@ HTML;
                         </div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-4 col-xl-2">
                     <div class="card card-stat kpi-ticket text-white h-100 shadow-sm">
                         <div class="card-body">
                             <h6 class="text-uppercase fw-bold small opacity-75">Ticket Promedio</h6>
@@ -1097,12 +1099,22 @@ HTML;
                         </div>
                     </div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-6 col-md-4 col-xl-2">
                     <div class="card card-stat kpi-trans text-white h-100 shadow-sm">
                         <div class="card-body">
                             <h6 class="text-uppercase fw-bold small opacity-75">Operaciones</h6>
                             <h2 class="display-6 fw-bold mb-0"><?php echo number_format($totalTransacciones); ?></h2>
                             <i class="fas fa-shopping-cart icon-stat text-white"></i>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-4 col-xl-2">
+                    <div class="card card-stat kpi-costo h-100 shadow-sm">
+                        <div class="card-body">
+                            <h6 class="text-muted fw-bold small text-uppercase">Costo Mercancías</h6>
+                            <h2 class="display-6 fw-bold mb-0">$<?php echo number_format($costoMercanciasPeriodo, 0); ?></h2>
+                            <div class="small text-muted mt-1"><?php echo number_format($pctCostoMercancias, 1); ?>% de ventas</div>
+                            <i class="fas fa-boxes-stacked icon-stat text-secondary"></i>
                         </div>
                     </div>
                 </div>

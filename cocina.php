@@ -382,10 +382,10 @@
                 }
 
                 hasVisibleItems = true;
-                let nota = i.note ? `<span class="item-note"><i class="fas fa-comment-alt"></i> ${i.note}</span>` : '';
+                let nota = i.note ? `<span class="item-note"><i class="fas fa-comment-alt"></i> ${escapeHtml(i.note)}</span>` : '';
                 itemsHtml += `
                     <div class="item-row">
-                        <span class="qty-badge">${i.qty}</span> ${i.name} 
+                        <span class="qty-badge">${i.qty}</span> ${escapeHtml(i.name)} 
                         ${nota}
                     </div>`;
             });
@@ -540,7 +540,10 @@
 
                 // Resumen Items
                 const items = JSON.parse(c.items_json || '[]');
-                const itemsSummary = items.map(i => `${i.qty}x ${i.name}`).join(', ');
+                const itemsSummary = items.map(i => {
+                    const base = `${i.qty}x ${escapeHtml(i.name)}`;
+                    return i.note ? `${base} (${escapeHtml(i.note)})` : base;
+                }).join(', ');
 
                 tbody.innerHTML += `
                     <tr>
@@ -669,4 +672,3 @@
 </script>
 </body>
 </html>
-

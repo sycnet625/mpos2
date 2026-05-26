@@ -1,8 +1,8 @@
 <?php
-// ARCHIVO: /var/www/palweb/api/pos_refund.php
-// VERSIÓN: 4.5 - FINAL (Devoluciones con Kardex y Ajuste de Caja)
+// ARCHIVO: pos_refund.php
+// VERSIÓN: 5.0 — Unificado: siempre crea ticket de devolución NUEVO. La venta original queda INTACTA.
+// Soporta devolución por ítem (id) o ticket completo (ticket_id).
 
-// 1. Configuración de Errores
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 error_reporting(E_ALL);
@@ -13,25 +13,20 @@ pos_security_bootstrap_session();
 require_once 'db.php';
 require_once 'pos_audit.php';
 
-// Verificar motor de inventario
 $kardexAvailable = false;
 if (file_exists('kardex_engine.php')) {
     require_once 'kardex_engine.php';
-    if (class_exists('KardexEngine')) {
-        $kardexAvailable = true;
-    }
+    if (class_exists('KardexEngine')) $kardexAvailable = true;
 }
 
 try {
     pos_security_enforce_session(false);
 
-    // 3. Obtener Datos
     $input = pos_security_json_input();
     pos_security_require_csrf($input);
-
     if (!$input) throw new Exception("Datos de entrada inválidos");
 
-    // 3. Autorización con credenciales del sistema
+    // ── Autenticación con credenciales del sistema ────────────────────────────
     $authUser = pos_security_clean_text($input['auth_user'] ?? '', 100);
     $authPass = (string)($input['auth_pass'] ?? '');
     if ($authUser === '' || $authPass === '') {
@@ -50,151 +45,210 @@ try {
     if ($authRole === 'cajero') {
         throw new Exception("Usuario del sistema sin permisos para devoluciones");
     }
+    $usuarioNombre = (string)($authRow['nombre'] ?? $authUser);
 
-    // Determinar si es devolución por Ítem o por Ticket completo
     $idDetalle = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
     $idTicket  = isset($input['ticket_id']) && is_numeric($input['ticket_id']) ? (int)$input['ticket_id'] : 0;
-
     if ($idDetalle <= 0 && $idTicket <= 0) {
         throw new Exception("Se requiere ID de detalle o ID de ticket");
     }
 
-    // 4. Cargar Configuración (Almacén/Sucursal)
+    // ── Configuración local ───────────────────────────────────────────────────
     $configFile = __DIR__ . '/pos.cfg';
-    $config = ["id_almacen" => 1, "id_sucursal" => 1];
+    $config = ["id_almacen" => 1, "id_sucursal" => 1, "id_empresa" => 1];
     if (file_exists($configFile)) {
         $loaded = json_decode(file_get_contents($configFile), true);
         if ($loaded) $config = array_merge($config, $loaded);
     }
 
-    // INICIAR TRANSACCIÓN
+    // ── Migración silenciosa: id_venta_original (fuera de transacción) ────────
+    try {
+        $pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN id_venta_original INT NULL, ADD KEY idx_vcab_orig (id_venta_original)");
+    } catch (PDOException $ignored) {}
+
     $pdo->beginTransaction();
     $kardex = ($kardexAvailable) ? new KardexEngine($pdo) : null;
-    $usuarioNombre = (string)($authRow['nombre'] ?? $authUser);
 
-    // =================================================================================
-    // CASO A: DEVOLUCIÓN DE UN SOLO ÍTEM (Desde el detalle del modal)
-    // =================================================================================
+    // =========================================================================
+    // CASO A: DEVOLUCIÓN DE UN SOLO ÍTEM
+    // =========================================================================
     if ($idDetalle > 0) {
-        // Obtener info del detalle y su cabecera
-        $sql = "SELECT d.*, v.id_almacen, v.id_sucursal, v.id as id_ticket, p.es_servicio 
-                FROM ventas_detalle d 
+        $sql = "SELECT d.*, v.id_almacen, v.id_sucursal, v.id as id_ticket, v.id_caja, v.id_sesion_caja, p.es_servicio, d.reembolsado
+                FROM ventas_detalle d
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                 LEFT JOIN productos p ON d.id_producto = p.codigo
                 WHERE d.id = ? FOR UPDATE";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$idDetalle]);
         $item = $stmt->fetch(PDO::FETCH_ASSOC);
-
         if (!$item) throw new Exception("El producto de la venta no existe.");
-        
-        // Validación: No devolver lo que ya está en negativo
         if (floatval($item['cantidad']) < 0) {
+            throw new Exception("Este ítem ya está registrado en negativo (devuelto por sistema anterior).");
+        }
+        if (!empty($item['reembolsado'])) {
             throw new Exception("Este ítem ya fue devuelto anteriormente.");
         }
 
-        // 1. Revertir Stock (Si no es servicio)
-        if ($kardex && $item['es_servicio'] == 0) {
+        $montoDevolver = floatval($item['cantidad']) * floatval($item['precio']);
+
+        // 1. Marcar detalle original como reembolsado (bandera de auditoría, no altera totales)
+        $pdo->prepare("UPDATE ventas_detalle SET reembolsado = 1 WHERE id = ?")
+            ->execute([$idDetalle]);
+
+        // 2. Crear cabecera de devolución
+        $uuid = uniqid('ref_');
+        $sqlHead = "INSERT INTO ventas_cabecera
+            (uuid_venta, fecha, total, metodo_pago, id_sucursal, id_empresa, id_almacen,
+             tipo_servicio, cliente_nombre, id_caja, id_sesion_caja, id_venta_original,
+             motivo_anulacion, anulada_por, anulada_en, canal_origen)
+            VALUES (?, NOW(), ?, 'Devolución', ?, ?, ?, 'devolucion', 'DEVOLUCIÓN', ?, ?, ?, 'Devolución ítem', ?, NOW(), 'POS')";
+        $stmtHead = $pdo->prepare($sqlHead);
+        $stmtHead->execute([
+            $uuid,
+            -1 * abs($montoDevolver),
+            $item['id_sucursal'] ?: $config['id_sucursal'],
+            $config['id_empresa'],
+            $item['id_almacen'] ?: $config['id_almacen'],
+            $item['id_caja'],
+            $item['id_sesion_caja'],
+            $item['id_ticket'],
+            $usuarioNombre
+        ]);
+        $newHeadId = $pdo->lastInsertId();
+
+        // 3. Crear detalle negativo en la devolución
+        $sqlDet = "INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto) VALUES (?, ?, ?, ?, ?)";
+        $stmtDet = $pdo->prepare($sqlDet);
+        $stmtDet->execute([
+            $newHeadId,
+            $item['id_producto'],
+            -1 * abs(floatval($item['cantidad'])),
+            $item['precio'],
+            'DEV: ' . ($item['nombre_producto'] ?? $item['id_producto'])
+        ]);
+
+        // 4. Revertir stock
+        if ($kardex && intval($item['es_servicio']) === 0) {
             $kardex->registrarMovimiento(
                 $pdo,
                 $item['id_producto'],
                 $item['id_almacen'] ?: $config['id_almacen'],
-                floatval($item['cantidad']), // Cantidad POSITIVA = Entrada al almacén
+                floatval($item['cantidad']),
                 'DEVOLUCION',
-                "Devolución Venta #{$item['id_ticket']}",
+                "Devolución ítem #{$newHeadId} → Venta #{$item['id_ticket']}",
                 null,
                 $item['id_sucursal'] ?: $config['id_sucursal'],
                 date('Y-m-d H:i:s')
             );
         }
 
-        // 2. Actualizar Detalle (Marcar negativo para que no sume)
-        // Convertimos la cantidad y el precio a negativo visualmente o solo cantidad
-        $sqlUpdateDet = "UPDATE ventas_detalle SET cantidad = -ABS(cantidad), nombre_producto = CONCAT(nombre_producto, ' (DEV)') WHERE id = ?";
-        $stmtUpd = $pdo->prepare($sqlUpdateDet);
-        $stmtUpd->execute([$idDetalle]);
+        $pdo->commit();
 
-        // 3. Actualizar Cabecera (Restar del total)
-        $montoRestar = floatval($item['cantidad']) * floatval($item['precio']);
-        $sqlUpdateCab = "UPDATE ventas_cabecera SET total = total - ? WHERE id = ?";
-        $stmtUpdCab = $pdo->prepare($sqlUpdateCab);
-        $stmtUpdCab->execute([$montoRestar, $item['id_ticket']]);
+        log_audit($pdo, AUDIT_DEVOLUCIÓN_ITEM, $usuarioNombre, [
+            'id_detalle_original' => $idDetalle,
+            'id_venta_original'   => $item['id_ticket'],
+            'id_devolucion'       => $newHeadId,
+            'producto'            => $item['nombre_producto'],
+            'codigo'              => $item['id_producto'],
+            'cantidad'            => floatval($item['cantidad']),
+            'precio'              => floatval($item['precio']),
+            'monto'               => $montoDevolver,
+        ]);
+
+        echo json_encode(['status' => 'success', 'msg' => 'Devolución procesada correctamente', 'id_devolucion' => $newHeadId]);
     }
 
-    // =================================================================================
-    // CASO B: DEVOLUCIÓN DE TICKET COMPLETO (Opción "Devolver Todo")
-    // =================================================================================
+    // =========================================================================
+    // CASO B: DEVOLUCIÓN DE TICKET COMPLETO
+    // =========================================================================
     elseif ($idTicket > 0) {
-        // Obtener Cabecera
         $stmtCab = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ? FOR UPDATE");
         $stmtCab->execute([$idTicket]);
         $venta = $stmtCab->fetch(PDO::FETCH_ASSOC);
-
         if (!$venta) throw new Exception("Venta no encontrada");
-        if (floatval($venta['total']) < 0) throw new Exception("Esta venta ya está anulada.");
+        if (floatval($venta['total']) < 0) {
+            throw new Exception("Esta venta ya fue anulada o devuelta (total negativo).");
+        }
 
-        // Obtener Detalles
-        $stmtDet = $pdo->prepare("SELECT d.*, p.es_servicio FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE id_venta_cabecera = ?");
+        // Verificar que no exista ya una devolución completa para esta venta
+        $stmtDup = $pdo->prepare("SELECT id FROM ventas_cabecera WHERE id_venta_original = ? LIMIT 1");
+        $stmtDup->execute([$idTicket]);
+        if ($stmtDup->fetchColumn()) {
+            throw new Exception("Esta venta ya tiene un ticket de devolución completo registrado.");
+        }
+
+        $stmtDet = $pdo->prepare("SELECT d.*, p.es_servicio FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo WHERE d.id_venta_cabecera = ?");
         $stmtDet->execute([$idTicket]);
         $detalles = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
+        // 1. Marcar todos los detalles originales como reembolsados
+        $pdo->prepare("UPDATE ventas_detalle SET reembolsado = 1 WHERE id_venta_cabecera = ? AND cantidad > 0")
+            ->execute([$idTicket]);
+
+        // 2. Crear cabecera de devolución
+        $uuid = uniqid('ref_');
+        $sqlHead = "INSERT INTO ventas_cabecera
+            (uuid_venta, fecha, total, metodo_pago, id_sucursal, id_empresa, id_almacen,
+             tipo_servicio, cliente_nombre, id_caja, id_sesion_caja, id_venta_original,
+             motivo_anulacion, anulada_por, anulada_en, canal_origen)
+            VALUES (?, NOW(), ?, 'Devolución', ?, ?, ?, 'devolucion', 'DEVOLUCIÓN', ?, ?, ?, 'Devolución ticket completo', ?, NOW(), 'POS')";
+        $stmtHead = $pdo->prepare($sqlHead);
+        $stmtHead->execute([
+            $uuid,
+            -1 * abs(floatval($venta['total'])),
+            $venta['id_sucursal'] ?: $config['id_sucursal'],
+            $config['id_empresa'],
+            $venta['id_almacen'] ?: $config['id_almacen'],
+            $venta['id_caja'],
+            $venta['id_sesion_caja'],
+            $idTicket,
+            $usuarioNombre
+        ]);
+        $newHeadId = $pdo->lastInsertId();
+
+        // 3. Crear detalles negativos y Kardex
         foreach ($detalles as $item) {
-            // Solo procesar si no ha sido devuelto ya individualmente
             if (floatval($item['cantidad']) > 0) {
-                // 1. Devolver al Kardex
-                if ($kardex && $item['es_servicio'] == 0) {
+                $pdo->prepare("INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto) VALUES (?, ?, ?, ?, ?)")
+                    ->execute([
+                        $newHeadId,
+                        $item['id_producto'],
+                        -1 * abs(floatval($item['cantidad'])),
+                        $item['precio'],
+                        'DEV: ' . ($item['nombre_producto'] ?? $item['id_producto'])
+                    ]);
+
+                if ($kardex && intval($item['es_servicio']) === 0) {
                     $kardex->registrarMovimiento(
                         $pdo,
                         $item['id_producto'],
                         $venta['id_almacen'] ?: $config['id_almacen'],
                         floatval($item['cantidad']),
                         'DEVOLUCION',
-                        "Anulación Venta #$idTicket",
+                        "Devolución ticket #{$newHeadId} → Venta #{$idTicket}",
                         null,
                         $venta['id_sucursal'] ?: $config['id_sucursal'],
                         date('Y-m-d H:i:s')
                     );
                 }
-                
-                // 2. Marcar detalle como devuelto
-                $pdo->prepare("UPDATE ventas_detalle SET cantidad = -ABS(cantidad) WHERE id = ?")->execute([$item['id']]);
             }
         }
 
-        // 3. Marcar Cabecera como Devuelta (Total Negativo)
-        $pdo->prepare("UPDATE ventas_cabecera SET total = -ABS(total), metodo_pago = CONCAT(metodo_pago, ' (ANULADO)') WHERE id = ?")->execute([$idTicket]);
-    }
+        $pdo->commit();
 
-    $pdo->commit();
-
-    // ── Audit trail (fuera de transacción) ────────────────────────────────────
-    if ($idDetalle > 0) {
-        log_audit($pdo, AUDIT_DEVOLUCION_ITEM, $usuarioNombre, [
-            'id_detalle'  => $idDetalle,
-            'id_venta'    => $item['id_ticket'],
-            'producto'    => $item['nombre_producto'],
-            'codigo'      => $item['id_producto'],
-            'cantidad'    => floatval($item['cantidad']),
-            'precio'      => floatval($item['precio']),
-            'monto'       => $montoRestar,
+        log_audit($pdo, AUDIT_DEVOLUCIÓN_TICKET, $usuarioNombre, [
+            'id_venta_original' => $idTicket,
+            'id_devolucion'     => $newHeadId,
+            'total_original'    => floatval($venta['total']),
+            'cliente'           => $venta['cliente_nombre'] ?? '',
+            'metodo_pago'       => $venta['metodo_pago'],
+            'items_count'       => count($detalles),
         ]);
-    } elseif ($idTicket > 0) {
-        log_audit($pdo, AUDIT_DEVOLUCION_TICKET, $usuarioNombre, [
-            'id_venta'    => $idTicket,
-            'total'       => floatval($venta['total']),
-            'cliente'     => $venta['cliente_nombre'] ?? '',
-            'metodo_pago' => $venta['metodo_pago'],
-            'items_count' => count($detalles),
-        ]);
-    }
 
-    echo json_encode(['status' => 'success', 'msg' => 'Devolución procesada correctamente']);
+        echo json_encode(['status' => 'success', 'msg' => 'Ticket devuelto correctamente', 'id_devolucion' => $newHeadId]);
+    }
 
 } catch (Exception $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-    // Devolver error en JSON limpio
+    if ($pdo->inTransaction()) $pdo->rollBack();
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
-?>

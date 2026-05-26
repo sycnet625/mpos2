@@ -41,7 +41,7 @@ class ComprobanteGenerator {
         // Obtener detalles de la venta
         $stmtDetalles = $this->pdo->prepare("
             SELECT d.*,
-                   COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual
+                   COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual
             FROM ventas_detalle d
             LEFT JOIN productos p ON d.id_producto = p.codigo
             LEFT JOIN productos_precios_sucursal ps
@@ -275,7 +275,7 @@ class ComprobanteGenerator {
         $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
         if (!$venta) throw new Exception("Venta no encontrada");
 
-        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
         $stmtDet->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
         $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
@@ -367,6 +367,33 @@ class ComprobanteGenerator {
      */
     public function generarFacturaHTML($idVenta, float $markupPct = 0.0, string $priceView = 'venta') {
         $baseDir = dirname(__DIR__);
+        $oldGet = $_GET;
+        $oldServer = $_SERVER;
+        $pdo = $this->pdo;
+        $config = $this->config;
+
+        $_GET = [
+            'id' => (int)$idVenta,
+            'format' => 'a4',
+            'pdf_export' => '1',
+            'price_view' => $priceView,
+            'markup_pct' => (string)$markupPct,
+        ];
+        $_SERVER['REQUEST_URI'] = '/ticket_to_invoice.php?id=' . (int)$idVenta . '&format=a4&pdf_export=1';
+
+        ob_start();
+        try {
+            include $baseDir . '/ticket_to_invoice.php';
+            return ob_get_clean();
+        } catch (Throwable $e) {
+            ob_end_clean();
+            throw $e;
+        } finally {
+            $_GET = $oldGet;
+            $_SERVER = $oldServer;
+        }
+
+        $baseDir = dirname(__DIR__);
         $markupPct = max(-99.99, round($markupPct, 2));
         $markupFactor = 1 + ($markupPct / 100);
         $priceView = in_array($priceView, ['venta', 'mayorista'], true) ? $priceView : 'venta';
@@ -374,7 +401,7 @@ class ComprobanteGenerator {
         $stmtVenta->execute([$idVenta]);
         $venta = $stmtVenta->fetch(PDO::FETCH_ASSOC);
         
-        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, p.unidad_medida, COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
+        $stmtDet = $this->pdo->prepare("SELECT d.*, p.nombre, p.unidad_medida, COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ? WHERE d.id_venta_cabecera = ?");
         $stmtDet->execute([(int)($venta['id_sucursal'] ?? 0), $idVenta]);
         $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 

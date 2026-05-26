@@ -553,6 +553,7 @@ function bot_validate_bridge_for_campaign(): array {
     $bridgeState = 'unknown';
     $bridgeMsg = 'Sin información';
     $sessionOk = false;
+    $updatedAt = 0;
     if (is_file($statusFile)) {
         $raw = @file_get_contents($statusFile);
         $data = json_decode((string)$raw, true);
@@ -564,17 +565,22 @@ function bot_validate_bridge_for_campaign(): array {
             if ($updatedAt > 0 && (time() - $updatedAt) > 45) {
                 $bridgeState = 'stale';
                 $bridgeMsg = 'Estado desactualizado (>45s)';
-                $sessionOk = false;
             }
         }
     }
     $readyStates = ['ready', 'connected', 'authenticated'];
+    $isStale = ($bridgeState === 'stale');
+    $bridgeHealthy = $running && (
+        in_array($bridgeState, $readyStates, true)
+        || ($isStale && $sessionOk)
+    );
     return [
-        'ok' => $running && in_array($bridgeState, $readyStates, true) && $sessionOk,
+        'ok' => $bridgeHealthy,
         'running' => $running,
         'state' => $bridgeState,
         'msg' => $bridgeMsg,
-        'session_ok' => $sessionOk
+        'session_ok' => $sessionOk,
+        'updated_at' => $updatedAt
     ];
 }
 

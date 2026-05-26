@@ -54,9 +54,9 @@ try {
     ]);
 
     // KPIs principales
-    $kpiSales  = $m[BM_VENTAS]['total'];
-    $kpiProfit = $m[BM_VENTAS]['ganancia_bruta'];
-    $kpiMargin = $m[BM_VENTAS]['margen_bruto_pct'];
+    $kpiSales  = $m[BM_VENTAS]['total'] - $m[BM_VENTAS]['devoluciones']['valor'];
+    $kpiProfit = $m[BM_VENTAS]['ganancia_bruta'] - ($m[BM_VENTAS]['devoluciones']['valor'] - $m[BM_VENTAS]['devoluciones']['valor_costo']);
+    $kpiMargin = $kpiSales > 0 ? ($kpiProfit / $kpiSales) * 100 : 0.0;
 
     // Construir serie de 30 días (incluye días sin actividad como ceros)
     $dates = [];

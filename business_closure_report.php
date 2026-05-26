@@ -1,5 +1,13 @@
 <?php
 // ARCHIVO: business_closure_report.php
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Style\Border;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Style\Font;
+use PhpOffice\PhpSpreadsheet\Style\NumberFormat;
+
 session_start();
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
@@ -10,6 +18,39 @@ require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'accounting_helpers.php';
 require_once 'business_metrics.php';
+
+$autoloadCandidates = [
+    __DIR__ . '/vendor/autoload.php',
+    __DIR__ . '/marinero/vendor/autoload.php',
+];
+$autoloadFile = null;
+foreach ($autoloadCandidates as $candidate) {
+    if (file_exists($candidate)) {
+        $autoloadFile = $candidate;
+        break;
+    }
+}
+if ($autoloadFile === null) {
+    die('Error: no se encontró vendor/autoload.php para exportar a Excel.');
+}
+require_once $autoloadFile;
+
+function business_closure_family_label(string $name): string
+{
+    $name = trim(preg_replace('/\s+/u', ' ', $name));
+    if ($name === '') {
+        return 'SIN FAMILIA';
+    }
+
+    $parts = preg_split('/\s+/u', $name);
+    $family = trim((string)($parts[0] ?? ''));
+    $family = preg_replace('/^[^\pL\pN]+|[^\pL\pN]+$/u', '', $family);
+    if ($family === '') {
+        return 'SIN FAMILIA';
+    }
+
+    return function_exists('mb_strtoupper') ? mb_strtoupper($family, 'UTF-8') : strtoupper($family);
+}
 
 // --- 0. AUTO-MIGRACIÓN: CREAR TABLA DE REPORTES SI NO EXISTE ---
 try {
@@ -100,6 +141,8 @@ $prev30_fin = date('Y-m-d', strtotime($fecha_fin . ' - 30 days'));
 $next30_ini = date('Y-m-d', strtotime($fecha_inicio . ' + 30 days'));
 $next30_fin = date('Y-m-d', strtotime($fecha_fin . ' + 30 days'));
 
+$productSummary = [];
+
 function business_report_ticket_session_id(array $ticket): int {
     $sessionId = intval($ticket['id_sesion_caja'] ?? 0);
     if ($sessionId > 0) {
@@ -119,11 +162,11 @@ try {
         'secciones'    => [BM_VENTAS, BM_GASTOS, BM_SERIES],
     ]);
 
-    $venta_total          = $mMetrics[BM_VENTAS]['total'];
+    $venta_total          = $mMetrics[BM_VENTAS]['total'] - $mMetrics[BM_VENTAS]['devoluciones']['valor'];
     $costo_total          = $mMetrics[BM_VENTAS]['costo'];
     $total_transacciones  = $mMetrics[BM_VENTAS]['count_tickets'];
     $ganancia_bruta       = $mMetrics[BM_VENTAS]['ganancia_bruta'];
-    $pct_margen_bruto     = $mMetrics[BM_VENTAS]['margen_bruto_pct'];
+    $pct_margen_bruto     = $venta_total > 0 ? ($ganancia_bruta / $venta_total) * 100 : 0.0;
     $gastos_totales       = $mMetrics[BM_GASTOS]['total'];
 
     // Transferencias: extraer del desglose de métodos de pago
@@ -256,9 +299,384 @@ try {
                 $sessionSummary[$sessionId]['estado'] = $row['estado'] ?? '';
             }
         }
+
+        $stmt = $pdo->prepare(
+            "SELECT
+                p.nombre,
+                p.categoria,
+                SUM(vd.cantidad) AS total_qty,
+                SUM(vd.cantidad * vd.precio) AS total_val
+             FROM ventas_detalle vd
+             JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
+             LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+             JOIN productos p ON vd.id_producto = p.codigo
+             WHERE v.id_sucursal = ?
+               AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+               AND " . ventas_reales_where_clause('v') . "
+             GROUP BY p.codigo, p.nombre, p.categoria
+             ORDER BY p.categoria ASC, p.nombre ASC"
+        );
+        $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+        $productSummary = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
 } catch (Exception $e) { $error = $e->getMessage(); }
+
+if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
+    $exportFileName = sprintf(
+        'cierre_negocio_%s_%s.xlsx',
+        str_replace('-', '', $fecha_inicio),
+        str_replace('-', '', $fecha_fin)
+    );
+
+    $writeCard = function ($sheet, string $col, int $row, string $title, string $value, string $sub, string $fillRgb, string $fontRgb) {
+        $range = sprintf('%s%d:%s%d', $col, $row, chr(ord($col) + 1), $row + 2);
+        $sheet->mergeCells(sprintf('%s%d:%s%d', $col, $row, chr(ord($col) + 1), $row));
+        $sheet->mergeCells(sprintf('%s%d:%s%d', $col, $row + 1, chr(ord($col) + 1), $row + 1));
+        $sheet->mergeCells(sprintf('%s%d:%s%d', $col, $row + 2, chr(ord($col) + 1), $row + 2));
+        $sheet->setCellValue($col . $row, $title);
+        $sheet->setCellValue($col . ($row + 1), $value);
+        $sheet->setCellValue($col . ($row + 2), $sub);
+        $sheet->getStyle($range)->applyFromArray([
+            'fill' => [
+                'fillType' => Fill::FILL_SOLID,
+                'startColor' => ['rgb' => $fillRgb],
+            ],
+            'borders' => [
+                'allBorders' => [
+                    'borderStyle' => Border::BORDER_THIN,
+                    'color' => ['rgb' => 'D9E2EC'],
+                ],
+            ],
+            'alignment' => [
+                'horizontal' => Alignment::HORIZONTAL_CENTER,
+                'vertical' => Alignment::VERTICAL_CENTER,
+                'wrapText' => true,
+            ],
+        ]);
+        $sheet->getStyle($col . $row)->applyFromArray([
+            'font' => [
+                'bold' => true,
+                'size' => 10,
+                'color' => ['rgb' => $fontRgb],
+            ],
+        ]);
+        $sheet->getStyle($col . ($row + 1))->applyFromArray([
+            'font' => [
+                'bold' => true,
+                'size' => 18,
+                'color' => ['rgb' => $fontRgb],
+            ],
+        ]);
+        $sheet->getStyle($col . ($row + 2))->applyFromArray([
+            'font' => [
+                'size' => 9,
+                'color' => ['rgb' => $fontRgb],
+            ],
+        ]);
+    };
+
+    $currencyFmt = '$#,##0.00';
+
+    $spreadsheet = new Spreadsheet();
+    $spreadsheet->removeSheetByIndex(0);
+    $spreadsheet->getProperties()
+        ->setCreator(config_loader_system_name())
+        ->setTitle('Cierre de Negocio')
+        ->setSubject('Reporte de Cierre de Negocio')
+        ->setDescription('Exportacion premium del cierre de negocio con KPIs, detalle de operaciones y resumen de productos vendidos.');
+
+    // Hoja 1: Dashboard KPI
+    $sheet = $spreadsheet->createSheet(0);
+    $sheet->setTitle('Dashboard');
+    $sheet->freezePane('A9');
+    foreach (range('A', 'J') as $col) {
+        $sheet->getColumnDimension($col)->setWidth(15);
+    }
+    $sheet->mergeCells('A1:J1');
+    $sheet->mergeCells('A2:J2');
+    $sheet->setCellValue('A1', 'CIERRE DE NEGOCIO');
+    $sheet->setCellValue('A2', sprintf(
+        'Sucursal #%d | Periodo %s al %s',
+        $id_sucursal,
+        date('d/m/Y', strtotime($fecha_inicio)),
+        date('d/m/Y', strtotime($fecha_fin))
+    ));
+    $sheet->getStyle('A1:J2')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0D6EFD']],
+        'font' => ['color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+    ]);
+    $sheet->getStyle('A1')->applyFromArray(['font' => ['bold' => true, 'size' => 18]]);
+    $sheet->getStyle('A2')->applyFromArray(['font' => ['size' => 11, 'italic' => true]]);
+    $sheet->getRowDimension(1)->setRowHeight(24);
+    $sheet->getRowDimension(2)->setRowHeight(20);
+    $sheet->getRowDimension(4)->setRowHeight(20);
+    $sheet->getRowDimension(5)->setRowHeight(28);
+    $sheet->getRowDimension(6)->setRowHeight(18);
+    $sheet->getRowDimension(7)->setRowHeight(20);
+    $sheet->getRowDimension(8)->setRowHeight(20);
+    $writeCard($sheet, 'A', 4, 'VENTA TOTAL', '$' . number_format($venta_total, 2), 'Ingresos brutos del periodo', 'EEF2FF', '1E1B4B');
+    $writeCard($sheet, 'C', 4, 'GANANCIA BRUTA', '$' . number_format($ganancia_bruta, 2), number_format($pct_margen_bruto, 1) . '% sobre ventas', 'ECFDF3', '14532D');
+    $writeCard($sheet, 'E', 4, 'GASTOS OPERATIVOS', '$' . number_format($gastos_totales, 2), 'Total de gastos del periodo', 'FEF2F2', '7F1D1D');
+    $writeCard($sheet, 'G', 4, 'GANANCIA LIMPIA', '$' . number_format($ganancia_limpia, 2), 'Restando reserva (' . $pct_reserva . '%): -$' . number_format($reserva_monto, 2), 'FFF3CD', '000000');
+    $writeCard($sheet, 'I', 4, 'COSTO MERCANCÍAS', '$' . number_format($costo_total, 2), number_format($venta_total > 0 ? (($costo_total / $venta_total) * 100) : 0, 1) . '% de ventas', 'F8FAFC', '1E293B');
+
+    $sheet->setCellValue('A9', 'Método de Pago');
+    $sheet->setCellValue('B9', 'Monto');
+    $sheet->setCellValue('D9', 'Fecha');
+    $sheet->setCellValue('E9', 'Ventas');
+    $sheet->setCellValue('F9', 'Transf.');
+    $sheet->setCellValue('G9', 'Costo Merc.');
+    $sheet->setCellValue('H9', 'Ganancia Bruta');
+    $sheet->setCellValue('I9', 'Gastos');
+    $sheet->setCellValue('J9', 'Neto');
+    $sheet->getStyle('A9:J9')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '212529']],
+        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+    ]);
+    $sheet->fromArray([], null, 'A10');
+
+    $payRow = 10;
+    foreach ($payments as $pago) {
+        $sheet->setCellValue('A' . $payRow, $pago['metodo_pago']);
+        $sheet->setCellValue('B' . $payRow, (float)$pago['total']);
+        $sheet->getStyle('B' . $payRow)->getNumberFormat()->setFormatCode($currencyFmt);
+        $payRow++;
+    }
+    $sheet->setCellValue('A' . $payRow, 'TOTAL PAGOS');
+    $sheet->setCellValue('B' . $payRow, array_sum(array_column($payments, 'total')));
+    $sheet->getStyle('A' . $payRow . ':B' . $payRow)->applyFromArray([
+        'font' => ['bold' => true],
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E9ECEF']],
+    ]);
+    $sheet->getStyle('B10:B' . $payRow)->getNumberFormat()->setFormatCode($currencyFmt);
+
+    // Hoja 2: Detalle de operaciones diario
+    $ops = $spreadsheet->createSheet(1);
+    $ops->setTitle('Operaciones');
+    $ops->freezePane('A5');
+    foreach (range('A', 'G') as $col) {
+        $ops->getColumnDimension($col)->setWidth(18);
+    }
+    $ops->mergeCells('A1:G1');
+    $ops->mergeCells('A2:G2');
+    $ops->setCellValue('A1', 'DESGLOSE DIARIO DE OPERACIONES');
+    $ops->setCellValue('A2', sprintf('Sucursal #%d | %s al %s', $id_sucursal, date('d/m/Y', strtotime($fecha_inicio)), date('d/m/Y', strtotime($fecha_fin))));
+    $ops->getStyle('A1:G2')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0D6EFD']],
+        'font' => ['color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+    ]);
+    $ops->getStyle('A1')->applyFromArray(['font' => ['bold' => true, 'size' => 16]]);
+    $ops->getStyle('A2')->applyFromArray(['font' => ['size' => 10]]);
+    $ops->setCellValue('A4', 'Fecha');
+    $ops->setCellValue('B4', 'Ventas');
+    $ops->setCellValue('C4', 'Transf.');
+    $ops->setCellValue('D4', 'Costo Merc.');
+    $ops->setCellValue('E4', 'Ganancia Bruta');
+    $ops->setCellValue('F4', 'Gastos');
+    $ops->setCellValue('G4', 'Saldo Neto');
+    $ops->getStyle('A4:G4')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '212529']],
+        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+    ]);
+    $opsRow = 5;
+    foreach ($dailySummary as $row) {
+        $v = (float)$row['total_venta'];
+        $t = (float)$row['total_transferencia'];
+        $c = (float)$row['total_costo'];
+        $e = (float)$row['total_gasto'];
+        $gb = $v - $c;
+        $sn = $gb - $e;
+        $ops->setCellValue('A' . $opsRow, $row['dia']);
+        $ops->setCellValue('B' . $opsRow, $v);
+        $ops->setCellValue('C' . $opsRow, $t);
+        $ops->setCellValue('D' . $opsRow, $c);
+        $ops->setCellValue('E' . $opsRow, $gb);
+        $ops->setCellValue('F' . $opsRow, $e);
+        $ops->setCellValue('G' . $opsRow, $sn);
+        $opsRow++;
+    }
+    $ops->setCellValue('A' . $opsRow, 'TOTALES');
+    $ops->setCellValue('B' . $opsRow, $venta_total);
+    $ops->setCellValue('C' . $opsRow, $total_transferencias);
+    $ops->setCellValue('D' . $opsRow, $costo_total);
+    $ops->setCellValue('E' . $opsRow, $ganancia_bruta);
+    $ops->setCellValue('F' . $opsRow, $gastos_totales);
+    $ops->setCellValue('G' . $opsRow, $ganancia_bruta - $gastos_totales);
+    $ops->getStyle('A' . $opsRow . ':G' . $opsRow)->applyFromArray([
+        'font' => ['bold' => true],
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E9ECEF']],
+    ]);
+    $ops->getStyle('B5:G' . $opsRow)->getNumberFormat()->setFormatCode($currencyFmt);
+
+    // Hoja 3: Resumen de productos
+    $prod = $spreadsheet->createSheet(2);
+    $prod->setTitle('Productos');
+    $prod->freezePane('A5');
+    foreach (range('A', 'E') as $col) {
+        $prod->getColumnDimension($col)->setWidth(22);
+    }
+    $prod->mergeCells('A1:E1');
+    $prod->mergeCells('A2:E2');
+    $prod->setCellValue('A1', 'RESUMEN DE PRODUCTOS VENDIDOS');
+    $prod->setCellValue('A2', sprintf('Sucursal #%d | %s al %s', $id_sucursal, date('d/m/Y', strtotime($fecha_inicio)), date('d/m/Y', strtotime($fecha_fin))));
+    $prod->getStyle('A1:E2')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0F172A']],
+        'font' => ['color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
+    ]);
+    $prod->getStyle('A1')->applyFromArray(['font' => ['bold' => true, 'size' => 16]]);
+    $prod->getStyle('A2')->applyFromArray(['font' => ['size' => 10]]);
+    $headers = ['Categoría', 'Familia', 'Producto', 'Cant. Total', 'Total Recaudado'];
+    foreach ($headers as $idx => $label) {
+        $col = chr(ord('A') + $idx);
+        $prod->setCellValue($col . '4', $label);
+    }
+    $prod->getStyle('A4:E4')->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '212529']],
+        'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+        'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+    ]);
+
+    $currentCategory = null;
+    $currentFamily = null;
+    $categoryQty = 0.0;
+    $categoryVal = 0.0;
+    $familyQty = 0.0;
+    $familyVal = 0.0;
+    $grandQty = 0.0;
+    $grandVal = 0.0;
+    $rowNum = 5;
+
+    $flushFamily = function () use (&$prod, &$rowNum, &$currentFamily, &$familyQty, &$familyVal) {
+        if ($currentFamily === null) {
+            return;
+        }
+        $prod->mergeCells('A' . $rowNum . ':C' . $rowNum);
+        $prod->setCellValue('A' . $rowNum, 'Subtotal familia: ' . $currentFamily);
+        $prod->setCellValue('D' . $rowNum, $familyQty);
+        $prod->setCellValue('E' . $rowNum, $familyVal);
+        $prod->getStyle('A' . $rowNum . ':E' . $rowNum)->applyFromArray([
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'FFF3CD']],
+            'font' => ['bold' => true],
+        ]);
+        $rowNum++;
+        $currentFamily = null;
+        $familyQty = 0.0;
+        $familyVal = 0.0;
+    };
+
+    $flushCategory = function () use (&$prod, &$rowNum, &$currentCategory, &$categoryQty, &$categoryVal) {
+        if ($currentCategory === null) {
+            return;
+        }
+        $prod->mergeCells('A' . $rowNum . ':C' . $rowNum);
+        $prod->setCellValue('A' . $rowNum, 'Subtotal categoría: ' . $currentCategory);
+        $prod->setCellValue('D' . $rowNum, $categoryQty);
+        $prod->setCellValue('E' . $rowNum, $categoryVal);
+        $prod->getStyle('A' . $rowNum . ':E' . $rowNum)->applyFromArray([
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'E9ECEF']],
+            'font' => ['bold' => true],
+        ]);
+        $rowNum++;
+        $currentCategory = null;
+        $categoryQty = 0.0;
+        $categoryVal = 0.0;
+    };
+
+    if (empty($productSummary)) {
+        $prod->mergeCells('A5:E5');
+        $prod->setCellValue('A5', 'No hay productos vendidos en este periodo.');
+        $prod->getStyle('A5:E5')->applyFromArray([
+            'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8F9FA']],
+            'font' => ['italic' => true, 'color' => ['rgb' => '6C757D']],
+            'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+        ]);
+        $rowNum = 6;
+    } else {
+        foreach ($productSummary as $prodRow) {
+            $category = trim((string)($prodRow['categoria'] ?? ''));
+            if ($category === '') {
+                $category = 'SIN CATEGORÍA';
+            }
+            $family = business_closure_family_label((string)($prodRow['nombre'] ?? ''));
+            $qty = (float)$prodRow['total_qty'];
+            $val = (float)$prodRow['total_val'];
+
+            if ($currentCategory !== $category) {
+                $flushFamily();
+                $flushCategory();
+                $currentCategory = $category;
+                $prod->mergeCells('A' . $rowNum . ':E' . $rowNum);
+                $prod->setCellValue('A' . $rowNum, '📂 ' . $currentCategory);
+                $prod->getStyle('A' . $rowNum . ':E' . $rowNum)->applyFromArray([
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => '0F172A']],
+                    'font' => ['bold' => true, 'color' => ['rgb' => 'FFFFFF']],
+                ]);
+                $rowNum++;
+            }
+
+            if ($currentFamily !== $family) {
+                $flushFamily();
+                $currentFamily = $family;
+                $prod->mergeCells('B' . $rowNum . ':E' . $rowNum);
+                $prod->setCellValue('B' . $rowNum, 'Familia: ' . $currentFamily);
+                $prod->getStyle('B' . $rowNum . ':E' . $rowNum)->applyFromArray([
+                    'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'F8F9FA']],
+                    'font' => ['bold' => true, 'color' => ['rgb' => '6C757D']],
+                ]);
+                $rowNum++;
+            }
+
+            $grandQty += $qty;
+            $grandVal += $val;
+            $categoryQty += $qty;
+            $categoryVal += $val;
+            $familyQty += $qty;
+            $familyVal += $val;
+
+            $prod->setCellValue('A' . $rowNum, '');
+            $prod->setCellValue('B' . $rowNum, $currentFamily);
+            $prod->setCellValue('C' . $rowNum, (string)($prodRow['nombre'] ?? ''));
+            $prod->setCellValue('D' . $rowNum, $qty);
+            $prod->setCellValue('E' . $rowNum, $val);
+            $prod->getStyle('D' . $rowNum . ':E' . $rowNum)->getNumberFormat()->setFormatCode($currencyFmt);
+            $rowNum++;
+        }
+    }
+    $flushFamily();
+    $flushCategory();
+    $prod->mergeCells('A' . $rowNum . ':C' . $rowNum);
+    $prod->setCellValue('A' . $rowNum, 'TOTAL GENERAL PRODUCTOS');
+    $prod->setCellValue('D' . $rowNum, $grandQty);
+    $prod->setCellValue('E' . $rowNum, $grandVal);
+    $prod->getStyle('A' . $rowNum . ':E' . $rowNum)->applyFromArray([
+        'fill' => ['fillType' => Fill::FILL_SOLID, 'startColor' => ['rgb' => 'D1E7DD']],
+        'font' => ['bold' => true],
+    ]);
+    $prod->getStyle('D5:E' . $rowNum)->getNumberFormat()->setFormatCode($currencyFmt);
+
+    $sheet->getStyle('A10:B' . $payRow)->getNumberFormat()->setFormatCode($currencyFmt);
+    $sheet->getStyle('D10:J' . $payRow)->getNumberFormat()->setFormatCode($currencyFmt);
+
+    $writer = new Xlsx($spreadsheet);
+    $writer->setPreCalculateFormulas(false);
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('Content-Disposition: attachment; filename="' . $exportFileName . '"');
+    header('Cache-Control: max-age=0');
+    header('Expires: 0');
+    header('Pragma: public');
+    $writer->save('php://output');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -308,6 +726,7 @@ try {
             <div class="d-flex flex-wrap gap-2">
                 <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
                 <a href="print_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>" target="_blank" class="btn btn-light fw-bold"><i class="fas fa-print me-1"></i>IMPRIMIR A4</a>
+                <a href="business_closure_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>&export=xlsx" class="btn btn-success fw-bold"><i class="fas fa-file-excel me-1"></i>Exportar Excel</a>
             </div>
         </div>
     </section>
@@ -386,7 +805,7 @@ try {
                 <div class="card-body">
                     <h6 class="small text-uppercase text-warning fw-bold">Ganancia Limpia</h6>
                     <h2 class="fw-bold mb-0">$<?php echo number_format($ganancia_limpia, 2); ?></h2>
-                    <small class="text-white-50">Reserva (<?php echo $pct_reserva; ?>%): $<?php echo number_format($reserva_monto, 2); ?></small>
+                    <small class="text-white-50">Restando reserva (<?php echo $pct_reserva; ?>%): -$<?php echo number_format($reserva_monto, 2); ?></small>
                 </div>
             </div>
         </div>

@@ -101,10 +101,43 @@ foreach ($sucursales as $s) {
 $fDesde          = isset($_GET['fdesde'])   ? trim($_GET['fdesde'])   : '';
 $fHasta          = isset($_GET['fhasta'])   ? trim($_GET['fhasta'])   : '';
 $fCajero         = isset($_GET['fcajero'])  ? trim($_GET['fcajero'])  : '';
+$fClienteRaw     = $_GET['fcliente'] ?? '';
+$fClientes       = [];
+if (is_array($fClienteRaw)) {
+    foreach ($fClienteRaw as $raw) {
+        $id = intval($raw);
+        if ($id > 0) $fClientes[] = $id;
+    }
+} else {
+    foreach (preg_split('/[,\s]+/', trim((string)$fClienteRaw)) as $raw) {
+        $id = intval($raw);
+        if ($id > 0) $fClientes[] = $id;
+    }
+}
+$fClientes = array_values(array_unique($fClientes));
+$fCliente  = $fClientes[0] ?? 0;
 $fEstado         = isset($_GET['festado'])  ? trim($_GET['festado'])  : '';
 $fDescuadre      = isset($_GET['fdesc']) && $_GET['fdesc'] === '1';
 $umbralDescuadre = isset($_GET['umbral']) ? floatval($_GET['umbral']) : 100.0;
 $horasZombi      = isset($_GET['hzombi']) ? max(1, intval($_GET['hzombi'])) : 12;
+
+$clientesCrm = $pdo->query(
+    "SELECT id, nombre, telefono
+     FROM clientes
+     WHERE activo = 1
+     ORDER BY nombre ASC
+     LIMIT 2000"
+)->fetchAll(PDO::FETCH_ASSOC);
+
+$clientesFiltroNombres = [];
+foreach ($clientesCrm as $cli) {
+    if (in_array(intval($cli['id']), $fClientes, true)) {
+        $clientesFiltroNombres[] = trim((string)$cli['nombre']);
+    }
+}
+$clienteNombreFiltro = implode(' | ', $clientesFiltroNombres);
+$clienteFiltroTitulo  = !empty($clientesFiltroNombres) ? implode(' · ', $clientesFiltroNombres) : '';
+$clienteFiltroBig     = !empty($clientesFiltroNombres) ? implode(' | ', $clientesFiltroNombres) : '';
 
 function parseIds($arr): array {
     $out = [];
@@ -120,15 +153,32 @@ $export         = $_GET['export'] ?? '';
 // ---------------------------------------------------------------
 // Lista de sesiones (con filtros)
 // ---------------------------------------------------------------
-$where  = "id_sucursal = ?";
+$where  = "cs.id_sucursal = ?";
 $params = [$sucursalID];
 if ($fDesde !== '')  { $where .= " AND fecha_contable >= ?"; $params[] = $fDesde; }
 if ($fHasta !== '')  { $where .= " AND fecha_contable <= ?"; $params[] = $fHasta; }
 if ($fCajero !== '') { $where .= " AND nombre_cajero = ?";   $params[] = $fCajero; }
 if ($fEstado !== '') { $where .= " AND estado = ?";          $params[] = $fEstado; }
 if ($fDescuadre)     { $where .= " AND ABS(diferencia) > ?"; $params[] = $umbralDescuadre; }
+if (!empty($fClientes)) {
+    $phCliente = implode(',', array_fill(0, count($fClientes), '?'));
+    $where .= " AND EXISTS (
+        SELECT 1
+        FROM ventas_cabecera v
+        WHERE v.id_caja = cs.id
+          AND v.id_sucursal = ?
+          AND (
+              v.id_cliente IN ($phCliente)
+              " . ($clienteNombreFiltro !== '' ? " OR v.cliente_nombre IN (" . implode(',', array_fill(0, count($clientesFiltroNombres), '?')) . ")" : "") . "
+          )
+          AND " . ventas_reales_where_clause('v') . "
+    )";
+    $params[] = $sucursalID;
+    foreach ($fClientes as $cid) { $params[] = $cid; }
+    foreach ($clientesFiltroNombres as $cn) { $params[] = $cn; }
+}
 
-$stmtL = $pdo->prepare("SELECT * FROM caja_sesiones WHERE $where ORDER BY id DESC LIMIT 100");
+$stmtL = $pdo->prepare("SELECT cs.* FROM caja_sesiones cs WHERE $where ORDER BY cs.id DESC LIMIT 100");
 $stmtL->execute($params);
 $sesionesLista = $stmtL->fetchAll(PDO::FETCH_ASSOC);
 
@@ -160,7 +210,7 @@ function getCanalBadgeRCM($canal, $map): string {
     return "<span style=\"display:inline-flex;align-items:center;gap:4px;background-color:{$bg}!important;color:white!important;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;print-color-adjust:exact;-webkit-print-color-adjust:exact;\">{$emoji} {$label}</span>";
 }
 
-function calcularSet(PDO $pdo, array $ids, int $sucursalID): array {
+function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [], array $clienteNombreFiltros = []): array {
     $r = [
         'sesiones'=>[],'tickets'=>[],'detalles'=>[],'detallesPorTicket'=>[],
         'totalVentaNeta'=>0,'ventasReales'=>0,'metodosPago'=>[],
@@ -174,25 +224,72 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID): array {
     if (empty($ids)) return $r;
 
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id IN ($ph) AND id_sucursal = ? ORDER BY id DESC");
-    $stmt->execute(array_merge($ids, [$sucursalID]));
+    $sqlSes = "SELECT * FROM caja_sesiones WHERE id IN ($ph) AND id_sucursal = ?";
+    $bindSes = array_merge($ids, [$sucursalID]);
+    if (!empty($fClientes)) {
+        $phCliente = implode(',', array_fill(0, count($fClientes), '?'));
+        $sqlSes .= " AND EXISTS (
+            SELECT 1
+            FROM ventas_cabecera v
+            WHERE v.id_caja = caja_sesiones.id
+              AND v.id_sucursal = ?
+              AND (
+                v.id_cliente IN ($phCliente)
+                " . (!empty($clienteNombreFiltros) ? " OR v.cliente_nombre IN (" . implode(',', array_fill(0, count($clienteNombreFiltros), '?')) . ")" : "") . "
+              )
+              AND " . ventas_reales_where_clause('v') . "
+        )";
+        $bindSes[] = $sucursalID;
+        foreach ($fClientes as $cid) { $bindSes[] = $cid; }
+        foreach ($clienteNombreFiltros as $cn) { $bindSes[] = $cn; }
+    }
+    $sqlSes .= " ORDER BY id DESC";
+    $stmt = $pdo->prepare($sqlSes);
+    $stmt->execute($bindSes);
     $r['sesiones'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if (empty($r['sesiones'])) return $r;
 
     $idsValidos = array_map(fn($s) => intval($s['id']), $r['sesiones']);
     $ph2 = implode(',', array_fill(0, count($idsValidos), '?'));
 
-    $st = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id_caja IN ($ph2) AND id_sucursal = ? AND " . ventas_reales_where_clause() . " ORDER BY id DESC");
-    $st->execute(array_merge($idsValidos, [$sucursalID]));
+    $sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja IN ($ph2) AND id_sucursal = ? AND " . ventas_reales_where_clause();
+    $bindTickets = array_merge($idsValidos, [$sucursalID]);
+    if (!empty($fClientes)) {
+        $sqlTickets .= " AND (" . "id_cliente IN (" . implode(',', array_fill(0, count($fClientes), '?')) . ")";
+        if (!empty($clienteNombreFiltros)) {
+            $sqlTickets .= " OR cliente_nombre IN (" . implode(',', array_fill(0, count($clienteNombreFiltros), '?')) . ")";
+        }
+        $sqlTickets .= ")";
+        foreach ($fClientes as $cid) { $bindTickets[] = $cid; }
+        foreach ($clienteNombreFiltros as $cn) { $bindTickets[] = $cn; }
+    }
+    $sqlTickets .= " ORDER BY id DESC";
+    $st = $pdo->prepare($sqlTickets);
+    $st->execute($bindTickets);
     $r['tickets'] = $st->fetchAll(PDO::FETCH_ASSOC);
 
-    $sd = $pdo->prepare("SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id WHERE v.id_caja IN ($ph2) AND v.id_sucursal = ? AND " . ventas_reales_where_clause('v'));
-    $sd->execute(array_merge($idsValidos, [$sucursalID]));
+    $sqlDet = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria
+               FROM ventas_detalle d
+               JOIN productos p ON d.id_producto = p.codigo
+               JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+               WHERE v.id_caja IN ($ph2)
+                 AND v.id_sucursal = ?
+                 AND " . ventas_reales_where_clause('v');
+    $bindDet = array_merge($idsValidos, [$sucursalID]);
+    if (!empty($fClientes)) {
+        $sqlDet .= " AND (" . "v.id_cliente IN (" . implode(',', array_fill(0, count($fClientes), '?')) . ")";
+        if (!empty($clienteNombreFiltros)) {
+            $sqlDet .= " OR v.cliente_nombre IN (" . implode(',', array_fill(0, count($clienteNombreFiltros), '?')) . ")";
+        }
+        $sqlDet .= ")";
+        foreach ($fClientes as $cid) { $bindDet[] = $cid; }
+        foreach ($clienteNombreFiltros as $cn) { $bindDet[] = $cn; }
+    }
+    $sd = $pdo->prepare($sqlDet);
+    $sd->execute($bindDet);
     $r['detalles'] = $sd->fetchAll(PDO::FETCH_ASSOC);
 
-    $stp = $pdo->prepare("SELECT COALESCE(SUM(monto),0) FROM ventas_pagos WHERE id_venta_cabecera IN (SELECT id FROM ventas_cabecera WHERE id_caja IN ($ph2))");
-    $stp->execute($idsValidos);
-    $r['totalVentaNeta'] = floatval($stp->fetchColumn() ?? 0);
+    $r['totalVentaNeta'] = array_sum(array_column($r['tickets'], 'total'));
 
     $prodAgg = [];
     foreach ($r['detalles'] as $d) {
@@ -264,8 +361,8 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID): array {
     return $r;
 }
 
-$A = $haySeleccion   ? calcularSet($pdo, $idsA, $sucursalID) : null;
-$B = $hayComparativa ? calcularSet($pdo, $idsB, $sucursalID) : null;
+$A = $haySeleccion   ? calcularSet($pdo, $idsA, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
+$B = $hayComparativa ? calcularSet($pdo, $idsB, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
 
 // ---------------------------------------------------------------
 // #24 — detectar tickets duplicados (mismo cajero, mismo total, ±120s)
@@ -343,6 +440,7 @@ if ($haySeleccion) {
     $lineas = [
         "📊 *Reporte Multi-Sesión* — " . date('d/m/Y H:i'),
         "Sucursal #{$sucursalID}" . ($r['fechaMin'] ? " | " . date('d/m/Y', strtotime($r['fechaMin'])) . " → " . date('d/m/Y', strtotime($r['fechaMax'])) : ''),
+        !empty($clientesFiltroNombres) ? ("Cliente(s): " . implode(" | ", $clientesFiltroNombres)) : null,
         "Sesiones: " . count($r['sesiones']) . " | Tickets: " . $r['conteoTickets'],
         "Venta Neta: $" . number_format($r['totalVentaNeta'],2),
         "Ventas Reales: $" . number_format($r['ventasReales'],2),
@@ -350,6 +448,7 @@ if ($haySeleccion) {
         "Devoluciones: " . $r['cantDevoluciones'] . " | -$" . number_format($r['valorDevoluciones'],2),
         "Diferencia caja: $" . number_format($r['totalDiferencias'],2),
     ];
+    $lineas = array_values(array_filter($lineas, fn($x) => $x !== null && $x !== ''));
     foreach ($r['metodosPago'] as $m=>$v) $lineas[] = "  $m: $" . number_format($v,2);
     $resumenEjecutivo = implode("\n", $lineas);
 }
@@ -359,7 +458,7 @@ if ($haySeleccion) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Reporte Multi-Sesión de Caja</title>
+    <title><?php echo htmlspecialchars('Reporte Multi-Sesión de Caja' . (!empty($clientesFiltroNombres) ? ' - ' . implode(' | ', $clientesFiltroNombres) : '')); ?></title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@700;900&display=swap" rel="stylesheet">
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/all.min.css">
@@ -410,6 +509,9 @@ if ($haySeleccion) {
         .delta-up   { color: #198754; }
         .delta-down { color: #dc3545; }
         .chart-card { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 2px 4px rgba(0,0,0,0.04); height: 100%; }
+        .client-filter-banner { background: linear-gradient(135deg, #0d6efd, #0b5ed7); color: #fff; border-radius: 14px; padding: 14px 18px; margin: 12px 0 14px; box-shadow: 0 10px 24px rgba(13,110,253,.18); }
+        .client-filter-banner .tag { display: inline-block; font-size: .75rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; opacity: .9; }
+        .client-filter-banner .name { display: block; font-size: 1.75rem; line-height: 1.1; font-weight: 900; margin-top: 2px; text-wrap: balance; }
         /* #19 nota inline */
         .nota-cell { cursor: pointer; }
         .nota-cell:hover .nota-text { text-decoration: underline dotted; }
@@ -425,6 +527,9 @@ if ($haySeleccion) {
             .container-fluid { width: 100% !important; max-width: 100% !important; padding: 0 !important; margin: 0 !important; }
             .mb-4 { margin-bottom: 4px !important; }
             h4 { font-size: 13px !important; display: inline-block; margin-right: 8px !important; }
+            .client-filter-banner { border: 2px solid #000 !important; background: #fff !important; color: #000 !important; box-shadow: none !important; padding: 8px 10px !important; margin: 4px 0 8px !important; }
+            .client-filter-banner .tag { font-size: 10px !important; color: #000 !important; opacity: 1 !important; }
+            .client-filter-banner .name { font-size: 22px !important; font-weight: 900 !important; color: #000 !important; }
             .accounting-date-badge { padding: 1px 4px !important; font-size: 9px !important; margin: 0 !important; box-shadow: none !important; border: 1px solid #000 !important; }
             .row { display: flex !important; flex-wrap: wrap !important; --bs-gutter-x: 3px !important; --bs-gutter-y: 3px !important; margin-bottom: 3px !important; }
             .col-md-4 { width: 33.33% !important; flex: 0 0 auto !important; }
@@ -488,16 +593,25 @@ if ($haySeleccion) {
                     <span class="badge bg-warning text-dark ms-1">B: <?php echo count($B['sesiones']); ?></span>
                 <?php endif; ?>
             </h4>
-            <div class="text-muted small mt-1">
-                <i class="fas fa-store"></i> Sucursal #<?php echo $sucursalID; ?>
-                <?php if($haySeleccion && $A['fechaMin']): ?>
-                    | <span class="accounting-date-badge"><?php echo date('d/m/Y', strtotime($A['fechaMin'])); ?> &rarr; <?php echo date('d/m/Y', strtotime($A['fechaMax'])); ?></span>
-                <?php endif; ?>
-                <?php if($haySeleccion): ?>
-                    | <i class="far fa-clock"></i> <?php echo number_format($A['horasOperacion'],2); ?> h
-                <?php endif; ?>
-            </div>
-        </div>
+    <div class="text-muted small mt-1">
+        <i class="fas fa-store"></i> Sucursal #<?php echo $sucursalID; ?>
+        <?php if($haySeleccion && $A['fechaMin']): ?>
+            | <span class="accounting-date-badge"><?php echo date('d/m/Y', strtotime($A['fechaMin'])); ?> &rarr; <?php echo date('d/m/Y', strtotime($A['fechaMax'])); ?></span>
+        <?php endif; ?>
+        <?php if(!empty($clientesFiltroNombres)): ?>
+            | <i class="fas fa-user"></i> <?php echo htmlspecialchars(implode(' | ', $clientesFiltroNombres)); ?>
+        <?php endif; ?>
+        <?php if($haySeleccion): ?>
+            | <i class="far fa-clock"></i> <?php echo number_format($A['horasOperacion'],2); ?> h
+        <?php endif; ?>
+    </div>
+</div>
+<?php if(!empty($clientesFiltroNombres)): ?>
+    <div class="client-filter-banner">
+        <span class="tag">Reporte filtrado por cliente(s)</span>
+        <span class="name"><?php echo htmlspecialchars(implode('  •  ', $clientesFiltroNombres)); ?></span>
+    </div>
+<?php endif; ?>
         <div class="no-print d-flex gap-1 flex-wrap">
             <?php if($haySeleccion): ?>
                 <button onclick="window.print()" class="btn btn-success btn-sm"><i class="fas fa-print"></i> Imprimir A4</button>
@@ -586,6 +700,31 @@ if ($haySeleccion) {
                             <option value="<?php echo htmlspecialchars($c); ?>" <?php echo $fCajero===$c?'selected':''; ?>><?php echo htmlspecialchars($c); ?></option>
                         <?php endforeach; ?>
                     </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Cliente CRM</label>
+                    <input type="hidden" name="fcliente" id="fcliente-id" value="<?php echo $fCliente > 0 ? (int)$fCliente : ''; ?>">
+                    <div class="input-group input-group-sm">
+                        <input
+                            type="search"
+                            id="fcliente-search"
+                            class="form-control"
+                            list="crm-clientes-list"
+                            placeholder="Buscar por nombre o teléfono"
+                            value="<?php echo htmlspecialchars($clienteNombreFiltro !== '' ? $clienteNombreFiltro : ''); ?>"
+                            autocomplete="off"
+                        >
+                        <button type="button" class="btn btn-outline-secondary" id="fcliente-clear" title="Limpiar cliente">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div id="fcliente-suggest" class="list-group list-group-sm mt-1" style="max-height: 180px; overflow:auto;"></div>
+                    <datalist id="crm-clientes-list">
+                        <?php foreach($clientesCrm as $cli): ?>
+                            <?php $label = $cli['nombre'] . (($cli['telefono'] ?? '') !== '' ? ' · ' . $cli['telefono'] : ''); ?>
+                            <option value="<?php echo htmlspecialchars($label); ?>" data-id="<?php echo intval($cli['id']); ?>" data-phone="<?php echo htmlspecialchars((string)($cli['telefono'] ?? '')); ?>"></option>
+                        <?php endforeach; ?>
+                    </datalist>
                 </div>
                 <div class="col-md-1">
                     <label class="form-label small mb-1">Estado</label>
@@ -722,6 +861,13 @@ if ($haySeleccion) {
     <?php if(!$haySeleccion): ?>
         <div class="alert alert-info no-print"><i class="fas fa-info-circle"></i> Marca sesiones en la columna <b>A</b> (y opcionalmente en <b>B</b> para comparar) y pulsa <b>Generar</b>.</div>
     <?php else: ?>
+
+    <?php if(!empty($clientesFiltroNombres)): ?>
+        <div class="client-filter-banner" style="margin-top:0;">
+            <span class="tag">Estadísticas exclusivas de</span>
+            <span class="name"><?php echo htmlspecialchars(implode('  •  ', $clientesFiltroNombres)); ?></span>
+        </div>
+    <?php endif; ?>
 
     <!-- Resumen físico -->
     <div class="row g-3 mb-2">
@@ -885,7 +1031,14 @@ if ($haySeleccion) {
     <div class="card border-0 shadow-sm">
         <div class="card-header bg-white py-2">
             <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <h5 class="mb-0 fw-bold">Movimientos Consolidados (<?php echo count($A['tickets']); ?>)</h5>
+                <div>
+                    <h5 class="mb-0 fw-bold">Movimientos Consolidados (<?php echo count($A['tickets']); ?>)</h5>
+                    <?php if(!empty($clientesFiltroNombres)): ?>
+                        <div class="small fw-bold text-primary mt-1" style="font-size:.95rem;">
+                            Cliente(s): <?php echo htmlspecialchars(implode('  •  ', $clientesFiltroNombres)); ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
                 <div class="d-flex gap-2 flex-wrap align-items-center no-print">
                     <!-- #20 Búsqueda -->
                     <input type="search" id="ticket-search" class="form-control form-control-sm" placeholder="Buscar ticket, cliente, monto…" style="width:200px;">
@@ -993,6 +1146,15 @@ if ($haySeleccion) {
 const SUCURSAL = <?php echo $sucursalID; ?>;
 const SK = 'rcm_sel_' + SUCURSAL;
 const RESUMEN = <?php echo json_encode($resumenEjecutivo); ?>;
+const CLIENTES_FILTRO = <?php echo json_encode($clientesFiltroNombres); ?>;
+
+function buildContextoClientes() {
+    if (!CLIENTES_FILTRO || !CLIENTES_FILTRO.length) return '';
+    return 'CLIENTE(S) FILTRADO(S): ' + CLIENTES_FILTRO.join(' | ');
+}
+if (CLIENTES_FILTRO.length) {
+    document.title = 'Reporte Multi-Sesión de Caja - ' + CLIENTES_FILTRO.join(' | ');
+}
 
 // ── FASE 1: Sticky KPI bar ────────────────────────────────────
 const stickyBar = document.getElementById('sticky-kpi');
@@ -1066,6 +1228,86 @@ document.getElementById('frm-sesiones')?.addEventListener('submit', () => {
     const b=[...document.querySelectorAll('.chk-b:checked')].map(c=>c.value);
     try { localStorage.setItem(SK+'_last', JSON.stringify({a,b})); } catch(e){}
 });
+
+const clientSearch = document.getElementById('fcliente-search');
+const clientHidden = document.getElementById('fcliente-id');
+const clientList = document.getElementById('crm-clientes-list');
+const clientSuggest = document.getElementById('fcliente-suggest');
+const clientClear = document.getElementById('fcliente-clear');
+if (clientSearch && clientHidden && clientList && clientSuggest) {
+    const normalizeClientText = (text) => String(text || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const allClients = [...clientList.options].map(opt => ({
+        id: String(opt.dataset.id || ''),
+        label: String(opt.value || ''),
+        phone: String(opt.dataset.phone || ''),
+        nLabel: normalizeClientText(opt.value),
+        nPhone: normalizeClientText(opt.dataset.phone || ''),
+    }));
+
+    const renderSuggestions = (query) => {
+        const q = normalizeClientText(query);
+        const items = q
+            ? allClients.filter(cli => cli.nLabel.includes(q) || cli.nPhone.includes(q)).slice(0, 12)
+            : allClients.slice(0, 8);
+        clientSuggest.innerHTML = '';
+        if (!items.length) {
+            clientSuggest.innerHTML = '<div class="list-group-item py-2 text-muted small">Sin coincidencias</div>';
+            return;
+        }
+        items.forEach(cli => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'list-group-item list-group-item-action py-2';
+            btn.innerHTML = `<div class="d-flex justify-content-between align-items-center"><div><strong>${cli.label.replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))}</strong></div><small class="text-muted">${(cli.phone || '').replace(/[&<>"]/g, s => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s]))}</small></div>`;
+            btn.addEventListener('click', () => {
+                clientHidden.value = cli.id;
+                clientSearch.value = cli.label;
+                renderSuggestions(cli.label);
+            });
+            clientSuggest.appendChild(btn);
+        });
+    };
+
+    const syncClientFilter = () => {
+        const value = clientSearch.value.trim();
+        if (!value) {
+            clientHidden.value = '';
+            renderSuggestions('');
+            return;
+        }
+        const normalizedValue = normalizeClientText(value);
+        const matches = allClients.filter(cli => cli.nLabel === normalizedValue || cli.nLabel.includes(normalizedValue) || cli.nPhone.includes(normalizedValue));
+        if (matches.length === 1) {
+            clientHidden.value = matches[0].id;
+            clientSearch.value = matches[0].label || value;
+            renderSuggestions(matches[0].label);
+            return;
+        }
+        const exact = allClients.find(cli => cli.nLabel === normalizedValue);
+        clientHidden.value = exact ? exact.id : '';
+        if (exact) {
+            clientSearch.value = exact.label || value;
+        }
+        renderSuggestions(value);
+    };
+    clientSearch.addEventListener('input', syncClientFilter);
+    clientSearch.addEventListener('change', syncClientFilter);
+    clientSearch.addEventListener('blur', syncClientFilter);
+    clientSearch.form?.addEventListener('submit', syncClientFilter);
+    clientClear?.addEventListener('click', () => {
+        clientHidden.value = '';
+        clientSearch.value = '';
+        clientSearch.focus();
+        renderSuggestions('');
+    });
+    syncClientFilter();
+}
 
 // ── #18 Auditada toggle ───────────────────────────────────────
 document.querySelectorAll('.btn-aud').forEach(btn => btn.addEventListener('click', async e => {
@@ -1167,12 +1409,14 @@ if (savedPhone && document.getElementById('wa-phone')) document.getElementById('
 
 // ── #25 Copiar resumen ────────────────────────────────────────
 function copiarResumen() {
-    if (!RESUMEN) return;
-    navigator.clipboard.writeText(RESUMEN)
+    const extra = buildContextoClientes();
+    const text = [extra, RESUMEN].filter(Boolean).join('\n\n');
+    if (!text) return;
+    navigator.clipboard.writeText(text)
         .then(()=>alert('Resumen copiado al portapapeles.'))
         .catch(()=>{
             const ta=document.createElement('textarea');
-            ta.value=RESUMEN; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+            ta.value=text; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
             alert('Resumen copiado.');
         });
 }
@@ -1195,7 +1439,51 @@ async function refundItem(id, name) {
 <?php if($haySeleccion): ?>
 const sesData   = <?php echo json_encode(array_map(fn($s)=>['id'=>$s['id']], $A['sesiones'])); ?>;
 const vps       = <?php $vps=[]; foreach($A['tickets'] as $t){$c=intval($t['id_caja']);if(!isset($vps[$c]))$vps[$c]=0;$vps[$c]+=floatval($t['total']);}; echo json_encode($vps); ?>;
-new Chart(document.getElementById('chartVentasSesion'),{type:'bar',data:{labels:sesData.map(s=>'#'+s.id),datasets:[{label:'Ventas $',data:sesData.map(s=>vps[s.id]||0),backgroundColor:'#0d6efd'}]},options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true}}}});
+const formatMontoSesion = value => '$' + Number(value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const ventasSesionLabelsPlugin = {
+    id: 'ventasSesionLabels',
+    afterDatasetsDraw(chart) {
+        const {ctx} = chart;
+        const meta = chart.getDatasetMeta(0);
+        const data = chart.data.datasets[0]?.data || [];
+        ctx.save();
+        ctx.fillStyle = '#1f2937';
+        ctx.font = '700 11px Segoe UI';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        data.forEach((value, index) => {
+            const bar = meta.data[index];
+            if (!bar) return;
+            const pos = bar.tooltipPosition();
+            ctx.fillText(formatMontoSesion(value), pos.x, pos.y - 6);
+        });
+        ctx.restore();
+    }
+};
+new Chart(document.getElementById('chartVentasSesion'),{
+    type:'bar',
+    data:{
+        labels:sesData.map(s=>'#'+s.id),
+        datasets:[{
+            label:'Ventas $',
+            data:sesData.map(s=>vps[s.id]||0),
+            backgroundColor:'#0d6efd'
+        }]
+    },
+    options:{
+        layout:{padding:{top:24}},
+        plugins:{legend:{display:false}},
+        scales:{
+            y:{
+                beginAtZero:true,
+                ticks:{
+                    callback:value => '$' + Number(value || 0).toLocaleString('en-US')
+                }
+            }
+        }
+    },
+    plugins:[ventasSesionLabelsPlugin]
+});
 new Chart(document.getElementById('chartMetodos'),{type:'doughnut',data:{labels:<?php echo json_encode(array_keys($A['metodosPago'])); ?>,datasets:[{data:<?php echo json_encode(array_values($A['metodosPago'])); ?>,backgroundColor:['#198754','#0d6efd','#fd7e14','#6f42c1','#dc3545','#0dcaf0','#ffc107']}]}});
 new Chart(document.getElementById('chartProductos'),{type:'doughnut',data:{labels:<?php echo json_encode(array_map(fn($p)=>mb_substr($p['nombre'],0,18),$A['topProductos'])); ?>,datasets:[{data:<?php echo json_encode(array_map(fn($p)=>floatval($p['monto']),$A['topProductos'])); ?>,backgroundColor:['#0d6efd','#198754','#fd7e14','#6f42c1','#dc3545','#0dcaf0','#ffc107','#20c997','#6610f2','#e83e8c']}]}});
 <?php endif; ?>

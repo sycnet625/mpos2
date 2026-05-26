@@ -3,7 +3,28 @@
 // DESCRIPCIÓN: Dashboard CRUD de Facturación y Ofertas Comerciales
 require_once 'db.php';
 require_once 'config_loader.php';
+require_once 'onat_contabilidad_bridge.php';
 session_start();
+$EMP_ID_INV = intval($config['id_empresa'] ?? 1);
+
+// Pre-cargar periodos cerrados (Mensual-Ventas presentada/pagada) para bloquear facturas ya declaradas.
+$onatPeriodos = [];
+try {
+    $stmtP = $pdo->prepare("SELECT id, periodo_inicio, periodo_fin, estado
+                            FROM onat_declaraciones
+                            WHERE id_empresa = ? AND modelo = 'Mensual-Ventas'
+                              AND estado IN ('presentada','pagada')");
+    $stmtP->execute([$EMP_ID_INV]);
+    $onatPeriodos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) { /* tabla opcional */ }
+
+function invoice_lock_period(string $fechaEmision, array $periodos): ?array {
+    $f = substr($fechaEmision, 0, 10);
+    foreach ($periodos as $p) {
+        if ($f >= $p['periodo_inicio'] && $f <= $p['periodo_fin']) return $p;
+    }
+    return null;
+}
 
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
@@ -17,6 +38,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $estado = $_POST['estado']; // ACTIVA / ANULADA
         $pago = $_POST['estado_pago']; // PENDIENTE / PAGADA
         $metodo = $_POST['metodo_pago'];
+
+        // Si la factura está en período declarado a la ONAT, sólo permitimos cambiar estado_pago.
+        // Anularla alteraría las ventas ya reportadas → bloquear.
+        $stCheck = $pdo->prepare("SELECT fecha_emision, estado AS estado_actual FROM facturas WHERE id = ?");
+        $stCheck->execute([$id]);
+        $facCheck = $stCheck->fetch(PDO::FETCH_ASSOC);
+        if ($facCheck && invoice_lock_period($facCheck['fecha_emision'], $onatPeriodos) && $estado === 'ANULADA' && $facCheck['estado_actual'] !== 'ANULADA') {
+            header("Location: invoices.php?msg=onat_locked"); exit;
+        }
 
         $fechaPago = ($pago === 'PAGADA') ? date('Y-m-d H:i:s') : NULL;
 
@@ -35,7 +65,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             $pdo->prepare("UPDATE facturas SET estado_pago='PAGADA', metodo_pago='Efectivo', fecha_pago=NOW() WHERE id IN ($placeholders)")
                 ->execute($ids);
         } elseif ($bulkAct === 'cancel') {
-            $pdo->prepare("UPDATE facturas SET estado='ANULADA' WHERE id IN ($placeholders)")->execute($ids);
+            // Filtrar IDs bloqueados por declaración ONAT.
+            $idsLibres = [];
+            $sel = $pdo->prepare("SELECT id, fecha_emision, estado FROM facturas WHERE id IN ($placeholders)");
+            $sel->execute($ids);
+            foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $f) {
+                if ($f['estado'] === 'ANULADA') continue;
+                if (invoice_lock_period($f['fecha_emision'], $onatPeriodos)) continue;
+                $idsLibres[] = (int)$f['id'];
+            }
+            if ($idsLibres) {
+                $ph2 = implode(',', array_fill(0, count($idsLibres), '?'));
+                $pdo->prepare("UPDATE facturas SET estado='ANULADA' WHERE id IN ($ph2)")->execute($idsLibres);
+            }
         }
         header("Location: invoices.php?tab=facturas&msg=bulk_ok");
         exit;
@@ -126,6 +168,9 @@ $nextSuggested = $lastNum ? ($lastNum + 1) : date('Ymd')."001";
             </div>
         </section>
 
+        <?php if (($_GET['msg'] ?? '') === 'onat_locked'): ?>
+        <div class="alert alert-warning"><i class="fas fa-lock me-1"></i>Esta factura está incluida en una declaración ONAT presentada/pagada y no puede anularse. Si necesitas corregirla, emite una nota de crédito.</div>
+        <?php endif; ?>
         <!-- KPIs SOLO PARA FACTURAS -->
         <?php if($tab === 'facturas'): ?>
         <div class="row g-4 mb-4 inventory-fade-in">
@@ -193,10 +238,11 @@ $nextSuggested = $lastNum ? ($lastNum + 1) : date('Ymd')."001";
                                 $pagoClass = ($f['estado_pago'] === 'PAGADA') ? 'bg-primary' : 'bg-warning text-dark';
                                 $waPhone = preg_replace('/[^0-9]/', '', $f['cliente_telefono'] ?? '');
                                 $waMsg   = urlencode('Hola, le enviamos su factura #'.$f['numero_factura'].'.');
+                                $lock    = invoice_lock_period($f['fecha_emision'], $onatPeriodos);
                             ?>
                             <tr class="<?= $f['estado'] === 'ANULADA' ? 'opacity-50' : '' ?>">
-                                <td class="ps-3"><input type="checkbox" name="ids[]" value="<?= $f['id'] ?>" class="form-check-input row-chk" form="bulkForm" onchange="updateBulkBar()"></td>
-                                <td class="fw-bold text-primary">#<?= $f['numero_factura'] ?></td>
+                                <td class="ps-3"><input type="checkbox" name="ids[]" value="<?= $f['id'] ?>" class="form-check-input row-chk" form="bulkForm" onchange="updateBulkBar()" <?= $lock ? 'disabled' : '' ?>></td>
+                                <td class="fw-bold text-primary">#<?= $f['numero_factura'] ?><?php if($lock): ?> <span class="badge bg-info text-dark" title="Incluida en declaración ONAT <?= htmlspecialchars($lock['estado']) ?> (<?= htmlspecialchars($lock['periodo_inicio']) ?> → <?= htmlspecialchars($lock['periodo_fin']) ?>) — no se puede anular"><i class="fas fa-lock"></i> ONAT</span><?php endif; ?></td>
                                 <td><div><?= date('d/m/Y', strtotime($f['fecha_emision'])) ?></div><div class="tiny text-muted"><?= date('H:i', strtotime($f['fecha_emision'])) ?></div></td>
                                 <td><div class="fw-bold"><?= htmlspecialchars($f['cliente_nombre']) ?></div><div class="tiny text-muted"><?= $f['cliente_telefono'] ?></div></td>
                                 <td class="text-center"><span class="badge <?= $statusClass ?> rounded-pill px-3"><?= $f['estado'] ?></span></td>

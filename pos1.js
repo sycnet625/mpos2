@@ -27,7 +27,9 @@ async function ensurePosCsrfToken(forceRefresh = false) {
             method: 'GET',
             cache: 'no-store',
             credentials: 'same-origin',
-            signal: AbortSignal.timeout(5000)
+            signal: typeof window.posFetchTimeoutSignal === 'function'
+                ? window.posFetchTimeoutSignal(5000)
+                : undefined
         });
         const data = await resp.json();
         if (data && data.status === 'success' && typeof data.csrf_token === 'string' && data.csrf_token.length >= 32) {
@@ -884,7 +886,9 @@ async function verifyPin() {
                 credentials: 'same-origin',
                 headers: getPosJsonHeaders(),
                 body: JSON.stringify({ pin: enteredPin }),
-                signal: AbortSignal.timeout(5000)
+                signal: typeof window.posFetchTimeoutSignal === 'function'
+                    ? window.posFetchTimeoutSignal(5000)
+                    : undefined
             });
             const data = await resp.json();
             if (data.status === 'success') {
@@ -2090,6 +2094,216 @@ function deleteParkedOrder(index) {
 // ==========================================
 // HISTORIAL DE TICKETS (RECTIFICADO: LLAMA A MODAL_HISTORY.PHP)
 // ==========================================
+function renderHistorialModalFromJson(data) {
+    const tickets = Array.isArray(data?.tickets) ? data.tickets : [];
+    const detalles = Array.isArray(data?.detalles) ? data.detalles : [];
+    const totales = data?.totales || {};
+    const detallesMap = detalles.reduce((acc, d) => {
+        const key = String(d.id_venta_cabecera || '');
+        if (!key) return acc;
+        if (!acc[key]) acc[key] = [];
+        acc[key].push(d);
+        return acc;
+    }, {});
+
+    const totalVenta = Number(totales.total || 0);
+    const totalTickets = Number(totales.count || tickets.filter(t => Number(t.total || 0) > 0).length);
+    const totalDev = Number(totales.valor_devoluciones || 0);
+    const totalNeto = tickets.reduce((acc, t) => {
+        const total = Number(t.total || 0);
+        return acc + (total > 0 ? total : 0);
+    }, 0);
+
+    const renderTicketDetailRows = (ticket) => {
+        const rows = detallesMap[String(ticket.id)] || [];
+        if (!rows.length) {
+            return '<tr><td colspan="5" class="text-center text-muted py-3">Sin detalle disponible</td></tr>';
+        }
+        return rows.map(item => {
+            const qty = Number(item.cantidad || 0);
+            const price = Number(item.precio || 0);
+            const total = qty * price;
+            return `
+                <tr>
+                    <td>${escapeHtml(item.nombre || item.nombre_producto || 'Producto')}</td>
+                    <td class="text-end fw-bold ${qty < 0 ? 'text-danger' : ''}">${Math.abs(qty)}</td>
+                    <td class="text-end">$${Math.abs(price).toFixed(2)}</td>
+                    <td class="text-end ${qty < 0 ? 'text-danger' : ''}">$${Math.abs(total).toFixed(2)}</td>
+                    <td class="text-end">
+                        ${qty < 0 ? '' : `<button class="btn btn-xs btn-outline-danger py-0 px-2" style="font-size: 0.65rem;" onclick="refundItemFromHistorial(${item.id}, '${String(item.nombre || item.nombre_producto || '').replace(/'/g, "\\'")}')">DEVOLVER</button>`}
+                    </td>
+                </tr>`;
+        }).join('');
+    };
+
+    const renderPaymentBadge = (ticket) => {
+        const total = Number(ticket.total || 0);
+        const mp = String(ticket.metodo_pago || 'Mixto').toLowerCase();
+        let badgeClass = 'bg-dark text-white';
+        if (total < 0) badgeClass = 'bg-refund-badge';
+        else if (mp.includes('efectivo')) badgeClass = 'bg-efectivo';
+        else if (mp.includes('transferencia')) badgeClass = 'bg-transfer';
+        else if (mp.includes('tarjeta') || mp.includes('gasto')) badgeClass = 'bg-gasto';
+        return `<span class="badge ${badgeClass} badge-pago" style="font-size:0.7rem">${escapeHtml(ticket.metodo_pago || 'Mixto')}</span>`;
+    };
+
+    const renderTicketRowClass = (ticket) => {
+        const total = Number(ticket.total || 0);
+        const mp = String(ticket.metodo_pago || 'Mixto').toLowerCase();
+        if (total < 0) return 'row-refund';
+        if (mp.includes('efectivo')) return 'row-efectivo';
+        if (mp.includes('transferencia')) return 'row-transfer';
+        if (mp.includes('tarjeta') || mp.includes('gasto')) return 'row-gasto';
+        return 'row-mixto';
+    };
+
+    let html = `
+        <div class="sticky-top bg-white shadow-sm border-bottom z-index-2 p-3">
+            <div class="row g-2 align-items-stretch">
+                <div class="col-6 col-md-3">
+                    <div class="card h-100 border-0 bg-light shadow-sm text-center p-2">
+                        <div class="text-muted small fw-bold text-uppercase">Ventas Netas</div>
+                        <div class="fs-4 fw-bold text-success">$${totalNeto.toFixed(2)}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2">
+                    <div class="card h-100 border-0 bg-light shadow-sm text-center p-2">
+                        <div class="text-muted small fw-bold text-uppercase">Tickets</div>
+                        <div class="fs-4 fw-bold text-dark">${totalTickets}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-2">
+                    <div class="card h-100 border-0 bg-light shadow-sm text-center p-2">
+                        <div class="text-muted small fw-bold text-uppercase">Devoluciones</div>
+                        <div class="fs-4 fw-bold text-danger">$${totalDev.toFixed(2)}</div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-5">
+                    <div class="card h-100 border-0 shadow-sm rounded-3 overflow-hidden">
+                        <div class="bg-dark text-white py-1 px-2 fw-bold text-uppercase text-center" style="font-size:0.6rem; letter-spacing:1px;">
+                            <i class="fas fa-wallet me-1 text-warning"></i> Resumen
+                        </div>
+                        <div class="p-0">
+                            <ul class="list-group list-group-flush small">
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-receipt me-1"></i> Total tickets</span>
+                                    <span class="fw-bold text-dark" style="font-size:0.9rem;">${tickets.length}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-dollar-sign me-1"></i> Total bruto</span>
+                                    <span class="fw-bold text-success" style="font-size:0.9rem;">$${totalVenta.toFixed(2)}</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end mt-2">
+                <button type="button" class="btn btn-success btn-sm fw-bold" onclick="openHistorialWhatsappModal()">
+                    <i class="fab fa-whatsapp me-1"></i> Enviar PDFs por WhatsApp
+                </button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table mb-0 align-middle" style="font-size:0.92rem;">
+                <thead class="bg-light text-secondary">
+                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
+                </thead>
+                <tbody>`;
+
+    if (!tickets.length) {
+        html += '<tr><td colspan="8" class="text-center p-5 text-muted"><i class="fas fa-receipt fa-2x mb-3 opacity-50"></i><br>Sin movimientos</td></tr>';
+    } else {
+        tickets.forEach(t => {
+            const total = Number(t.total || 0);
+            const isRef = total < 0;
+            const ticketRows = renderTicketDetailRows(t);
+            const ticketType = escapeHtml(t.tipo_servicio || '-');
+            const clientLabel = String(t.cliente_nombre || ('Ticket #' + t.id));
+            const clientLabelJs = JSON.stringify(clientLabel);
+            html += `
+                <tr class="${renderTicketRowClass(t)} ticket-row" data-ticket-id="${t.id}" onclick="toggleDetail(${t.id})">
+                    <td class="text-center"><i class="fas fa-chevron-right text-muted icon-collapse-${t.id}"></i></td>
+                    <td class="fw-bold">#${t.id}</td>
+                    <td>${escapeHtml((t.fecha || '').slice(11, 16) || '')}</td>
+                    <td>${escapeHtml(t.cliente_nombre || 'General')}</td>
+                    <td><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;">${ticketType}</small></td>
+                    <td class="fw-bold ${isRef ? 'text-danger' : 'text-dark'}">$${Math.abs(total).toFixed(2)}</td>
+                    <td>${renderPaymentBadge(t)}</td>
+                    <td class="text-end" onclick="event.stopPropagation()">
+                        ${isRef ? '' : `<button class="btn btn-sm btn-success py-0 px-2 shadow-sm me-1" onclick="loadSaleToCart(${t.id})" title="Cargar pedido al carrito"><i class="fas fa-cart-plus"></i></button>`}
+                        ${isRef ? '' : `<button class="btn btn-sm btn-secondary py-0 px-2 shadow-sm me-1" onclick="saveSaleAsTemplate(${t.id}, ${clientLabelJs})" title="Guardar como plantilla"><i class="fas fa-bookmark"></i></button>`}
+                        ${isRef ? '' : `<button class="btn btn-sm btn-warning py-0 px-2 shadow-sm me-1" onclick="voidTicket(${t.id})" title="Anular con motivo (sesión activa)"><i class="fas fa-ban"></i></button>`}
+                        ${isRef ? '' : `<button class="btn btn-sm btn-info py-0 px-2 shadow-sm me-1" onclick="openEditSale(${t.id})" title="Editar venta"><i class="fas fa-edit"></i></button>`}
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="window.open('ticket_view.php?id=${t.id}', 'Ticket', 'width=380,height=600')" title="Ver ticket">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                        ${isRef ? '' : `<button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="refundTicketComplete(${t.id})" title="Devolver ticket">
+                            <i class="fas fa-undo"></i>
+                        </button>`}
+                    </td>
+                </tr>
+                <tr id="det-row-${t.id}" class="collapse bg-light">
+                    <td colspan="8" class="p-0">
+                        <div class="p-3">
+                            <table class="table table-sm mb-0">
+                                <thead>
+                                    <tr>
+                                        <th>Producto</th>
+                                        <th class="text-end">Cant.</th>
+                                        <th class="text-end">Precio</th>
+                                        <th class="text-end">Importe</th>
+                                        <th class="text-end">Acción</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${ticketRows}</tbody>
+                            </table>
+                            ${t.mensajero_nombre ? `<div class="mt-2 small alert alert-info py-1 px-2 mb-0"><i class="fas fa-motorcycle me-1"></i> Mensajero: <strong>${escapeHtml(t.mensajero_nombre)}</strong></div>` : ''}
+                        </div>
+                    </td>
+                </tr>`;
+        });
+    }
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+
+        <div class="modal fade" id="historialWhatsappModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg">
+                    <div class="modal-header bg-success text-white">
+                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas PDF</h6>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="small text-muted mb-2">Se enviará un PDF individual por cada ticket visible en el historial actual.</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold">Contacto WhatsApp</label>
+                            <select id="historialWhatsappContacto" class="form-select form-select-sm">
+                                <option value="">Cargando contactos...</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold">Mensaje</label>
+                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto tus facturas en PDF.</textarea>
+                        </div>
+                        <div id="historialWhatsappEstado" class="small text-muted"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-success btn-sm fw-bold" onclick="enviarHistorialPorWhatsApp()">
+                            <i class="fab fa-whatsapp me-1"></i> Enviar PDFs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+    return html;
+}
+
 async function loadHistorialModalContent() {
     const body = document.getElementById('historialModalBody');
     if (!body) return;
@@ -2097,15 +2311,37 @@ async function loadHistorialModalContent() {
     body.innerHTML = '<div class="text-center p-5"><i class="fas fa-spinner fa-spin fa-2x text-primary"></i><p class="mt-2">Cargando historial...</p></div>';
 
     try {
-        const response = await fetch('modal_history.php?render_mode=1&t=' + Date.now(), {
+        const historialUrl = window.POS_HISTORIAL_URL || 'pos_historial.php';
+        const response = await fetch(historialUrl + '?t=' + Date.now(), {
             cache: 'no-store',
             credentials: 'same-origin'
         });
-        const html = await response.text();
-        body.innerHTML = html;
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        if (data && data.status === 'success') {
+            body.innerHTML = renderHistorialModalFromJson(data);
+            return;
+        }
+        throw new Error(data?.message || 'No se pudo cargar el historial');
     } catch (error) {
-        console.error('Error cargando historial:', error);
-        body.innerHTML = '<div class="p-5 text-center text-danger"><i class="fas fa-wifi fa-2x mb-2"></i><br>Error de conexión al cargar historial.</div>';
+        console.warn('Fallback historial modal_history.php:', error);
+        try {
+            const fallbackUrl = window.POS_HISTORIAL_FALLBACK_URL || 'modal_history.php?render_mode=1';
+            const fallback = await fetch(fallbackUrl + '&t=' + Date.now(), {
+                cache: 'no-store',
+                credentials: 'same-origin'
+            });
+            if (!fallback.ok) {
+                throw new Error(`HTTP ${fallback.status}`);
+            }
+            const html = await fallback.text();
+            body.innerHTML = html;
+        } catch (fallbackError) {
+            console.error('Error cargando historial:', fallbackError);
+            body.innerHTML = '<div class="p-5 text-center text-danger"><i class="fas fa-wifi fa-2x mb-2"></i><br>Error de conexión al cargar historial.</div>';
+        }
     }
 }
 

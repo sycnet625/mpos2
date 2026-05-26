@@ -133,11 +133,23 @@ window.POS_MONEDA_DEFAULT = <?= json_encode($config['moneda_default_pos'] ?? 'CU
 let posCurrentCurrency = 'CUP';
 let posCurrentTC       = 1.0;
 let deliveryCostBase   = 0; // Total del carrito sin mensajería
+let deliveryCostApplied = 0; // Costo de mensajería ya reflejado en el monto entregado
 
 window.setQuickAmount = function(amount) {
     const si = document.getElementById('singleAmountInput');
     if(si) { si.value = amount; calcChange(); }
 };
+
+function adjustCashAmountForDeliveryDelta(deltaCUP) {
+    const cashSection = document.getElementById('cashPaymentSection');
+    const si = document.getElementById('singleAmountInput');
+    if (!cashSection || cashSection.classList.contains('d-none') || !si || !Number.isFinite(deltaCUP)) return;
+
+    const currentValue = parseFloat(si.value) || 0;
+    const deltaInCurrentCurrency = deltaCUP / (posCurrentTC || 1);
+    const nextValue = Math.max(0, currentValue + deltaInCurrentCurrency);
+    si.value = nextValue.toFixed(2);
+}
 
 // ───── Render dinámico de botones de método ─────
 function renderPaymentMethodsPOS() {
@@ -343,6 +355,7 @@ window.openPaymentModal = function() {
     let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct / 100)) * i.qty), 0);
     currentSaleTotal = sub * (1 - globalDiscountPct / 100);
     deliveryCostBase = currentSaleTotal;
+    deliveryCostApplied = 0;
 
     // Resetear costo mensajería
     const dci = document.getElementById('deliveryCostInput');
@@ -418,6 +431,8 @@ window.toggleServiceOptions = function() {
     if (t === 'mensajeria' || t === 'delivery') {
         document.getElementById('deliveryDiv').classList.remove('d-none');
     } else {
+        adjustCashAmountForDeliveryDelta(-deliveryCostApplied);
+        deliveryCostApplied = 0;
         // Restaurar total base sin mensajería
         currentSaleTotal = deliveryCostBase;
         const dci = document.getElementById('deliveryCostInput');
@@ -429,7 +444,10 @@ window.toggleServiceOptions = function() {
 
 window.recalcDeliveryCost = function() {
     const cost = parseFloat(document.getElementById('deliveryCostInput').value) || 0;
+    const delta = cost - deliveryCostApplied;
+    deliveryCostApplied = cost;
     currentSaleTotal = deliveryCostBase + cost;
+    adjustCashAmountForDeliveryDelta(delta);
     updateTotalDisplay();
 };
 

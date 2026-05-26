@@ -129,6 +129,10 @@ try {
             ADD COLUMN IF NOT EXISTS tipo_cambio DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
             ADD COLUMN IF NOT EXISTS monto_moneda_original DECIMAL(12,2) NOT NULL DEFAULT 0.00");
     } catch (Throwable $_e) {}
+    try {
+        $pdo->exec("ALTER TABLE ventas_detalle
+            ADD COLUMN IF NOT EXISTS nota_cocina VARCHAR(255) NULL AFTER nombre_producto");
+    } catch (Throwable $_e) {}
 
     // 4. TRANSACCIÓN GLOBAL
     $pdo->beginTransaction();
@@ -215,8 +219,8 @@ try {
     // D. Procesar Detalles e Inventario
     $sqlDet = "INSERT INTO ventas_detalle (
         id_venta_cabecera, id_producto, cantidad, precio, 
-        nombre_producto, codigo_producto
-    ) VALUES (?, ?, ?, ?, ?, ?)";
+        nombre_producto, codigo_producto, nota_cocina
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)";
     $stmtDet = $pdo->prepare($sqlDet);
 
     $itemsCocina = [];
@@ -231,12 +235,13 @@ try {
         $qty = isset($item['qty']) && is_numeric($item['qty']) ? (float)$item['qty'] : 0.0;
         $price = isset($item['price']) && is_numeric($item['price']) ? (float)$item['price'] : 0.0;
         $name = safe_str(pos_security_clean_text($item['name'] ?? $sku, 150), 150);
+        $note = safe_str(pos_security_clean_text($item['note'] ?? '', 255), 255);
         if ($sku === '' || !is_finite($qty) || !is_finite($price) || $qty == 0.0) {
             throw new Exception('Detalle de venta inválido');
         }
 
         // Insertar Detalle
-        $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku]);
+        $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku, $note !== '' ? $note : null]);
 
     }
 

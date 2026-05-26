@@ -64,18 +64,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             validateMonthIsOpen($pdo, $ff);
             $pdo->beginTransaction();
 
-            // 1. LIMPIEZA TOTAL (Incluye COMPRA y MERMA ahora)
-            $pdo->prepare("DELETE FROM contabilidad_diario WHERE fecha BETWEEN ? AND ? AND asiento_tipo IN ('VENTA','COSTO','GASTO','VENTA_CASA','IMPUESTOS','COMPRA','MERMA')")->execute([$fi, $ff]);
-            
+            // 1. LIMPIEZA TOTAL (todos los tipos autogenerados)
+            $pdo->prepare("DELETE FROM contabilidad_diario WHERE fecha BETWEEN ? AND ? AND asiento_tipo IN ('VENTA','COSTO','GASTO','VENTA_CASA','IMPUESTOS','COMPRA','MERMA','DEVOLUCION','FACTURA')")->execute([$fi, $ff]);
+
             // PREPARAR FILTROS SCOPE
-            // CAMBIO: Usar fecha contable de la sesión (caja_sesiones.fecha_contable)
-            $sqlVentas = "SELECT v.*, IFNULL(sc.fecha_contable, DATE(v.fecha)) as fecha_contable_final 
-                          FROM ventas_cabecera v 
+            // Usar fecha contable de la sesión de caja; excluir devoluciones (se procesan en bloque F)
+            $sqlVentas = "SELECT v.*, IFNULL(sc.fecha_contable, DATE(v.fecha)) as fecha_contable_final
+                          FROM ventas_cabecera v
                           LEFT JOIN caja_sesiones sc ON v.id_caja = sc.id
-                          WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN '$fi' AND '$ff' AND " . ventas_reales_where_clause('v');
+                          WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN '$fi' AND '$ff'
+                          AND " . ventas_reales_where_clause('v') . " AND v.tipo_servicio != 'devolucion'";
+            $sqlDevoluciones = "SELECT v.*, IFNULL(sc.fecha_contable, DATE(v.fecha)) as fecha_contable_final
+                                FROM ventas_cabecera v
+                                LEFT JOIN caja_sesiones sc ON v.id_caja = sc.id
+                                WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN '$fi' AND '$ff'
+                                AND v.tipo_servicio = 'devolucion'";
             $sqlGastos = "SELECT * FROM gastos_historial WHERE fecha BETWEEN '$fi' AND '$ff'";
-            $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND COALESCE(estado, 'PROCESADA') != 'CANCELADA'";
-            $sqlMermas = "SELECT * FROM mermas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'"; // Asumiendo columna fecha
+            // Solo compras PROCESADAS (no Borrador/Pendiente que aún no movieron dinero)
+            $sqlCompras = "SELECT * FROM compras_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59' AND COALESCE(estado, 'PROCESADA') = 'PROCESADA'";
+            $sqlMermas = "SELECT * FROM mermas_cabecera WHERE fecha BETWEEN '$fi 00:00:00' AND '$ff 23:59:59'";
 
             $comprasHasSucursal = acctTableHasColumn($pdo, 'compras_cabecera', 'id_sucursal');
             $comprasHasEmpresa = acctTableHasColumn($pdo, 'compras_cabecera', 'id_empresa');
@@ -84,34 +91,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mermasHasEmpresa = acctTableHasColumn($pdo, 'mermas_cabecera', 'id_empresa');
 
             if ($scope === 'local') {
-                $sqlVentas .= " AND v.id_sucursal = $SUC_ID";
-                $sqlGastos .= " AND id_sucursal = $SUC_ID"; 
+                $sqlVentas       .= " AND v.id_sucursal = $SUC_ID";
+                $sqlDevoluciones .= " AND v.id_sucursal = $SUC_ID";
+                $sqlGastos       .= " AND id_sucursal = $SUC_ID";
                 if ($comprasHasSucursal) $sqlCompras .= " AND id_sucursal=$SUC_ID";
-                if ($comprasHasAlmacen) $sqlCompras .= " AND id_almacen=$ALM_ID";
-                if ($mermasHasSucursal) $sqlMermas .= " AND id_sucursal=$SUC_ID";
+                if ($comprasHasAlmacen)  $sqlCompras .= " AND id_almacen=$ALM_ID";
+                if ($mermasHasSucursal)  $sqlMermas  .= " AND id_sucursal=$SUC_ID";
             } else {
-                $sqlVentas .= " AND v.id_empresa = $EMP_ID";
+                $sqlVentas       .= " AND v.id_empresa = $EMP_ID";
+                $sqlDevoluciones .= " AND v.id_empresa = $EMP_ID";
                 try { $pdo->query("SELECT id_empresa FROM gastos_historial LIMIT 1"); $sqlGastos .= " AND id_empresa=$EMP_ID"; } catch(Exception $e){}
                 if ($comprasHasEmpresa) $sqlCompras .= " AND id_empresa=$EMP_ID";
-                if ($mermasHasEmpresa) $sqlMermas .= " AND id_empresa=$EMP_ID";
+                if ($mermasHasEmpresa)  $sqlMermas  .= " AND id_empresa=$EMP_ID";
             }
 
             // A. VENTAS
             $subCaja = getCajaSucursal($pdo, $SUC_ID); $nomCaja = getNombreCuenta($pdo, $subCaja);
             $vtas = $pdo->query($sqlVentas)->fetchAll(PDO::FETCH_ASSOC);
             foreach($vtas as $v){
-                $f = $v['fecha_contable_final']; 
-                $t = floatval($v['total']); 
-                $c = $pdo->query("SELECT SUM(d.cantidad*p.costo) FROM ventas_detalle d JOIN productos p ON d.id_producto=p.codigo WHERE d.id_venta_cabecera={$v['id']}")->fetchColumn()?:0;
+                $f = $v['fecha_contable_final'];
+                $t = floatval($v['total']);
+                $c = floatval($pdo->query("SELECT COALESCE(SUM(d.cantidad*p.costo),0) FROM ventas_detalle d JOIN productos p ON d.id_producto=p.codigo WHERE d.id_venta_cabecera={$v['id']}")->fetchColumn());
                 if($v['metodo_pago']==='Gasto Casa'){
                     insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'709 - Retiro Dueño',$c,0,"Consumo Casa #{$v['id']}");
-                    insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'120 - Inventario',0,$c,"Salida Inv.");
+                    insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'120 - Inventario Mercancías',0,$c,"Salida Inv.");
                 } else {
-                    $cD = ($v['metodo_pago']==='Transferencia')?'102 - Banco':"$subCaja - $nomCaja";
-                    insertAsiento($pdo,$f,'VENTA',$v['id'],$cD,$t,0,"Venta #{$v['id']}");
-                    insertAsiento($pdo,$f,'VENTA',$v['id'],'401 - Ingresos',0,$t,"Venta #{$v['id']}");
-                    insertAsiento($pdo,$f,'COSTO',$v['id'],'501 - Costo',$c,0,"Costo Venta");
-                    insertAsiento($pdo,$f,'COSTO',$v['id'],'120 - Inventario',0,$c,"Baja Stock");
+                    // Ventas web con pago pendiente de verificar → Cuentas por Cobrar
+                    $estadoPago = $v['estado_pago'] ?? 'confirmado';
+                    if (in_array($estadoPago, ['verificando', 'pendiente'], true)) {
+                        $cD = '110 - CxC Clientes';
+                    } elseif ($v['metodo_pago'] === 'Transferencia') {
+                        $cD = '102 - Banco';
+                    } elseif ($v['metodo_pago'] === 'MLC' || $v['metodo_pago'] === 'USD') {
+                        $cD = '103 - Moneda Extranjera';
+                    } else {
+                        $cD = "$subCaja - $nomCaja";
+                    }
+                    if ($t > 0) {
+                        $canal = ($v['canal_origen'] ?? 'POS') === 'Web' ? ' (Web)' : '';
+                        insertAsiento($pdo,$f,'VENTA',$v['id'],$cD,$t,0,"Venta{$canal} #{$v['id']}");
+                        insertAsiento($pdo,$f,'VENTA',$v['id'],'401 - Ingresos',0,$t,"Venta{$canal} #{$v['id']}");
+                        if ($c > 0) {
+                            insertAsiento($pdo,$f,'COSTO',$v['id'],'501 - Costo de Ventas',$c,0,"Costo Venta #{$v['id']}");
+                            insertAsiento($pdo,$f,'COSTO',$v['id'],'120 - Inventario Mercancías',0,$c,"Baja Stock #{$v['id']}");
+                        }
+                    }
+                }
+            }
+
+            // B. DEVOLUCIONES — reversal contable de ventas devueltas
+            $devs = $pdo->query($sqlDevoluciones)->fetchAll(PDO::FETCH_ASSOC);
+            foreach($devs as $dev){
+                $f = $dev['fecha_contable_final'];
+                $t = abs(floatval($dev['total']));
+                // Costo de los ítems devueltos (cantidades son negativas en detalle)
+                $c = abs(floatval($pdo->query("SELECT COALESCE(SUM(ABS(d.cantidad)*p.costo),0) FROM ventas_detalle d JOIN productos p ON d.id_producto=p.codigo WHERE d.id_venta_cabecera={$dev['id']}")->fetchColumn()));
+                $cD = ($dev['metodo_pago']==='Transferencia') ? '102 - Banco' : "$subCaja - $nomCaja";
+                if ($t > 0) {
+                    // Reversal del ingreso: Debe Ingresos / Haber Caja (sale dinero al cliente)
+                    insertAsiento($pdo,$f,'DEVOLUCION',$dev['id'],'401 - Ingresos',$t,0,"Dev #{$dev['id']} - Reversal ingreso");
+                    insertAsiento($pdo,$f,'DEVOLUCION',$dev['id'],$cD,0,$t,"Dev #{$dev['id']} - Reembolso cliente");
+                    if ($c > 0) {
+                        // Reversal del costo: Debe Inventario / Haber Costo (reentra mercancía)
+                        insertAsiento($pdo,$f,'DEVOLUCION',$dev['id'],'120 - Inventario Mercancías',$c,0,"Dev #{$dev['id']} - Ret. inventario");
+                        insertAsiento($pdo,$f,'DEVOLUCION',$dev['id'],'501 - Costo de Ventas',0,$c,"Dev #{$dev['id']} - Ret. costo");
+                    }
                 }
             }
 
@@ -154,7 +198,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch(Exception $e) { /* Ignorar si falla query por columnas faltantes */ }
 
-            // E. MERMAS (NUEVO)
+            // E. MERMAS — pérdida de inventario
             // DEBE 708 (Gasto Merma) / HABER 120 (Baja Inv)
             try {
                 $mermas = $pdo->query($sqlMermas)->fetchAll(PDO::FETCH_ASSOC);
@@ -164,13 +208,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $total = floatval($mm['total_costo_perdida']);
                     if($total > 0) {
                         insertAsiento($pdo, $f, 'MERMA', $mm['id'], "708 - Gastos por Mermas", $total, 0, "Pérdida Merma #{$mm['id']}");
-                        insertAsiento($pdo, $f, 'MERMA', $mm['id'], "120 - Inventario Mercancías", 0, $total, "Baja por Merma");
+                        insertAsiento($pdo, $f, 'MERMA', $mm['id'], "120 - Inventario Mercancías", 0, $total, "Baja por Merma #{$mm['id']}");
                     }
                 }
             } catch(Exception $e) { }
 
-            $pdo->commit(); 
-            echo json_encode(['status'=>'success','msg'=>"Sincronizado $mes/$anio ($scope). Incluye Compras y Mermas."]); 
+            // F. FACTURAS STANDALONE — facturas no ligadas a ticket POS (crédito comercial)
+            // Evita doble conteo: solo procesa facturas sin id_ticket_origen
+            try {
+                $sqlFact = "SELECT * FROM facturas
+                            WHERE DATE(fecha_emision) BETWEEN '$fi' AND '$ff'
+                            AND COALESCE(estado,'vigente') != 'anulada'
+                            AND (id_ticket_origen IS NULL OR id_ticket_origen = 0)";
+                $facts = $pdo->query($sqlFact)->fetchAll(PDO::FETCH_ASSOC);
+                foreach($facts as $fact) {
+                    $f       = date('Y-m-d', strtotime($fact['fecha_emision']));
+                    $total   = floatval($fact['total']);
+                    $envio   = floatval($fact['costo_envio'] ?? 0);
+                    $subtot  = $total - $envio;
+                    $pagado  = (($fact['estado_pago'] ?? 'pendiente') === 'pagado');
+                    $nroFact = $fact['numero_factura'] ?? "#{$fact['id']}";
+                    $cliNom  = substr($fact['cliente_nombre'] ?? '', 0, 30);
+
+                    // Cuenta de contrapartida: CxC si pendiente, Caja/Banco si cobrada
+                    if ($pagado) {
+                        $cD = ($fact['metodo_pago'] === 'Transferencia') ? '102 - Banco' : '101 - Efectivo';
+                    } else {
+                        $cD = '110 - CxC Clientes';
+                    }
+
+                    if ($total > 0) {
+                        insertAsiento($pdo,$f,'FACTURA',$fact['id'],$cD,$total,0,"Factura $nroFact - $cliNom");
+                        if ($subtot > 0) insertAsiento($pdo,$f,'FACTURA',$fact['id'],'401 - Ingresos',0,$subtot,"Factura $nroFact");
+                        if ($envio  > 0) insertAsiento($pdo,$f,'FACTURA',$fact['id'],'405 - Ingresos Mensajería',0,$envio,"Envío Factura $nroFact");
+                    }
+                }
+            } catch(Exception $e) { /* tabla facturas puede no existir aún */ }
+
+            $pdo->commit();
+            $nVtas  = count($vtas);
+            $nDevs  = count($devs ?? []);
+            $nGts   = count($gts ?? []);
+            $nCmps  = count($compras ?? []);
+            $nMrms  = count($mermas ?? []);
+            $nFacts = count($facts ?? []);
+            echo json_encode(['status'=>'success','msg'=>"Sincronizado $mes/$anio ($scope). Ventas: $nVtas | Devoluciones: $nDevs | Gastos: $nGts | Compras: $nCmps | Mermas: $nMrms | Facturas: $nFacts"]);
             exit;
         }
 
@@ -202,7 +284,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'save_balances') { validateMonthIsOpen($pdo, $input['fecha']); $pdo->prepare("INSERT INTO contabilidad_saldos (fecha, caja_fuerte, banco, observaciones) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE caja_fuerte=?, banco=?, observaciones=?")->execute([$input['fecha'], floatval($input['caja']), floatval($input['banco']), $input['obs'], floatval($input['caja']), floatval($input['banco']), $input['obs']]); echo json_encode(['status'=>'success']); exit; }
         if ($action === 'equity_op') { validateMonthIsOpen($pdo, $input['fecha']); $m = floatval($input['monto']); if($input['tipo_op'] === 'APORTE') { insertAsiento($pdo, $input['fecha'], 'CAPITAL', 0, "101 - Efectivo", $m, 0, "Aporte"); insertAsiento($pdo, $input['fecha'], 'CAPITAL', 0, "601 - Capital", 0, $m, "Suscripción"); } else { insertAsiento($pdo, $input['fecha'], 'DIVIDENDO', 0, "630 - Utilidades", $m, 0, "Dividendo"); insertAsiento($pdo, $input['fecha'], 'DIVIDENDO', 0, "101 - Efectivo", 0, $m, "Pago Socio"); } echo json_encode(['status'=>'success']); exit; }
         if ($action === 'close_month_execute') { $mes=intval($input['mes']); $anio=intval($input['anio']); if(getPeriodStatus($pdo,$mes,$anio)!=='ABIERTO') throw new Exception("Estado incorrecto."); $fin=date("Y-m-t",strtotime(sprintf('%04d-%02d-01',$anio,$mes))); $pdo->prepare("INSERT INTO contabilidad_config (clave,valor) VALUES ('fecha_cierre',?) ON DUPLICATE KEY UPDATE valor=?")->execute([$fin,$fin]); echo json_encode(['status'=>'success','msg'=>'Mes Cerrado.']); exit; }
-        if ($action === 'check_close_requirements') { $mes=intval($input['mes']); $anio=intval($input['anio']); $w=[]; if($pdo->query("SELECT COUNT(*) FROM gastos_historial WHERE MONTH(fecha)=$mes AND YEAR(fecha)=$anio AND categoria='NOMINA'")->fetchColumn()==0) $w[]="Falta NÓMINA."; if($pdo->query("SELECT COUNT(*) FROM declaraciones_onat WHERE mes=$mes AND anio=$anio")->fetchColumn()==0) $w[]="Falta ONAT."; echo json_encode(['status'=>'success','warnings'=>$w]); exit; }
+        if ($action === 'check_close_requirements') {
+            $mes=intval($input['mes']); $anio=intval($input['anio']); $w=[];
+            if($pdo->query("SELECT COUNT(*) FROM gastos_historial WHERE MONTH(fecha)=$mes AND YEAR(fecha)=$anio AND categoria='NOMINA'")->fetchColumn()==0) $w[]="Falta NÓMINA.";
+            // ONAT: aceptar declaraciones_onat (legacy) o onat_declaraciones (nueva)
+            $hayOnatLegacy = (int)$pdo->query("SELECT COUNT(*) FROM declaraciones_onat WHERE mes=$mes AND anio=$anio")->fetchColumn();
+            $hayOnatNuevo = 0;
+            try {
+                $stmtN = $pdo->prepare("SELECT COUNT(*) FROM onat_declaraciones
+                                        WHERE id_empresa=? AND modelo='Mensual-Ventas'
+                                          AND MONTH(periodo_inicio)=? AND YEAR(periodo_inicio)=?
+                                          AND estado IN ('presentada','pagada','generada')");
+                $stmtN->execute([$EMP_ID, $mes, $anio]);
+                $hayOnatNuevo = (int)$stmtN->fetchColumn();
+            } catch (Throwable $e) {}
+            if ($hayOnatLegacy + $hayOnatNuevo === 0) $w[]="Falta ONAT.";
+            // Advertir si quedan facturas emitidas sin cobrar en el periodo
+            try {
+                $fi2 = sprintf('%04d-%02d-01', $anio, $mes);
+                $ff2 = date("Y-m-t", strtotime($fi2));
+                $pendFact = (int)$pdo->query("SELECT COUNT(*) FROM facturas WHERE DATE(fecha_emision) BETWEEN '$fi2' AND '$ff2' AND estado_pago='pendiente' AND COALESCE(estado,'vigente')='vigente'")->fetchColumn();
+                if ($pendFact > 0) $w[] = "$pendFact factura(s) pendiente(s) de cobro en el periodo.";
+            } catch (Throwable $e) {}
+            // Advertir si hay ventas web con pago verificando
+            try {
+                $fi2 = $fi2 ?? sprintf('%04d-%02d-01', $anio, $mes);
+                $ff2 = $ff2 ?? date("Y-m-t", strtotime($fi2));
+                $pendWeb = (int)$pdo->query("SELECT COUNT(*) FROM ventas_cabecera WHERE DATE(fecha) BETWEEN '$fi2' AND '$ff2' AND estado_pago IN ('verificando','pendiente') AND canal_origen='Web'")->fetchColumn();
+                if ($pendWeb > 0) $w[] = "$pendWeb venta(s) web con pago pendiente de confirmar.";
+            } catch (Throwable $e) {}
+            echo json_encode(['status'=>'success','warnings'=>$w]); exit;
+        }
         if ($action === 'close_year') { $y=$input['year']; $fin="$y-12-31"; if(getPeriodStatus($pdo,12,$y)!=='ABIERTO') throw new Exception("Debe cerrar meses previos."); $res=floatval($pdo->query("SELECT SUM(haber-debe) FROM contabilidad_diario WHERE YEAR(fecha)=$y AND (cuenta LIKE '4%' OR cuenta LIKE '5%' OR cuenta LIKE '7%')")->fetchColumn()); $pdo->beginTransaction(); if($res>0){ insertAsiento($pdo,$fin,'CIERRE',0,"400 - Resumen",$res,0,"Cierre Nominales"); insertAsiento($pdo,$fin,'CIERRE',0,"630 - Utilidades",0,$res,"Utilidad $y"); $r=$res*0.05; insertAsiento($pdo,$fin,'RESERVA',0,"630 - Utilidades",$r,0,"Reserva"); insertAsiento($pdo,$fin,'RESERVA',0,"640 - Reservas",0,$r,"Legal"); } else { insertAsiento($pdo,$fin,'CIERRE',0,"630 - Utilidades",abs($res),0,"Pérdida"); insertAsiento($pdo,$fin,'CIERRE',0,"400 - Resumen",0,abs($res),"Cierre"); } $pdo->prepare("UPDATE contabilidad_config SET valor=? WHERE clave='fecha_cierre'")->execute([$fin]); $pdo->commit(); echo json_encode(['status'=>'success','msg'=>"Año $y cerrado."]); exit; }
 
     } catch (Exception $e) {
@@ -409,8 +521,8 @@ new Vue({
     el:'#app',
     data:{
         tab:'diario', fecha:<?php echo json_encode($ff); ?>,
-        saldos:{caja_fuerte:<?php echo json_encode($jsCaja); ?>, banco:<?php echo json_encode($jsBanco); ?>, obs:<?php echo json_encode($jO); ?>},
-        formPat:{aporte:0, dividendo:0}, errorDb:<?php echo json_encode($errorVista); ?>,
+        saldos:{caja_fuerte:<?php echo json_encode($jC); ?>, banco:<?php echo json_encode($jB); ?>, obs:<?php echo json_encode($jO); ?>},
+        formPat:{aporte:0, dividendo:0}, errorDb:<?php echo json_encode($errView); ?>,
         selMes:parseInt("<?php echo date('m',strtotime($ff)); ?>"), selAnio:parseInt("<?php echo date('Y',strtotime($ff)); ?>"), status:'ABIERTO',
         scope:<?php echo json_encode($scope); ?>, 
         autoOnat: true

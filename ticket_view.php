@@ -40,7 +40,16 @@ try {
         $branchBanner = $stmtS->fetchColumn();
     }
 
-    $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto,
+    $hasNotaCocina = false;
+    try {
+        $stmtCol = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ventas_detalle' AND COLUMN_NAME = 'nota_cocina'");
+        $stmtCol->execute();
+        $hasNotaCocina = (bool)$stmtCol->fetchColumn();
+    } catch (Throwable $e) {
+        $hasNotaCocina = false;
+    }
+
+    $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto" . ($hasNotaCocina ? ", d.nota_cocina" : "") . ",
                       COALESCE(p.nombre, CONCAT('Art: ', d.id_producto)) AS nombre_producto,
                       COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual
                FROM ventas_detalle d
@@ -179,6 +188,19 @@ if ($priceView === 'mayorista') {
         .items-table td { 
             padding: 3px 0; 
             border-bottom: 1px dotted #ccc;
+        }
+        .items-table td.desc-item {
+            font-size: 13px;
+            line-height: 1.25;
+            font-weight: 700;
+        }
+        .items-table td.qty-item,
+        .items-table td.money-item {
+            font-weight: 700;
+        }
+        .total-section td.label-item,
+        .total-section td.value-item {
+            font-weight: 700;
         }
         .total-section { 
             background: #f8f9fa; 
@@ -551,12 +573,17 @@ if ($priceView === 'mayorista') {
             foreach($items as $item): 
                 $sub = $item['subtotal_display'];
                 $itemCount++;
+                $displayName = (string)($item['nombre_producto'] ?? '');
+                $note = trim((string)($item['nota_cocina'] ?? ''));
+                if ($note !== '') {
+                    $displayName .= ' (' . $note . ')';
+                }
             ?>
             <tr>
-                <td><?php echo number_format($item['cantidad'], 2); ?></td>
-                <td><?php echo htmlspecialchars($item['nombre_producto']); ?></td>
-                <td align="right">$<?php echo number_format($item['precio_display'], 2); ?></td>
-                <td align="right" class="fw-bold">$<?php echo number_format($sub, 2); ?></td>
+                <td class="qty-item"><?php echo number_format($item['cantidad'], 2); ?></td>
+                <td class="desc-item"><?php echo htmlspecialchars($displayName); ?></td>
+                <td align="right" class="money-item">$<?php echo number_format($item['precio_display'], 2); ?></td>
+                <td align="right" class="money-item">$<?php echo number_format($sub, 2); ?></td>
             </tr>
             <?php endforeach; ?>
         </tbody>
@@ -574,12 +601,12 @@ if ($priceView === 'mayorista') {
         <table>
             <?php if($venta['tipo_servicio'] === 'reserva' && !empty($venta['abono'])): ?>
                 <?php if ($hayEnvio): ?>
-                    <tr><td>Subtotal productos:</td><td class="text-right">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td></tr>
-                    <tr><td>Costo mensajería:</td><td class="text-right fw-bold">$<?php echo number_format($costoEnvio, 2); ?></td></tr>
+                    <tr><td class="label-item">Subtotal productos:</td><td class="text-right value-item">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td></tr>
+                    <tr><td class="label-item">Costo mensajería:</td><td class="text-right value-item">$<?php echo number_format($costoEnvio, 2); ?></td></tr>
                     <tr style="border-top: 1px dashed #000;"><td colspan="2"></td></tr>
                 <?php endif; ?>
-                <tr><td><?php echo $hayEnvio ? 'Total pedido:' : 'Subtotal:'; ?></td><td class="text-right">$<?php echo number_format($totalDisplay, 2); ?></td></tr>
-                <tr><td>Abono Recibido:</td><td class="text-right fw-bold" style="color: #28a745;">-$<?php echo number_format($abonoDisplay, 2); ?></td></tr>
+                <tr><td class="label-item"><?php echo $hayEnvio ? 'Total pedido:' : 'Subtotal:'; ?></td><td class="text-right value-item">$<?php echo number_format($totalDisplay, 2); ?></td></tr>
+                <tr><td class="label-item">Abono Recibido:</td><td class="text-right value-item" style="color: #28a745;">-$<?php echo number_format($abonoDisplay, 2); ?></td></tr>
                 <tr style="border-top: 2px solid #000; padding-top: 5px;">
                     <td class="fw-bold" style="font-size:14px;">PENDIENTE:</td>
                     <td class="text-right fw-bold" style="font-size:18px; color: #dc3545;">
@@ -589,12 +616,12 @@ if ($priceView === 'mayorista') {
             <?php else: ?>
                 <?php if ($hayEnvio): ?>
                     <tr>
-                        <td>Subtotal productos:</td>
-                        <td class="text-right">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td>
+                        <td class="label-item">Subtotal productos:</td>
+                        <td class="text-right value-item">$<?php echo number_format($subtotalItemsDisplay, 2); ?></td>
                     </tr>
                     <tr>
-                        <td>Costo mensajería:</td>
-                        <td class="text-right fw-bold">$<?php echo number_format($costoEnvio, 2); ?></td>
+                        <td class="label-item">Costo mensajería:</td>
+                        <td class="text-right value-item">$<?php echo number_format($costoEnvio, 2); ?></td>
                     </tr>
                     <tr style="border-top: 1px dashed #000;"><td colspan="2"></td></tr>
                 <?php endif; ?>

@@ -38,13 +38,13 @@ if ($idSesion > 0) {
     if ($cabs) {
         $ids = array_column($cabs, 'id');
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $stmtD = $pdo->prepare("SELECT id_venta_cabecera, codigo_producto, nombre_producto, cantidad
+        $stmtD = $pdo->prepare("SELECT id_venta_cabecera, codigo_producto, nombre_producto, cantidad, nota_cocina
                                 FROM ventas_detalle
                                 WHERE id_venta_cabecera IN ($placeholders)");
         $stmtD->execute($ids);
         $detsPorTk = [];
         foreach ($stmtD->fetchAll(PDO::FETCH_ASSOC) as $d) {
-            $detsPorTk[$d['id_venta_cabecera']][] = $d;
+                $detsPorTk[$d['id_venta_cabecera']][] = $d;
         }
         foreach ($cabs as $c) {
             $c['items'] = $detsPorTk[$c['id']] ?? [];
@@ -416,7 +416,11 @@ function renderTickets() {
             badges.push(`<span class="tk-badge chn">${escapeHtml(tk.canal_origen)}</span>`);
         }
         const items = (tk.items || []).map(it =>
-            `<li><span class="qty">${fmtQty(it.cantidad)}×</span>${escapeHtml(it.nombre_producto)}</li>`
+            `<li>
+                <span class="qty">${fmtQty(it.cantidad)}×</span>
+                <span>${escapeHtml(it.nombre_producto)}</span>
+                ${it.nota_cocina ? `<div style="font-size:0.8rem;color:#fbbf24;font-style:italic;padding-left:42px;">(${escapeHtml(it.nota_cocina)})</div>` : ''}
+            </li>`
         ).join('');
         const cliente = tk.cliente_nombre || 'Mostrador';
         return `<div class="kds-ticket ${isDone ? 'done' : ''}" data-uuid="${escapeHtml(tk.uuid_venta)}">
@@ -466,12 +470,45 @@ function printSummary() {
         hour: '2-digit', minute: '2-digit'
     });
 
-    const filas = arr.map(p => `
-        <tr>
-            <td>${escapeHtml(p.name)}</td>
-            <td class="num">${fmtQty(p.total)}</td>
-        </tr>
-    `).join('');
+    const getGrupo = (name) => {
+        const raw = String(name || '').trim();
+        if (!raw) return 'Sin nombre';
+        return raw.split(/\s+/)[0].replace(/[.,;:!?]+$/g, '');
+    };
+
+    const grouped = [];
+    const map = new Map();
+    arr.forEach((p) => {
+        const groupKey = getGrupo(p.name);
+        const normKey = groupKey.toLocaleLowerCase('es');
+        if (!map.has(normKey)) {
+            const bucket = { label: groupKey, items: [], total: 0 };
+            map.set(normKey, bucket);
+            grouped.push(bucket);
+        }
+        const bucket = map.get(normKey);
+        bucket.items.push(p);
+        bucket.total += (parseFloat(p.total) || 0);
+    });
+
+    const filas = grouped.map(group => {
+        const itemsHtml = group.items.map(p => `
+            <tr>
+                <td class="product-cell">${escapeHtml(p.name)}</td>
+                <td class="num">${fmtQty(p.total)}</td>
+            </tr>
+        `).join('');
+        return `
+            <tr class="group-row">
+                <td colspan="2">${escapeHtml(group.label)}</td>
+            </tr>
+            ${itemsHtml}
+            <tr class="group-subtotal">
+                <td>Subtotal ${escapeHtml(group.label)}</td>
+                <td class="num">${fmtQty(group.total)}</td>
+            </tr>
+        `;
+    }).join('');
 
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -488,6 +525,9 @@ function printSummary() {
     th, td { padding: 5px 6px; border-bottom: 1px dashed #aaa; text-align: left; }
     th { background: #eee; font-size: 12px; text-transform: uppercase; border-bottom: 2px solid #000; }
     .num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .group-row td { background: #f1f3f5; font-weight: 800; text-transform: uppercase; border-bottom: 1px solid #999; padding-top: 7px; }
+    .group-subtotal td { border-top: 1px solid #000; font-weight: 800; background: #fafafa; }
+    .product-cell { padding-left: 14px; }
     tfoot td { border-top: 2px solid #000; border-bottom: none; font-weight: 800; padding-top: 8px; }
     .footer { margin-top: 18px; font-size: 10px; color: #666; text-align: center; }
 </style>

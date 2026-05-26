@@ -573,7 +573,7 @@ function deriveFlags(?string $categoria, bool $isFinal): array
 function ensureRecetaSchema(PDO $pdo): void
 {
     try {
-        $pdo->exec('ALTER TABLE recetas_detalle ADD COLUMN IF NOT EXISTS pct_formula DECIMAL(5,2) DEFAULT 0');
+        $pdo->exec('ALTER TABLE recetas_detalle ADD COLUMN IF NOT EXISTS pct_formula DECIMAL(7,4) DEFAULT 0.0000');
     } catch (Throwable $e) {
         // no-op
     }
@@ -979,11 +979,11 @@ function applyFromDraft(array $draft, array $manualMap, array &$productsByCode, 
         WHERE codigo = ? AND id_empresa = ?");
     $stmtFindRecipe = $pdo->prepare('SELECT id FROM recetas_cabecera WHERE nombre_receta = ? LIMIT 1');
     $stmtUpdateRecipe = $pdo->prepare("UPDATE recetas_cabecera
-        SET id_producto_final = ?, unidades_resultantes = ?, costo_total_lote = ?, costo_unitario = ?, descripcion = ?, activo = 1
+        SET id_producto_final = ?, unidades_resultantes = ?, costo_total_lote = ?, costo_unitario = ?, descripcion = ?, modo_creacion = ?, activo = 1
         WHERE id = ?");
     $stmtInsertRecipe = $pdo->prepare("INSERT INTO recetas_cabecera
-        (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion, activo)
-        VALUES (?, ?, ?, ?, ?, ?, 1)");
+        (id_producto_final, nombre_receta, unidades_resultantes, costo_total_lote, costo_unitario, descripcion, modo_creacion, activo)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
     $stmtDeleteDet = $pdo->prepare('DELETE FROM recetas_detalle WHERE id_receta = ?');
     $stmtInsDet = $pdo->prepare('INSERT INTO recetas_detalle (id_receta, id_ingrediente, cantidad, costo_calculado, pct_formula) VALUES (?, ?, ?, ?, ?)');
 
@@ -1011,6 +1011,7 @@ function applyFromDraft(array $draft, array $manualMap, array &$productsByCode, 
             $costTotal,
             $costUnit,
             $desc,
+            'clasico',
             (int)$existingRecipeId,
         ]);
         $recipeId = (int)$existingRecipeId;
@@ -1022,13 +1023,14 @@ function applyFromDraft(array $draft, array $manualMap, array &$productsByCode, 
             $costTotal,
             $costUnit,
             $desc,
+            'clasico',
         ]);
         $recipeId = (int)$pdo->lastInsertId();
     }
 
     $stmtDeleteDet->execute([$recipeId]);
     foreach ($linePrepared as $it) {
-        $pct = ($qtyTotal > 0) ? (($it['qty'] / $qtyTotal) * 100.0) : 0.0;
+        $pct = ($qtyTotal > 0) ? round(($it['qty'] / $qtyTotal) * 100.0, 4) : 0.0;
         $stmtInsDet->execute([
             $recipeId,
             $it['code'],

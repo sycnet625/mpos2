@@ -307,7 +307,39 @@ try {
             poscash_error('Sesion de caja invalida.', 422);
         }
 
-        $montoSistema = isset($input['sistema']) && is_numeric($input['sistema']) ? (float)$input['sistema'] : 0.0;
+        $montoSistema = null;
+        if (array_key_exists('sistema', $input) && is_numeric($input['sistema'])) {
+            $montoSistema = (float)$input['sistema'];
+        }
+
+        if ($montoSistema === null) {
+            // Compatibilidad con clientes viejos: recalcular aquí el monto esperado.
+            $stmtSesion = $pdo->prepare("SELECT monto_inicial FROM caja_sesiones WHERE id = ? LIMIT 1");
+            $stmtSesion->execute([$sessionId]);
+            $montoInicial = (float)($stmtSesion->fetchColumn() ?: 0);
+
+            $sqlPagosCierre = "SELECT COALESCE(SUM(monto_ajustado), 0) FROM (
+                                    SELECT p.metodo_pago,
+                                           (p.monto * v.total / NULLIF((SELECT SUM(m2.monto) FROM ventas_pagos m2 WHERE m2.id_venta_cabecera = v.id), 0)) as monto_ajustado
+                                    FROM ventas_pagos p
+                                    JOIN ventas_cabecera v ON p.id_venta_cabecera = v.id
+                                    WHERE v.id_caja = ?
+                                      AND p.metodo_pago != 'Mixto'
+                                      AND p.metodo_pago IS NOT NULL
+                                    UNION ALL
+                                    SELECT v.metodo_pago,
+                                           v.total as monto_ajustado
+                                    FROM ventas_cabecera v
+                                    WHERE v.id_caja = ?
+                                      AND NOT EXISTS (SELECT 1 FROM ventas_pagos p2 WHERE p2.id_venta_cabecera = v.id)
+                               ) AS desglose
+                               WHERE metodo_pago = 'Efectivo'";
+            $stmtCash = $pdo->prepare($sqlPagosCierre);
+            $stmtCash->execute([$sessionId, $sessionId]);
+            $cashVentas = (float)($stmtCash->fetchColumn() ?: 0);
+            $montoSistema = $montoInicial + $cashVentas;
+        }
+
         $montoReal = isset($input['real']) && is_numeric($input['real']) ? (float)$input['real'] : 0.0;
         $nota = trim((string)($input['nota'] ?? ''));
         if (strlen($nota) > 500) {

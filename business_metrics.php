@@ -204,6 +204,7 @@ if (!function_exists('_bm_calc_ventas')) {
         $countTickets    = 0;
         $countDevol      = 0;
         $valorDevol      = 0.0;
+        $costoDevol      = 0.0;
         $metodosPago     = [];
         $porCanal        = [];
         $porTipoServicio = [];
@@ -239,6 +240,10 @@ if (!function_exists('_bm_calc_ventas')) {
             if ($tval < 0) {
                 $countDevol++;
                 $valorDevol += abs($tval);
+                foreach ($detallesPorTicket[$tid] ?? [] as $d) {
+                    $qty = floatval($d['cantidad'] ?? 0);
+                    $costoDevol += abs($qty) * floatval($d['costo_unitario'] ?? 0);
+                }
                 continue;
             }
             if ($tval == 0) continue;
@@ -292,7 +297,7 @@ if (!function_exists('_bm_calc_ventas')) {
             'ticket_promedio'   => $countTickets > 0 ? $total / $countTickets : 0.0,
             'dias_activos'      => $diasActivos,
             'promedio_diario'   => $diasActivos > 0 ? $total / $diasActivos : 0.0,
-            'devoluciones'      => ['count' => $countDevol, 'valor' => $valorDevol],
+            'devoluciones'      => ['count' => $countDevol, 'valor' => $valorDevol, 'valor_costo' => $costoDevol],
             'por_metodo_pago'   => $metodosPago,
             'por_canal'         => $porCanal,
             'por_tipo_servicio' => $porTipoServicio,
@@ -384,7 +389,7 @@ if (!function_exists('_bm_calc_productos')) {
         foreach ($detalles as $d) {
             $sku    = (string)($d['id_producto'] ?? '');
             $qty    = floatval($d['cantidad'] ?? 0);
-            if ($qty <= 0) continue;  // excluye líneas de devolución
+            if ($qty == 0) continue; 
             $precio = floatval($d['precio'] ?? 0);
             $costo  = floatval($d['costo_unitario'] ?? 0);
             $nombre = (string)($d['nombre_prod'] ?? $d['nombre_producto'] ?? $sku);
@@ -574,28 +579,28 @@ if (!function_exists('_bm_calc_series')) {
         $sql = "SELECT
                     dates.dia,
                     COALESCE((
-                        SELECT SUM(CASE WHEN v.total > 0 THEN v.total ELSE 0 END)
+                        SELECT SUM(v.total)
                         FROM ventas_cabecera v $csjoin
                         WHERE v.id_empresa = ?
                           AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND $wReal AND v.tipo_servicio != 'reserva' $sucFilterV
+                          AND $wReal $sucFilterV
                     ), 0) AS venta,
                     COALESCE((
-                        SELECT SUM(CASE WHEN vd.cantidad > 0 THEN vd.cantidad * p.costo ELSE 0 END)
+                        SELECT SUM(vd.cantidad * p.costo)
                         FROM ventas_detalle vd
                         JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
                         JOIN productos p ON vd.id_producto = p.codigo
                         $csjoin
                         WHERE v.id_empresa = ?
                           AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND v.total > 0 AND $wReal AND v.tipo_servicio != 'reserva' $sucFilterV
+                          AND $wReal $sucFilterV
                     ), 0) AS costo,
                     COALESCE((
                         SELECT COUNT(v.id)
                         FROM ventas_cabecera v $csjoin
                         WHERE v.id_empresa = ?
                           AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND v.total > 0 AND $wReal AND v.tipo_servicio != 'reserva' $sucFilterV
+                          AND v.total > 0 AND $wReal $sucFilterV
                     ), 0) AS transacciones,
                     COALESCE((
                         SELECT SUM(monto) FROM gastos_historial
@@ -606,7 +611,7 @@ if (!function_exists('_bm_calc_series')) {
                     FROM ventas_cabecera v $csjoin
                     WHERE v.id_empresa = ?
                       AND IFNULL(cs.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
-                      AND $wReal AND v.tipo_servicio != 'reserva' $sucFilterV
+                      AND $wReal $sucFilterV
                     UNION
                     SELECT DISTINCT DATE(fecha) AS dia
                     FROM gastos_historial

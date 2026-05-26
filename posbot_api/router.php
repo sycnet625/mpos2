@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/helpers/runtime.php';
 bot_ensure_tables($pdo);
 $cfg = bot_cfg($pdo);
 $action = $_GET['action'] ?? '';

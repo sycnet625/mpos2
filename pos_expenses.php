@@ -9,6 +9,8 @@ require_once 'db.php';
 // --- CONFIGURACIÓN Y SUCURSAL ---
 date_default_timezone_set('America/Havana');
 require_once 'config_loader.php';
+require_once 'onat_contabilidad_bridge.php';
+$ONAT_DEDUCIBLES = onat_categorias_deducibles();
 $SUC_ID = intval($config['id_sucursal']); 
 
 $mesActual = date('m');
@@ -188,7 +190,7 @@ $plantillasRapidas = [
                         <h2 class="h5 fw-bold mb-0"><i class="fas fa-list me-2"></i>Historial Reciente</h2>
                     </div>
                 </div>
-                <div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light small"><tr><th>Fecha</th><th>Concepto</th><th>Categ.</th><th>Tipo</th><th class="text-end">Monto</th><th class="text-end">Acciones</th></tr></thead><tbody><?php foreach($gastos as $g): ?><tr id="row-<?php echo $g['id']; ?>"><td><?php echo date('d/m', strtotime($g['fecha'])); ?></td><td class="fw-bold text-dark"><?php echo htmlspecialchars($g['concepto']); ?></td><td><span class="badge bg-light text-dark border"><?php echo $g['categoria']; ?></span></td><td><?php if($g['tipo']=='FIJO'): ?><span class="badge badge-fijo" style="font-size:0.65rem">FIJO</span><?php else: ?><span class="badge badge-variable" style="font-size:0.65rem">VAR</span><?php endif; ?></td><td class="text-end fw-bold text-danger">-$<?php echo number_format($g['monto'], 2); ?></td><td class="text-end"><button class="btn btn-sm btn-link text-primary p-0 me-2" onclick='editExpense(<?php echo json_encode($g); ?>)'><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-link text-secondary p-0" onclick="deleteExpense(<?php echo $g['id']; ?>)"><i class="fas fa-trash"></i></button></td></tr><?php endforeach; ?></tbody></table></div>
+                <div class="table-responsive"><table class="table table-hover align-middle mb-0"><thead class="table-light small"><tr><th>Fecha</th><th>Concepto</th><th>Categ.</th><th>Tipo</th><th class="text-end">Monto</th><th class="text-end">Acciones</th></tr></thead><tbody><?php foreach($gastos as $g): ?><tr id="row-<?php echo $g['id']; ?>"><td><?php echo date('d/m', strtotime($g['fecha'])); ?></td><td class="fw-bold text-dark"><?php echo htmlspecialchars($g['concepto']); ?></td><td><span class="badge bg-light text-dark border"><?php echo $g['categoria']; ?></span><?php if(in_array($g['categoria'], $ONAT_DEDUCIBLES, true)): ?> <span class="badge bg-success-subtle text-success border border-success-subtle" title="Deducible para DJ Utilidades / DJ-08" style="font-size:0.6rem"><i class="fas fa-check me-1"></i>ONAT</span><?php endif; ?></td><td><?php if($g['tipo']=='FIJO'): ?><span class="badge badge-fijo" style="font-size:0.65rem">FIJO</span><?php else: ?><span class="badge badge-variable" style="font-size:0.65rem">VAR</span><?php endif; ?></td><td class="text-end fw-bold text-danger">-$<?php echo number_format($g['monto'], 2); ?></td><td class="text-end"><button class="btn btn-sm btn-link text-primary p-0 me-2" onclick='editExpense(<?php echo json_encode($g); ?>)'><i class="fas fa-edit"></i></button><button class="btn btn-sm btn-link text-secondary p-0" onclick="deleteExpense(<?php echo $g['id']; ?>)"><i class="fas fa-trash"></i></button></td></tr><?php endforeach; ?></tbody></table></div>
             </div>
         </div>
     </div>

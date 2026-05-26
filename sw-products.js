@@ -1,4 +1,4 @@
-const CACHE_NAME = 'marinero-products-v5';
+const CACHE_NAME = 'marinero-products-v6';
 const BASE_URL = new URL('./', self.location.href);
 const assetUrl = (rel) => new URL(rel, BASE_URL).toString();
 const ASSETS = [
@@ -50,7 +50,14 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(e.request, { cache: 'no-store' }).then((response) => {
         if (response && response.ok) {
-          caches.open(CACHE_NAME).then((cache) => cache.put(e.request, response.clone()));
+          try {
+            const responseCopy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(e.request, responseCopy).catch(() => {});
+            }).catch(() => {});
+          } catch (err) {
+            console.warn('[SW-PRODUCTS] No se pudo clonar respuesta para caché:', err);
+          }
         }
         return response;
       }).catch(() => {

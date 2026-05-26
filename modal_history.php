@@ -213,6 +213,11 @@ if (isset($_GET['render_mode'])) {
                     </div>
                 </div>
             </div>
+            <div class="d-flex justify-content-end mt-2">
+                <button type="button" class="btn btn-success btn-sm fw-bold" onclick="openHistorialWhatsappModal()">
+                    <i class="fab fa-whatsapp me-1"></i> Enviar PDFs por WhatsApp
+                </button>
+            </div>
         </div>
 
         <div class="table-responsive">
@@ -240,7 +245,7 @@ if (isset($_GET['render_mode'])) {
                         elseif (stripos($metodosDisplay, 'transferencia') !== false && count(array_unique($metodosReales)) == 1) { $rowClass = 'row-transferencia'; $badgeClass = 'bg-primary'; }
                         else { $rowClass = 'row-mixto'; $badgeClass = 'bg-dark text-white'; }
                     ?>
-                    <tr class="<?php echo $rowClass; ?> ticket-row" onclick="toggleDetail(<?php echo $t['id']; ?>)">
+                    <tr class="<?php echo $rowClass; ?> ticket-row" data-ticket-id="<?php echo $t['id']; ?>" onclick="toggleDetail(<?php echo $t['id']; ?>)">
                         <td class="text-center"><i class="fas fa-chevron-right text-muted icon-collapse-<?php echo $t['id']; ?>"></i></td>
                         <td class="fw-bold">#<?php echo $t['id']; ?></td>
                         <td><?php echo date('H:i', strtotime($t['fecha'])); ?></td>
@@ -324,6 +329,37 @@ if (isset($_GET['render_mode'])) {
                 <?php endif; ?>
                 </tbody>
             </table>
+        </div>
+
+        <div class="modal fade" id="historialWhatsappModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow-lg">
+                    <div class="modal-header bg-success text-white">
+                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas PDF</h6>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="small text-muted mb-2">Se enviará un PDF individual por cada ticket visible en el historial actual.</div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold">Contacto WhatsApp</label>
+                            <select id="historialWhatsappContacto" class="form-select form-select-sm">
+                                <option value="">Cargando contactos...</option>
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-bold">Mensaje</label>
+                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto tus facturas en PDF.</textarea>
+                        </div>
+                        <div id="historialWhatsappEstado" class="small text-muted"></div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-success btn-sm fw-bold" onclick="enviarHistorialPorWhatsApp()">
+                            <i class="fab fa-whatsapp me-1"></i> Enviar PDFs
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
         <?php
         exit;

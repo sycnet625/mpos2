@@ -83,6 +83,7 @@ try {
 
     $sessionSummary = [];
     $ticketDetailsBySale = [];
+    $productSummary = [];
 
     $stmt = $pdo->prepare("SELECT v.*
                            FROM ventas_cabecera v
@@ -153,9 +154,45 @@ try {
                 $sessionSummary[$sessionId]['estado'] = $row['estado'] ?? '';
             }
         }
+
+        $stmt = $pdo->prepare(
+            "SELECT
+                p.nombre,
+                p.categoria,
+                SUM(vd.cantidad) AS total_qty,
+                SUM(vd.cantidad * vd.precio) AS total_val
+             FROM ventas_detalle vd
+             JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
+             LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+             JOIN productos p ON vd.id_producto = p.codigo
+             WHERE v.id_sucursal = ?
+               AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+               AND " . ventas_reales_where_clause('v') . "
+             GROUP BY p.codigo, p.nombre, p.categoria
+             ORDER BY p.categoria ASC, p.nombre ASC"
+        );
+        $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+        $productSummary = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
 } catch (Exception $e) { die("Error DB: " . $e->getMessage()); }
+
+function print_report_family_label(string $name): string
+{
+    $name = trim(preg_replace('/\s+/u', ' ', $name));
+    if ($name === '') {
+        return 'SIN FAMILIA';
+    }
+
+    $parts = preg_split('/\s+/u', $name);
+    $family = trim((string)($parts[0] ?? ''));
+    $family = preg_replace('/^[^\pL\pN]+|[^\pL\pN]+$/u', '', $family);
+    if ($family === '') {
+        return 'SIN FAMILIA';
+    }
+
+    return function_exists('mb_strtoupper') ? mb_strtoupper($family, 'UTF-8') : strtoupper($family);
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -174,6 +211,7 @@ try {
             .bg-gradient-success { background: #198754 !important; color: white !important; }
             .bg-gradient-danger { background: #dc3545 !important; color: white !important; }
             .bg-dark { background: #212529 !important; color: white !important; }
+            .bg-light-warning { background: #fff3cd !important; color: #000 !important; }
         }
         body { font-family: 'Segoe UI', sans-serif; background: #fff; }
         .header-box { border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; }
@@ -199,28 +237,36 @@ try {
     </div>
 
     <div class="row g-3 mb-4">
-        <div class="col-3">
+        <div class="col-lg-2 col-md-4 col-6">
             <div class="p-3 bg-light border rounded text-center">
                 <small class="text-uppercase fw-bold text-muted">VENTAS</small>
                 <h3 class="fw-bold text-primary mb-0">$<?php echo number_format($venta_total, 2); ?></h3>
             </div>
         </div>
-        <div class="col-3">
+        <div class="col-lg-2 col-md-4 col-6">
             <div class="p-3 bg-light border rounded text-center">
                 <small class="text-uppercase fw-bold text-muted">COSTOS</small>
                 <h3 class="fw-bold text-secondary mb-0">$<?php echo number_format($costo_total, 2); ?></h3>
             </div>
         </div>
-        <div class="col-3">
+        <div class="col-lg-2 col-md-4 col-6">
             <div class="p-3 bg-light border rounded text-center">
                 <small class="text-uppercase fw-bold text-muted">GASTOS</small>
                 <h3 class="fw-bold text-danger mb-0">$<?php echo number_format($gastos_totales, 2); ?></h3>
             </div>
         </div>
-        <div class="col-3">
-            <div class="p-3 bg-dark text-white border rounded text-center">
-                <small class="text-uppercase fw-bold text-warning">NETO FINAL</small>
-                <h3 class="fw-bold mb-0">$<?php echo number_format($ganancia_limpia, 2); ?></h3>
+        <div class="col-lg-2 col-md-4 col-6">
+            <div class="p-3 bg-light-warning border rounded text-center">
+                <small class="text-uppercase fw-bold text-dark">NETO FINAL</small>
+                <h3 class="fw-bold mb-0 text-dark">$<?php echo number_format($ganancia_limpia, 2); ?></h3>
+                <div class="small text-dark mt-1">Restando reserva (<?php echo $pct_reserva; ?>%): -$<?php echo number_format($reserva_monto, 2); ?></div>
+            </div>
+        </div>
+        <div class="col-lg-2 col-md-4 col-6">
+            <div class="p-3 bg-light border rounded text-center">
+                <small class="text-uppercase fw-bold text-muted">GANANCIA BRUTA</small>
+                <h3 class="fw-bold text-success mb-0">$<?php echo number_format($ganancia_bruta, 2); ?></h3>
+                <div class="small text-success fw-bold"><?php echo number_format($pct_margen, 1); ?>%</div>
             </div>
         </div>
     </div>
@@ -358,6 +404,127 @@ try {
         <?php else: ?>
             <div class="alert alert-light border">No hay tickets asociados a sesiones de caja en este periodo.</div>
         <?php endif; ?>
+    </div>
+
+    <div class="mt-4">
+        <h5 class="fw-bold border-bottom pb-2">Resumen de Productos Vendidos</h5>
+        <table class="table table-sm table-bordered">
+            <thead class="table-light">
+                <tr>
+                    <th>Categoría</th>
+                    <th>Familia</th>
+                    <th>Producto</th>
+                    <th class="text-end">Cant. Total</th>
+                    <th class="text-end">Total Recaudado</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php
+                $currentCategory = null;
+                $currentFamily = null;
+                $categoryQty = 0.0;
+                $categoryVal = 0.0;
+                $familyQty = 0.0;
+                $familyVal = 0.0;
+                $grandQty = 0.0;
+                $grandVal = 0.0;
+
+                $flushFamily = function () use (&$currentFamily, &$familyQty, &$familyVal) {
+                    if ($currentFamily === null) {
+                        return;
+                    }
+                    ?>
+                    <tr class="table-warning">
+                        <td colspan="3" class="fw-bold text-uppercase">Subtotal familia: <?php echo htmlspecialchars($currentFamily); ?></td>
+                        <td class="text-end fw-bold"><?php echo number_format($familyQty, 2); ?></td>
+                        <td class="text-end fw-bold">$<?php echo number_format($familyVal, 2); ?></td>
+                    </tr>
+                    <?php
+                    $currentFamily = null;
+                    $familyQty = 0.0;
+                    $familyVal = 0.0;
+                };
+
+                $flushCategory = function () use (&$currentCategory, &$categoryQty, &$categoryVal) {
+                    if ($currentCategory === null) {
+                        return;
+                    }
+                    ?>
+                    <tr class="table-secondary">
+                        <td colspan="3" class="fw-bold text-uppercase">Subtotal categoría: <?php echo htmlspecialchars($currentCategory); ?></td>
+                        <td class="text-end fw-bold"><?php echo number_format($categoryQty, 2); ?></td>
+                        <td class="text-end fw-bold">$<?php echo number_format($categoryVal, 2); ?></td>
+                    </tr>
+                    <?php
+                    $currentCategory = null;
+                    $categoryQty = 0.0;
+                    $categoryVal = 0.0;
+                };
+
+                if (empty($productSummary)) {
+                    echo '<tr><td colspan="5" class="text-center text-muted">No hay productos vendidos en este periodo.</td></tr>';
+                } else {
+                    foreach ($productSummary as $prod) {
+                        $category = trim((string)($prod['categoria'] ?? ''));
+                        if ($category === '') {
+                            $category = 'SIN CATEGORÍA';
+                        }
+                        $family = print_report_family_label((string)($prod['nombre'] ?? ''));
+                        $qty = floatval($prod['total_qty'] ?? 0);
+                        $val = floatval($prod['total_val'] ?? 0);
+
+                        if ($currentCategory !== $category) {
+                            $flushFamily();
+                            $flushCategory();
+                            $currentCategory = $category;
+                            ?>
+                            <tr class="table-dark">
+                                <td colspan="5" class="fw-bold text-uppercase">📂 <?php echo htmlspecialchars($currentCategory); ?></td>
+                            </tr>
+                            <?php
+                        }
+
+                        if ($currentFamily !== $family) {
+                            $flushFamily();
+                            $currentFamily = $family;
+                            ?>
+                            <tr class="table-light">
+                                <td></td>
+                                <td colspan="4" class="fw-bold text-uppercase text-muted">Familia: <?php echo htmlspecialchars($currentFamily); ?></td>
+                            </tr>
+                            <?php
+                        }
+
+                        $grandQty += $qty;
+                        $grandVal += $val;
+                        $categoryQty += $qty;
+                        $categoryVal += $val;
+                        $familyQty += $qty;
+                        $familyVal += $val;
+                        ?>
+                        <tr>
+                            <td></td>
+                            <td><?php echo htmlspecialchars($currentFamily); ?></td>
+                            <td style="padding-left: 20px;"><?php echo htmlspecialchars($prod['nombre'] ?? ''); ?></td>
+                            <td class="text-end"><?php echo number_format($qty, 2); ?></td>
+                            <td class="text-end">$<?php echo number_format($val, 2); ?></td>
+                        </tr>
+                        <?php
+                    }
+
+                    $flushFamily();
+                    $flushCategory();
+                    ?>
+                    <tr style="border-top: 2px solid #333; font-weight: bold;">
+                        <td colspan="3">TOTAL GENERAL PRODUCTOS</td>
+                        <td class="text-end"><?php echo number_format($grandQty, 2); ?></td>
+                        <td class="text-end">$<?php echo number_format($grandVal, 2); ?></td>
+                    </tr>
+                    <?php
+                }
+                ?>
+            </tbody>
+        </table>
     </div>
 
     <div class="fixed-bottom p-3 text-center no-print">

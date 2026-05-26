@@ -10,10 +10,21 @@ require_once 'db.php';
 require_once 'config_loader.php';
 $EMP_ID = intval($config['id_empresa']);
 
+try {
+    $stmtModeCol = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'recetas_cabecera' AND COLUMN_NAME = 'modo_creacion'");
+    $stmtModeCol->execute();
+    if ((int)$stmtModeCol->fetchColumn() === 0) {
+        $pdo->exec("ALTER TABLE recetas_cabecera ADD COLUMN modo_creacion VARCHAR(20) NOT NULL DEFAULT 'clasico' AFTER descripcion");
+    }
+} catch (Throwable $e) {
+    // Si no se puede alterar aquí, la app sigue funcionando con el valor por defecto.
+}
+
 // 2. CARGA DE DATOS MAESTROS (Para inicializar Vue rápidamente)
 try {
     // Recetas (Cabecera + Precio Venta Actual del Producto Final)
     $recetas = $pdo->query("SELECT r.*, 
+                            COALESCE(r.modo_creacion, 'clasico') AS modo_creacion,
                             COALESCE(p.nombre, 'Producto Borrado') as nombre_producto_final, 
                             COALESCE(p.precio, 0) as precio_venta,
                             COALESCE((
@@ -39,6 +50,30 @@ try {
                             ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {
     die("Error de conexión o base de datos: " . $e->getMessage());
+}
+
+if (isset($_GET['action']) && $_GET['action'] === 'refresh_catalog') {
+    header('Content-Type: application/json; charset=utf-8');
+    try {
+        $productosFinales = $pdo->query("SELECT codigo, nombre, unidad_medida 
+                                         FROM productos 
+                                         WHERE activo=1 AND id_empresa=$EMP_ID AND es_elaborado=1 
+                                         ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+        $insumos = $pdo->query("SELECT codigo, nombre, costo, unidad_medida 
+                                FROM productos 
+                                WHERE activo=1 AND id_empresa=$EMP_ID AND es_servicio=0 
+                                ORDER BY nombre ASC")->fetchAll(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'status' => 'success',
+            'productosFinales' => $productosFinales,
+            'insumos' => $insumos
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Exception $e) {
+        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+    }
+    exit;
 }
 ?>
 
@@ -141,7 +176,12 @@ try {
                                 <input type="text" class="form-control form-control-sm" v-model="searchRecipeByName" placeholder="🔍 Buscar por nombre de receta">
                             </div>
                             <div class="col-lg-6">
-                                <input type="text" class="form-control form-control-sm" v-model="searchRecipeByIngredient" placeholder="🔍 Filtrar por producto dentro de la receta">
+                                <div class="input-group input-group-sm">
+                                    <input type="text" class="form-control" v-model="searchRecipeByIngredient" placeholder="🔍 Filtrar por producto dentro de la receta">
+                                    <button type="button" class="btn btn-outline-secondary" @click="refreshProductLists" title="Recargar productos e insumos del buscador">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div class="mt-2 d-flex flex-wrap align-items-center gap-2" v-if="hasRecipeFilters">
@@ -572,8 +612,8 @@ try {
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
-    const allFinales = <?php echo json_encode($productosFinales); ?>;
-    const allInsumos = <?php echo json_encode($insumos); ?>;
+    let allFinales = <?php echo json_encode($productosFinales); ?>;
+    let allInsumos = <?php echo json_encode($insumos); ?>;
     const recetasInit = <?php echo json_encode($recetas); ?>;
 
     new Vue({
@@ -682,13 +722,16 @@ try {
             startEdit(r) {
                 this.resetForm();
                 this.isEditing = true;
+                this.modoCreacion = (r.modo_creacion === 'porcentual') ? 'porcentual' : 'clasico';
                 const pf = allFinales.find(p => p.codigo == r.id_producto_final);
                 this.selectedFinalName = pf ? pf.nombre : r.id_producto_final;
                 this.form = { ...r, id_producto_final: r.id_producto_final, unidades: parseFloat(r.unidades_resultantes), ingredientes: [] };
                 this.form.id = r.id; 
                 this.api('get_details', {id: r.id}).then(d => {
                     const hasPct = d.some(x => parseFloat(x.pct_formula) > 0);
-                    this.modoCreacion = hasPct ? 'porcentual' : 'clasico';
+                    if (!r.modo_creacion) {
+                        this.modoCreacion = hasPct ? 'porcentual' : 'clasico';
+                    }
                     if (hasPct) {
                         const anchor = d.find(x => parseFloat(x.pct_formula) > 0 && parseFloat(x.cantidad) > 0);
                         if (anchor) {
@@ -713,6 +756,7 @@ try {
                 const costoTotal = this.formCostoLote;
                 const payload = {
                     ...this.form,
+                    modo_creacion: this.modoCreacion,
                     costo_lote: costoTotal,
                     costo_unitario: this.formCostoUnit,
                     ingredientes: this.form.ingredientes.map(i => {
@@ -720,8 +764,8 @@ try {
                         const pctFormula = this.modoCreacion === 'porcentual'
                             ? (parseFloat(i.pct) || 0)
                             : (totalCant > 0 ? parseFloat(((i.cant / totalCant) * 100).toFixed(2)) : 0);
-                        return { id: i.id, cant: i.cant, costo_total: i.cant * i.costo_base, pct_formula: pctFormula };
-                    })
+                        return { id: i.id, cant: i.cant, costo_total: i.cant * i.costo_base, pct_formula: parseFloat(pctFormula.toFixed(4)) };
+                })
                 };
                 this.api('save_recipe', payload).then(d => {
                     if(d.status === 'success') location.reload(); else alert('Error al guardar: ' + d.msg);
@@ -756,6 +800,29 @@ try {
             clearFinal() { this.form.id_producto_final=''; this.selectedFinalName=''; },
             filterIngs() { const q=this.searchIng.toLowerCase(); this.filteredIngs=allInsumos.filter(p=>p.nombre.toLowerCase().includes(q)).slice(0,10); },
             selectIng(p) { this.tempIng=p; this.searchIng=p.nombre; this.filteredIngs=[]; document.getElementById('ingSearch').focus(); },
+            async refreshProductLists() {
+                try {
+                    const res = await fetch('pos_production.php?action=refresh_catalog', { cache: 'no-store' });
+                    const data = await res.json();
+                    if (data.status !== 'success') {
+                        alert('No se pudo refrescar el catálogo: ' + (data.msg || 'error desconocido'));
+                        return;
+                    }
+                    allFinales = Array.isArray(data.productosFinales) ? data.productosFinales : [];
+                    allInsumos = Array.isArray(data.insumos) ? data.insumos : [];
+                    this.filteredFinales = [];
+                    this.filteredIngs = [];
+                    this.searchFinal = '';
+                    this.searchIng = '';
+                    this.selectedFinalName = this.form.id_producto_final
+                        ? (allFinales.find(p => p.codigo == this.form.id_producto_final)?.nombre || this.selectedFinalName)
+                        : this.selectedFinalName;
+                    alert('Catálogo de productos actualizado.');
+                } catch (e) {
+                    console.error(e);
+                    alert('Error al recargar el catálogo de productos.');
+                }
+            },
             addIngrediente() {
                 if (!this.tempIng) return;
                 let cant, pct;
