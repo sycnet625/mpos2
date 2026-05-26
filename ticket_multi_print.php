@@ -117,6 +117,20 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
 .tk-items { width: 100%; border-collapse: collapse; margin: 4px 0; }
 .tk-items th { border-bottom: 1px solid #000; font-size: 11px; padding: 3px 4px; }
 .tk-items td { font-size: 11px; padding: 3px 4px; border-bottom: 1px dotted #ddd; }
+.tk-items th:nth-child(3),
+.tk-items td:nth-child(3) {
+    padding-right: 10px;
+    width: 18%;
+    white-space: nowrap;
+    font-weight: 400;
+}
+.tk-items th:nth-child(4),
+.tk-items td:nth-child(4) {
+    padding-left: 10px;
+    width: 19%;
+    white-space: nowrap;
+    font-weight: 700;
+}
 .tk-items td.tk-desc {
     font-size: 12px;
     line-height: 1.25;
@@ -224,7 +238,8 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
         <?php foreach ($items as $item): $sub = $item['cantidad'] * $item['precio']; ?>
             <tr>
         <td class="tk-desc"><?= htmlspecialchars(mb_strimwidth($item['nombre_producto'], 0, 30, '…')) ?></td>
-                <td class="r tk-qty"><?= rtrim(rtrim(number_format($item['cantidad'], 2), '0'), '.') ?></td>
+                <?php $qtyValue = floatval($item['cantidad']); ?>
+                <td class="r tk-qty"><?= (abs($qtyValue - round($qtyValue)) < 0.00001) ? number_format((int)round($qtyValue), 0) : rtrim(rtrim(number_format($qtyValue, 2, '.', ''), '0'), '.') ?></td>
                 <td class="r tk-money">$<?= number_format($item['precio'], 2) ?></td>
                 <td class="r tk-money">$<?= number_format($sub, 2) ?></td>
             </tr>

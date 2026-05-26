@@ -1968,6 +1968,33 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 // ── PWA Install Banner ────────────────────────────────────────────────────────
 (function () {
     let _deferredPrompt = null; // guarda el evento beforeinstallprompt
+    const PWA_SNOOZE_KEY = 'pos_pwa_banner_snooze_until';
+    const PWA_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+
+    function getPwaSnoozeUntil() {
+        const raw = localStorage.getItem(PWA_SNOOZE_KEY);
+        const until = raw ? parseInt(raw, 10) : 0;
+        return Number.isFinite(until) ? until : 0;
+    }
+
+    function isPwaSnoozed() {
+        const until = getPwaSnoozeUntil();
+        if (until > Date.now()) {
+            return true;
+        }
+        if (until > 0) {
+            localStorage.removeItem(PWA_SNOOZE_KEY);
+        }
+        return false;
+    }
+
+    function snoozePwaBanner() {
+        localStorage.setItem(PWA_SNOOZE_KEY, String(Date.now() + PWA_SNOOZE_MS));
+    }
+
+    function clearPwaSnooze() {
+        localStorage.removeItem(PWA_SNOOZE_KEY);
+    }
 
     // Detectar si YA está instalado como PWA
     function isPwaInstalled() {
@@ -1985,7 +2012,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     // Mostrar el banner si aplica
     function maybeShowBanner() {
         if (isPwaInstalled()) return; // ya instalado, no mostrar nada
-        if (sessionStorage.getItem('pwa_banner_dismissed')) return; 
+        if (isPwaSnoozed()) return;
 
         const banner   = document.getElementById('pwaBanner');
         const iosSteps = document.getElementById('pwaIosSteps');
@@ -2023,6 +2050,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     window.addEventListener('appinstalled', function () {
         document.getElementById('pwaBanner').style.display = 'none';
         _deferredPrompt = null;
+        clearPwaSnooze();
     });
 
     // Botón "Instalar ahora"
@@ -2033,13 +2061,14 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         _deferredPrompt = null;
         if (outcome === 'accepted') {
             document.getElementById('pwaBanner').style.display = 'none';
+            clearPwaSnooze();
         }
     };
 
     // Botón "Ahora no"
     window.dismissPwaBanner = function () {
         document.getElementById('pwaBanner').style.display = 'none';
-        sessionStorage.setItem('pwa_banner_dismissed', '1');
+        snoozePwaBanner();
     };
 
     // Comprobar al cargar (para iOS, que no dispara beforeinstallprompt)
@@ -2323,6 +2352,34 @@ window.updateCartBackground = function (sucursalId) {
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                 <button type="button" id="btnSaveBarcodes" class="btn btn-primary fw-bold" onclick="saveBarcodes()">
                     <i class="fas fa-save me-1"></i> Guardar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="qtyModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered" style="max-width:360px;">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header py-2 bg-dark text-white">
+                <h6 class="modal-title fw-bold"><i class="fas fa-weight-hanging me-2"></i>Editar Cantidad</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="small text-muted text-uppercase fw-bold mb-1">Producto seleccionado</div>
+                <div id="qtyModalItemName" class="fw-bold mb-2 text-truncate">—</div>
+                <div class="d-flex justify-content-between align-items-center mb-3 small">
+                    <span class="text-muted">Cantidad actual</span>
+                    <span id="qtyModalCurrentQty" class="fw-bold">0</span>
+                </div>
+                <label for="qtyModalInput" class="form-label small fw-bold text-muted">Nueva cantidad</label>
+                <input type="number" id="qtyModalInput" class="form-control form-control-lg text-center fw-bold" step="0.01" min="0.01" inputmode="decimal" autocomplete="off">
+                <div class="form-text">Usa valores enteros o decimales según el producto.</div>
+            </div>
+            <div class="modal-footer py-2 bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-primary fw-bold" id="btnQtyModalSave" onclick="confirmQtyModal()">
+                    <i class="fas fa-check me-1"></i> Aplicar
                 </button>
             </div>
         </div>

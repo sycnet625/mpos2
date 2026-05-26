@@ -185,6 +185,20 @@ if ($priceView === 'mayorista') {
             padding: 3px 0; 
             font-weight: bold;
         }
+        .items-table th:nth-child(3),
+        .items-table td:nth-child(3) {
+            padding-right: 10px;
+            width: 24%;
+            white-space: nowrap;
+            font-weight: 400;
+        }
+        .items-table th:nth-child(4),
+        .items-table td:nth-child(4) {
+            padding-left: 10px;
+            width: 22%;
+            white-space: nowrap;
+            font-weight: 700;
+        }
         .items-table td { 
             padding: 3px 0; 
             border-bottom: 1px dotted #ccc;
@@ -578,9 +592,13 @@ if ($priceView === 'mayorista') {
                 if ($note !== '') {
                     $displayName .= ' (' . $note . ')';
                 }
+                $qtyValue = floatval($item['cantidad']);
+                $qtyDisplay = (abs($qtyValue - round($qtyValue)) < 0.00001)
+                    ? number_format((int)round($qtyValue), 0)
+                    : rtrim(rtrim(number_format($qtyValue, 2, '.', ''), '0'), '.');
             ?>
             <tr>
-                <td class="qty-item"><?php echo number_format($item['cantidad'], 2); ?></td>
+                <td class="qty-item"><?php echo $qtyDisplay; ?></td>
                 <td class="desc-item"><?php echo htmlspecialchars($displayName); ?></td>
                 <td align="right" class="money-item">$<?php echo number_format($item['precio_display'], 2); ?></td>
                 <td align="right" class="money-item">$<?php echo number_format($sub, 2); ?></td>
