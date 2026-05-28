@@ -1,6 +1,6 @@
 <?php
 // ARCHIVO: kardex_engine.php
-// VERSIÓN: 3.2 (SOLUCIÓN DEFINITIVA: MÉTODOS MÁGICOS PARA EVITAR REDECLARACIÓN)
+// VERSIÓN: 3.3 (CORRECCIÓN: REGISTRO DE USUARIO EN KARDEX)
 require_once 'db.php';
 
 class KardexEngine {
@@ -32,7 +32,7 @@ class KardexEngine {
                 $user  = $args[7] ?? null;
                 $fecha = $args[8] ?? null;
 
-                return self::_ejecutarLogica($this->pdo, $sku, $alm, $qty, $tipo, $ref, $costo, $suc, $fecha);
+                return self::_ejecutarLogica($this->pdo, $sku, $alm, $qty, $tipo, $ref, $costo, $suc, $fecha, $user);
             }
         }
     }
@@ -51,14 +51,14 @@ class KardexEngine {
      */
     public function registrarVenta($producto_id, $cantidad, $id_venta, $usuario, $fecha, $almacen_id = 1) {
         $cantidad_salida = -abs(floatval($cantidad));
-        return self::_ejecutarLogica($this->pdo, $producto_id, $almacen_id, $cantidad_salida, 'VENTA', "Venta #$id_venta ($usuario)", null, null, $fecha);
+        return self::_ejecutarLogica($this->pdo, $producto_id, $almacen_id, $cantidad_salida, 'VENTA', "Venta #$id_venta", null, null, $fecha, $usuario);
     }
 
     /**
      * LÓGICA CENTRAL ÚNICA (Privada)
-     * Firma: ($pdo, $producto_id, $almacen_id, $cantidad, $tipo, $referencia, $costo_unitario, $sucursal_id, $fecha)
+     * Firma actualizada para incluir $usuario
      */
-    private static function _ejecutarLogica($pdo, $producto_id, $almacen_id, $cantidad, $tipo, $referencia, $costo_unitario = null, $sucursal_id = null, $fecha = null) {
+    private static function _ejecutarLogica($pdo, $producto_id, $almacen_id, $cantidad, $tipo, $referencia, $costo_unitario = null, $sucursal_id = null, $fecha = null, $usuario = null) {
         try {
             if (!$pdo instanceof PDO) throw new Exception("Primer parámetro debe ser una instancia de PDO");
             if (!$fecha) $fecha = date('Y-m-d H:i:s');
@@ -91,8 +91,8 @@ class KardexEngine {
             $saldo_anterior = floatval($stmtSaldo->fetchColumn() ?: 0);
             $nuevo_saldo = $saldo_anterior + floatval($cantidad);
 
-            $stmtInsert = $pdo->prepare("INSERT INTO kardex (id_producto, id_almacen, fecha, tipo_movimiento, cantidad, saldo_anterior, saldo_actual, referencia, costo_unitario, id_sucursal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmtInsert->execute([$producto_id, $almacen_id, $fecha, $tipo, $cantidad, $saldo_anterior, $nuevo_saldo, $referencia, $costo_unitario, $sucursal_id]);
+            $stmtInsert = $pdo->prepare("INSERT INTO kardex (id_producto, id_almacen, fecha, tipo_movimiento, cantidad, saldo_anterior, saldo_actual, referencia, costo_unitario, id_sucursal, usuario) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmtInsert->execute([$producto_id, $almacen_id, $fecha, $tipo, $cantidad, $saldo_anterior, $nuevo_saldo, $referencia, $costo_unitario, $sucursal_id, $usuario]);
 
             $stmtUpdateStock = $pdo->prepare("INSERT INTO stock_almacen (id_almacen, id_producto, cantidad, id_sucursal, ultima_actualizacion) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cantidad = ?, ultima_actualizacion = ?");
             $stmtUpdateStock->execute([$almacen_id, $producto_id, $nuevo_saldo, $sucursal_id, $fecha, $nuevo_saldo, $fecha]);

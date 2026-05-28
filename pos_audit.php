@@ -13,6 +13,12 @@ define('AUDIT_DEVOLUCION_ITEM',    'DEVOLUCION_ITEM');
 define('AUDIT_DEVOLUCION_TICKET',  'DEVOLUCION_TICKET');
 define('AUDIT_SESION_ABIERTA',     'SESION_ABIERTA');
 define('AUDIT_SESION_CERRADA',     'SESION_CERRADA');
+define('AUDIT_INV_ENTRADA',       'INV_ENTRADA');
+define('AUDIT_INV_MERMA',         'INV_MERMA');
+define('AUDIT_INV_AJUSTE',        'INV_AJUSTE');
+define('AUDIT_INV_TRANSFERENCIA', 'INV_TRANSFERENCIA');
+define('AUDIT_INV_CONTEO',        'INV_CONTEO');
+define('AUDIT_INV_BARCODE_UPDT',  'INV_BARCODE_UPDT');
 
 // ── Inicialización de tabla (solo una vez por proceso) ────────────────────────
 if (!function_exists('_audit_ensure_table')) {

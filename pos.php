@@ -48,6 +48,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 }
 
 require_once 'db.php';
+require_once 'pos_audit.php';
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
 require_once 'pos_session_helpers.php';
@@ -365,11 +366,11 @@ if (isset($_GET['load_products'])) {
                     FROM productos p
                     LEFT JOIN productos_precios_sucursal ps
                            ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
-                    WHERE $where
+                    WHERE p.id_empresa = ? AND $where
                     ORDER BY p.nombre";
 
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtProd->execute(array_merge([$almacenID, (int)$ctxConfig['id_empresa'], $sucursalID], $params));
+        $stmtProd->execute(array_merge([$almacenID, (int)$ctxConfig['id_empresa'], $sucursalID, (int)$ctxConfig['id_empresa']], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
         $prods = combo_apply_product_rows($pdo, $prods, (int)$ctxConfig['id_empresa'], $almacenID);
 
@@ -495,6 +496,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         
         $q = $pdo->prepare("UPDATE productos SET codigo_barra_1=?, codigo_barra_2=? WHERE codigo=? AND id_empresa=?");
         if ($q->execute([$b1, $b2, $sku, $EMP])) {
+            log_audit($pdo, AUDIT_INV_BARCODE_UPDT, $usuario, ['sku' => $sku, 'b1' => $b1, 'b2' => $b2]);
             echo json_encode(['status'=>'success', 'msg'=>'Códigos actualizados']);
         } else {
             echo json_encode(['status'=>'error', 'msg'=>'Error en base de datos']);
@@ -681,6 +683,25 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($pdo->inTransaction()) $pdo->commit();
+
+        // ── Registro en Audit Trail ──────────────────────────────────────────
+        $auditActions = [
+            'entrada'       => AUDIT_INV_ENTRADA,
+            'merma'         => AUDIT_INV_MERMA,
+            'transferencia' => AUDIT_INV_TRANSFERENCIA,
+            'ajuste'        => AUDIT_INV_AJUSTE,
+            'conteo'        => AUDIT_INV_CONTEO
+        ];
+        if (isset($auditActions[$accion])) {
+            log_audit($pdo, $auditActions[$accion], $usuario, [
+                'motivo'      => $motivo,
+                'almacen_id'  => $ALM,
+                'sucursal_id' => $SUC,
+                'items_count' => count($items),
+                'resumen'     => implode(', ', array_slice($results, 0, 5)) . (count($results) > 5 ? '...' : '')
+            ]);
+        }
+
         $n = count($results);
         $preview = implode(', ', array_slice($results,0,3)) . ($n>3 ? '…':'');
         echo json_encode(['status'=>'success','msg'=>"$n items procesados: $preview",'stocks_updated'=>$stocks_updated]);
@@ -774,15 +795,23 @@ try {
     
     $where = implode(" AND ", $cond);
     $almacenID = intval($config['id_almacen']);
+    $sucursalID = intval($config['id_sucursal'] ?? 1);
+    $empresaID = intval($config['id_empresa'] ?? 1);
     $params = $config['categorias_ocultas'];
 
     // Categorias
-    $stmtCat = $pdo->prepare("SELECT DISTINCT p.categoria as nombre_categoria, c.color, c.emoji FROM productos p LEFT JOIN categorias c ON p.categoria = c.nombre WHERE $where ORDER BY p.categoria");
-    $stmtCat->execute($params);
+    $stmtCat = $pdo->prepare("SELECT DISTINCT p.categoria as nombre_categoria, c.color, c.emoji FROM productos p LEFT JOIN categorias c ON p.categoria = c.nombre WHERE p.id_empresa = ? AND $where ORDER BY p.categoria");
+    $stmtCat->execute(array_merge([$empresaID], $params));
     $catsData = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
     // Productos
-    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
+    $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre,
+                p.precio                                                         AS precio_global,
+                COALESCE(p.precio_mayorista, 0)                                  AS precio_mayorista_global,
+                COALESCE(ps.precio_venta,    p.precio)                           AS precio_suc,
+                COALESCE(ps.precio_mayorista, p.precio_mayorista, p.precio)      AS precio_mayorista_suc,
+                COALESCE(ps.precio_venta,    p.precio)                           AS precio,
+                p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                 p.codigo_barra_1, p.codigo_barra_2,
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
@@ -790,11 +819,13 @@ try {
                  WHERE s.id_producto = p.codigo AND s.id_almacen = ?
                    AND EXISTS (SELECT 1 FROM productos ep WHERE ep.codigo = s.id_producto AND ep.id_empresa = ?)) as stock
                 FROM productos p
-                WHERE $where
+                LEFT JOIN productos_precios_sucursal ps
+                       ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+                WHERE p.id_empresa = ? AND $where
                 ORDER BY p.nombre";
 
     $stmtProd = $pdo->prepare($sqlProd);
-    $stmtProd->execute(array_merge([$almacenID, (int)($config['id_empresa'] ?? 1)], $params));
+    $stmtProd->execute(array_merge([$almacenID, $empresaID, $sucursalID, $empresaID], $params));
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
     $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa'] ?? 1), $almacenID);
 
@@ -1078,7 +1109,7 @@ try {
         .category-btn { padding: 8px 16px; border: none; border-radius: 20px; font-weight: 600; background: white; color: #555; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
         .category-btn.active { background: #0d6efd; color: white; }
         .product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap: 10px; overflow-y: auto; padding-bottom: 80px; }
-        .product-card { background: white; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.08); display: flex; flex-direction: column; position: relative !important; min-height: 180px; }
+        .product-card { background: white; border-radius: 10px; overflow: hidden; cursor: pointer; box-shadow: 0 2px 5px rgba(0,0,0,0.08); display: flex; flex-direction: column; position: relative !important; min-height: 180px; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
         .product-card.disabled { opacity: 0.5; pointer-events: none; }
         .product-img-container { width: 100%; aspect-ratio: 4/3; background: #eee; display: flex; align-items: center; justify-content: center; overflow: hidden; }
         .product-img { width: 100%; height: 100%; object-fit: cover; }
@@ -1340,7 +1371,7 @@ try {
         }
     </style>
 
-<link rel="manifest" href="manifest-pos.php?v=20260521-pwa4">
+<link rel="manifest" href="manifest-pos.php?v=20260527-pwa5">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1366,7 +1397,12 @@ try {
         window.addEventListener('load', () => {
             const swScope = '<?php echo $posScopePath; ?>';
             navigator.serviceWorker.register('service-worker.js', { scope: swScope, updateViaCache: 'none' })
-                .then(reg => console.log('SW POS registrado en scope:', reg.scope))
+                .then(reg => {
+                    console.log('SW POS registrado en scope:', reg.scope);
+                    if (reg && typeof reg.update === 'function') {
+                        reg.update().catch(() => {});
+                    }
+                })
                 .catch(err => console.warn('Error registrando SW de POS', err));
         });
     }
@@ -1961,8 +1997,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260521-offline2"></script>
-<script src="pos-offline-system.js?v=20260521-offline2"></script>
+<script src="pos1.js?v=20260527-ui2"></script>
+<script src="pos-offline-system.js?v=20260527-ui2"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────
