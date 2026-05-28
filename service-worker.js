@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 9.0 - Online first + POS offline completo
+// Versión 9.2 - Online first + POS offline completo
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v91';
+const CACHE_NAME = 'palweb-pos-v93';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -32,7 +32,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v9.0...');
+    console.log('[SW-POS] Instalando Service Worker v9.2...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -59,7 +59,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v9.0...');
+    console.log('[SW-POS] Activando Service Worker v9.2...');
     
     event.waitUntil(
         caches.keys()
@@ -271,7 +271,7 @@ self.addEventListener('message', (event) => {
     }
 });
 
-console.log('[SW-POS] Service Worker v9.0 (ONLINE FIRST + POS offline completo) cargado');
+console.log('[SW-POS] Service Worker v9.2 (ONLINE FIRST + POS offline completo) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

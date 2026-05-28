@@ -328,6 +328,7 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
     $r['topClientes'] = array_slice(array_values($cliAgg), 0, 10);
     $r['ganancia'] = $r['totalVentaBrutaPositivos'] - $r['totalCostoPositivos'];
     $r['margen']   = $r['totalVentaBrutaPositivos'] != 0 ? ($r['ganancia'] / $r['totalVentaBrutaPositivos']) * 100 : 0;
+    $r['ventasRealesNeta'] = $r['totalVentaNeta'] - $r['valorDevoluciones'];
 
     $sesByCaja = [];
     foreach ($r['sesiones'] as $s) {
@@ -565,7 +566,7 @@ if ($haySeleccion) {
 <div id="sticky-kpi">
     <span class="fw-bold me-2" style="font-size:.85rem;white-space:nowrap;"><i class="fas fa-layer-group me-1"></i>Multi-Sesión</span>
     <div class="sticky-kpi-item"><span class="val"><?php echo count($A['sesiones']); ?></span><span class="lbl">Sesiones</span></div>
-    <div class="sticky-kpi-item"><span class="val">$<?php echo number_format($A['ventasReales'],0); ?></span><span class="lbl">Ventas</span></div>
+    <div class="sticky-kpi-item"><span class="val">$<?php echo number_format($A['ventasRealesNeta'],0); ?></span><span class="lbl">Ventas</span></div>
     <div class="sticky-kpi-item"><span class="val">$<?php echo number_format($A['ganancia'],0); ?></span><span class="lbl">Ganancia</span></div>
     <div class="sticky-kpi-item"><span class="val"><?php echo number_format($A['margen'],1); ?>%</span><span class="lbl">Margen</span></div>
     <div class="sticky-kpi-item"><span class="val"><?php echo $A['conteoTickets']; ?></span><span class="lbl">Tickets</span></div>
@@ -902,7 +903,7 @@ if ($haySeleccion) {
     <!-- Highlights -->
     <div class="row g-3 mb-3 kpi-highlight-row">
         <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-primary"><div class="kpi-icon bg-primary bg-opacity-10 text-primary"><i class="fas fa-dollar-sign"></i></div><small class="text-muted fw-bold">VENTA NETA</small><h3 class="fw-bold mb-0">$<?php echo number_format($A['totalVentaNeta'],2); ?></h3><small class="text-muted">(Total movimientos)</small></div></div>
-        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-wallet"></i></div><small class="text-muted fw-bold">VENTAS REALES</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($A['ventasReales'],2); ?></h3><small class="text-muted">(<?php echo $A['conteoTickets']; ?> tickets)</small></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-wallet"></i></div><small class="text-muted fw-bold">VENTAS REALES</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($A['ventasRealesNeta'],2); ?></h3><small class="text-muted">(Neto - Reembolsos)</small></div></div>
         <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-chart-line"></i></div><small class="text-muted fw-bold">GANANCIA</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($A['ganancia'],2); ?></h3><small class="text-muted">Margen: <?php echo number_format($A['margen'],1); ?>%</small></div></div>
     </div>
 
@@ -914,7 +915,7 @@ if ($haySeleccion) {
             <?php
             $cmpRows = [
                 ['Sesiones',$A['sesiones'],$B['sesiones'],'#'],
-                ['Ventas',$A['ventasReales'],$B['ventasReales'],'$'],
+                ['Ventas',$A['ventasRealesNeta'],$B['ventasRealesNeta'],'$'],
                 ['Tickets',$A['conteoTickets'],$B['conteoTickets'],'#'],
                 ['Ganancia',$A['ganancia'],$B['ganancia'],'$'],
                 ['Margen %',$A['margen'],$B['margen'],'%'],

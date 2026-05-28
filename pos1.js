@@ -1178,6 +1178,19 @@ function lockPos() {
 // ==========================================
 let cashModal;
 let qtyModalContext = { mode: 'cart', product: null };
+let qtyModalLastValue = parseFloat(localStorage.getItem('pos_last_qty_modal') || '1');
+if (!Number.isFinite(qtyModalLastValue) || qtyModalLastValue <= 0) qtyModalLastValue = 1;
+
+document.addEventListener('contextmenu', (e) => {
+    const productCard = e.target && typeof e.target.closest === 'function' ? e.target.closest('.product-card') : null;
+    if (!productCard) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    if (typeof productCard._posOpenQtyModal === 'function') {
+        productCard._posOpenQtyModal(e, false);
+    }
+}, true);
+
 document.addEventListener('DOMContentLoaded', () => {
     const modalEl = document.getElementById('cashModal');
     if (modalEl) cashModal = new bootstrap.Modal(modalEl);
@@ -1413,13 +1426,8 @@ function bindProductQuantityGesture(card, product) {
     if (!card || !product) return;
 
     const openProductQty = () => openQtyModal('product', product);
-    card.oncontextmenu = (e) => {
-        e.preventDefault();
-        openProductQty();
-    };
-
     let pressTimer = null;
-    let longPressFired = false;
+    let quantityModalOpenedAt = 0;
 
     const clearPressTimer = () => {
         if (pressTimer) {
@@ -1428,32 +1436,53 @@ function bindProductQuantityGesture(card, product) {
         }
     };
 
-    card.addEventListener('touchstart', () => {
-        longPressFired = false;
+    const triggerQuantityModal = (e = null, suppressNextClick = true) => {
+        if (e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+        const now = Date.now();
+        if (now - quantityModalOpenedAt < 300) return;
+        quantityModalOpenedAt = now;
+        clearPressTimer();
+        if (suppressNextClick) {
+            card._suppressNextClick = true;
+            setTimeout(() => { card._suppressNextClick = false; }, 2500);
+        }
+        openProductQty();
+    };
+    card._posOpenQtyModal = triggerQuantityModal;
+
+    card.addEventListener('touchstart', (e) => {
         clearPressTimer();
         pressTimer = setTimeout(() => {
-            longPressFired = true;
-            card._suppressNextClick = true;
-            openProductQty();
+            triggerQuantityModal(null, true);
         }, 650);
-    }, { passive: true });
+    }, { passive: false });
 
     card.addEventListener('touchend', () => {
         clearPressTimer();
-        if (longPressFired) {
-            card._suppressNextClick = true;
-            setTimeout(() => { card._suppressNextClick = false; }, 350);
-        }
     }, { passive: true });
 
     card.addEventListener('touchmove', clearPressTimer, { passive: true });
     card.addEventListener('touchcancel', clearPressTimer, { passive: true });
     card.addEventListener('mousedown', (e) => {
         if (e.button === 2) {
-            e.preventDefault();
-            openProductQty();
+            triggerQuantityModal(e, false);
+            return;
         }
+        if (e.button !== 0) return;
+        clearPressTimer();
+        pressTimer = setTimeout(() => {
+            triggerQuantityModal(null, true);
+        }, 650);
     });
+    card.addEventListener('mouseup', clearPressTimer);
+    card.addEventListener('mouseleave', clearPressTimer);
+    card.addEventListener('dragend', clearPressTimer);
+    card.addEventListener('contextmenu', clearPressTimer, true);
+
+    card.addEventListener('dragstart', (e) => e.preventDefault());
 }
 
 // ==========================================
@@ -1592,8 +1621,14 @@ function renderCart() {
         c.appendChild(d);
     });
     
-    // AUTO-SCROLL
-    setTimeout(() => { c.scrollTop = c.scrollHeight; }, 50);
+    // Mantener siempre visible y centrado el item seleccionado
+    requestAnimationFrame(() => {
+        const selectedEl = c.querySelector('.cart-item.selected');
+        if (!selectedEl) return;
+        const targetTop = selectedEl.offsetTop - (c.clientHeight / 2) + (selectedEl.offsetHeight / 2);
+        const maxTop = Math.max(0, c.scrollHeight - c.clientHeight);
+        c.scrollTop = Math.max(0, Math.min(targetTop, maxTop));
+    });
 
     const total = sub * (1 - globalDiscountPct/100);
     const lbl = document.getElementById('totalAmount');
@@ -1742,18 +1777,21 @@ function openQtyModal(mode = 'cart', product = null) {
     const currentQty = qtyModalContext.mode === 'product'
         ? (item ? parseFloat(item.qty || 0) : 0)
         : parseFloat(item?.qty || 0);
+    const rememberedQty = Number.isFinite(qtyModalLastValue) && qtyModalLastValue > 0 ? qtyModalLastValue : 1;
 
     nameEl.textContent = productName;
     qtyEl.textContent = Number(currentQty || 0).toLocaleString('es-ES', { maximumFractionDigits: 3 });
-    input.value = currentQty > 0 ? String(currentQty) : '1';
+    input.value = currentQty > 0 ? String(currentQty) : String(rememberedQty);
     input.dataset.initialQty = String(currentQty);
 
     const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
     modal.show();
     const focusQtyInput = () => {
         input.focus({ preventScroll: true });
-        input.select();
-        if (typeof input.setSelectionRange === 'function') {
+        if (typeof input.select === 'function') {
+            try { input.select(); } catch (e) {}
+        }
+        if (input.type !== 'number' && typeof input.setSelectionRange === 'function') {
             input.setSelectionRange(0, String(input.value || '').length);
         }
     };
@@ -1776,6 +1814,8 @@ function confirmQtyModal() {
     if (!Number.isFinite(newQty) || newQty <= 0) {
         return showToast('Cantidad inválida', 'warning');
     }
+    qtyModalLastValue = newQty;
+    localStorage.setItem('pos_last_qty_modal', String(qtyModalLastValue));
 
     const isProductMode = qtyModalContext.mode === 'product' && qtyModalContext.product;
     const item = isProductMode
@@ -3549,7 +3589,7 @@ window.invConfirmar = async function() {
     }
 };
 
-console.log('POS.js v3.4 cargado');
+console.log('POS.js v3.6 cargado');
 
 window.openBarcodeModal = function() {
     if (cart.length === 0 || selectedIndex < 0) {

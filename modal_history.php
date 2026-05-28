@@ -158,8 +158,8 @@ if (isset($_GET['render_mode'])) {
             $totalPagosRegistrados += floatval($monto);
         }
 
-        // El total neto es la suma de todos los pagos registrados (transacciones brutas)
-        $totalNeto = $totalPagosRegistrados;
+        // Neto real: pagos registrados menos el valor de devoluciones detectadas en detalles
+        $totalNeto = $totalPagosRegistrados - $totalDev;
 
         // RENDERIZADO HTML
         ?>
@@ -170,6 +170,7 @@ if (isset($_GET['render_mode'])) {
                     <div class="card h-100 border-0 bg-light shadow-sm text-center p-2">
                         <div class="text-muted small fw-bold text-uppercase">Ventas Netas</div>
                         <div class="fs-4 fw-bold text-success">$<?php echo number_format($totalNeto, 2); ?></div>
+                        <div class="small text-muted">(Pagos - devoluciones)</div>
                     </div>
                 </div>
                 <!-- Tickets -->

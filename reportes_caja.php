@@ -134,6 +134,7 @@ foreach ($allDetalles as $d) {
 
 $ganancia = $totalVentaBrutaPositivos - $totalCostoPositivos;
 $margen = ($totalVentaBrutaPositivos != 0) ? ($ganancia / $totalVentaBrutaPositivos) * 100 : 0;
+$ventasRealesNeta = $totalVentaNeta - $valorDevoluciones;
 
 // KPIs modificados según solicitud:
 $ticketPromedio = $ventasReales * 0.20; // 20% para Crecimiento Negoc.
@@ -327,7 +328,7 @@ $ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
 
     <div class="row g-3 mb-3 kpi-highlight-row">
         <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-primary"><div class="kpi-icon bg-primary bg-opacity-10 text-primary"><i class="fas fa-dollar-sign"></i></div><small class="text-muted fw-bold">VENTA NETA</small><h3 class="fw-bold mb-0">$<?php echo number_format($totalVentaNeta, 2); ?></h3><small class="text-muted">(Total movimientos)</small></div></div>
-        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-wallet"></i></div><small class="text-muted fw-bold">VENTAS REALES</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ventasReales, 2); ?></h3><small class="text-muted">(Neto)</small></div></div>
+        <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-wallet"></i></div><small class="text-muted fw-bold">VENTAS REALES</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ventasRealesNeta, 2); ?></h3><small class="text-muted">(Neto - Reembolsos)</small></div></div>
         <div class="col-md-4 col-sm-6"><div class="kpi-card border-start border-4 border-success"><div class="kpi-icon bg-success bg-opacity-10 text-success"><i class="fas fa-chart-line"></i></div><small class="text-muted fw-bold">GANANCIA</small><h3 class="fw-bold mb-0 text-success">$<?php echo number_format($ganancia, 2); ?></h3><small class="text-muted">Margen: <?php echo number_format($margen, 1); ?>%</small></div></div>
     </div>
 
