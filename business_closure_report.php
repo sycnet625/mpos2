@@ -276,7 +276,10 @@ try {
                 ];
             }
             $sessionSummary[$sessionId]['tickets'][] = $ticket;
-            $sessionSummary[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+            $ticketVal = floatval($ticket['total'] ?? 0);
+            if ($ticketVal > 0) {
+                $sessionSummary[$sessionId]['total'] += $ticketVal;
+            }
         }
 
         if (!empty($sessionSummary)) {
@@ -298,6 +301,74 @@ try {
                 $sessionSummary[$sessionId]['fecha_contable'] = $row['fecha_contable'] ?? null;
                 $sessionSummary[$sessionId]['estado'] = $row['estado'] ?? '';
             }
+        }
+
+        foreach ($sessionSummary as $sessionId => $sessionData) {
+            $tickets = $sessionData['tickets'] ?? [];
+            $ticketsById = [];
+            $reversalsByOriginal = [];
+
+            foreach ($tickets as $ticket) {
+                $ticketId = intval($ticket['id'] ?? 0);
+                if ($ticketId <= 0) {
+                    continue;
+                }
+
+                $ticketsById[$ticketId] = $ticket;
+
+                $originalId = intval($ticket['id_venta_original'] ?? 0);
+                $ticketTotal = floatval($ticket['total'] ?? 0);
+                if ($originalId > 0 && $ticketTotal < 0) {
+                    if (!isset($reversalsByOriginal[$originalId])) {
+                        $reversalsByOriginal[$originalId] = [];
+                    }
+                    $reversalsByOriginal[$originalId][] = $ticketId;
+                }
+            }
+
+            $fullCanceledIds = [];
+            foreach ($ticketsById as $ticketId => $ticket) {
+                $ticketTotal = floatval($ticket['total'] ?? 0);
+                if ($ticketTotal <= 0) {
+                    continue;
+                }
+
+                foreach (($reversalsByOriginal[$ticketId] ?? []) as $reversalId) {
+                    if (!isset($ticketsById[$reversalId])) {
+                        continue;
+                    }
+                    $reversalTotal = floatval($ticketsById[$reversalId]['total'] ?? 0);
+                    if (abs(abs($reversalTotal) - abs($ticketTotal)) <= 0.01) {
+                        $fullCanceledIds[$ticketId] = true;
+                        $fullCanceledIds[$reversalId] = true;
+                        break;
+                    }
+                }
+            }
+
+            $annotatedTickets = [];
+            $totalReal = 0.0;
+            $fullCanceledCount = 0;
+            foreach ($tickets as $ticket) {
+                $ticketId = intval($ticket['id'] ?? 0);
+                $isFullCanceled = isset($fullCanceledIds[$ticketId]);
+                $ticketTotal = floatval($ticket['total'] ?? 0);
+
+                if ($isFullCanceled) {
+                    $ticket['cancelado_completo'] = true;
+                    if ($ticketTotal > 0) {
+                        $fullCanceledCount++;
+                    }
+                } else {
+                    $totalReal += $ticketTotal;
+                }
+
+                $annotatedTickets[] = $ticket;
+            }
+
+            $sessionSummary[$sessionId]['tickets'] = $annotatedTickets;
+            $sessionSummary[$sessionId]['total_real'] = $totalReal;
+            $sessionSummary[$sessionId]['cancelados_completos'] = $fullCanceledCount;
         }
 
         $stmt = $pdo->prepare(
@@ -705,6 +776,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
         .session-summary-head { background: linear-gradient(135deg, rgba(13, 110, 253, 0.10), rgba(25, 135, 84, 0.08)); padding: 14px 18px; border-bottom: 1px solid rgba(13, 110, 253, 0.12); }
         .session-summary-meta { display: flex; flex-wrap: wrap; gap: 14px; font-size: 0.82rem; color: #6c757d; margin-top: 6px; }
         .ticket-items-list { font-size: 0.82rem; color: #495057; line-height: 1.45; }
+        .row-cancelado-completo { background: #fff8db !important; }
+        .row-cancelado-completo td { border-top-color: #f4cf55 !important; }
+        .badge-cancelado-completo { background: #f4b400; color: #212529; }
     </style>
 </head>
 <body class="pb-5 inventory-suite">
@@ -975,8 +1049,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
                                             </div>
                                         </div>
                                         <div class="text-lg-end">
-                                            <small class="text-muted d-block">Total sesión</small>
+                                            <small class="text-muted d-block">Total sesión (Bruto)</small>
                                             <div class="fw-bold fs-4 text-primary">$<?php echo number_format($session['total'], 2); ?></div>
+                                            <small class="text-muted d-block mt-1">Total Real (Neto)</small>
+                                            <div class="fw-bold fs-5 text-success">$<?php echo number_format($session['total_real'] ?? $session['total'], 2); ?></div>
                                         </div>
                                     </div>
                                 </div>
@@ -995,6 +1071,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
                                             <?php foreach ($session['tickets'] as $ticket): ?>
                                                 <?php
                                                 $details = $ticketDetailsBySale[intval($ticket['id'])] ?? [];
+                                                $isCanceladoCompleto = !empty($ticket['cancelado_completo']);
                                                 $groupedItems = [];
                                                 foreach ($details as $detail) {
                                                     $name = trim((string)($detail['nombre_producto'] ?? 'Producto'));
@@ -1011,8 +1088,19 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
                                                     $groupedItems[$key]['qty'] += $qty;
                                                 }
                                                 ?>
-                                                <tr>
-                                                    <td class="fw-bold">#<?php echo intval($ticket['id']); ?></td>
+                                                <tr class="<?php echo $isCanceladoCompleto ? 'row-cancelado-completo' : ''; ?>">
+                                                    <td class="fw-bold">
+                                                        #<?php echo intval($ticket['id']); ?>
+                                                        <?php if ($isCanceladoCompleto): ?>
+                                                            <div class="mt-1">
+                                                                <span class="badge badge-cancelado-completo">Cancelado completo</span>
+                                                            </div>
+                                                        <?php elseif (floatval($ticket['total'] ?? 0) < 0): ?>
+                                                            <div class="mt-1">
+                                                                <span class="badge bg-danger">Devolución</span>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                    </td>
                                                     <td><?php echo date('d/m H:i', strtotime($ticket['fecha'])); ?></td>
                                                     <td><?php echo htmlspecialchars($ticket['cliente_nombre'] ?: 'Cliente general'); ?></td>
                                                     <td class="ticket-items-list">

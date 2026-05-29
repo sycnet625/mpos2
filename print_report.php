@@ -131,7 +131,10 @@ try {
                 ];
             }
             $sessionSummary[$sessionId]['tickets'][] = $ticket;
-            $sessionSummary[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+            $tVal = floatval($ticket['total'] ?? 0);
+            if ($tVal > 0) {
+                $sessionSummary[$sessionId]['total'] += $tVal;
+            }
         }
 
         if (!empty($sessionSummary)) {
@@ -152,6 +155,61 @@ try {
                 $sessionSummary[$sessionId]['fecha_cierre'] = $row['fecha_cierre'] ?? null;
                 $sessionSummary[$sessionId]['fecha_contable'] = $row['fecha_contable'] ?? null;
                 $sessionSummary[$sessionId]['estado'] = $row['estado'] ?? '';
+            }
+
+            foreach ($sessionSummary as $sessionId => $sessionData) {
+                $tickets = $sessionData['tickets'] ?? [];
+                $ticketsById = [];
+                $reversalsByOriginal = [];
+
+                foreach ($tickets as $ticket) {
+                    $ticketId = intval($ticket['id'] ?? 0);
+                    if ($ticketId <= 0) continue;
+                    $ticketsById[$ticketId] = $ticket;
+
+                    $originalId = intval($ticket['id_venta_original'] ?? 0);
+                    $ticketTotal = floatval($ticket['total'] ?? 0);
+                    if ($originalId > 0 && $ticketTotal < 0) {
+                        if (!isset($reversalsByOriginal[$originalId])) {
+                            $reversalsByOriginal[$originalId] = [];
+                        }
+                        $reversalsByOriginal[$originalId][] = $ticketId;
+                    }
+                }
+
+                $fullCanceledIds = [];
+                foreach ($ticketsById as $ticketId => $ticket) {
+                    $ticketTotal = floatval($ticket['total'] ?? 0);
+                    if ($ticketTotal <= 0) continue;
+
+                    foreach (($reversalsByOriginal[$ticketId] ?? []) as $reversalId) {
+                        if (!isset($ticketsById[$reversalId])) continue;
+                        $reversalTotal = floatval($ticketsById[$reversalId]['total'] ?? 0);
+                        if (abs(abs($reversalTotal) - abs($ticketTotal)) <= 0.01) {
+                            $fullCanceledIds[$ticketId] = true;
+                            $fullCanceledIds[$reversalId] = true;
+                            break;
+                        }
+                    }
+                }
+
+                $annotatedTickets = [];
+                $totalReal = 0.0;
+                foreach ($tickets as $ticket) {
+                    $ticketId = intval($ticket['id'] ?? 0);
+                    $isFullCanceled = isset($fullCanceledIds[$ticketId]);
+                    $ticketTotal = floatval($ticket['total'] ?? 0);
+
+                    if ($isFullCanceled) {
+                        $ticket['cancelado_completo'] = true;
+                    } else {
+                        $totalReal += $ticketTotal;
+                    }
+                    $annotatedTickets[] = $ticket;
+                }
+
+                $sessionSummary[$sessionId]['tickets'] = $annotatedTickets;
+                $sessionSummary[$sessionId]['total_real'] = $totalReal;
             }
         }
 
@@ -219,6 +277,8 @@ function print_report_family_label(string $name): string
         .session-block-head { background: #f8f9fa; padding: 10px 14px; border-bottom: 1px solid #d9dee5; }
         .session-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 0.82rem; color: #6c757d; margin-top: 4px; }
         .ticket-items-list { font-size: 0.8rem; color: #495057; line-height: 1.45; }
+        .row-cancelado { text-decoration: line-through; color: #adb5bd !important; }
+        .badge-cancelado { font-size: 0.65rem; padding: 2px 5px; border: 1px solid #adb5bd; color: #adb5bd; text-transform: uppercase; font-weight: bold; border-radius: 3px; display: inline-block; margin-top: 2px; text-decoration: none !important; }
     </style>
 </head>
 <body onload="window.print()">
@@ -336,8 +396,10 @@ function print_report_family_label(string $name): string
                                 </div>
                             </div>
                             <div class="text-end">
-                                <small class="text-muted d-block">Total sesión</small>
+                                <small class="text-muted d-block">Total sesión (Bruto)</small>
                                 <div class="fw-bold">$<?php echo number_format($session['total'], 2); ?></div>
+                                <small class="text-muted d-block mt-1">Total Real (Neto)</small>
+                                <div class="fw-bold text-success">$<?php echo number_format($session['total_real'] ?? $session['total'], 2); ?></div>
                             </div>
                         </div>
                     </div>
@@ -354,6 +416,7 @@ function print_report_family_label(string $name): string
                         <tbody>
                             <?php foreach ($session['tickets'] as $ticket): ?>
                                 <?php
+                                $isCancelado = !empty($ticket['cancelado_completo']);
                                 $details = $ticketDetailsBySale[intval($ticket['id'])] ?? [];
                                 $groupedItems = [];
                                 foreach ($details as $detail) {
@@ -371,8 +434,15 @@ function print_report_family_label(string $name): string
                                     $groupedItems[$key]['qty'] += $qty;
                                 }
                                 ?>
-                                <tr>
-                                    <td>#<?php echo intval($ticket['id']); ?></td>
+                                <tr class="<?php echo $isCancelado ? 'row-cancelado' : ''; ?>">
+                                    <td>
+                                        #<?php echo intval($ticket['id']); ?>
+                                        <?php if ($isCancelado): ?>
+                                            <br><span class="badge-cancelado">Cancelado</span>
+                                        <?php elseif (floatval($ticket['total'] ?? 0) < 0): ?>
+                                            <br><span class="badge-cancelado">Devolución</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td><?php echo date('d/m H:i', strtotime($ticket['fecha'])); ?></td>
                                     <td><?php echo htmlspecialchars($ticket['cliente_nombre'] ?: 'Cliente general'); ?></td>
                                     <td class="ticket-items-list">
@@ -394,8 +464,12 @@ function print_report_family_label(string $name): string
                         </tbody>
                         <tfoot class="table-light">
                             <tr>
-                                <th colspan="4">Total sesión #<?php echo intval($session['id']); ?></th>
+                                <th colspan="4" class="text-end">Total sesión (Bruto):</th>
                                 <th class="text-end">$<?php echo number_format($session['total'], 2); ?></th>
+                            </tr>
+                            <tr>
+                                <th colspan="4" class="text-end">TOTAL REAL (NETO):</th>
+                                <th class="text-end text-success h5 mb-0">$<?php echo number_format($session['total_real'] ?? $session['total'], 2); ?></th>
                             </tr>
                         </tfoot>
                     </table>
