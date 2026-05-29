@@ -8,6 +8,9 @@ if (isset($_GET['render_mode'])) {
     error_reporting(E_ALL);
 
     try {
+        require_once 'config_loader.php';
+        $idSucursalCtx = intval($config['id_sucursal'] ?? 1);
+
         // 1. Detectar Sesión Activa
         $idSesion = 0;
         $stmtCaja = $pdo->query("SELECT id FROM caja_sesiones WHERE estado = 'ABIERTA' ORDER BY id DESC LIMIT 1");
@@ -32,18 +35,28 @@ if (isset($_GET['render_mode'])) {
         $stmtCab->execute($params);
         $tickets = $stmtCab->fetchAll(PDO::FETCH_ASSOC);
 
-        // 3. Consulta Detalles (RESTABLECIDA)
-        $sqlDet = "SELECT d.id, d.id_venta_cabecera, d.nombre_producto, d.cantidad, d.precio 
+        // 3. Consulta Detalles (CON PRECIO MAYORISTA)
+        $sqlDet = "SELECT d.id, d.id_venta_cabecera, d.nombre_producto, d.cantidad, d.precio,
+                          COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista
                    FROM ventas_detalle d 
                    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
+                   LEFT JOIN productos p ON d.id_producto = p.codigo
+                   LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
                    $filtroSql";
+        
+        $paramsDet = array_merge([$idSucursalCtx], $params);
         $stmtDet = $pdo->prepare($sqlDet);
-        $stmtDet->execute($params);
+        $stmtDet->execute($paramsDet);
         $allDetalles = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
 
         $detallesMap = [];
+        $wholesaleTotalsMap = [];
         foreach ($allDetalles as $d) {
-            $detallesMap[$d['id_venta_cabecera']][] = $d;
+            $vid = $d['id_venta_cabecera'];
+            $detallesMap[$vid][] = $d;
+            
+            if (!isset($wholesaleTotalsMap[$vid])) $wholesaleTotalsMap[$vid] = 0.0;
+            $wholesaleTotalsMap[$vid] += floatval($d['cantidad']) * floatval($d['precio_mayorista']);
         }
 
         // 4. Obtener desglose de métodos de pago para cada ticket (Para la tabla)
@@ -224,7 +237,7 @@ if (isset($_GET['render_mode'])) {
         <div class="table-responsive">
             <table class="table mb-0 align-middle" style="font-size:0.92rem;">
                 <thead class="bg-light text-secondary">
-                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
+                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th class="text-warning">Mayorista</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
                 </thead>
                 <tbody>
                 <?php if (empty($tickets)): ?>
@@ -253,6 +266,7 @@ if (isset($_GET['render_mode'])) {
                         <td><?php echo htmlspecialchars($t['cliente_nombre'] ?: 'General'); ?></td>
                         <td><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;"><?php echo $t['tipo_servicio']; ?></small></td>
                         <td class="fw-bold <?php echo $isRef ? 'text-danger' : 'text-dark'; ?>">$<?php echo number_format(abs($total), 2); ?></td>
+                        <td class="text-warning fw-bold">$<?php echo number_format(abs($wholesaleTotalsMap[$t['id']] ?? 0), 2); ?></td>
                         <td><span class="badge <?php echo $badgeClass; ?> badge-pago" style="font-size:0.7rem"><?php echo $metodosDisplay; ?></span></td>
                         <td class="text-end" onclick="event.stopPropagation()">
                             <?php if (!$isRef): ?>
