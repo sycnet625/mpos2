@@ -2360,7 +2360,7 @@ function renderHistorialModalFromJson(data) {
         return 'row-mixto';
     };
 
-    let html = `
+    const html = `
         <div class="sticky-top bg-white shadow-sm border-bottom z-index-2 p-3">
             <div class="row g-2 align-items-stretch">
                 <div class="col-6 col-md-3">
@@ -2410,16 +2410,19 @@ function renderHistorialModalFromJson(data) {
         <div class="table-responsive">
             <table class="table mb-0 align-middle" style="font-size:0.92rem;">
                 <thead class="bg-light text-secondary">
-                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
+                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th class="text-warning">Mayorista</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
                 </thead>
                 <tbody>`;
 
     if (!tickets.length) {
-        html += '<tr><td colspan="8" class="text-center p-5 text-muted"><i class="fas fa-receipt fa-2x mb-3 opacity-50"></i><br>Sin movimientos</td></tr>';
+        html += '<tr><td colspan="9" class="text-center p-5 text-muted"><i class="fas fa-receipt fa-2x mb-3 opacity-50"></i><br>Sin movimientos</td></tr>';
     } else {
         tickets.forEach(t => {
             const total = Number(t.total || 0);
             const isRef = total < 0;
+            const tDetalles = detallesMap[String(t.id)] || [];
+            const wholesaleTotal = tDetalles.reduce((sum, d) => sum + (Number(d.cantidad || 0) * Number(d.precio_mayorista || d.precio || 0)), 0);
+
             const ticketRows = renderTicketDetailRows(t);
             const ticketType = escapeHtml(t.tipo_servicio || '-');
             const clientLabel = String(t.cliente_nombre || ('Ticket #' + t.id));
@@ -2432,6 +2435,7 @@ function renderHistorialModalFromJson(data) {
                     <td>${escapeHtml(t.cliente_nombre || 'General')}</td>
                     <td><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;">${ticketType}</small></td>
                     <td class="fw-bold ${isRef ? 'text-danger' : 'text-dark'}">$${Math.abs(total).toFixed(2)}</td>
+                    <td class="text-warning fw-bold">$${Math.abs(wholesaleTotal).toFixed(2)}</td>
                     <td>${renderPaymentBadge(t)}</td>
                     <td class="text-end" onclick="event.stopPropagation()">
                         ${isRef ? '' : `<button class="btn btn-sm btn-success py-0 px-2 shadow-sm me-1" onclick="loadSaleToCart(${t.id})" title="Cargar pedido al carrito"><i class="fas fa-cart-plus"></i></button>`}
@@ -2447,7 +2451,7 @@ function renderHistorialModalFromJson(data) {
                     </td>
                 </tr>
                 <tr id="det-row-${t.id}" class="collapse bg-light">
-                    <td colspan="8" class="p-0">
+                    <td colspan="9" class="p-0">
                         <div class="p-3">
                             <table class="table table-sm mb-0">
                                 <thead>

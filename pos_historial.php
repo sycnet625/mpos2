@@ -39,13 +39,15 @@ try {
     $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
     
     // 4. Obtener detalles de todos los tickets
-    $sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria 
+    $sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria,
+                          COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista
                     FROM ventas_detalle d
                     JOIN productos p ON d.id_producto = p.codigo 
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                    LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
                     WHERE v.id_caja = ? AND v.id_sucursal = ?";
     $stmtD = $pdo->prepare($sqlDetalles);
-    $stmtD->execute([$idSesion, $sucursalID]);
+    $stmtD->execute([$sucursalID, $idSesion, $sucursalID]);
     $detalles = $stmtD->fetchAll(PDO::FETCH_ASSOC);
     
     // 5. Calcular totales
