@@ -40,7 +40,7 @@ try {
     
     // 4. Obtener detalles de todos los tickets
     $sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria,
-                          COALESCE(ps.precio_mayorista, p.precio_mayorista, d.precio) AS precio_mayorista
+                          COALESCE(NULLIF(p.precio_mayorista, 0), NULLIF(ps.precio_mayorista, 0), d.precio) AS precio_mayorista
                     FROM ventas_detalle d
                     JOIN productos p ON d.id_producto = p.codigo 
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
