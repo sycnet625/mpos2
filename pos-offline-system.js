@@ -1,5 +1,5 @@
 // ==========================================
-// SISTEMA OFFLINE V9 - CORREGIDO
+// SISTEMA OFFLINE V10 - CORREGIDO
 // ==========================================
 
 if (typeof window.posOfflineLoaded === 'undefined') {
@@ -8,7 +8,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
     class POSCache {
         constructor() {
             this.dbName = 'POS_Offline_DB';
-            this.dbVersion = 13;
+            this.dbVersion = 14;
             this.db = null;
         }
         

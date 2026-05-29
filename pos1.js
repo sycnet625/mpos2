@@ -3589,7 +3589,7 @@ window.invConfirmar = async function() {
     }
 };
 
-console.log('POS.js v3.6 cargado');
+console.log('POS.js v3.7 cargado');
 
 window.openBarcodeModal = function() {
     if (cart.length === 0 || selectedIndex < 0) {

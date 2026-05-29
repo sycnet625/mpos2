@@ -1371,7 +1371,7 @@ try {
         }
     </style>
 
-<link rel="manifest" href="manifest-pos.php?v=20260527-pwa5">
+<link rel="manifest" href="manifest-pos.php?v=20260529-pwa2">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
@@ -1997,8 +1997,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260527-ui2"></script>
-<script src="pos-offline-system.js?v=20260527-ui2"></script>
+<script src="pos1.js?v=20260529-ui2"></script>
+<script src="pos-offline-system.js?v=20260529-ui2"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────

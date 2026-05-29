@@ -8,7 +8,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
 class POSCache {
     constructor() {
         this.dbName = 'POS_Offline_DB';
-        this.dbVersion = 12; // Subida de versión
+        this.dbVersion = 14; // Subida de versión
         this.db = null;
     }
     
