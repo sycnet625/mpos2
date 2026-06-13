@@ -1997,7 +1997,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260529-ui2"></script>
+<script src="pos1.js?v=20260612-session-zip2"></script>
 <script src="pos-offline-system.js?v=20260529-ui2"></script>
 
 <script>

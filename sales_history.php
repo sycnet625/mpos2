@@ -279,6 +279,25 @@ $activeDays = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
 $numActiveDays = count($activeDays);
 $promedioVentaDiaria = ($numActiveDays > 0) ? array_sum(array_column($activeDays, 'venta_dia')) / $numActiveDays : 0;
 $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
+
+$telefonoDefault = preg_replace('/[^0-9]/', '', $config['telefono'] ?? '');
+$resumenTextoLineas = [
+    "RESUMEN FINANCIERO",
+    "Período: " . date('d/m/Y', strtotime($start)) . " - " . date('d/m/Y', strtotime($end)),
+    "Alcance: " . ($scope === 'global' ? 'Global' : "Sucursal #{$SUC_ID_LOCAL}"),
+    "Venta total: $" . number_format($ventaTotal, 2),
+    "Ganancia bruta: $" . number_format($ganancia, 2) . " | Margen: " . number_format($margen, 1) . "%",
+    "Tickets: " . count($allTickets) . " | Ticket promedio: $" . number_format($ticketPromedio, 2),
+    "Promedio venta diaria: $" . number_format($promedioVentaDiaria, 2),
+    "",
+    "CLIENTES Y VENTAS POR TICKET",
+];
+foreach ($allTickets as $ticketResumen) {
+    $resumenTextoLineas[] = "Ticket #" . intval($ticketResumen['id'])
+        . " | " . trim((string)($ticketResumen['cliente_nombre'] ?: 'Cliente general'))
+        . " | $" . number_format(floatval($ticketResumen['total']), 2);
+}
+$resumenTexto = implode("\n", $resumenTextoLineas);
 ?>
 
 <!DOCTYPE html>
@@ -323,6 +342,9 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
                     <label class="form-check-label small fw-bold text-white" for="toggleInventory">📉 Inventario</label>
                 </div>
                 <button class="btn btn-light" onclick="printRange()"><i class="fas fa-print me-1"></i>PDF</button>
+                <button class="btn btn-outline-light web-pdf-exclude" onclick="exportarPaginaWebPDF('historial_ventas_<?php echo $start; ?>_<?php echo $end; ?>')"><i class="fas fa-file-pdf me-1"></i>PDF igual a web</button>
+                <button class="btn btn-outline-light" onclick="abrirResumenTexto()"><i class="fas fa-align-left me-1"></i>Resumen texto</button>
+                <button class="btn btn-outline-light" onclick="openWhatsAppReport()"><i class="fab fa-whatsapp me-1"></i>WhatsApp</button>
                 <button class="btn btn-outline-light" onclick="openInvoiceModal()"><i class="fas fa-file-invoice-dollar me-1"></i>Facturar</button>
                 <a href="pos.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
             </div>
@@ -348,6 +370,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
             </div>
             <div class="col">
                 <button class="btn btn-primary btn-sm"><i class="fas fa-search"></i></button>
+                <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="setThisWeek()"><i class="fas fa-calendar-week"></i> Semana</button>
             </div>
         </form>
     </div>
@@ -564,6 +587,7 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
                 <div class="col-md-4 text-end">
                     <div class="fs-4 fw-bold text-dark">$<?php echo number_format($totalSession, 2); ?></div>
                     <button class="btn btn-sm btn-outline-primary mt-1" onclick="printSession(<?php echo $sid; ?>)"><i class="fas fa-file-invoice"></i> Reporte</button>
+                    <button class="btn btn-sm btn-outline-success mt-1" onclick="openWhatsAppSession(<?php echo $sid; ?>)"><i class="fab fa-whatsapp"></i> WhatsApp</button>
                 </div>
             </div>
         </div>
@@ -607,6 +631,45 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
         </div>
     </div>
     <?php endforeach; ?>
+</div>
+
+<div class="modal fade" id="resumenTextoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="fas fa-align-left me-2"></i>Resumen en texto</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <textarea id="resumenTextoContenido" class="form-control font-monospace" rows="20" readonly><?php echo htmlspecialchars($resumenTexto); ?></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary" onclick="copiarResumenTexto()"><i class="fas fa-copy"></i> Copiar</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="whatsappReportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fab fa-whatsapp me-2"></i>Enviar reporte por WhatsApp</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <label class="form-label small fw-bold">Número destino con código de país</label>
+                <input type="text" id="wa-report-phone" class="form-control mb-3" value="<?php echo htmlspecialchars($telefonoDefault); ?>" placeholder="Ej: 5352783083">
+                <div id="wa-report-description" class="alert alert-light border mb-0"></div>
+                <div id="wa-report-result" class="small mt-2"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="button" class="btn btn-success" onclick="sendWhatsAppReport()"><i class="fab fa-whatsapp"></i> Enviar</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="modal fade" id="invoiceModal" tabindex="-1">
@@ -661,6 +724,130 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
 <script>
     Chart.register(ChartDataLabels);
     let salesChart; 
+    const resumenTextoModal = new bootstrap.Modal(document.getElementById('resumenTextoModal'));
+
+    function abrirResumenTexto() {
+        resumenTextoModal.show();
+    }
+
+    async function copiarResumenTexto() {
+        const textarea = document.getElementById('resumenTextoContenido');
+        try {
+            await navigator.clipboard.writeText(textarea.value);
+        } catch (error) {
+            textarea.select();
+            document.execCommand('copy');
+        }
+    }
+
+    function exportarPaginaWebPDF(filename) {
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('canvas').forEach((canvasClone, index) => {
+            const source = document.querySelectorAll('canvas')[index];
+            if (!source) return;
+            const image = document.createElement('img');
+            image.src = source.toDataURL('image/png');
+            image.style.cssText = source.style.cssText;
+            image.style.width = source.getBoundingClientRect().width + 'px';
+            image.style.height = source.getBoundingClientRect().height + 'px';
+            canvasClone.replaceWith(image);
+        });
+        clone.querySelectorAll('script,.web-pdf-exclude,.modal-backdrop').forEach(element => element.remove());
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'web_page_pdf.php';
+        form.target = '_blank';
+        const htmlInput = document.createElement('input');
+        htmlInput.type = 'hidden';
+        htmlInput.name = 'html';
+        htmlInput.value = '<!DOCTYPE html>' + clone.outerHTML;
+        const filenameInput = document.createElement('input');
+        filenameInput.type = 'hidden';
+        filenameInput.name = 'filename';
+        filenameInput.value = filename;
+        const widthInput = document.createElement('input');
+        widthInput.type = 'hidden';
+        widthInput.name = 'page_width';
+        widthInput.value = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+        const heightInput = document.createElement('input');
+        heightInput.type = 'hidden';
+        heightInput.name = 'page_height';
+        heightInput.value = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+        form.append(htmlInput, filenameInput, widthInput, heightInput);
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    }
+
+    const whatsappReportModal = new bootstrap.Modal(document.getElementById('whatsappReportModal'));
+    let whatsappReportRequest = {};
+
+    function showWhatsAppReport(description, request) {
+        const savedPhone = localStorage.getItem('report_wa_phone');
+        if (savedPhone) document.getElementById('wa-report-phone').value = savedPhone;
+        document.getElementById('wa-report-description').innerHTML =
+            '<i class="fas fa-file-pdf text-danger me-2"></i>' + description;
+        document.getElementById('wa-report-result').textContent = '';
+        whatsappReportRequest = request;
+        whatsappReportModal.show();
+    }
+
+    function openWhatsAppReport() {
+        showWhatsAppReport(
+            'Se generará el PDF del resumen del rango seleccionado y se enviará como documento adjunto.',
+            <?php echo json_encode(['report_mode' => 'range', 'start' => $start, 'end' => $end, 'scope' => $scope]); ?>
+        );
+    }
+
+    function openWhatsAppSession(sessionId) {
+        showWhatsAppReport(
+            'Se generará el PDF del resumen de la caja #' + sessionId + ' y se enviará como documento adjunto.',
+            {report_mode: 'session', session_id: sessionId}
+        );
+    }
+
+    async function sendWhatsAppReport() {
+        const phone = document.getElementById('wa-report-phone').value.replace(/\D/g, '');
+        const result = document.getElementById('wa-report-result');
+        if (!phone) {
+            result.innerHTML = '<span class="text-danger">El teléfono es requerido.</span>';
+            return;
+        }
+        result.innerHTML = '<span class="text-muted">Generando PDF y enviando...</span>';
+        const body = new FormData();
+        body.append('phone', phone);
+        Object.entries(whatsappReportRequest).forEach(([key, value]) => body.append(key, value));
+        try {
+            const response = await fetch('report_whatsapp_send.php', {method: 'POST', body});
+            const data = await response.json();
+            result.innerHTML = data.status === 'ok'
+                ? '<span class="text-success">' + data.msg + '</span>'
+                : '<span class="text-danger">' + data.msg + '</span>';
+            if (data.status === 'ok') localStorage.setItem('report_wa_phone', phone);
+        } catch (error) {
+            result.innerHTML = '<span class="text-danger">Error de conexión.</span>';
+        }
+    }
+
+    function setThisWeek() {
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() + diffToMonday);
+
+        const formatDate = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const form = document.querySelector('form[method="GET"]');
+        form.querySelector('input[name="start"]').value = formatDate(monday);
+        form.querySelector('input[name="end"]').value = formatDate(new Date());
+        form.submit();
+    }
 
     function printRange() { 
         const start = '<?php echo $start; ?>';
@@ -751,4 +938,3 @@ $promedioGananciaDiaria = ($numActiveDays > 0) ? $ganancia / $numActiveDays : 0;
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

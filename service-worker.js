@@ -1,9 +1,9 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 9.4 - Online first + POS offline completo
+// Versión 9.5 - Online first + POS offline completo
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v94';
+const CACHE_NAME = 'palweb-pos-v95';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -32,7 +32,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v9.4...');
+    console.log('[SW-POS] Instalando Service Worker v9.5...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -59,7 +59,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v9.4...');
+    console.log('[SW-POS] Activando Service Worker v9.5...');
     
     event.waitUntil(
         caches.keys()
@@ -116,6 +116,22 @@ self.addEventListener('fetch', (event) => {
             fetch(event.request, { credentials: 'same-origin' })
                 .then(r => r)
                 .catch(() => new Response('{}', { headers: { 'Content-Type': 'application/json' } }))
+        );
+        return;
+    }
+
+    // El flujo de historial/WhatsApp vive aquí. Nunca servir una versión vieja.
+    if (swUrl.pathname.endsWith('/pos1.js')) {
+        event.respondWith(
+            fetch(event.request, { credentials: 'same-origin', cache: 'no-store' })
+                .then(async (response) => {
+                    if (response && response.ok) {
+                        const cache = await caches.open(CACHE_NAME);
+                        cache.put(event.request, response.clone());
+                    }
+                    return response;
+                })
+                .catch(() => caches.match(event.request))
         );
         return;
     }

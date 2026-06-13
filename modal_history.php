@@ -229,7 +229,7 @@ if (isset($_GET['render_mode'])) {
             </div>
             <div class="d-flex justify-content-end mt-2">
                 <button type="button" class="btn btn-success btn-sm fw-bold" onclick="openHistorialWhatsappModal()">
-                    <i class="fab fa-whatsapp me-1"></i> Enviar PDFs por WhatsApp
+                    <i class="fab fa-whatsapp me-1"></i> Enviar ZIP por WhatsApp
                 </button>
             </div>
         </div>
@@ -350,11 +350,11 @@ if (isset($_GET['render_mode'])) {
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content border-0 shadow-lg">
                     <div class="modal-header bg-success text-white">
-                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas PDF</h6>
+                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas en ZIP</h6>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="small text-muted mb-2">Se enviará un PDF individual por cada ticket visible en el historial actual.</div>
+                        <div class="small text-muted mb-2">Se enviará un solo archivo ZIP que contiene una factura PDF por cada ticket de esta sesión.</div>
                         <div class="mb-2">
                             <label class="form-label small fw-bold">Contacto WhatsApp</label>
                             <select id="historialWhatsappContacto" class="form-select form-select-sm">
@@ -363,14 +363,14 @@ if (isset($_GET['render_mode'])) {
                         </div>
                         <div class="mb-2">
                             <label class="form-label small fw-bold">Mensaje</label>
-                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto tus facturas en PDF.</textarea>
+                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto las facturas PDF de la sesión en un archivo ZIP.</textarea>
                         </div>
                         <div id="historialWhatsappEstado" class="small text-muted"></div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
                         <button type="button" class="btn btn-success btn-sm fw-bold" onclick="enviarHistorialPorWhatsApp()">
-                            <i class="fab fa-whatsapp me-1"></i> Enviar PDFs
+                            <i class="fab fa-whatsapp me-1"></i> Enviar ZIP
                         </button>
                     </div>
                 </div>

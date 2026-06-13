@@ -123,11 +123,159 @@ if ($action === 'get_contacts') {
     }
 }
 
+// ===== ENVIAR FACTURAS DE SESIÓN EN UN ZIP =====
+if ($action === 'send_session_zip') {
+    $archivosTemporales = [];
+    $rutaZip = '';
+    try {
+        if (!class_exists('ZipArchive')) {
+            throw new Exception('La extensión ZIP no está disponible en el servidor');
+        }
+
+        $idsRaw = json_decode((string)($_POST['ticket_ids'] ?? '[]'), true);
+        $ids = is_array($idsRaw)
+            ? array_values(array_unique(array_filter(array_map('intval', $idsRaw), static fn($id) => $id > 0)))
+            : [];
+        $telefonoWhatsapp = trim((string)($_POST['whatsapp'] ?? ''));
+        $mensaje = trim((string)($_POST['mensaje'] ?? ''));
+
+        if (empty($ids) || $telefonoWhatsapp === '') {
+            throw new Exception('Datos incompletos');
+        }
+        $bridge = bot_validate_bridge_for_campaign();
+        if (empty($bridge['ok'])) {
+            $state = trim((string)($bridge['state'] ?? 'desconocido'));
+            $msg = trim((string)($bridge['msg'] ?? ''));
+            throw new Exception('WhatsApp Web no está conectado. Estado: ' . $state . ($msg !== '' ? " ({$msg})" : ''));
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmtVentas = $pdo->prepare(
+            "SELECT id, id_caja, id_sucursal
+             FROM ventas_cabecera
+             WHERE id IN ($placeholders)
+             ORDER BY id ASC"
+        );
+        $stmtVentas->execute($ids);
+        $ventas = $stmtVentas->fetchAll(PDO::FETCH_ASSOC);
+        if (count($ventas) !== count($ids)) {
+            throw new Exception('Uno o más tickets no existen');
+        }
+
+        $sesionId = intval($ventas[0]['id_caja'] ?? 0);
+        $sucursalId = intval($ventas[0]['id_sucursal'] ?? 0);
+        $sucursalConfig = intval($config['id_sucursal'] ?? 0);
+        foreach ($ventas as $venta) {
+            if (intval($venta['id_caja'] ?? 0) !== $sesionId || intval($venta['id_sucursal'] ?? 0) !== $sucursalId) {
+                throw new Exception('Todos los tickets deben pertenecer a la misma sesión y sucursal');
+            }
+        }
+        if ($sucursalConfig > 0 && $sucursalId !== $sucursalConfig) {
+            throw new Exception('La sesión no pertenece a la sucursal activa');
+        }
+        if ($sesionId < 1) {
+            throw new Exception('Los tickets no pertenecen a una sesión de caja válida');
+        }
+
+        // La selección identifica la sesión; el ZIP siempre incluye todos sus tickets.
+        $stmtSesionVentas = $pdo->prepare(
+            "SELECT id, id_caja, id_sucursal
+             FROM ventas_cabecera
+             WHERE id_caja = ? AND id_sucursal = ?
+             ORDER BY id ASC"
+        );
+        $stmtSesionVentas->execute([$sesionId, $sucursalId]);
+        $ventas = $stmtSesionVentas->fetchAll(PDO::FETCH_ASSOC);
+        if (empty($ventas)) {
+            throw new Exception('La sesión no contiene tickets');
+        }
+        if (count($ventas) > 250) {
+            throw new Exception('La sesión contiene demasiados tickets para un solo ZIP');
+        }
+
+        $waId = preg_replace('/[^0-9+]/', '', $telefonoWhatsapp);
+        if (str_starts_with($waId, '+')) {
+            $waId = substr($waId, 1);
+        }
+        if (strlen($waId) < 8) {
+            throw new Exception('Número de WhatsApp inválido');
+        }
+
+        $rutaZip = tempnam(sys_get_temp_dir(), 'facturas_sesion_');
+        if ($rutaZip === false) {
+            throw new Exception('No se pudo preparar el archivo ZIP');
+        }
+        $zip = new ZipArchive();
+        if ($zip->open($rutaZip, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            throw new Exception('No se pudo crear el archivo ZIP');
+        }
+
+        $generator = new ComprobanteGenerator($pdo, $config);
+        foreach ($ventas as $venta) {
+            $idVenta = intval($venta['id']);
+            $rutaPdf = sys_get_temp_dir() . '/factura_sesion_' . $sesionId . '_' . $idVenta . '_' . bin2hex(random_bytes(3)) . '.pdf';
+            $generator->generarPDF($idVenta, $rutaPdf, 'factura');
+            if (!is_file($rutaPdf)) {
+                throw new Exception("No se pudo generar la factura del ticket #{$idVenta}");
+            }
+            $archivosTemporales[] = $rutaPdf;
+            if (!$zip->addFile($rutaPdf, "factura_ticket_{$idVenta}.pdf")) {
+                throw new Exception("No se pudo agregar la factura #{$idVenta} al ZIP");
+            }
+        }
+        $zip->close();
+        $zip = null;
+
+        if (!is_file($rutaZip) || filesize($rutaZip) < 100) {
+            throw new Exception('No se pudo generar el ZIP de facturas');
+        }
+        if (filesize($rutaZip) > 90 * 1024 * 1024) {
+            throw new Exception('El ZIP supera el límite de 90 MB');
+        }
+
+        $nombreZip = 'facturas_sesion_' . $sesionId . '.zip';
+        $job = [
+            'id' => 'session_zip_' . $sesionId . '_' . date('Ymd_His') . '_' . bin2hex(random_bytes(3)),
+            'target_id' => $waId,
+            'type' => 'document',
+            'file_base64' => base64_encode(file_get_contents($rutaZip)),
+            'filename' => $nombreZip,
+            'mimetype' => 'application/zip',
+            'caption' => $mensaje ?: "Facturas de la sesión #{$sesionId}",
+        ];
+        if (!bot_enqueue_bridge_job($job)) {
+            throw new Exception('No se pudo encolar el ZIP en WhatsApp');
+        }
+
+        echo json_encode([
+            'status' => 'success',
+            'msg' => 'ZIP con ' . count($ventas) . ' factura(s) en cola de WhatsApp.',
+            'job_id' => $job['id'],
+            'filename' => $nombreZip,
+        ]);
+        exit;
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        exit;
+    } finally {
+        if (isset($zip) && $zip instanceof ZipArchive) {
+            $zip->close();
+        }
+        foreach ($archivosTemporales as $archivo) {
+            @unlink($archivo);
+        }
+        if ($rutaZip !== '') {
+            @unlink($rutaZip);
+        }
+    }
+}
+
 // ===== ENVIAR POR WHATSAPP =====
 if ($action === 'send') {
     try {
         $idVenta = isset($_POST['id_venta']) ? intval($_POST['id_venta']) : 0;
         $tipoDoc = $_POST['tipo_doc'] ?? 'comprobante'; // comprobante, ticket, factura
+        $source = trim((string)($_POST['source'] ?? ''));
         $telefonoWhatsapp = trim($_POST['whatsapp'] ?? '');
         $mensaje = trim($_POST['mensaje'] ?? '');
         $markupPct = isset($_POST['markup_pct']) ? round(floatval($_POST['markup_pct']), 2) : 0.0;
@@ -141,6 +289,9 @@ if ($action === 'send') {
 
         if (!$idVenta || !$telefonoWhatsapp) {
             throw new Exception('Datos incompletos');
+        }
+        if ($tipoDoc === 'factura' && $source !== 'single_ticket') {
+            throw new Exception('El historial solo permite enviar un ZIP único con todas las facturas. Recarga el POS.');
         }
 
         $bridge = bot_validate_bridge_for_campaign();

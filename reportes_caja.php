@@ -152,6 +152,25 @@ $stmtAyer = $pdo->prepare($sqlVentasAyer);
 $stmtAyer->execute([$fechaAyer, $sucursalID]);
 $ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
 // La variable $variacion ya fue calculada como el 10% de ventasReales arriba.
+
+$telefonoDefault = preg_replace('/[^0-9]/', '', $config['telefono'] ?? '');
+$resumenTextoLineas = [
+    "RESUMEN CAJA #{$idSesion}",
+    "Fecha contable: " . date('d/m/Y', strtotime($sesion['fecha_contable'])),
+    "Cajero: " . ($sesion['nombre_cajero'] ?? 'Cajero'),
+    "Venta neta: $" . number_format($totalVentaNeta, 2),
+    "Ventas reales: $" . number_format($ventasRealesNeta, 2),
+    "Ganancia: $" . number_format($ganancia, 2) . " | Margen: " . number_format($margen, 1) . "%",
+    "Tickets: {$conteoTickets} | Devoluciones: {$cantDevoluciones} (-$" . number_format($valorDevoluciones, 2) . ")",
+    "",
+    "CLIENTES Y VENTAS POR TICKET",
+];
+foreach ($tickets as $ticketResumen) {
+    $resumenTextoLineas[] = "Ticket #" . intval($ticketResumen['id'])
+        . " | " . trim((string)($ticketResumen['cliente_nombre'] ?: 'Cliente general'))
+        . " | $" . number_format(floatval($ticketResumen['total']), 2);
+}
+$resumenTexto = implode("\n", $resumenTextoLineas);
 ?>
 
 <!DOCTYPE html>
@@ -276,8 +295,53 @@ $ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
         </div>
         <div class="no-print">
             <button onclick="window.print()" class="btn btn-success btn-sm"><i class="fas fa-print"></i> Imprimir A4 Horizontal</button>
+            <button onclick="exportarPaginaWebPDF('reporte_caja_<?php echo $idSesion; ?>')" class="btn btn-outline-danger btn-sm web-pdf-exclude"><i class="fas fa-file-pdf"></i> PDF igual a web</button>
+            <button onclick="abrirResumenTexto()" class="btn btn-outline-info btn-sm"><i class="fas fa-align-left"></i> Resumen texto</button>
+            <button onclick="abrirWhatsAppReporte()" class="btn btn-outline-success btn-sm"><i class="fab fa-whatsapp"></i> WhatsApp</button>
             <a href="sales_history.php" class="btn btn-outline-secondary btn-sm"><i class="fas fa-history"></i> Historial</a>
             <a href="pos.php" class="btn btn-primary btn-sm"><i class="fas fa-desktop"></i> POS</a>
+        </div>
+    </div>
+
+    <div class="modal fade no-print" id="resumenTextoModal" tabindex="-1">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header bg-info text-white">
+                    <h5 class="modal-title"><i class="fas fa-align-left me-2"></i>Resumen en texto</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <textarea id="resumenTextoContenido" class="form-control font-monospace" rows="20" readonly><?php echo htmlspecialchars($resumenTexto); ?></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-primary" onclick="copiarResumenTexto()"><i class="fas fa-copy"></i> Copiar</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade no-print" id="whatsappReportModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="fab fa-whatsapp me-2"></i>Enviar reporte por WhatsApp</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label small fw-bold">Número destino con código de país</label>
+                    <input type="text" id="wa-report-phone" class="form-control mb-3" value="<?php echo htmlspecialchars($telefonoDefault); ?>" placeholder="Ej: 5352783083">
+                    <div class="alert alert-light border mb-0">
+                        <i class="fas fa-file-pdf text-danger me-2"></i>
+                        Se generará el PDF de resumen de la caja #<?php echo $idSesion; ?> y se enviará como documento adjunto.
+                    </div>
+                    <div id="wa-report-result" class="small mt-2"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-success" onclick="enviarWhatsAppReporte()"><i class="fab fa-whatsapp"></i> Enviar</button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -419,6 +483,94 @@ $ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
+    const resumenTextoModal = new bootstrap.Modal(document.getElementById('resumenTextoModal'));
+
+    function abrirResumenTexto() {
+        resumenTextoModal.show();
+    }
+
+    async function copiarResumenTexto() {
+        const textarea = document.getElementById('resumenTextoContenido');
+        try {
+            await navigator.clipboard.writeText(textarea.value);
+        } catch (error) {
+            textarea.select();
+            document.execCommand('copy');
+        }
+    }
+
+    function exportarPaginaWebPDF(filename) {
+        const clone = document.documentElement.cloneNode(true);
+        clone.querySelectorAll('canvas').forEach((canvasClone, index) => {
+            const source = document.querySelectorAll('canvas')[index];
+            if (!source) return;
+            const image = document.createElement('img');
+            image.src = source.toDataURL('image/png');
+            image.style.cssText = source.style.cssText;
+            image.style.width = source.getBoundingClientRect().width + 'px';
+            image.style.height = source.getBoundingClientRect().height + 'px';
+            canvasClone.replaceWith(image);
+        });
+        clone.querySelectorAll('script,.web-pdf-exclude,.modal-backdrop').forEach(element => element.remove());
+        const form = document.createElement('form');
+        form.method = 'POST';
+        form.action = 'web_page_pdf.php';
+        form.target = '_blank';
+        const htmlInput = document.createElement('input');
+        htmlInput.type = 'hidden';
+        htmlInput.name = 'html';
+        htmlInput.value = '<!DOCTYPE html>' + clone.outerHTML;
+        const filenameInput = document.createElement('input');
+        filenameInput.type = 'hidden';
+        filenameInput.name = 'filename';
+        filenameInput.value = filename;
+        const widthInput = document.createElement('input');
+        widthInput.type = 'hidden';
+        widthInput.name = 'page_width';
+        widthInput.value = Math.max(document.documentElement.scrollWidth, window.innerWidth);
+        const heightInput = document.createElement('input');
+        heightInput.type = 'hidden';
+        heightInput.name = 'page_height';
+        heightInput.value = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+        form.append(htmlInput, filenameInput, widthInput, heightInput);
+        document.body.appendChild(form);
+        form.submit();
+        form.remove();
+    }
+
+    const whatsappReportModal = new bootstrap.Modal(document.getElementById('whatsappReportModal'));
+
+    function abrirWhatsAppReporte() {
+        const savedPhone = localStorage.getItem('report_wa_phone');
+        if (savedPhone) document.getElementById('wa-report-phone').value = savedPhone;
+        document.getElementById('wa-report-result').textContent = '';
+        whatsappReportModal.show();
+    }
+
+    async function enviarWhatsAppReporte() {
+        const phone = document.getElementById('wa-report-phone').value.replace(/\D/g, '');
+        const result = document.getElementById('wa-report-result');
+        if (!phone) {
+            result.innerHTML = '<span class="text-danger">El teléfono es requerido.</span>';
+            return;
+        }
+        result.innerHTML = '<span class="text-muted">Generando PDF y enviando...</span>';
+        const body = new FormData();
+        body.append('phone', phone);
+        body.append('report_mode', 'session');
+        body.append('session_id', '<?php echo $idSesion; ?>');
+        try {
+            const response = await fetch('report_whatsapp_send.php', {method: 'POST', body});
+            const data = await response.json();
+            result.innerHTML = data.status === 'ok'
+                ? '<span class="text-success">' + data.msg + '</span>'
+                : '<span class="text-danger">' + data.msg + '</span>';
+            if (data.status === 'ok') localStorage.setItem('report_wa_phone', phone);
+        } catch (error) {
+            result.innerHTML = '<span class="text-danger">Error de conexión.</span>';
+        }
+    }
+
     async function refundItem(id, name) {
         if (!confirm(`¿Generar DEVOLUCIÓN para: ${name}?`)) return;
         try {

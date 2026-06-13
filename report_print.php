@@ -45,16 +45,18 @@ if ($mode === 'session') {
 
 } else {
     $start = $_GET['start']; $end = $_GET['end'];
+    $scope = ($_GET['scope'] ?? 'local') === 'global' ? 'global' : 'local';
+    $scopeWhere = $scope === 'global' ? '' : ' AND v.id_sucursal = ' . intval($config['id_sucursal']);
     $title = "Reporte General: $start al $end";
     $startDt = new DateTime($start);
     $endDt = new DateTime($end);
     $reportDays = max(1, $startDt->diff($endDt)->days + 1);
 
-    $stmt = $pdo->prepare("SELECT v.*, s.nombre_cajero FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE DATE(v.fecha) BETWEEN ? AND ? ORDER BY v.id DESC");
+    $stmt = $pdo->prepare("SELECT v.*, s.nombre_cajero FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE DATE(v.fecha) BETWEEN ? AND ?{$scopeWhere} ORDER BY v.id DESC");
     $stmt->execute([$start, $end]);
     $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $whereClause = "DATE(v.fecha) BETWEEN ? AND ?";
+    $whereClause = "DATE(v.fecha) BETWEEN ? AND ?{$scopeWhere}";
     $params = [$start, $end];
 }
 

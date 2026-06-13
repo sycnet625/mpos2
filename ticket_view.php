@@ -1064,6 +1064,7 @@ function enviarPorWhatsApp(idVenta) {
     const formData = new FormData();
     formData.append('id_venta', idVenta);
     formData.append('tipo_doc', tipoDoc);
+    formData.append('source', 'single_ticket');
     formData.append('whatsapp', whatsapp);
     formData.append('mensaje', mensaje);
     if (priceSelection === 'mayorista') {

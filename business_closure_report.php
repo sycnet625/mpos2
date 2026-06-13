@@ -748,6 +748,25 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
     $writer->save('php://output');
     exit;
 }
+
+$resumenTextoLineas = [
+    "RESUMEN CIERRE DE NEGOCIO",
+    "Período: " . date('d/m/Y', strtotime($fecha_inicio)) . " - " . date('d/m/Y', strtotime($fecha_fin)),
+    "Sucursal: {$id_sucursal}",
+    "Venta total: $" . number_format($venta_total, 2),
+    "Ganancia bruta: $" . number_format($ganancia_bruta, 2) . " | Margen: " . number_format($pct_margen_bruto, 1) . "%",
+    "Gastos operativos: $" . number_format($gastos_totales, 2),
+    "Ganancia limpia: $" . number_format($ganancia_limpia, 2),
+    "Tickets: {$total_transacciones} | Ticket promedio: $" . number_format($ticket_promedio, 2),
+    "",
+    "CLIENTES Y VENTAS POR TICKET",
+];
+foreach ($sessionTickets as $ticketResumen) {
+    $resumenTextoLineas[] = "Ticket #" . intval($ticketResumen['id'])
+        . " | " . trim((string)($ticketResumen['cliente_nombre'] ?: 'Cliente general'))
+        . " | $" . number_format(floatval($ticketResumen['total']), 2);
+}
+$resumenTexto = implode("\n", $resumenTextoLineas);
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -800,6 +819,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
             <div class="d-flex flex-wrap gap-2">
                 <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
                 <a href="print_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>" target="_blank" class="btn btn-light fw-bold"><i class="fas fa-print me-1"></i>IMPRIMIR A4</a>
+                <button type="button" class="btn btn-outline-light" onclick="abrirResumenTexto()"><i class="fas fa-align-left me-1"></i>Resumen texto</button>
                 <a href="business_closure_report.php?fecha_inicio=<?php echo $fecha_inicio; ?>&fecha_fin=<?php echo $fecha_fin; ?>&export=xlsx" class="btn btn-success fw-bold"><i class="fas fa-file-excel me-1"></i>Exportar Excel</a>
             </div>
         </div>
@@ -823,6 +843,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
                     <a href="?periodo=30d" class="btn btn-outline-primary">30 Días</a>
                 </div>
                 <button type="submit" class="btn btn-primary btn-sm ms-2 px-3 fw-bold">FILTRAR</button>
+                <button type="button" class="btn btn-outline-primary btn-sm ms-2" onclick="setThisWeek()"><i class="fas fa-calendar-week"></i> Semana</button>
             </div>
         </form>
         
@@ -1194,7 +1215,59 @@ if (isset($_GET['export']) && $_GET['export'] === 'xlsx' && empty($error)) {
     <br><br>
 </div>
 
+<div class="modal fade" id="resumenTextoModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="fas fa-align-left me-2"></i>Resumen en texto</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <textarea id="resumenTextoContenido" class="form-control font-monospace" rows="20" readonly><?php echo htmlspecialchars($resumenTexto); ?></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-primary" onclick="copiarResumenTexto()"><i class="fas fa-copy"></i> Copiar</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
+    function abrirResumenTexto() {
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('resumenTextoModal')).show();
+    }
+
+    async function copiarResumenTexto() {
+        const textarea = document.getElementById('resumenTextoContenido');
+        try {
+            await navigator.clipboard.writeText(textarea.value);
+        } catch (error) {
+            textarea.select();
+            document.execCommand('copy');
+        }
+    }
+
+    function setThisWeek() {
+        const today = new Date();
+        const dayOfWeek = today.getDay(); // 0 (Sun) to 6 (Sat)
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const monday = new Date(today);
+        monday.setDate(today.getDate() + diffToMonday);
+
+        const formatDate = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+
+        const form = document.querySelector('form[method="GET"]');
+        form.querySelector('input[name="fecha_inicio"]').value = formatDate(monday);
+        form.querySelector('input[name="fecha_fin"]').value = formatDate(new Date());
+        form.submit();
+    }
+
     new Chart(document.getElementById('dailyChart'), {
         type: 'line',
         data: {

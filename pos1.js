@@ -2403,7 +2403,7 @@ function renderHistorialModalFromJson(data) {
             </div>
             <div class="d-flex justify-content-end mt-2">
                 <button type="button" class="btn btn-success btn-sm fw-bold" onclick="openHistorialWhatsappModal()">
-                    <i class="fab fa-whatsapp me-1"></i> Enviar PDFs por WhatsApp
+                    <i class="fab fa-whatsapp me-1"></i> Enviar ZIP por WhatsApp
                 </button>
             </div>
         </div>
@@ -2481,11 +2481,11 @@ function renderHistorialModalFromJson(data) {
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content border-0 shadow-lg">
                     <div class="modal-header bg-success text-white">
-                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas PDF</h6>
+                        <h6 class="modal-title fw-bold"><i class="fab fa-whatsapp me-2"></i>Enviar facturas en ZIP</h6>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="small text-muted mb-2">Se enviará un PDF individual por cada ticket visible en el historial actual.</div>
+                        <div class="small text-muted mb-2">Se enviará un solo archivo ZIP que contiene una factura PDF por cada ticket de esta sesión.</div>
                         <div class="mb-2">
                             <label class="form-label small fw-bold">Contacto WhatsApp</label>
                             <select id="historialWhatsappContacto" class="form-select form-select-sm">
@@ -2494,14 +2494,14 @@ function renderHistorialModalFromJson(data) {
                         </div>
                         <div class="mb-2">
                             <label class="form-label small fw-bold">Mensaje</label>
-                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto tus facturas en PDF.</textarea>
+                            <textarea id="historialWhatsappMensaje" class="form-control form-control-sm" rows="3">Adjunto las facturas PDF de la sesión en un archivo ZIP.</textarea>
                         </div>
                         <div id="historialWhatsappEstado" class="small text-muted"></div>
                     </div>
                     <div class="modal-footer">
                         <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
                         <button type="button" class="btn btn-success btn-sm fw-bold" onclick="enviarHistorialPorWhatsApp()">
-                            <i class="fab fa-whatsapp me-1"></i> Enviar PDFs
+                            <i class="fab fa-whatsapp me-1"></i> Enviar ZIP
                         </button>
                     </div>
                 </div>
@@ -2755,32 +2755,26 @@ window.enviarHistorialPorWhatsApp = async function() {
         return;
     }
 
-    if (!confirm(`Se enviarán ${ids.length} PDF(s) uno por uno a ${whatsapp}. ¿Continuar?`)) {
+    if (!confirm(`Se enviará un ZIP con ${ids.length} factura(s) PDF a ${whatsapp}. ¿Continuar?`)) {
         return;
     }
 
-    estado.textContent = `Preparando ${ids.length} PDF(s)...`;
+    estado.textContent = `Generando ZIP con ${ids.length} factura(s) PDF...`;
     try {
-        let ok = 0;
-        for (let i = 0; i < ids.length; i++) {
-            const idVenta = ids[i];
-            estado.textContent = `Enviando ${i + 1}/${ids.length}: factura #${idVenta}...`;
-            const formData = new FormData();
-            formData.append('id_venta', String(idVenta));
-            formData.append('tipo_doc', 'factura');
-            formData.append('whatsapp', whatsapp);
-            formData.append('mensaje', mensaje ? mensaje.value : '');
-            const resp = await fetch('ticket_whatsapp_send.php?action=send', {
-                method: 'POST',
-                credentials: 'same-origin',
-                body: formData
-            });
-            const data = await resp.json();
-            if (data.status === 'success') ok++;
-            else console.warn('Fallo envío factura', idVenta, data.msg || data);
-            await new Promise(resolve => setTimeout(resolve, 250));
+        const formData = new FormData();
+        formData.append('ticket_ids', JSON.stringify(ids));
+        formData.append('whatsapp', whatsapp);
+        formData.append('mensaje', mensaje ? mensaje.value : '');
+        const resp = await fetch('ticket_whatsapp_send.php?action=send_session_zip', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: formData
+        });
+        const data = await resp.json();
+        if (data.status !== 'success') {
+            throw new Error(data.msg || 'No se pudo enviar el ZIP.');
         }
-        estado.textContent = `Proceso terminado: ${ok}/${ids.length} enviado(s).`;
+        estado.textContent = data.msg;
         setTimeout(() => {
             if (modalEl) bootstrap.Modal.getInstance(modalEl)?.hide();
         }, 1800);
