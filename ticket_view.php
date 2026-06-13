@@ -337,6 +337,7 @@ if ($priceView === 'mayorista') {
                 <select id="printDocumentSelect" data-pref="printDocument">
                     <option value="ticket">Ticket</option>
                     <option value="factura">Factura</option>
+                    <option value="factura_eco">Factura ECO A4</option>
                     <option value="comprobante">Comprobante Premium</option>
                 </select>
             </div>
@@ -353,6 +354,8 @@ if ($priceView === 'mayorista') {
             </div>
             <div class="toolbar-actions">
                 <button class="btn-print-main" onclick="printSelectedDocument()">🖨️ Imprimir</button>
+                <button style="background:#6b7280; color:white; border:none; border-radius:6px; padding:7px 10px; font-size:11px; font-weight:bold; cursor:pointer;"
+                        onclick="openEcoPrintModal()">🧾 ECO A4</button>
                 <button style="background:#2F75B5; color:white; border:none; border-radius:6px; padding:7px 10px; font-size:11px; font-weight:bold; cursor:pointer;"
                         onclick="openDuoPrintModal()">🖨️ Dúplex (2 Tickets)</button>
                 <button class="btn-wa" onclick="openWhatsAppModal(<?= $idVenta ?>)">💬 Enviar por WhatsApp</button>
@@ -829,11 +832,16 @@ function printSelectedDocument() {
         return;
     }
 
-    if (doc === 'factura') {
+    if (doc === 'factura' || doc === 'factura_eco') {
         const url = new URL('ticket_to_invoice.php', window.location.href);
         url.searchParams.set('id', '<?php echo $idVenta; ?>');
         url.searchParams.set('autoprint', '1');
-        url.searchParams.set('format', format);
+        if (doc === 'factura_eco') {
+            url.searchParams.set('eco', '1');
+            url.searchParams.set('format', 'a4');
+        } else {
+            url.searchParams.set('format', format);
+        }
         applyPriceSelectionToUrl(url);
         window.open(url.toString(), '_blank', 'width=960,height=900');
         return;
@@ -847,6 +855,106 @@ function printSelectedDocument() {
     window.open(url.toString(), '_blank', 'width=960,height=900');
 }
 
+function closeEcoPrintModal() {
+    const modal = document.getElementById('ecoPrintModal');
+    if (modal) modal.remove();
+}
+
+function openEcoPrintModal() {
+    closeEcoPrintModal();
+
+    const modal = document.createElement('div');
+    modal.id = 'ecoPrintModal';
+    modal.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 100000; padding: 18px;
+    `;
+
+    const content = document.createElement('div');
+    content.style.cssText = `
+        width: min(520px, 100%); background: #fff; border-radius: 14px;
+        box-shadow: 0 18px 60px rgba(0,0,0,0.35); padding: 18px;
+        font-family: Arial, sans-serif; color: #111;
+    `;
+
+    content.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:14px;">
+            <div>
+                <div style="font-size:18px; font-weight:800; margin-bottom:4px;">Impresión ECO A4</div>
+                <div style="font-size:12px; color:#6b7280; line-height:1.4;">
+                    Elige si quieres una factura por hoja, dos iguales por hoja o dos tickets distintos en media hoja con corte.
+                </div>
+            </div>
+            <button type="button" onclick="closeEcoPrintModal()" style="border:none; background:#f3f4f6; color:#374151; border-radius:8px; width:32px; height:32px; cursor:pointer; font-size:18px;">×</button>
+        </div>
+
+        <div style="display:grid; gap:10px;">
+            <button type="button" onclick="ecoPrintSingle()" style="padding:12px 14px; border:none; border-radius:10px; background:#111827; color:#fff; font-weight:700; cursor:pointer; text-align:left;">
+                1 vez por hoja
+                <div style="font-size:12px; font-weight:400; opacity:.8; margin-top:3px;">Factura A4 minimalista en una sola hoja.</div>
+            </button>
+
+            <button type="button" onclick="ecoPrintDoubleSame()" style="padding:12px 14px; border:none; border-radius:10px; background:#374151; color:#fff; font-weight:700; cursor:pointer; text-align:left;">
+                2 veces por hoja
+                <div style="font-size:12px; font-weight:400; opacity:.8; margin-top:3px;">La misma factura arriba y abajo en una hoja A4 con corte.</div>
+            </button>
+
+            <div style="border:1px solid #e5e7eb; border-radius:10px; padding:12px;">
+                <div style="font-weight:700; margin-bottom:8px;">Mitad superior + otro ticket en la inferior</div>
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <input id="ecoSecondTicketId" type="number" min="1" placeholder="Código del otro ticket" style="flex:1; min-width:180px; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px;">
+                    <button type="button" onclick="ecoPrintSplit()" style="padding:10px 14px; border:none; border-radius:8px; background:#0d6efd; color:#fff; font-weight:700; cursor:pointer;">Imprimir corte</button>
+                </div>
+                <div style="font-size:12px; color:#6b7280; margin-top:8px; line-height:1.4;">
+                    La primera factura queda en la mitad superior de la hoja y la segunda en la mitad inferior con línea de tijera al centro.
+                </div>
+            </div>
+        </div>
+    `;
+
+    modal.appendChild(content);
+    modal.addEventListener('click', function (e) {
+        if (e.target === modal) closeEcoPrintModal();
+    });
+    document.body.appendChild(modal);
+    const input = document.getElementById('ecoSecondTicketId');
+    if (input) setTimeout(() => input.focus(), 50);
+}
+
+function ecoPrintSingle() {
+    const url = new URL('ticket_to_invoice.php', window.location.href);
+    url.searchParams.set('id', '<?php echo $idVenta; ?>');
+    url.searchParams.set('autoprint', '1');
+    url.searchParams.set('eco', '1');
+    url.searchParams.set('format', 'a4');
+    applyPriceSelectionToUrl(url);
+    closeEcoPrintModal();
+    window.open(url.toString(), '_blank', 'width=960,height=900');
+}
+
+function ecoPrintDoubleSame() {
+    const url = new URL('ticket_duo_invoice.php', window.location.href);
+    url.searchParams.set('id1', '<?php echo $idVenta; ?>');
+    closeEcoPrintModal();
+    window.open(url.toString(), '_blank', 'width=980,height=900');
+}
+
+function ecoPrintSplit() {
+    const input = document.getElementById('ecoSecondTicketId');
+    const id2 = input ? parseInt(input.value, 10) : 0;
+    if (!id2 || id2 === <?php echo (int)$idVenta; ?>) {
+        alert('Ingresa un código de ticket diferente.');
+        if (input) input.focus();
+        return;
+    }
+    const url = new URL('ticket_duo_invoice.php', window.location.href);
+    url.searchParams.set('id1', '<?php echo $idVenta; ?>');
+    url.searchParams.set('id2', String(id2));
+    closeEcoPrintModal();
+    window.open(url.toString(), '_blank', 'width=980,height=900');
+}
+
 <?php if ($autoPrint): ?>
 window.addEventListener('load', function () {
     setTimeout(function () {
@@ -858,7 +966,8 @@ window.addEventListener('load', function () {
 
 // ===== WHATSAPP MODAL =====
 function openWhatsAppModal(idVenta) {
-    const currentDoc = (document.getElementById('printDocumentSelect') || {}).value || 'ticket';
+    const currentDocRaw = (document.getElementById('printDocumentSelect') || {}).value || 'ticket';
+    const currentDoc = currentDocRaw === 'factura_eco' ? 'factura' : currentDocRaw;
     const currentPrice = (document.getElementById('printPriceSelect') || {}).value || 'normal';
     const ticketPhone = String(<?= json_encode((string)($venta['cliente_telefono'] ?? '')) ?> || '').trim();
     const ticketClientName = String(<?= json_encode((string)($venta['cliente_nombre'] ?? '')) ?> || '').trim();
@@ -1042,7 +1151,8 @@ function cargarContactosWhatsApp(idVenta, ticketInfo = {}) {
 }
 
 function enviarPorWhatsApp(idVenta) {
-    const tipoDoc = document.getElementById('tipoDocumento').value;
+    const tipoDocRaw = document.getElementById('tipoDocumento').value;
+    const tipoDoc = tipoDocRaw === 'factura_eco' ? 'factura' : tipoDocRaw;
     const whatsapp = document.getElementById('contactoWhatsApp').value;
     const mensaje = document.getElementById('mensajeWhatsApp').value;
     const status = document.getElementById('whatsappStatus');

@@ -1,9 +1,10 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 9.5 - Online first + POS offline completo
+// Versión 9.6 - Online first + POS offline completo
 // ==========================================
 
-const CACHE_NAME = 'palweb-pos-v95';
+const SW_VERSION = 'v9.6';
+const CACHE_NAME = 'palweb-pos-v96';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -32,7 +33,7 @@ const OFFLINE_ASSETS = [
 // INSTALACIÓN
 // ==========================================
 self.addEventListener('install', (event) => {
-    console.log('[SW-POS] Instalando Service Worker v9.5...');
+    console.log('[SW-POS] Instalando Service Worker ' + SW_VERSION + '...');
 
     event.waitUntil(
         caches.open(CACHE_NAME).then(async (cache) => {
@@ -59,7 +60,7 @@ self.addEventListener('install', (event) => {
 // ACTIVACIÓN - Limpiar cachés viejas
 // ==========================================
 self.addEventListener('activate', (event) => {
-    console.log('[SW-POS] Activando Service Worker v9.5...');
+    console.log('[SW-POS] Activando Service Worker ' + SW_VERSION + '...');
     
     event.waitUntil(
         caches.keys()
@@ -77,6 +78,19 @@ self.addEventListener('activate', (event) => {
             .then(() => {
                 console.log('[SW-POS] Activación completada - ONLINE FIRST activo');
                 return self.clients.claim();
+            })
+            .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
+            .then((clients) => {
+                return Promise.all(clients.map((client) => {
+                    try {
+                        const clientUrl = new URL(client.url);
+                        const isPosClient = clientUrl.pathname.endsWith('/pos.php') || clientUrl.pathname.endsWith('/pos/');
+                        if (isPosClient && typeof client.navigate === 'function') {
+                            return client.navigate(client.url);
+                        }
+                    } catch (e) {}
+                    return null;
+                }));
             })
     );
 });
@@ -283,11 +297,11 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v91-online-first-pos-offline' });
+        event.ports[0].postMessage({ version: 'v96-online-first-pos-offline' });
     }
 });
 
-console.log('[SW-POS] Service Worker v9.4 (ONLINE FIRST + POS offline completo) cargado');
+console.log('[SW-POS] Service Worker ' + SW_VERSION + ' (ONLINE FIRST + POS offline completo) cargado');
 
 // ══════════════════════════════════════════════════════════════════════════
 // PUSH NOTIFICATIONS

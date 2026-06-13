@@ -20,6 +20,10 @@ $markupPct = isset($_GET['markup_pct']) ? round(floatval($_GET['markup_pct']), 2
 if ($markupPct < -99.99) $markupPct = -99.99;
 $markupFactor = 1 + ($markupPct / 100);
 $autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
+$ecoMode = !empty($_GET['eco']) && $_GET['eco'] === '1';
+if ($ecoMode) {
+    $duplex = false;
+}
 
 // ── Cabecera de venta ─────────────────────────────────────────────────────────
 $stmtH = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
@@ -227,6 +231,9 @@ if ($autoRegistroFacturaPos) {
 // Filas vacías para mantener la cuadrícula de 13 líneas (solo modo normal)
 $totalRows  = 13;
 $emptyRows  = max(0, $totalRows - count($items));
+if ($ecoMode) {
+    $emptyRows = 0;
+}
 
 // Términos de pago
 $terminos = (($venta['estado_pago'] ?? '') === 'confirmado')
@@ -266,7 +273,7 @@ if (empty($logoUrl)) {
 <html lang="es">
 <head>
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
-<title>Factura – Ticket #<?= $idVenta ?><?= $duplex ? ' (2x hoja)' : '' ?></title>
+<title><?= $ecoMode ? 'Factura ECO' : 'Factura' ?> – Ticket #<?= $idVenta ?><?= $duplex ? ' (2x hoja)' : '' ?></title>
 <style>
     body {
         font-family: "Calibri", Arial, sans-serif;
@@ -274,6 +281,12 @@ if (empty($logoUrl)) {
         margin: 0; padding: 0;
         background-color: #525659;
         color: #000;
+    }
+
+    body.eco-mode {
+        background: #fff;
+        color: #111;
+        font-family: Arial, Helvetica, sans-serif;
     }
 
     /* Barra de herramientas (solo pantalla) */
@@ -322,6 +335,111 @@ if (empty($logoUrl)) {
     .total-final   { background-color: #D9E1F2; font-size: 14px; font-weight: bold; border-top: 1px solid #2F75B5; }
     .signature-line { margin-top: 40px; border-top: 2px solid #2F75B5; width: 100%; padding-top: 5px; color: white; background-color: #2F75B5; text-align: center; font-weight: bold; }
     .origen-badge { display: inline-block; background: #f0f4ff; border: 1px solid #c7d2fe; color: #3730a3; padding: 2px 8px; border-radius: 4px; font-size: 10px; }
+
+    body.eco-mode .toolbar,
+    body.eco-mode .price-note {
+        display: none !important;
+    }
+    body.eco-mode .page-container {
+        width: 210mm;
+        min-height: 297mm;
+        background: #fff;
+        margin: 0 auto;
+        padding: 12mm 14mm;
+        box-shadow: none;
+        border: none;
+    }
+    body.eco-mode .header-table,
+    body.eco-mode .main-table,
+    body.eco-mode .totals-table {
+        color: #111;
+    }
+    body.eco-mode .company-name,
+    body.eco-mode .invoice-title,
+    body.eco-mode .blue-header,
+    body.eco-mode .info-cell,
+    body.eco-mode .total-final,
+    body.eco-mode .signature-line,
+    body.eco-mode .origen-badge {
+        color: #111;
+        background: transparent;
+        border-color: #d1d5db;
+        box-shadow: none;
+    }
+    body.eco-mode .company-name,
+    body.eco-mode .invoice-title {
+        color: #111;
+    }
+    body.eco-mode .invoice-title {
+        font-size: 22px;
+        text-align: right;
+        letter-spacing: .02em;
+    }
+    body.eco-mode .company-name {
+        font-size: 17px;
+        text-transform: uppercase;
+    }
+    body.eco-mode .blue-header {
+        padding: 2px 0;
+        text-align: left;
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        border-bottom: 1px solid #d1d5db;
+    }
+    body.eco-mode .info-cell {
+        padding: 2px 0;
+        border-bottom: 1px solid #e5e7eb;
+        font-weight: 600;
+    }
+    body.eco-mode .main-table {
+        margin-top: 8px;
+    }
+    body.eco-mode .main-table th {
+        background: transparent;
+        color: #111;
+        border: none;
+        border-bottom: 1px solid #cbd5e1;
+        font-size: 10px;
+        font-weight: 700;
+        padding: 3px 0 4px;
+        text-align: left;
+    }
+    body.eco-mode .main-table td {
+        border: none;
+        border-bottom: none;
+        padding: 2px 0;
+        font-size: 10px;
+        height: auto;
+    }
+    body.eco-mode .main-table tbody tr + tr td {
+        border-top: none;
+    }
+    body.eco-mode .main-table tfoot tr,
+    body.eco-mode .main-table tfoot td {
+        border: none;
+    }
+    body.eco-mode .totals-table td {
+        padding: 3px 0;
+    }
+    body.eco-mode .total-final {
+        background: transparent;
+        font-size: 12px;
+        border-top: 1px solid #cbd5e1;
+    }
+    body.eco-mode .signature-line {
+        margin-top: 14px;
+        padding-top: 4px;
+        background: transparent;
+        border-top: 1px solid #d1d5db;
+        color: #111;
+    }
+    body.eco-mode .origen-badge {
+        padding: 1px 6px;
+        border-radius: 999px;
+        font-size: 9px;
+    }
 
     /* ══ MODO DUPLEX (2 facturas por A4) ═══════════════════════════════════════ */
     .duplex-page {
@@ -387,11 +505,17 @@ if (empty($logoUrl)) {
 
         /* Normal */
         .page-container { width: 100%; margin: 0; padding: 0; box-shadow: none; border: none; min-height: auto; }
+        <?php if ($ecoMode): ?>
+        @page { size: A4 portrait; margin: 8mm 10mm; }
+        <?php else: ?>
         @page { size: letter; margin: 1cm; }
+        <?php endif; ?>
 
+        <?php if ($duplex): ?>
         /* Duplex */
         .duplex-page { width: 100%; margin: 0; box-shadow: none; }
         @page { size: A4 portrait; margin: 0; }
+        <?php endif; ?>
 
         .blue-header, .main-table th, .signature-line, .total-final,
         .duplex-half .blue-header, .duplex-half .main-table th,
@@ -402,7 +526,7 @@ if (empty($logoUrl)) {
     }
 </style>
 </head>
-<body>
+<body<?= $ecoMode ? ' class="eco-mode"' : '' ?>>
 
 <?php if (!$pdfExport): ?>
 <div class="toolbar">
@@ -455,7 +579,7 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
     <table width="100%" style="margin-bottom:4px;">
         <tr>
             <td width="58%" valign="top">
-                <?php if ($logoUrl): ?>
+                <?php if ($logoUrl && !$ecoMode): ?>
                 <img src="<?= htmlspecialchars($logoUrl) ?>?v=<?= filemtime(__DIR__ . '/' . ltrim($logoUrl, '/')) ?: 1 ?>"
                      style="max-width:100px; max-height:36px; display:block; margin-bottom:2px; object-fit:contain;" alt="Logo">
                 <?php endif; ?>
@@ -652,7 +776,7 @@ $cfg = [
         <tbody>
             <tr>
                 <td width="60%" valign="top">
-                    <?php if ($logoUrl): ?>
+                    <?php if ($logoUrl && !$ecoMode): ?>
                     <img src="<?= htmlspecialchars($logoUrl) ?>?v=<?= filemtime(__DIR__ . '/' . ltrim($logoUrl, '/')) ?: 1 ?>"
                          style="max-width:180px; max-height:70px; display:block; margin-bottom:6px; object-fit:contain;" alt="Logo">
                     <?php endif; ?>

@@ -87,30 +87,30 @@ $logoUrl = ($logoRel && file_exists(__DIR__ . '/' . $logoRel)) ? '/' . ltrim($lo
 <meta charset="UTF-8">
 <title>Impresión Dúplex - Tickets #<?= $id1 ?> y #<?= $id2 ?></title>
 <style>
-    body { font-family: "Calibri", Arial, sans-serif; margin: 0; padding: 0; background: #525659; }
+    body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 0; background: #fff; color: #111; }
     
     .toolbar {
         position: fixed; top: 0; left: 0; right: 0;
-        background: #1e293b; color: #fff;
+        background: #1f2937; color: #fff;
         padding: 10px 20px; display: flex; align-items: center; gap: 15px;
         z-index: 1000;
     }
     .toolbar button {
-        padding: 8px 20px; border: none; border-radius: 6px;
-        cursor: pointer; font-weight: bold; background: #2F75B5; color: #fff;
+        padding: 8px 18px; border: none; border-radius: 8px;
+        cursor: pointer; font-weight: 700; background: #6b7280; color: #fff;
     }
 
     .a4-page {
         width: 210mm; height: 297mm;
-        background: white; margin: 60px auto;
-        box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        background: #fff; margin: 0 auto;
+        box-shadow: none;
         display: flex; flex-direction: column;
         box-sizing: border-box;
     }
 
     .ticket-half {
         height: 148.5mm; width: 100%;
-        padding: 10mm 15mm;
+        padding: 8mm 10mm;
         box-sizing: border-box;
         overflow: hidden;
         position: relative;
@@ -118,44 +118,43 @@ $logoUrl = ($logoRel && file_exists(__DIR__ . '/' . $logoRel)) ? '/' . ltrim($lo
     }
 
     .cut-line {
-        height: 0; border-top: 1px dashed #bbb;
-        text-align: center; color: #bbb; font-size: 10px;
+        height: 0; border-top: 1px dashed #000;
+        text-align: center; color: #000; font-size: 9px;
         line-height: 0; position: relative;
     }
     .cut-line span { background: #fff; padding: 0 10px; position: relative; top: -5px; }
 
-    /* Estilos Factura Mejorados (Más grandes como pidió el usuario) */
+    /* Estilos ECO minimalistas */
     .header { display: flex; justify-content: space-between; margin-bottom: 10px; }
     .company-info { width: 60%; }
-    .company-name { font-size: 22px; font-weight: bold; color: #2F75B5; margin-bottom: 2px; }
+    .company-name { font-size: 16px; font-weight: 700; color: #111; margin-bottom: 2px; text-transform: uppercase; }
     .invoice-box { width: 35%; text-align: right; }
-    .invoice-title { font-size: 26px; font-weight: bold; color: #2F75B5; }
+    .invoice-title { font-size: 20px; font-weight: 800; color: #111; letter-spacing: .02em; }
     
-    .blue-bar { background: #2F75B5; color: #fff; padding: 4px 8px; font-weight: bold; font-size: 13px; text-transform: uppercase; margin-bottom: 4px; }
+    .blue-bar { background: #f3f4f6; color: #111; padding: 4px 8px; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; border-bottom: 1px solid #d1d5db; }
     
-    .client-section { display: flex; gap: 20px; margin-bottom: 10px; }
-    .client-box { flex: 1; border: 1px solid #ddd; padding: 6px; }
+    .client-section { display: flex; gap: 12px; margin-bottom: 10px; }
+    .client-box { flex: 1; border: 1px solid #d1d5db; padding: 6px; }
     
     .items-table { width: 100%; border-collapse: collapse; margin-top: 5px; flex-grow: 1; }
-    .items-table th { background: #2F75B5; color: #fff; padding: 6px; font-size: 13px; text-align: left; }
-    .items-table td { border: 1px solid #ddd; padding: 6px; font-size: 13px; } /* SUBIDO TAMAÑO */
+    .items-table th { background: transparent; color: #111; padding: 4px 0; font-size: 10px; text-align: left; border-bottom: 1px solid #9ca3af; }
+    .items-table td { border-bottom: 1px dotted #d1d5db; padding: 4px 0; font-size: 10px; }
     .items-table .text-right { text-align: right; }
     .items-table .text-center { text-align: center; }
-    .items-table .fw-bold { font-weight: bold; font-size: 14px; } /* PRODUCTOS Y PRECIOS MÁS GRANDES */
+    .items-table .fw-bold { font-weight: 700; font-size: 10px; }
 
     .footer-section { display: flex; justify-content: space-between; margin-top: 10px; align-items: flex-end; }
-    .bank-info { width: 55%; font-size: 11px; }
+    .bank-info { width: 55%; font-size: 9px; line-height: 1.35; }
     .totals-box { width: 40%; }
     .totals-table { width: 100%; border-collapse: collapse; }
-    .totals-table td { padding: 4px; font-size: 13px; }
-    .total-row { background: #D9E1F2; font-weight: bold; font-size: 18px; color: #2F75B5; border-top: 2px solid #2F75B5; } /* TOTAL MUCHO MÁS GRANDE */
+    .totals-table td { padding: 3px 0; font-size: 10px; }
+    .total-row { background: transparent; font-weight: 700; font-size: 11px; color: #111; border-top: 1px solid #9ca3af; }
 
     @media print {
         .toolbar { display: none; }
         body { background: none; }
         .a4-page { margin: 0; box-shadow: none; border: none; width: 100%; height: 100%; }
         @page { size: A4 portrait; margin: 0; }
-        .blue-bar, .items-table th, .total-row { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     }
 </style>
 </head>
@@ -182,9 +181,6 @@ function renderHalf($d, $logoUrl, $config) {
 <div class="ticket-half">
     <div class="header">
         <div class="company-info">
-            <?php if ($logoUrl): ?>
-                <img src="<?= $logoUrl ?>" style="max-height:45px; margin-bottom:5px;">
-            <?php endif; ?>
             <div class="company-name"><?= htmlspecialchars($config['tienda_nombre']) ?></div>
             <div style="font-size:11px;"><?= htmlspecialchars($config['direccion']) ?></div>
             <div style="font-size:11px;">Tel: <?= htmlspecialchars($config['telefono']) ?></div>

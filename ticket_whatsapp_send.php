@@ -286,6 +286,9 @@ if ($action === 'send') {
         if (!in_array($priceView, ['venta', 'mayorista'], true)) {
             $priceView = 'venta';
         }
+        if ($tipoDoc === 'factura_eco') {
+            $tipoDoc = 'factura';
+        }
 
         if (!$idVenta || !$telefonoWhatsapp) {
             throw new Exception('Datos incompletos');

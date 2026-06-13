@@ -1371,7 +1371,7 @@ try {
         }
     </style>
 
-<link rel="manifest" href="manifest-pos.php?v=20260529-pwa2">
+<link rel="manifest" href="manifest-pos.php?v=20260613-pwa3">
 <meta name="theme-color" content="#2c3e50">
 <link rel="apple-touch-icon" href="icon-pos-192.png">
 <meta name="mobile-web-app-capable" content="yes">
