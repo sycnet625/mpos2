@@ -2002,6 +2002,31 @@ function openPaymentModal() {
     payModal.show(); 
 }
 
+async function checkLiveStockForCart(items) {
+    if (!navigator.onLine) {
+        return { ok: true, online: false, out: [] };
+    }
+
+    try {
+        const resp = await fetch('pagos_api.php', {
+            method: 'POST',
+            headers: getPosJsonHeaders(),
+            body: JSON.stringify({
+                action: 'check_stock',
+                items: items
+            })
+        });
+        const data = await resp.json();
+        return {
+            ok: !!(data && data.all_ok),
+            online: true,
+            out: Array.isArray(data?.out) ? data.out : []
+        };
+    } catch (e) {
+        return { ok: true, online: false, out: [] };
+    }
+}
+
 function toggleServiceOptions() { 
     const t = document.getElementById('serviceType').value; 
     const rd = document.getElementById('reservationDiv'); 
@@ -2066,6 +2091,25 @@ async function confirmPayment() {
     let cN = (cliNameEl ? cliNameEl.value : '').trim() || 'Consumidor Final';
     const itms = cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, note: i.note }));
 
+    if (navigator.onLine) {
+        const liveCheck = await checkLiveStockForCart(itms);
+        if (!liveCheck.ok && liveCheck.out.length > 0) {
+            const lista = liveCheck.out
+                .map(p => `• ${p.nombre} [${p.id}]: disponible ${p.stock}, requerido ${p.needed}`)
+                .join('\n');
+            if (typeof refreshProducts === 'function') {
+                await refreshProducts().catch(() => {});
+            }
+            showToast('Stock desactualizado', 'warning');
+            alert(
+                'No se puede cobrar porque el stock cambió o ya no existe suficiente inventario:\n\n' +
+                lista +
+                '\n\nSe actualizó el catálogo. Revisa el carrito y vuelve a intentar.'
+            );
+            return;
+        }
+    }
+
     // Descuentos para audit trail inmutable
     const descuentosItems = cart
         .filter(i => i.discountPct > 0)
@@ -2097,6 +2141,8 @@ async function confirmPayment() {
         descuento_global:  globalDiscountPct
     };
 
+    payModal.hide();
+
     // Guardar información para la pantalla del cliente (Vuelto)
     if(met === 'Efectivo') {
         const cashReceived = parseFloat(document.getElementById('cashReceived')?.value || 0);
@@ -2110,8 +2156,6 @@ async function confirmPayment() {
             }));
         }
     }
-
-    payModal.hide();
 
     if (navigator.onLine) {
         try {
@@ -2130,6 +2174,16 @@ async function confirmPayment() {
                 finishSale();
                 return;
             } else {
+                const errMsg = String(res.msg || '');
+                if (/stock insuficiente/i.test(errMsg)) {
+                    if (typeof refreshProducts === 'function') {
+                        await refreshProducts().catch(() => {});
+                    }
+                    showToast('Stock insuficiente en tiempo real', 'error');
+                    alert(errMsg + '\n\nSe actualizó el catálogo. Ajusta la cantidad y vuelve a cobrar.');
+                    paymentProcessing = false;
+                    return;
+                }
                 if (await handleSessionAuthFailure(res, () => confirmPayment(), 'Inicio de sesion requerido para registrar la venta.')) {
                     paymentProcessing = false;
                     return;
@@ -2360,7 +2414,7 @@ function renderHistorialModalFromJson(data) {
         return 'row-mixto';
     };
 
-    const html = `
+    let html = `
         <div class="sticky-top bg-white shadow-sm border-bottom z-index-2 p-3">
             <div class="row g-2 align-items-stretch">
                 <div class="col-6 col-md-3">

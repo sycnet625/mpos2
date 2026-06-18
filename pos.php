@@ -61,6 +61,7 @@ if ($posBasePath === '') {
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
 $posScopePath = $posPrefix . '/';
+$posUiVersion = 'v9.71';
 
 function pos_is_authenticated(): bool
 {
@@ -1126,6 +1127,36 @@ try {
         #pinLockMsg { min-height: 0; }
         .cash-status { font-size: 0.7rem; margin-left: 5px; padding: 1px 6px; border-radius: 4px; display: inline-block; vertical-align: middle; }
         .cash-open { background: #d1e7dd; color: #0f5132; } .cash-closed { background: #f8d7da; color: #842029; }
+        .pos-version-badge {
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            padding: 2px 7px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #f8fafc;
+            background: linear-gradient(135deg, #0f172a, #334155);
+            border: 1px solid rgba(255,255,255,0.12);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            white-space: nowrap;
+        }
+        .pin-version-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin: 2px auto 0;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            color: #0f172a;
+            background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+            border: 1px solid #cbd5e1;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+        }
         .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
         .pin-btn { height: 60px; font-size: 1.5rem; border-radius: 10px; border: 1px solid #ccc; background: #f8f9fa; }
         .toast-container { z-index: 10000; }
@@ -1396,7 +1427,7 @@ try {
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
             const swScope = '<?php echo $posScopePath; ?>';
-            navigator.serviceWorker.register('service-worker.js', { scope: swScope, updateViaCache: 'none' })
+            navigator.serviceWorker.register('service-worker.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>', { scope: swScope, updateViaCache: 'none' })
                 .then(reg => {
                     console.log('SW POS registrado en scope:', reg.scope);
                     if (reg && typeof reg.update === 'function') {
@@ -1457,6 +1488,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         <?php endif; ?>
         <h3 class="mb-1"><?php echo htmlspecialchars($systemBrandName); ?></h3>
         <div class="small text-muted mb-2"><?php echo htmlspecialchars($companyBrandName); ?></div>
+        <div class="pin-version-badge" title="Versión de la interfaz POS">POS <?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?></div>
         <div class="fs-1 mb-2" id="pinDisplay">••••</div>
         <div id="pinAttemptsDots" class="mb-2 text-muted small"></div>
         <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 small" style="visibility:hidden; height:0; overflow:hidden; padding:0; margin:0; border:none;"></div>
@@ -1530,6 +1562,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <i class="fas fa-user" style="font-size:0.8rem; opacity:0.75;"></i>
                     <span id="cashierName" style="font-weight:700; font-size:0.9rem; line-height:1;">Cajero</span>
                     <span id="cashStatusBadge" class="cash-status cash-closed">CERRADA</span>
+                    <span class="pos-version-badge" title="Versión de la interfaz POS">POS <?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?></span>
                 </div>
                 <div class="d-flex align-items-center gap-1">
                     <button id="btnSync" onclick="syncOfflineQueue()" class="btn btn-sm btn-warning text-dark px-2 d-none" title="Sincronizar cola offline">
@@ -1997,7 +2030,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
-<script src="pos1.js?v=20260612-session-zip2"></script>
+<script src="pos1.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="pos-offline-system.js?v=20260529-ui2"></script>
 
 <script>
