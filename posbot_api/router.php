@@ -1,4 +1,22 @@
 <?php
+if (!defined('POSBOT_API_ROOT')) {
+    define('POSBOT_API_ROOT', dirname(__DIR__));
+}
+
+if (!headers_sent()) {
+    header('Content-Type: application/json; charset=utf-8');
+}
+
+if (!isset($pdo) || !$pdo instanceof PDO) {
+    require_once POSBOT_API_ROOT . '/db.php';
+    require_once POSBOT_API_ROOT . '/config_loader.php';
+}
+
+require_once POSBOT_API_ROOT . '/habana_delivery.php';
+require_once POSBOT_API_ROOT . '/push_notify.php';
+require_once POSBOT_API_ROOT . '/posbot_api/bootstrap.php';
+require_once POSBOT_API_ROOT . '/posbot_api/repository.php';
+require_once POSBOT_API_ROOT . '/posbot_api/helpers.php';
 require_once __DIR__ . '/helpers/runtime.php';
 bot_ensure_tables($pdo);
 $cfg = bot_cfg($pdo);
@@ -21,7 +39,6 @@ $adminActions = [
     'promo_chats','promo_products','promo_my_group_payload','promo_create','promo_list','promo_detail','promo_force_now','promo_update','promo_delete','promo_pause','promo_clone',
     'promo_templates','promo_template_save','promo_template_delete','promo_upload_image',
     'promo_group_lists','promo_group_list_save','promo_group_list_delete',
-    'promo_process_scheduled','promo_validate_bridge',
     'bridge_restart','bridge_reset_session','bridge_logs','clear_message_logs'
 ];
 if (in_array($action, $adminActions, true)) {

@@ -8,6 +8,7 @@ require_once 'config_loader.php';
 
 $id1 = isset($_GET['id1']) ? intval($_GET['id1']) : 0;
 $id2 = isset($_GET['id2']) ? intval($_GET['id2']) : 0;
+$autoPrint = isset($_GET['autoprint']) && $_GET['autoprint'] === '1';
 
 if ($id1 <= 0) die('ID de ticket 1 inválido.');
 // Si no hay id2, duplicamos el id1 (comportamiento por defecto del duplex original)
@@ -106,54 +107,61 @@ $logoUrl = ($logoRel && file_exists(__DIR__ . '/' . $logoRel)) ? '/' . ltrim($lo
         box-shadow: none;
         display: flex; flex-direction: column;
         box-sizing: border-box;
+        overflow: hidden;
+        page-break-inside: avoid;
     }
 
     .ticket-half {
-        height: 148.5mm; width: 100%;
-        padding: 8mm 10mm;
+        height: 148mm; width: 100%;
+        padding: 5mm 8mm 4mm;
         box-sizing: border-box;
         overflow: hidden;
         position: relative;
         display: flex; flex-direction: column;
+        page-break-inside: avoid;
     }
 
     .cut-line {
-        height: 0; border-top: 1px dashed #000;
+        height: 1mm; border-top: 1px dashed #000;
         text-align: center; color: #000; font-size: 9px;
         line-height: 0; position: relative;
+        box-sizing: border-box;
     }
     .cut-line span { background: #fff; padding: 0 10px; position: relative; top: -5px; }
 
     /* Estilos ECO minimalistas */
-    .header { display: flex; justify-content: space-between; margin-bottom: 10px; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 6px; }
     .company-info { width: 60%; }
-    .company-name { font-size: 16px; font-weight: 700; color: #111; margin-bottom: 2px; text-transform: uppercase; }
+    .company-name { font-size: 14px; font-weight: 700; color: #111; margin-bottom: 1px; text-transform: uppercase; }
     .invoice-box { width: 35%; text-align: right; }
-    .invoice-title { font-size: 20px; font-weight: 800; color: #111; letter-spacing: .02em; }
+    .invoice-title { font-size: 18px; font-weight: 800; color: #111; letter-spacing: .02em; }
     
-    .blue-bar { background: #f3f4f6; color: #111; padding: 4px 8px; font-weight: 700; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; border-bottom: 1px solid #d1d5db; }
+    .blue-bar { background: #f3f4f6; color: #111; padding: 3px 6px; font-weight: 700; font-size: 10px; text-transform: uppercase; margin-bottom: 3px; border-bottom: 1px solid #d1d5db; }
     
-    .client-section { display: flex; gap: 12px; margin-bottom: 10px; }
-    .client-box { flex: 1; border: 1px solid #d1d5db; padding: 6px; }
+    .client-section { display: flex; gap: 8px; margin-bottom: 6px; }
+    .client-box { flex: 1; border: 1px solid #d1d5db; padding: 4px 5px; }
     
-    .items-table { width: 100%; border-collapse: collapse; margin-top: 5px; flex-grow: 1; }
-    .items-table th { background: transparent; color: #111; padding: 4px 0; font-size: 10px; text-align: left; border-bottom: 1px solid #9ca3af; }
-    .items-table td { border-bottom: 1px dotted #d1d5db; padding: 4px 0; font-size: 10px; }
+    .items-table { width: 100%; border-collapse: collapse; margin-top: 3px; flex: 1 1 auto; }
+    .items-table th { background: transparent; color: #111; padding: 3px 0; font-size: 9px; text-align: left; border-bottom: 1px solid #9ca3af; }
+    .items-table td { border-bottom: 1px dotted #d1d5db; padding: 3px 0; font-size: 9.5px; line-height: 1.15; }
     .items-table .text-right { text-align: right; }
     .items-table .text-center { text-align: center; }
     .items-table .fw-bold { font-weight: 700; font-size: 10px; }
+    .items-table .qty { font-weight: 800; font-size: 11px; }
+    .items-table .money { font-weight: 800; font-size: 10.5px; }
 
-    .footer-section { display: flex; justify-content: space-between; margin-top: 10px; align-items: flex-end; }
-    .bank-info { width: 55%; font-size: 9px; line-height: 1.35; }
+    .footer-section { display: flex; justify-content: space-between; margin-top: 5px; align-items: flex-end; flex: 0 0 auto; }
+    .bank-info { width: 55%; font-size: 8px; line-height: 1.2; }
     .totals-box { width: 40%; }
     .totals-table { width: 100%; border-collapse: collapse; }
-    .totals-table td { padding: 3px 0; font-size: 10px; }
-    .total-row { background: transparent; font-weight: 700; font-size: 11px; color: #111; border-top: 1px solid #9ca3af; }
+    .totals-table td { padding: 2px 0; font-size: 10px; font-weight: 700; }
+    .totals-table .money { font-weight: 900; font-size: 11px; }
+    .total-row { background: transparent; font-weight: 900; color: #111; border-top: 1px solid #9ca3af; }
 
     @media print {
         .toolbar { display: none; }
-        body { background: none; }
-        .a4-page { margin: 0; box-shadow: none; border: none; width: 100%; height: 100%; }
+        html, body { width: 210mm; height: 297mm; background: none; overflow: hidden; }
+        .a4-page { margin: 0; box-shadow: none; border: none; width: 210mm; height: 297mm; }
         @page { size: A4 portrait; margin: 0; }
     }
 </style>
@@ -172,6 +180,14 @@ $logoUrl = ($logoRel && file_exists(__DIR__ . '/' . $logoRel)) ? '/' . ltrim($lo
     <?php renderHalf($data2 ?: $data1, $logoUrl, $config); ?>
 </div>
 
+<?php if ($autoPrint): ?>
+<script>
+    window.addEventListener('load', function () {
+        setTimeout(function () { window.print(); }, 250);
+    });
+</script>
+<?php endif; ?>
+
 <?php
 function renderHalf($d, $logoUrl, $config) {
     if (!$d) return;
@@ -182,12 +198,12 @@ function renderHalf($d, $logoUrl, $config) {
     <div class="header">
         <div class="company-info">
             <div class="company-name"><?= htmlspecialchars($config['tienda_nombre']) ?></div>
-            <div style="font-size:11px;"><?= htmlspecialchars($config['direccion']) ?></div>
-            <div style="font-size:11px;">Tel: <?= htmlspecialchars($config['telefono']) ?></div>
+            <div style="font-size:10px;"><?= htmlspecialchars($config['direccion']) ?></div>
+            <div style="font-size:10px;">Tel: <?= htmlspecialchars($config['telefono']) ?></div>
         </div>
         <div class="invoice-box">
             <div class="invoice-title">FACTURA</div>
-            <div style="font-size:12px; font-weight:bold; margin-top:5px;">
+            <div style="font-size:11px; font-weight:bold; margin-top:3px;">
                 #<?= $numFac ?><br>
                 FECHA: <?= date('d/m/Y', strtotime($v['fecha'])) ?>
             </div>
@@ -197,15 +213,15 @@ function renderHalf($d, $logoUrl, $config) {
     <div class="client-section">
         <div class="client-box">
             <div class="blue-bar">Facturar a:</div>
-            <div style="font-weight:bold; font-size:14px;"><?= htmlspecialchars($d['cliNombre']) ?></div>
-            <div style="font-size:12px;"><?= htmlspecialchars($d['cliDireccion']) ?></div>
-            <div style="font-size:12px;">Tel: <?= htmlspecialchars($d['cliTelefono']) ?></div>
+            <div style="font-weight:bold; font-size:12px;"><?= htmlspecialchars($d['cliNombre']) ?></div>
+            <div style="font-size:10px;"><?= htmlspecialchars($d['cliDireccion']) ?></div>
+            <div style="font-size:10px;">Tel: <?= htmlspecialchars($d['cliTelefono']) ?></div>
         </div>
         <div class="client-box">
             <div class="blue-bar">Información:</div>
-            <div style="font-size:12px;">Cajero: <?= htmlspecialchars($d['cajero']) ?></div>
-            <div style="font-size:12px;">Pago: <?= htmlspecialchars($v['metodo_pago']) ?></div>
-            <div style="font-size:12px;">Ticket Original: #<?= $d['id'] ?></div>
+            <div style="font-size:10px;">Cajero: <?= htmlspecialchars($d['cajero']) ?></div>
+            <div style="font-size:10px;">Pago: <?= htmlspecialchars($v['metodo_pago']) ?></div>
+            <div style="font-size:10px;">Ticket Original: #<?= $d['id'] ?></div>
         </div>
     </div>
 
@@ -221,10 +237,10 @@ function renderHalf($d, $logoUrl, $config) {
         <tbody>
             <?php foreach($d['items'] as $it): ?>
             <tr>
-                <td class="text-center"><?= number_format($it['cantidad'], 1) ?></td>
+                <td class="text-center qty"><?= formatCantidadFactura($it['cantidad']) ?></td>
                 <td class="fw-bold"><?= htmlspecialchars($it['descripcion']) ?></td>
-                <td class="text-right">$<?= number_format($it['precio'], 2) ?></td>
-                <td class="text-right fw-bold">$<?= number_format($it['subtotal'], 2) ?></td>
+                <td class="text-right money">$<?= number_format($it['precio'], 2) ?></td>
+                <td class="text-right money">$<?= number_format($it['subtotal'], 2) ?></td>
             </tr>
             <?php endforeach; ?>
             <?php 
@@ -250,23 +266,34 @@ function renderHalf($d, $logoUrl, $config) {
             <table class="totals-table">
                 <tr>
                     <td>SUBTOTAL</td>
-                    <td class="text-right">$<?= number_format($d['subtotal'], 2) ?></td>
+                    <td class="text-right money">$<?= number_format($d['subtotal'], 2) ?></td>
                 </tr>
                 <?php if($d['envio'] > 0): ?>
                 <tr>
                     <td>ENVÍO / MENSAJERÍA</td>
-                    <td class="text-right">$<?= number_format($d['envio'], 2) ?></td>
+                    <td class="text-right money">$<?= number_format($d['envio'], 2) ?></td>
                 </tr>
                 <?php endif; ?>
                 <tr class="total-row">
                     <td>TOTAL</td>
-                    <td class="text-right">$<?= number_format($d['total'], 2) ?></td>
+                    <td class="text-right money">$<?= number_format($d['total'], 2) ?></td>
                 </tr>
             </table>
         </div>
     </div>
 </div>
 <?php } ?>
+
+<?php
+function formatCantidadFactura($cantidad) {
+    $valor = (float)$cantidad;
+    if (abs($valor - round($valor)) < 0.0001) {
+        return number_format($valor, 0);
+    }
+
+    return rtrim(rtrim(number_format($valor, 2, '.', ''), '0'), '.');
+}
+?>
 
 </body>
 </html>
