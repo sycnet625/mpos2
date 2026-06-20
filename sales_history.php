@@ -8,7 +8,9 @@ require_once 'db.php';
 // ---------------------------------------------------------
 // 🔒 SEGURIDAD Y CONFIGURACIÓN
 // ---------------------------------------------------------
-session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
@@ -309,8 +311,6 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
     <link rel="stylesheet" href="assets/css/all.min.css">
     <?php require_once __DIR__ . '/theme.php'; ?>
     <link rel="stylesheet" href="assets/css/inventory-suite.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
     <style>
         .table thead th { white-space: nowrap; }
         .session-card { border-left: 5px solid #0d6efd; margin-bottom: 20px; transition: all 0.2s; }
@@ -722,9 +722,37 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
-    Chart.register(ChartDataLabels);
     let salesChart; 
     const resumenTextoModal = new bootstrap.Modal(document.getElementById('resumenTextoModal'));
+
+    function loadReportScript(src) {
+        return new Promise(function (resolve, reject) {
+            const script = document.createElement('script');
+            const timeout = window.setTimeout(function () {
+                script.remove();
+                reject(new Error('timeout'));
+            }, 8000);
+            script.src = src;
+            script.async = true;
+            script.onload = function () {
+                window.clearTimeout(timeout);
+                resolve();
+            };
+            script.onerror = function () {
+                window.clearTimeout(timeout);
+                reject(new Error('load error'));
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    function showChartUnavailable() {
+        const chartCanvas = document.getElementById('salesChart');
+        if (chartCanvas) {
+            chartCanvas.insertAdjacentHTML('afterend', '<div class="alert alert-warning mb-0">El gráfico no cargó por la conexión externa. El reporte ya está visible.</div>');
+            chartCanvas.remove();
+        }
+    }
 
     function abrirResumenTexto() {
         resumenTextoModal.show();
@@ -880,60 +908,76 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
         }
     }
 
-    const ctx = document.getElementById('salesChart').getContext('2d');
-    salesChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: <?php echo json_encode($chartLabels); ?>,
-            datasets: [
-                {
-                    label: 'Ventas ($)',
-                    data: <?php echo json_encode($chartVentas); ?>,
-                    borderColor: '#0d6efd',
-                    backgroundColor: 'rgba(13, 110, 253, 0.1)',
-                    borderWidth: 3,
-                    tension: 0.3,
-                    fill: true,
-                    datalabels: { display: false }
-                },
-                {
-                    label: 'Ganancia ($)',
-                    data: <?php echo json_encode($chartGanancias); ?>,
-                    borderColor: '#198754',
-                    backgroundColor: 'rgba(25, 135, 84, 0.1)',
-                    borderWidth: 3,
-                    tension: 0.3,
-                    fill: true,
-                    datalabels: { display: false }
-                },
-                {
-                    label: 'Inventario ($)',
-                    data: <?php echo json_encode($chartInventario); ?>,
-                    borderColor: '#6f42c1',
-                    backgroundColor: 'rgba(111, 66, 193, 0.05)',
-                    borderWidth: 2,
-                    borderDash: [5, 5],
-                    tension: 0.1,
-                    fill: false,
-                    pointRadius: 4,
-                    datalabels: {
-                        display: true,
-                        align: 'top',
-                        color: '#6f42c1',
-                        font: { weight: 'bold', size: 10 },
-                        formatter: (v) => '$' + Math.round(v/1000) + 'k'
-                    }
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'top' } },
-            interaction: { mode: 'nearest', axis: 'x', intersect: false },
-            scales: { y: { beginAtZero: true }, x: { grid: { display: false } } }
+    function initSalesChart() {
+        if (typeof Chart === 'undefined') {
+            showChartUnavailable();
+            return;
         }
-    });
+        if (typeof ChartDataLabels !== 'undefined') {
+            Chart.register(ChartDataLabels);
+        }
+        const ctx = document.getElementById('salesChart').getContext('2d');
+        salesChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: <?php echo json_encode($chartLabels); ?>,
+                datasets: [
+                    {
+                        label: 'Ventas ($)',
+                        data: <?php echo json_encode($chartVentas); ?>,
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.3,
+                        fill: true,
+                        datalabels: { display: false }
+                    },
+                    {
+                        label: 'Ganancia ($)',
+                        data: <?php echo json_encode($chartGanancias); ?>,
+                        borderColor: '#198754',
+                        backgroundColor: 'rgba(25, 135, 84, 0.1)',
+                        borderWidth: 3,
+                        tension: 0.3,
+                        fill: true,
+                        datalabels: { display: false }
+                    },
+                    {
+                        label: 'Inventario ($)',
+                        data: <?php echo json_encode($chartInventario); ?>,
+                        borderColor: '#6f42c1',
+                        backgroundColor: 'rgba(111, 66, 193, 0.05)',
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        tension: 0.1,
+                        fill: false,
+                        pointRadius: 4,
+                        datalabels: {
+                            display: true,
+                            align: 'top',
+                            color: '#6f42c1',
+                            font: { weight: 'bold', size: 10 },
+                            formatter: (v) => '$' + Math.round(v/1000) + 'k'
+                        }
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'top' } },
+                interaction: { mode: 'nearest', axis: 'x', intersect: false },
+                scales: { y: { beginAtZero: true }, x: { grid: { display: false } } }
+            }
+        });
+    }
+
+    loadReportScript('https://cdn.jsdelivr.net/npm/chart.js')
+        .then(function () {
+            return loadReportScript('https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0').catch(function () {});
+        })
+        .then(initSalesChart)
+        .catch(showChartUnavailable);
 </script>
 <?php include_once 'menu_master.php'; ?>
 </body>
