@@ -61,7 +61,7 @@ if ($posBasePath === '') {
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
 $posScopePath = $posPrefix . '/';
-$posUiVersion = 'v9.71';
+$posUiVersion = 'v9.72';
 
 function pos_is_authenticated(): bool
 {

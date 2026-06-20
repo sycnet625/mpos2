@@ -2168,7 +2168,7 @@ async function confirmPayment() {
             
             if (res.status === 'success') {
                 if(tot < 0) Synth.refund(); else Synth.cash();
-                if(pr) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
+                if(pr) window.open('/ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
                 else showToast('Venta #' + res.id + ' registrada');
                 paymentProcessing = false;
                 finishSale();
@@ -2496,7 +2496,7 @@ function renderHistorialModalFromJson(data) {
                         ${isRef ? '' : `<button class="btn btn-sm btn-secondary py-0 px-2 shadow-sm me-1" onclick="saveSaleAsTemplate(${t.id}, ${clientLabelJs})" title="Guardar como plantilla"><i class="fas fa-bookmark"></i></button>`}
                         ${isRef ? '' : `<button class="btn btn-sm btn-warning py-0 px-2 shadow-sm me-1" onclick="voidTicket(${t.id})" title="Anular con motivo (sesión activa)"><i class="fas fa-ban"></i></button>`}
                         ${isRef ? '' : `<button class="btn btn-sm btn-info py-0 px-2 shadow-sm me-1" onclick="openEditSale(${t.id})" title="Editar venta"><i class="fas fa-edit"></i></button>`}
-                        <button class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="window.open('ticket_view.php?id=${t.id}', 'Ticket', 'width=380,height=600')" title="Ver ticket">
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-2 me-1" onclick="window.open('/ticket_view.php?id=${t.id}', 'Ticket', 'width=380,height=600')" title="Ver ticket">
                             <i class="fas fa-eye"></i>
                         </button>
                         ${isRef ? '' : `<button class="btn btn-sm btn-outline-danger py-0 px-2" onclick="refundTicketComplete(${t.id})" title="Devolver ticket">

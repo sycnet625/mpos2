@@ -486,7 +486,7 @@ if ($priceView === 'mayorista') {
         const id2 = prompt("Ingresa el ID del SEGUNDO ticket para imprimir en la misma hoja (o deja vacío para duplicar el actual):", "");
         if (id2 === null) return; // cancelado
         
-        let url = `ticket_duo_invoice.php?id1=${id1}`;
+        let url = `/ticket_duo_invoice.php?id1=${id1}`;
         if (id2.trim() !== "") {
             url += `&id2=${parseInt(id2)}`;
         }
@@ -833,7 +833,7 @@ function printSelectedDocument() {
     }
 
     if (doc === 'factura' || doc === 'factura_eco') {
-        const url = new URL('ticket_to_invoice.php', window.location.href);
+        const url = new URL('/ticket_to_invoice.php', window.location.origin);
         url.searchParams.set('id', '<?php echo $idVenta; ?>');
         url.searchParams.set('autoprint', '1');
         if (doc === 'factura_eco') {
@@ -923,7 +923,7 @@ function openEcoPrintModal() {
 }
 
 function ecoPrintSingle() {
-    const url = new URL('ticket_to_invoice.php', window.location.href);
+    const url = new URL('/ticket_to_invoice.php', window.location.origin);
     url.searchParams.set('id', '<?php echo $idVenta; ?>');
     url.searchParams.set('autoprint', '1');
     url.searchParams.set('eco', '1');
@@ -934,7 +934,7 @@ function ecoPrintSingle() {
 }
 
 function ecoPrintDoubleSame() {
-    const url = new URL('ticket_duo_invoice.php', window.location.href);
+    const url = new URL('/ticket_duo_invoice.php', window.location.origin);
     url.searchParams.set('id1', '<?php echo $idVenta; ?>');
     closeEcoPrintModal();
     window.open(url.toString(), '_blank', 'width=980,height=900');
@@ -948,7 +948,7 @@ function ecoPrintSplit() {
         if (input) input.focus();
         return;
     }
-    const url = new URL('ticket_duo_invoice.php', window.location.href);
+    const url = new URL('/ticket_duo_invoice.php', window.location.origin);
     url.searchParams.set('id1', '<?php echo $idVenta; ?>');
     url.searchParams.set('id2', String(id2));
     closeEcoPrintModal();

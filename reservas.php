@@ -638,7 +638,7 @@ $renderRows = function() use ($reservas) {
             <button class="btn btn-outline-success fw-bold" onclick="procesarAccion(<?= $r['id'] ?>,'complete')" title="Entregar"><i class="fas fa-check-circle"></i></button>
             <button class="btn btn-outline-danger" onclick="procesarAccion(<?= $r['id'] ?>,'cancel')" title="Cancelar"><i class="fas fa-times-circle"></i></button>
             <?php else: ?>
-            <button class="btn btn-outline-secondary" title="Imprimir" onclick="window.open('ticket_view.php?id=<?= $r['id'] ?>','_blank','width=380,height=600')"><i class="fas fa-print"></i></button>
+            <button class="btn btn-outline-secondary" title="Imprimir" onclick="window.open('/ticket_view.php?id=<?= $r['id'] ?>','_blank','width=380,height=600')"><i class="fas fa-print"></i></button>
             <?php endif; ?>
         </div>
     </td>
@@ -1097,7 +1097,7 @@ if (isset($_GET['ajax'])) {
                 <div class="p-3 border-top">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <span class="badge p-2 fs-6" id="tDeudaBadge"></span>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="window.open('ticket_view.php?id='+tCurrentId,'_blank','width=380,height=600')">
+                        <button class="btn btn-sm btn-outline-secondary" onclick="window.open('/ticket_view.php?id='+tCurrentId,'_blank','width=380,height=600')">
                             <i class="fas fa-print me-1"></i>Imprimir
                         </button>
                     </div>
@@ -1622,7 +1622,7 @@ async function guardarNuevoCliente() {
 function verTicket(id, deuda) {
     tCurrentId = id;
     document.getElementById('tModalId').innerText    = id;
-    document.getElementById('ticketFrame').src       = `ticket_view.php?id=${id}`;
+    document.getElementById('ticketFrame').src       = `/ticket_view.php?id=${id}`;
     const badge = document.getElementById('tDeudaBadge');
     badge.innerText  = deuda > 0 ? `Deuda: $${parseFloat(deuda).toFixed(2)}` : '✓ Saldado';
     badge.className  = `badge p-2 fs-6 ${deuda > 0 ? 'bg-danger' : 'bg-success'}`;
@@ -2119,7 +2119,7 @@ function imprimirMulti() {
     const ids = [...document.querySelectorAll('.ticket-chk:checked')].map(c => c.value);
     if (ids.length === 0) { showToast('Selecciona al menos 1 ticket.', 'warning'); return; }
     if (ids.length > 6)   { showToast('Máximo 6 tickets por página. Deselecciona algunos.', 'warning'); return; }
-    window.open('ticket_multi_print.php?ids=' + ids.join(','), '_blank', 'width=960,height=750');
+    window.open('/ticket_multi_print.php?ids=' + ids.join(','), '_blank', 'width=960,height=750');
 }
 
 // Delegación de eventos para checkboxes (persiste tras recargas AJAX)
