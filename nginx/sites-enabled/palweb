@@ -84,8 +84,41 @@ server {
         include fastcgi_params;
     }
 
-    # Vue SPA routes (login, pos, dashboard, admin, tienda)
-    location ~ ^/(login|pos|dashboard|admin|tienda)(/.*)?$ {
+    # Legacy/PWA pretty aliases
+    location = /pos {
+        return 301 /pos/;
+    }
+
+    location = /shop {
+        return 301 /shop/;
+    }
+
+    location = /products {
+        return 301 /products/;
+    }
+
+    location = /clock {
+        return 301 /clock/;
+    }
+
+    location = /pos/ {
+        rewrite ^ /pos.php last;
+    }
+
+    location = /shop/ {
+        rewrite ^ /shop.php last;
+    }
+
+    location = /products/ {
+        rewrite ^ /products/index.php last;
+    }
+
+    location = /clock/ {
+        rewrite ^ /clock/index.php last;
+    }
+
+    # Vue SPA routes (login, dashboard, admin, tienda)
+    location ~ ^/(login|dashboard|admin|tienda)(/.*)?$ {
         fastcgi_pass unix:/run/php/php8.3-fpm.sock;
         fastcgi_param SCRIPT_FILENAME /var/www/palweb-api/public/index.php;
         include fastcgi_params;
