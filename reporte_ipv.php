@@ -1,6 +1,15 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/reporte_ipv.php
 ini_set('display_errors', 0);
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    header('Location: login.php');
+    exit;
+}
+
 require_once 'db.php';
 
 // 1. CARGAR CONFIGURACIÓN (Almacén y Sucursal Actuales)
@@ -10,10 +19,13 @@ require_once 'business_metrics.php';
 
 $id_almacen = intval($config['id_almacen']);
 $id_sucursal = intval($config['id_sucursal']);
+session_write_close();
 
 // 2. PARÁMETROS DE FILTRO
 $start = $_GET['start'] ?? date('Y-m-d', strtotime('-7 days'));
 $end   = $_GET['end']   ?? date('Y-m-d');
+$solo_stock_fisico = isset($_GET['solo_stock_fisico']) && $_GET['solo_stock_fisico'] === '1';
+$blank_ipv = isset($_GET['blank_ipv']) && $_GET['blank_ipv'] === '1';
 
 // Ajustar horas para cubrir todo el día
 $startDateTime = $start . " 00:00:00";
@@ -31,6 +43,15 @@ try {
                  WHERE activo = 1 AND $columnaSucursal = 1 
                  ORDER BY nombre ASC";
     $allProducts = $pdo->query($sqlProds)->fetchAll(PDO::FETCH_ASSOC);
+
+    // 3b. STOCK FÍSICO ACTUAL: se usa para filtrar "en este momento real".
+    $stmtStockFisico = $pdo->prepare("
+        SELECT id_producto, cantidad
+        FROM stock_almacen
+        WHERE id_almacen = ?
+    ");
+    $stmtStockFisico->execute([$id_almacen]);
+    $stockFisicoMap = $stmtStockFisico->fetchAll(PDO::FETCH_KEY_PAIR);
 
     // 4. CONSULTAR KARDEX PARA MOVIMIENTOS EN EL RANGO (Filtrado por Almacén)
     $sqlMovs = "SELECT id_producto, tipo_movimiento, SUM(cantidad) as total_qty, SUM(ABS(cantidad) * costo_unitario) as total_costo
@@ -90,6 +111,11 @@ try {
 
     foreach ($allProducts as $p) {
         $sku = $p['codigo'];
+        $stock_fisico_actual = floatval($stockFisicoMap[$sku] ?? 0);
+
+        if ($blank_ipv && $stock_fisico_actual <= 0) {
+            continue;
+        }
         
         // Stock Inicial
         $stk_inic = floatval($stockInicialMap[$sku] ?? 0);
@@ -126,10 +152,21 @@ try {
         // Modo 2: Ventas + Movimientos (Cualquier actividad en el periodo)
         if ($filter_mode == '2' && !$tiene_movimiento) continue;
 
+        // Filtro independiente: inventario físico actual mayor que cero.
+        if ($solo_stock_fisico && $stock_fisico_actual <= 0) continue;
+
         // Dinero
         $monto_venta = floatval($ventasDineroMap[$sku] ?? 0);
         $costo_venta = $ventas_qty * $p['costo'];
         $ganancia = $monto_venta - $costo_venta;
+
+        if ($blank_ipv) {
+            $reportData[] = [
+                'nombre' => $p['nombre'],
+                'blank' => true
+            ];
+            continue;
+        }
 
         $reportData[] = [
             'nombre' => $p['nombre'],
@@ -140,6 +177,7 @@ try {
             'salidas' => $salidas,
             'ventas' => $ventas_qty,
             'final' => $stk_final,
+            'fisico_actual' => $stock_fisico_actual,
             'total_v' => $monto_venta,
             'ganancia' => $ganancia
         ];
@@ -190,10 +228,37 @@ try {
         .total-section { margin-top: 20px; float: right; width: 320px; }
         .total-table td { border: 1px solid #D9D9D9; padding: 8px; }
         .label-cell { font-weight: bold; text-align: right; background-color: #f2f2f2; width: 60%; }
-        @media print { .no-print { display: none; } body { margin: 0; } }
+        .blank-cell { height: 24px; background: #fff; }
+        body.blank-ipv table,
+        body.blank-ipv th,
+        body.blank-ipv td {
+            border-color: #000;
+        }
+        body.blank-ipv th,
+        body.blank-ipv td {
+            border-width: 1px;
+            border-style: solid;
+        }
+        @media print {
+            .no-print { display: none; }
+            body { margin: 0; }
+            body.blank-ipv,
+            body.blank-ipv table,
+            body.blank-ipv th,
+            body.blank-ipv td {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+            }
+            body.blank-ipv table,
+            body.blank-ipv th,
+            body.blank-ipv td {
+                border: 1px solid #000 !important;
+            }
+            @page { size: landscape; margin: 8mm; }
+        }
     </style>
 </head>
-<body>
+<body class="<?php echo $blank_ipv ? 'blank-ipv' : ''; ?>">
 
 <div class="no-print">
     <form method="GET" class="row g-3 align-items-center">
@@ -206,16 +271,35 @@ try {
             <option value="1" <?php echo $filter_mode == '1' ? 'selected':''; ?>>Solo con ventas</option>
             <option value="2" <?php echo $filter_mode == '2' ? 'selected':''; ?>>Ventas + Movimientos</option>
         </select>
+
+        <label style="display:inline-flex; align-items:center; gap:4px; margin-left:8px;">
+            <input type="checkbox" name="solo_stock_fisico" value="1" <?php echo $solo_stock_fisico ? 'checked' : ''; ?>>
+            Solo inventario físico &gt; 0 ahora
+        </label>
         
         <button type="submit">Generar Reporte Kardex</button>
+        <?php if (!$solo_stock_fisico): ?>
+            <button type="submit" name="solo_stock_fisico" value="1">Mostrar solo físico &gt; 0</button>
+        <?php else: ?>
+            <a href="?start=<?php echo urlencode($start); ?>&end=<?php echo urlencode($end); ?>&sales_only=<?php echo urlencode($filter_mode); ?>" style="display:inline-block; padding:3px 8px; border:1px solid #999; background:#fff; color:#333; text-decoration:none; border-radius:3px;">Quitar filtro físico</a>
+        <?php endif; ?>
         <button type="button" onclick="window.print()">Imprimir PDF</button>
+        <a href="?blank_ipv=1" target="_blank" style="display:inline-block; padding:3px 8px; border:1px solid #2F75B5; background:#2F75B5; color:#fff; text-decoration:none; border-radius:3px;">Imprimir IPV en blanco</a>
     </form>
 </div>
 
-<h1>IPV - BALANCE DE INVENTARIO Y VENTAS (KARDEX)</h1>
-<div class="meta">Periodo: <?php echo date('d/m/Y', strtotime($start)); ?> al <?php echo date('d/m/Y', strtotime($end)); ?></div>
+<h1><?php echo $blank_ipv ? 'IPV EN BLANCO PARA CONTEO MANUAL' : 'IPV - BALANCE DE INVENTARIO Y VENTAS (KARDEX)'; ?></h1>
+<div class="meta">
+    <?php if ($blank_ipv): ?>
+        Productos con existencia física actual &gt; 0
+    <?php else: ?>
+        Periodo: <?php echo date('d/m/Y', strtotime($start)); ?> al <?php echo date('d/m/Y', strtotime($end)); ?>
+    <?php endif; ?>
+</div>
 <div class="meta" style="margin-top:-15px; font-size:11px; color:#666;">
     Sucursal: <?php echo $id_sucursal; ?> | Almacén: <?php echo $id_almacen; ?>
+    <?php if ($solo_stock_fisico): ?> | Filtro activo: inventario físico actual &gt; 0<?php endif; ?>
+    <?php if ($blank_ipv): ?> | Columnas en blanco para llenar a mano<?php endif; ?>
 </div>
 
 <table>
@@ -230,6 +314,7 @@ try {
             <th style="width:7%; color:#CC0000;">Salidas</th>
             <th style="width:7%; font-weight:bold;">Ventas</th>
             <th style="width:7%; background-color:#FCE4D6; color:#000;">Final</th>
+            <th style="width:7%; background-color:#DDEBF7; color:#000;">Físico ahora</th>
             <th style="width:10%">Total Venta</th>
             <th style="width:10%">Ganancia</th>
         </tr>
@@ -239,6 +324,18 @@ try {
         <tr>
             <td class="center"><?php echo $i++; ?></td>
             <td class="left"><?php echo htmlspecialchars($row['nombre']); ?></td>
+            <?php if (!empty($row['blank'])): ?>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <td class="blank-cell">&nbsp;</td>
+            <?php else: ?>
             <td class="right" style="color:#666"><?php echo number_format($row['costo'], 2); ?></td>
             <td class="right"><?php echo number_format($row['precio'], 2); ?></td>
             <td class="center" style="background-color:#F2F2F2;"><?php echo $row['inic']; ?></td>
@@ -246,15 +343,18 @@ try {
             <td class="center bold" style="color:#CC0000;"><?php echo $row['salidas'] > 0 ? '-'.$row['salidas'] : '-'; ?></td>
             <td class="center bold"><?php echo $row['ventas'] > 0 ? $row['ventas'] : '0'; ?></td>
             <td class="center bold" style="background-color:#FFF2CC;"><?php echo $row['final']; ?></td>
+            <td class="center bold" style="background-color:#EAF3F8;"><?php echo $row['fisico_actual']; ?></td>
             <td class="right">$ <?php echo number_format($row['total_v'], 2); ?></td>
             <td class="right bold" style="color:<?php echo $row['ganancia'] >= 0 ? 'green':'red'; ?>">
                 <?php echo $row['ganancia'] > 0 ? number_format($row['ganancia'], 2) : '-'; ?>
             </td>
+            <?php endif; ?>
         </tr>
         <?php endforeach; ?>
     </tbody>
 </table>
 
+<?php if (!$blank_ipv): ?>
 <div class="total-section">
     <table class="total-table">
         <tr>
@@ -289,9 +389,10 @@ try {
         <?php endif; ?>
     </table>
 </div>
+<?php endif; ?>
 
 <div style="clear:both; font-size:10px; color:#999; margin-top:10px;">
-    * Datos basados en movimientos históricos del Kardex.
+    * <?php echo $blank_ipv ? 'Plantilla manual basada en productos activos con existencia física actual.' : 'Datos basados en movimientos históricos del Kardex.'; ?>
 </div>
 <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">
     Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v2.1 (Kardex Engine) - <?php echo date('d/m/Y H:i'); ?>

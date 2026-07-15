@@ -61,7 +61,7 @@ if ($posBasePath === '') {
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
 $posScopePath = $posPrefix . '/';
-$posUiVersion = 'v9.72';
+$posUiVersion = 'v9.73';
 
 function pos_is_authenticated(): bool
 {
@@ -1914,6 +1914,11 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     let currentSaleTotal = 0;
     let currentPaymentMode = 'cash';
     window.POS_CSRF_TOKEN_VALUE = <?php echo json_encode($POS_CSRF_TOKEN); ?>;
+    window.POS_ACTIVE_CONTEXT = {
+        id_empresa: <?php echo (int)($config['id_empresa'] ?? 1); ?>,
+        id_sucursal: <?php echo (int)($config['id_sucursal'] ?? 1); ?>,
+        id_almacen: <?php echo (int)($config['id_almacen'] ?? 1); ?>
+    };
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
     // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
     const CAJEROS_CONFIG = <?php

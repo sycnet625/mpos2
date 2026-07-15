@@ -949,6 +949,11 @@ async function verifyPin() {
             const almBadge = document.getElementById('ctxAlmacenBadge');
             if (sucBadge && loginContext.id_sucursal) sucBadge.innerText = String(loginContext.id_sucursal);
             if (almBadge && loginContext.id_almacen) almBadge.innerText = String(loginContext.id_almacen);
+            window.POS_ACTIVE_CONTEXT = Object.assign({}, window.POS_ACTIVE_CONTEXT || {}, {
+                id_empresa: parseInt(loginContext.id_empresa || (window.POS_ACTIVE_CONTEXT || {}).id_empresa || 1, 10),
+                id_sucursal: parseInt(loginContext.id_sucursal || (window.POS_ACTIVE_CONTEXT || {}).id_sucursal || 1, 10),
+                id_almacen: parseInt(loginContext.id_almacen || (window.POS_ACTIVE_CONTEXT || {}).id_almacen || 1, 10)
+            });
         }
 
         // Función que completa el login tras confirmar almacén
@@ -960,6 +965,11 @@ async function verifyPin() {
 
                 // Actualizar contexto con el almacén elegido
                 if (almId && loginContext) loginContext.id_almacen = almId;
+                window.POS_ACTIVE_CONTEXT = Object.assign({}, window.POS_ACTIVE_CONTEXT || {}, {
+                    id_empresa: parseInt(loginContext?.id_empresa || (window.POS_ACTIVE_CONTEXT || {}).id_empresa || 1, 10),
+                    id_sucursal: parseInt(loginContext?.id_sucursal || (window.POS_ACTIVE_CONTEXT || {}).id_sucursal || 1, 10),
+                    id_almacen: parseInt(almId || loginContext?.id_almacen || (window.POS_ACTIVE_CONTEXT || {}).id_almacen || 1, 10)
+                });
 
                 // Actualizar fondo del carrito con el banner de la sucursal
                 const sucId = loginContext ? loginContext.id_sucursal : null;
@@ -2136,6 +2146,9 @@ async function confirmPayment() {
         id_caja: cashId,
         timestamp: Date.now(),
         canal_origen: 'POS',
+        id_empresa: parseInt((window.POS_ACTIVE_CONTEXT || {}).id_empresa || 1, 10),
+        id_sucursal: parseInt((window.POS_ACTIVE_CONTEXT || {}).id_sucursal || 1, 10),
+        id_almacen: parseInt((window.POS_ACTIVE_CONTEXT || {}).id_almacen || 1, 10),
         estado_pago: 'confirmado',
         descuentos_items:  descuentosItems,
         descuento_global:  globalDiscountPct

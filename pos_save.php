@@ -29,6 +29,19 @@ function safe_str($str, $len = 250) {
     return substr((string)($str ?? ''), 0, $len);
 }
 
+function pos_save_context_name(PDO $pdo, string $table, int $id): string {
+    if ($id <= 0) {
+        return '';
+    }
+    try {
+        $stmt = $pdo->prepare("SELECT nombre FROM `$table` WHERE id = ? LIMIT 1");
+        $stmt->execute([$id]);
+        return (string)($stmt->fetchColumn() ?: '');
+    } catch (Throwable $e) {
+        return '';
+    }
+}
+
 try {
     pos_security_enforce_session(false);
 
@@ -49,6 +62,39 @@ try {
     $idSucursal = intval($config['id_sucursal']);
     $idEmpresa = intval($config['id_empresa']);
 
+    // En el POS físico manda el contexto del cajero autenticado. config_loader puede
+    // traer contexto de usuario/admin, pero al cobrar no debe reemplazar al almacén
+    // elegido en el login/selector del POS.
+    if (!empty($_SESSION['id_almacen'])) {
+        $idAlmacen = (int)$_SESSION['id_almacen'];
+    } elseif (isset($input['id_almacen']) && is_numeric($input['id_almacen'])) {
+        $idAlmacen = (int)$input['id_almacen'];
+    }
+    if (!empty($_SESSION['id_sucursal'])) {
+        $idSucursal = (int)$_SESSION['id_sucursal'];
+    } elseif (isset($input['id_sucursal']) && is_numeric($input['id_sucursal'])) {
+        $idSucursal = (int)$input['id_sucursal'];
+    }
+    if (!empty($_SESSION['id_empresa'])) {
+        $idEmpresa = (int)$_SESSION['id_empresa'];
+    } elseif (isset($input['id_empresa']) && is_numeric($input['id_empresa'])) {
+        $idEmpresa = (int)$input['id_empresa'];
+    }
+
+    if ($idAlmacen <= 0 || $idSucursal <= 0 || $idEmpresa <= 0) {
+        throw new Exception("Contexto POS inválido. Empresa: {$idEmpresa}. Sucursal: {$idSucursal}. Almacén: {$idAlmacen}.");
+    }
+
+    try {
+        $stmtCtx = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_sucursal = ? AND COALESCE(activo, 1) = 1 LIMIT 1");
+        $stmtCtx->execute([$idAlmacen, $idSucursal]);
+        if (!$stmtCtx->fetchColumn()) {
+            throw new Exception("Contexto POS inválido: el almacén {$idAlmacen} no pertenece a la sucursal {$idSucursal} o está inactivo.");
+        }
+    } catch (PDOException $e) {
+        // Si la tabla no existe en una instalación vieja, continuar con el contexto resuelto.
+    }
+
     // 3. Preparar Datos Generales
     $idSesion = isset($input['id_caja']) && is_numeric($input['id_caja']) ? (int)$input['id_caja'] : 0;
     $usuarioNombre = pos_security_clean_text($_SESSION['cajero'] ?? $_SESSION['admin_user'] ?? 'Sistema', 100);
@@ -56,10 +102,11 @@ try {
 
     // Recuperar sesión y su fecha contable
     if ($idSesion > 0) {
-        $stmtSesion = $pdo->prepare("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE id = ?");
-        $stmtSesion->execute([$idSesion]);
+        $stmtSesion = $pdo->prepare("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE id = ? AND id_sucursal = ? LIMIT 1");
+        $stmtSesion->execute([$idSesion, $idSucursal]);
     } else {
-        $stmtSesion = $pdo->query("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' ORDER BY id DESC LIMIT 1");
+        $stmtSesion = $pdo->prepare("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_sucursal = ? ORDER BY id DESC LIMIT 1");
+        $stmtSesion->execute([$idSucursal]);
     }
 
     if ($row = $stmtSesion->fetch(PDO::FETCH_ASSOC)) {
@@ -265,7 +312,14 @@ try {
         }
 
         if ($stockActual < $realQty) {
-            throw new Exception("Stock insuficiente para '" . $realName . "'. Disponible: " . $stockActual . ". Requerido: " . $realQty);
+            $almNombre = pos_save_context_name($pdo, 'almacenes', $idAlmacen);
+            $sucNombre = pos_save_context_name($pdo, 'sucursales', $idSucursal);
+            $debugContext = "Debug existencia: almacén #{$idAlmacen}"
+                . ($almNombre !== '' ? " ({$almNombre})" : '')
+                . ", sucursal #{$idSucursal}"
+                . ($sucNombre !== '' ? " ({$sucNombre})" : '')
+                . ", SKU {$realSku}.";
+            throw new Exception("Stock insuficiente para '" . $realName . "'. Disponible: " . $stockActual . ". Requerido: " . $realQty . ". " . $debugContext);
         }
         if ($kardexAvailable) {
             $kardex->registrarVenta($realSku, $realQty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
