@@ -161,6 +161,18 @@ if ($priceView === 'mayorista') {
     <title>Ticket #<?php echo $idVenta; ?></title>
     <script src="assets/js/qrcode.min.js"></script>
     <style>
+        :root {
+            --ticket-58-content-width: 46mm;
+            --ticket-58-font-size: 10px;
+            --ticket-58-line-height: 1.08;
+            --ticket-58-title-size: 16px;
+            --ticket-58-meta-size: 10px;
+            --ticket-58-logo-max-width: 42mm;
+            --ticket-58-logo-max-height: 18mm;
+            --ticket-58-desc-size: 10px;
+            --ticket-58-total-title-size: 14px;
+            --ticket-58-total-value-size: 16px;
+        }
         body { font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; width: 300px; color: #000; background: #fff; }
         .text-center { text-align: center; } 
         .text-right { text-align: right; } 
@@ -216,6 +228,15 @@ if ($priceView === 'mayorista') {
         .total-section td.value-item {
             font-weight: 700;
         }
+        .total-pay-row {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 4px;
+            width: 100%;
+        }
+        .total-pay-row .total-pay-label { font-size: 14px; }
+        .total-pay-row .total-pay-value { font-size: 20px; }
         .total-section { 
             background: #f8f9fa; 
             padding: 8px; 
@@ -246,6 +267,86 @@ if ($priceView === 'mayorista') {
         @media print {
             .no-print { display: none; }
             body { padding: 0; width: 100%; }
+            /*
+             * Las impresoras de 58 mm suelen disponer de solo 46-48 mm
+             * realmente imprimibles. Se mantiene todo el ticket dentro de
+             * 46 mm y se reducen los espacios verticales para evitar recortes.
+             */
+            body.fmt-58 {
+                width: var(--ticket-58-content-width) !important;
+                max-width: var(--ticket-58-content-width) !important;
+                margin: 0 auto !important;
+                font-size: var(--ticket-58-font-size);
+                line-height: var(--ticket-58-line-height);
+            }
+            body.fmt-58 .ticket-paper {
+                width: var(--ticket-58-content-width) !important;
+                max-width: var(--ticket-58-content-width) !important;
+                box-sizing: border-box;
+                overflow-wrap: anywhere;
+                word-break: break-word;
+            }
+            body.fmt-58 .ticket-paper .ticket-brand-logo {
+                max-width: var(--ticket-58-logo-max-width) !important;
+                max-height: var(--ticket-58-logo-max-height) !important;
+            }
+            body.fmt-58 .ticket-paper .ticket-brand-title {
+                font-size: var(--ticket-58-title-size);
+                line-height: 1.05;
+            }
+            body.fmt-58 .ticket-paper .ticket-brand-meta {
+                font-size: var(--ticket-58-meta-size);
+                line-height: 1.1;
+            }
+            body.fmt-58 table td { padding: 1px 0; }
+            body.fmt-58 .border-top { margin-top: 3px; padding-top: 3px; }
+            body.fmt-58 .border-bottom { margin-bottom: 3px; padding-bottom: 3px; }
+            body.fmt-58 .items-table {
+                margin: 3px 0;
+                table-layout: fixed;
+            }
+            body.fmt-58 .items-table th,
+            body.fmt-58 .items-table td { padding: 1px 0; }
+            body.fmt-58 .items-table th:nth-child(1),
+            body.fmt-58 .items-table td:nth-child(1) { width: 10%; }
+            body.fmt-58 .items-table th:nth-child(2),
+            body.fmt-58 .items-table td:nth-child(2) { width: 42%; }
+            body.fmt-58 .items-table th:nth-child(3),
+            body.fmt-58 .items-table td:nth-child(3),
+            body.fmt-58 .items-table th:nth-child(4),
+            body.fmt-58 .items-table td:nth-child(4) {
+                width: 24%;
+                padding-right: 0;
+                padding-left: 1mm;
+            }
+            body.fmt-58 .items-table td.desc-item {
+                font-size: var(--ticket-58-desc-size);
+                line-height: 1.08;
+            }
+            body.fmt-58 .total-section {
+                box-sizing: border-box;
+                padding: 3px;
+                margin-top: 3px;
+                border-width: 1px;
+            }
+            body.fmt-58 .total-pay-row {
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                gap: 1px;
+                text-align: center;
+            }
+            body.fmt-58 .total-pay-row .total-pay-label {
+                font-size: var(--ticket-58-total-title-size) !important;
+            }
+            body.fmt-58 .total-pay-row .total-pay-value {
+                font-size: var(--ticket-58-total-value-size) !important;
+            }
+            body.fmt-58 .delivery-highlight {
+                padding: 3px;
+                margin: 3px 0;
+                font-size: 11px;
+            }
             /* A4: ticket centrado, ancho de ticket térmico, no estirado */
             body.fmt-a4 {
                 width: 100% !important;
@@ -332,6 +433,14 @@ if ($priceView === 'mayorista') {
                     <option value="a4">A4 Deskjet</option>
                 </select>
             </div>
+            <div class="toolbar-group" id="printMarginGroup">
+                <label for="printMarginSelect">Margen 58mm</label>
+                <select id="printMarginSelect" data-pref="printMargin">
+                    <option value="normal">Normal</option>
+                    <option value="compacto">Compacto</option>
+                    <option value="amplio">Amplio</option>
+                </select>
+            </div>
             <div class="toolbar-group">
                 <label for="printDocumentSelect">Documento</label>
                 <select id="printDocumentSelect" data-pref="printDocument">
@@ -379,6 +488,84 @@ if ($priceView === 'mayorista') {
         try { localStorage.setItem(LS_KEY, JSON.stringify(prefs)); } catch(e) {}
     }
 
+    const PRINT_58_MARGIN_PRESETS = {
+        normal: {
+            pageMargin: '2mm 7mm 2mm 5mm',
+            contentWidth: '46mm',
+            fontSize: '10px',
+            lineHeight: '1.08',
+            titleSize: '16px',
+            metaSize: '10px',
+            logoMaxWidth: '42mm',
+            logoMaxHeight: '18mm',
+            descSize: '10px',
+            totalTitleSize: '14px',
+            totalValueSize: '16px'
+        },
+        compacto: {
+            pageMargin: '2mm 5mm 2mm 4mm',
+            contentWidth: '49mm',
+            fontSize: '10.5px',
+            lineHeight: '1.06',
+            titleSize: '17px',
+            metaSize: '10.5px',
+            logoMaxWidth: '45mm',
+            logoMaxHeight: '19mm',
+            descSize: '10.5px',
+            totalTitleSize: '15px',
+            totalValueSize: '17px'
+        },
+        amplio: {
+            pageMargin: '2mm 8mm 2mm 6mm',
+            contentWidth: '44mm',
+            fontSize: '9.5px',
+            lineHeight: '1.05',
+            titleSize: '15px',
+            metaSize: '9.5px',
+            logoMaxWidth: '40mm',
+            logoMaxHeight: '17mm',
+            descSize: '9.5px',
+            totalTitleSize: '13px',
+            totalValueSize: '15px'
+        }
+    };
+
+    function apply58MarginPresetStyles(presetName) {
+        const cfg = PRINT_58_MARGIN_PRESETS[presetName] || PRINT_58_MARGIN_PRESETS.normal;
+        const root = document.documentElement.style;
+        root.setProperty('--ticket-58-content-width', cfg.contentWidth);
+        root.setProperty('--ticket-58-font-size', cfg.fontSize);
+        root.setProperty('--ticket-58-line-height', cfg.lineHeight);
+        root.setProperty('--ticket-58-title-size', cfg.titleSize);
+        root.setProperty('--ticket-58-meta-size', cfg.metaSize);
+        root.setProperty('--ticket-58-logo-max-width', cfg.logoMaxWidth);
+        root.setProperty('--ticket-58-logo-max-height', cfg.logoMaxHeight);
+        root.setProperty('--ticket-58-desc-size', cfg.descSize);
+        root.setProperty('--ticket-58-total-title-size', cfg.totalTitleSize);
+        root.setProperty('--ticket-58-total-value-size', cfg.totalValueSize);
+        return cfg;
+    }
+
+    function sync58MarginControls() {
+        const formatSel = document.getElementById('printFormatSelect');
+        const marginSel = document.getElementById('printMarginSelect');
+        const marginGroup = document.getElementById('printMarginGroup');
+        const is58 = !!formatSel && formatSel.value === '58mm';
+        const preset = marginSel && PRINT_58_MARGIN_PRESETS[marginSel.value] ? marginSel.value : 'normal';
+
+        if (marginSel) {
+            marginSel.disabled = !is58;
+        }
+        if (marginGroup) {
+            marginGroup.style.display = is58 ? '' : 'none';
+            marginGroup.style.opacity = is58 ? '1' : '.6';
+        }
+
+        document.body.dataset.printFormat = formatSel ? formatSel.value : '';
+        document.body.dataset.printMargin58 = is58 ? preset : '';
+        apply58MarginPresetStyles(is58 ? preset : 'normal');
+    }
+
     function getEffectiveValue(el, prefs) {
         // Si el URL tiene parámetro explícito para esta preference, úsalo
         // (viene del GET, ya reflejado en value del select por PHP)
@@ -411,6 +598,7 @@ if ($priceView === 'mayorista') {
             const key = el.dataset.pref;
             const hasGetParam = (
                 (key === 'printFormat' && url.searchParams.has('format')) ||
+                (key === 'printMargin' && url.searchParams.has('margin_58')) ||
                 (key === 'printPrice' && (url.searchParams.has('price_view') || url.searchParams.has('markup_pct'))) ||
                 (key === 'printDocument' && false) // nunca viene por GET
             );
@@ -427,6 +615,7 @@ if ($priceView === 'mayorista') {
 
     // Al cargar la página, restaurar prefs desde localStorage si no hay GET
     applyPrefsFromStorage();
+    sync58MarginControls();
 
     // Actualizar el notice de precio según la selección (toolbar ya lista)
     function applyNoticeFromSelect() {
@@ -469,6 +658,22 @@ if ($priceView === 'mayorista') {
         applyNoticeFromSelect();
     });
 
+    const formatSelect = document.getElementById('printFormatSelect');
+    if (formatSelect) {
+        formatSelect.addEventListener('change', function() {
+            persistSelect(this);
+            sync58MarginControls();
+        });
+    }
+
+    const marginSelect = document.getElementById('printMarginSelect');
+    if (marginSelect) {
+        marginSelect.addEventListener('change', function() {
+            persistSelect(this);
+            sync58MarginControls();
+        });
+    }
+
     // Al cargar, sincronizar notice con lo que se mostró (GET params)
     (function syncNoticeOnLoad() {
         const url = new URL(window.location.href);
@@ -500,15 +705,15 @@ if ($priceView === 'mayorista') {
         $tLogoPath = $branchBanner ?: ($config['marca_empresa_logo'] ?? $config['ticket_logo'] ?? '');
         if (!empty($tLogoPath) && file_exists(__DIR__ . '/' . $tLogoPath)):
         ?>
-        <img src="<?php echo htmlspecialchars($tLogoPath) ?>?v=<?php echo filemtime(__DIR__ . '/' . $tLogoPath) ?>"
+        <img class="ticket-brand-logo" src="<?php echo htmlspecialchars($tLogoPath) ?>?v=<?php echo filemtime(__DIR__ . '/' . $tLogoPath) ?>"
              style="max-width:240px; max-height:80px; display:block; margin:0 auto 6px;" alt="Logo">
         <?php endif; ?>
-        <h2 style="margin:0;"><?php echo htmlspecialchars($config['tienda_nombre']); ?></h2>
+        <h2 class="ticket-brand-title" style="margin:0;"><?php echo htmlspecialchars($config['tienda_nombre']); ?></h2>
         <?php if (!empty($config['ticket_slogan'])): ?>
-        <small style="font-style:italic;"><?php echo htmlspecialchars($config['ticket_slogan']); ?></small><br>
+        <small class="ticket-brand-meta" style="font-style:italic;"><?php echo htmlspecialchars($config['ticket_slogan']); ?></small><br>
         <?php endif; ?>
-        <small><?php echo htmlspecialchars($config['direccion']); ?></small><br>
-        <small>Tel: <?php echo htmlspecialchars($config['telefono']); ?></small>
+        <small class="ticket-brand-meta"><?php echo htmlspecialchars($config['direccion']); ?></small><br>
+        <small class="ticket-brand-meta">Tel: <?php echo htmlspecialchars($config['telefono']); ?></small>
         <?php if ($priceNoticeTitle !== ''): ?>
         <div id="priceNoticeDynamic" style="margin-top:6px; padding:6px 8px; background:#fff3cd; border:1px dashed #856404; font-size:11px; font-weight:bold;">
             <?php echo htmlspecialchars($priceNoticeTitle); ?><br>
@@ -647,9 +852,11 @@ if ($priceView === 'mayorista') {
                     <tr style="border-top: 1px dashed #000;"><td colspan="2"></td></tr>
                 <?php endif; ?>
                 <tr>
-                    <td class="fw-bold" style="font-size:14px;">TOTAL A PAGAR:</td>
-                    <td class="text-right fw-bold" style="font-size:20px;">
-                        $<?php echo number_format($totalDisplay, 2); ?>
+                    <td colspan="2">
+                        <div class="total-pay-row">
+                            <span class="total-pay-label fw-bold">TOTAL A PAGAR:</span>
+                            <span class="total-pay-value fw-bold">$<?php echo number_format($totalDisplay, 2); ?></span>
+                        </div>
                     </td>
                 </tr>
                 <?php if ($priceNoticeTitle !== ''): ?>
@@ -761,7 +968,7 @@ if ($priceView === 'mayorista') {
 </div><!-- /ticket-paper -->
 
 <script>
-function printWithFormat(fmt) {
+function printWithFormat(fmt, marginPreset) {
     // Eliminar @page previo si existe
     const old = document.getElementById('_pgStyle');
     if (old) old.remove();
@@ -772,10 +979,13 @@ function printWithFormat(fmt) {
     s.id = '_pgStyle';
 
     if (fmt === '58mm') {
+        const marginSel = document.getElementById('printMarginSelect');
+        const preset = PRINT_58_MARGIN_PRESETS[marginPreset] ? marginPreset : (marginSel && PRINT_58_MARGIN_PRESETS[marginSel.value] ? marginSel.value : 'normal');
+        const cfg = apply58MarginPresetStyles(preset);
         document.body.classList.add('fmt-58');
-        document.body.style.width = '200px';
-        // 58mm - 4mm de márgenes = 54mm de área útil
-        s.textContent = '@page { size: 58mm auto; margin: 1mm 2mm; }';
+        document.body.style.width = cfg.contentWidth;
+        // El contenido se adapta al preset elegido y evita el recorte del lado derecho
+        s.textContent = '@page { size: 58mm auto; margin: ' + cfg.pageMargin + '; }';
     } else if (fmt === 'a4') {
         document.body.classList.add('fmt-a4');
         // Márgenes explícitos: evita que el navegador recorte el último carácter
@@ -820,14 +1030,21 @@ function applyPriceSelectionToUrl(url) {
 
 function printSelectedDocument() {
     const formatSel = document.getElementById('printFormatSelect');
+    const marginSel = document.getElementById('printMarginSelect');
     const docSel = document.getElementById('printDocumentSelect');
     const format = formatSel ? formatSel.value : '80mm';
     const doc = docSel ? docSel.value : 'ticket';
+    const margin58 = marginSel ? marginSel.value : 'normal';
 
     if (doc === 'ticket') {
         const url = applyPriceSelectionToUrl(new URL(window.location.href));
         url.searchParams.set('autoprint', '1');
         url.searchParams.set('format', format);
+        if (format === '58mm') {
+            url.searchParams.set('margin_58', margin58);
+        } else {
+            url.searchParams.delete('margin_58');
+        }
         window.open(url.toString(), '_blank', 'width=420,height=800');
         return;
     }
@@ -958,8 +1175,10 @@ function ecoPrintSplit() {
 <?php if ($autoPrint): ?>
 window.addEventListener('load', function () {
     setTimeout(function () {
-        const fmt = new URL(window.location.href).searchParams.get('format') || '80mm';
-        printWithFormat(fmt);
+        const url = new URL(window.location.href);
+        const fmt = url.searchParams.get('format') || '80mm';
+        const margin58 = url.searchParams.get('margin_58') || '';
+        printWithFormat(fmt, margin58);
     }, 250);
 });
 <?php endif; ?>
