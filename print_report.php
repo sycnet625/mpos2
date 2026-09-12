@@ -9,6 +9,7 @@ require_once 'accounting_helpers.php';
 
 // CONFIGURACIÓN MÍNIMA
 $id_sucursal = 1; 
+$id_empresa = 1;
 $pct_reserva = 10;
 // Intentar cargar config real
 $configFile = 'pos.cfg';
@@ -16,6 +17,7 @@ if (file_exists($configFile)) {
     $loaded = json_decode(file_get_contents($configFile), true);
     if ($loaded) {
         $id_sucursal = $loaded['id_sucursal'];
+        $id_empresa = $loaded['id_empresa'] ?? 1;
         $pct_reserva = $loaded['reserva_limpieza_pct'] ?? 10;
     }
 }
@@ -40,23 +42,23 @@ try {
                     dates.dia,
                     COALESCE((SELECT SUM(v.total) 
                               FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
-                              WHERE v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) = dates.dia AND $wReal), 0) as total_venta,
-                    COALESCE((SELECT SUM(vd.cantidad * p.costo)
+                              WHERE v.id_empresa = ? AND v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) = dates.dia AND $wReal), 0) as total_venta,
+                    COALESCE((SELECT SUM(vd.cantidad * COALESCE(vd.costo_unitario, p.costo))
                               FROM ventas_detalle vd 
                               JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id 
                               LEFT JOIN caja_sesiones sc ON vc.id_caja = sc.id
                               JOIN productos p ON vd.id_producto = p.codigo
-                              WHERE vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) = dates.dia AND $wRealVc), 0) as total_costo,
-                    COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto
+                              WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) = dates.dia AND $wRealVc), 0) as total_costo,
+                    COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_empresa = ? AND id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto
                  FROM (
                     SELECT DISTINCT IFNULL(s.fecha_contable, DATE(v.fecha)) as dia 
                     FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                    WHERE v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? AND $wReal
+                    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? AND $wReal
                     UNION
-                    SELECT DISTINCT DATE(fecha) as dia FROM gastos_historial WHERE id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
+                    SELECT DISTINCT DATE(fecha) as dia FROM gastos_historial WHERE id_empresa = ? AND id_sucursal = ? AND DATE(fecha) BETWEEN ? AND ?
                  ) as dates ORDER BY dates.dia ASC";
     $stmt = $pdo->prepare($sqlDaily);
-    $stmt->execute([$id_sucursal, $id_sucursal, $id_sucursal, $id_sucursal, $fecha_inicio, $fecha_fin, $id_sucursal, $fecha_inicio, $fecha_fin]);
+    $stmt->execute([$id_empresa, $id_sucursal, $id_empresa, $id_sucursal, $id_empresa, $id_sucursal, $id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin, $id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
     $dailySummary = $stmt->fetchAll();
 
     $venta_total = 0; $costo_total = 0; $gastos_totales = 0;
@@ -75,10 +77,10 @@ try {
                            FROM ventas_pagos vp 
                            JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id 
                            LEFT JOIN caja_sesiones sc ON vc.id_caja = sc.id
-                           WHERE vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) BETWEEN ? AND ? 
+                           WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) BETWEEN ? AND ?
                            AND " . ventas_reales_where_clause('vc') . " 
                            GROUP BY vp.metodo_pago");
-    $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $stmt->execute([$id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
     $payments = $stmt->fetchAll();
 
     $sessionSummary = [];
@@ -88,10 +90,10 @@ try {
     $stmt = $pdo->prepare("SELECT v.*
                            FROM ventas_cabecera v
                            LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                           WHERE v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ? 
+                           WHERE v.id_empresa = ? AND v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                            AND " . ventas_reales_where_clause('v') . "
                            ORDER BY IFNULL(s.fecha_contable, DATE(v.fecha)) ASC, v.id ASC");
-    $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $stmt->execute([$id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
     $sessionTickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!empty($sessionTickets)) {
@@ -142,9 +144,9 @@ try {
             $sessionPlaceholders = implode(',', array_fill(0, count($sessionIds), '?'));
             $stmt = $pdo->prepare("SELECT id, nombre_cajero, fecha_apertura, fecha_cierre, fecha_contable, estado
                                    FROM caja_sesiones
-                                   WHERE id IN ($sessionPlaceholders)
+                                   WHERE id IN ($sessionPlaceholders) AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
                                    ORDER BY fecha_apertura ASC, id ASC");
-            $stmt->execute($sessionIds);
+            $stmt->execute(array_merge($sessionIds, [$id_empresa, $id_sucursal, (int)($config['id_almacen'] ?? 1)]));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $sessionId = intval($row['id']);
                 if (!isset($sessionSummary[$sessionId])) {
@@ -223,13 +225,13 @@ try {
              JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
              LEFT JOIN caja_sesiones s ON v.id_caja = s.id
              JOIN productos p ON vd.id_producto = p.codigo
-             WHERE v.id_sucursal = ?
+             WHERE v.id_empresa = ? AND v.id_sucursal = ?
                AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                AND " . ventas_reales_where_clause('v') . "
              GROUP BY p.codigo, p.nombre, p.categoria
              ORDER BY p.categoria ASC, p.nombre ASC"
         );
-        $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+        $stmt->execute([$id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
         $productSummary = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

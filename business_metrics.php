@@ -113,6 +113,8 @@ if (!function_exists('_bm_normalize_params')) {
             'id_empresa'    => (int)$p['id_empresa'],
             'id_sucursal'   => isset($p['id_sucursal'])  ? (int)$p['id_sucursal']  : null,
             'id_almacen'    => isset($p['id_almacen'])   ? (int)$p['id_almacen']   : null,
+            'id_sesion_caja'=> isset($p['id_sesion_caja']) && (int)$p['id_sesion_caja'] > 0
+                ? (int)$p['id_sesion_caja'] : null,
             'secciones'     => $secciones,
             'limite_top'    => max(1, (int)($p['limite_top'] ?? 10)),
         ];
@@ -130,8 +132,13 @@ if (!function_exists('_bm_build_where')) {
     function _bm_build_where(array $p, string $alias = 'v'): array
     {
         $a     = $alias;
-        $where = "IFNULL(cs.fecha_contable, DATE({$a}.fecha)) BETWEEN ? AND ?";
-        $binds = [$p['fecha_inicio'], $p['fecha_fin']];
+        // Mantiene las fechas contables de la sesión, pero evita aplicar DATE()
+        // sobre v.fecha cuando la venta no tiene fecha contable.
+        $where = "((cs.fecha_contable BETWEEN ? AND ?)
+                   OR (cs.fecha_contable IS NULL
+                       AND {$a}.fecha >= ?
+                       AND {$a}.fecha < DATE_ADD(?, INTERVAL 1 DAY)))";
+        $binds = [$p['fecha_inicio'], $p['fecha_fin'], $p['fecha_inicio'], $p['fecha_fin']];
 
         $where .= " AND {$a}.id_empresa = ?";
         $binds[] = $p['id_empresa'];
@@ -139,6 +146,14 @@ if (!function_exists('_bm_build_where')) {
         if ($p['id_sucursal'] !== null) {
             $where .= " AND {$a}.id_sucursal = ?";
             $binds[] = $p['id_sucursal'];
+        }
+        if ($p['id_almacen'] !== null) {
+            $where .= " AND {$a}.id_almacen = ?";
+            $binds[] = $p['id_almacen'];
+        }
+        if ($p['id_sesion_caja'] !== null) {
+            $where .= " AND COALESCE(NULLIF({$a}.id_sesion_caja, 0), NULLIF({$a}.id_caja, 0)) = ?";
+            $binds[] = $p['id_sesion_caja'];
         }
 
         $where .= ' AND ' . ventas_reales_where_clause($alias);
@@ -153,11 +168,13 @@ if (!function_exists('_bm_load_tickets_detalles')) {
     {
         [$where, $binds] = _bm_build_where($p);
 
-        $sql = "SELECT v.*,
+        $sql = "SELECT v.id, v.total, v.fecha, v.metodo_pago, v.tipo_servicio,
+                       v.estado_pago, v.cliente_nombre, v.id_sesion_caja, v.id_caja,
+                       v.id_empresa, v.id_sucursal, v.id_almacen,
                        IFNULL(cs.fecha_contable, DATE(v.fecha)) AS fecha_contable_calc
                 FROM ventas_cabecera v
                 LEFT JOIN caja_sesiones cs
-                       ON (v.id_caja = cs.id OR v.id_sesion_caja = cs.id)
+                       ON cs.id = COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0))
                 WHERE $where
                 ORDER BY v.fecha ASC, v.id ASC";
 
@@ -176,7 +193,7 @@ if (!function_exists('_bm_load_tickets_detalles')) {
             "SELECT vd.*,
                     p.nombre        AS nombre_prod,
                     p.categoria,
-                    p.costo         AS costo_unitario,
+                    COALESCE(vd.costo_unitario, p.costo) AS costo_unitario,
                     p.es_elaborado  AS es_elaborado
              FROM ventas_detalle vd
              JOIN productos p ON vd.id_producto = p.codigo
@@ -521,12 +538,17 @@ if (!function_exists('_bm_calc_cajero')) {
         try {
             $sqlSes  = "SELECT cs.*
                         FROM caja_sesiones cs
-                        WHERE cs.fecha_contable BETWEEN ? AND ?";
-            $bSes    = [$p['fecha_inicio'], $p['fecha_fin']];
+                        WHERE cs.fecha_contable BETWEEN ? AND ?
+                          AND cs.id_empresa = ?";
+            $bSes    = [$p['fecha_inicio'], $p['fecha_fin'], $p['id_empresa']];
 
             if ($p['id_sucursal'] !== null) {
                 $sqlSes .= ' AND cs.id_sucursal = ?';
                 $bSes[]  = $p['id_sucursal'];
+            }
+            if ($p['id_almacen'] !== null) {
+                $sqlSes .= ' AND cs.id_almacen = ?';
+                $bSes[] = $p['id_almacen'];
             }
             $sqlSes .= ' ORDER BY cs.fecha_contable ASC, cs.id ASC';
 
@@ -568,84 +590,65 @@ if (!function_exists('_bm_calc_cajero')) {
 if (!function_exists('_bm_calc_series')) {
     function _bm_calc_series(PDO $pdo, array $p): array
     {
-        $wReal     = ventas_reales_where_clause('v');
-        $sucFilterV = $p['id_sucursal'] !== null ? ' AND v.id_sucursal = ?' : '';
-        $sucBindV   = $p['id_sucursal'] !== null ? [$p['id_sucursal']] : [];
-        $sucFilterG = $p['id_sucursal'] !== null ? ' AND id_sucursal = ?' : '';
-        $sucBindG   = $p['id_sucursal'] !== null ? [$p['id_sucursal']] : [];
+        // Antes había cuatro subconsultas correlacionadas por cada día. Cada
+        // bloque ahora agrupa una sola vez y PHP combina los resultados.
+        $sucV = $p['id_sucursal'] !== null ? ' AND v.id_sucursal = ?' : '';
+        $bindV = $p['id_sucursal'] !== null ? [$p['id_sucursal']] : [];
+        $sucG = $p['id_sucursal'] !== null ? ' AND id_sucursal = ?' : '';
+        $bindG = $p['id_sucursal'] !== null ? [$p['id_sucursal']] : [];
+        $sesV = $p['id_sesion_caja'] !== null
+            ? ' AND COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0)) = ?' : '';
+        $bindSes = $p['id_sesion_caja'] !== null ? [$p['id_sesion_caja']] : [];
+        $join = "LEFT JOIN caja_sesiones cs ON cs.id = COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0))";
+        $dia = "IFNULL(cs.fecha_contable, DATE(v.fecha))";
+        $map = [];
 
-        $csjoin = "LEFT JOIN caja_sesiones cs ON (v.id_caja = cs.id OR v.id_sesion_caja = cs.id)";
-
-        $sql = "SELECT
-                    dates.dia,
-                    COALESCE((
-                        SELECT SUM(v.total)
-                        FROM ventas_cabecera v $csjoin
-                        WHERE v.id_empresa = ?
-                          AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND $wReal $sucFilterV
-                    ), 0) AS venta,
-                    COALESCE((
-                        SELECT SUM(vd.cantidad * p.costo)
-                        FROM ventas_detalle vd
-                        JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
-                        JOIN productos p ON vd.id_producto = p.codigo
-                        $csjoin
-                        WHERE v.id_empresa = ?
-                          AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND $wReal $sucFilterV
-                    ), 0) AS costo,
-                    COALESCE((
-                        SELECT COUNT(v.id)
-                        FROM ventas_cabecera v $csjoin
-                        WHERE v.id_empresa = ?
-                          AND IFNULL(cs.fecha_contable, DATE(v.fecha)) = dates.dia
-                          AND v.total > 0 AND $wReal $sucFilterV
-                    ), 0) AS transacciones,
-                    COALESCE((
-                        SELECT SUM(monto) FROM gastos_historial
-                        WHERE DATE(fecha) = dates.dia $sucFilterG
-                    ), 0) AS gastos
-                FROM (
-                    SELECT DISTINCT IFNULL(cs.fecha_contable, DATE(v.fecha)) AS dia
-                    FROM ventas_cabecera v $csjoin
-                    WHERE v.id_empresa = ?
-                      AND IFNULL(cs.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
-                      AND $wReal $sucFilterV
-                    UNION
-                    SELECT DISTINCT DATE(fecha) AS dia
-                    FROM gastos_historial
-                    WHERE DATE(fecha) BETWEEN ? AND ? $sucFilterG
-                ) AS dates
-                ORDER BY dates.dia ASC";
-
-        $binds = array_merge(
-            [$p['id_empresa']], $sucBindV,       // bloque venta
-            [$p['id_empresa']], $sucBindV,       // bloque costo
-            [$p['id_empresa']], $sucBindV,       // bloque transacciones
-            $sucBindG,                            // bloque gastos
-            [$p['id_empresa'], $p['fecha_inicio'], $p['fecha_fin']], $sucBindV,  // UNION ventas
-            [$p['fecha_inicio'], $p['fecha_fin']], $sucBindG                      // UNION gastos
-        );
-
-        $st = $pdo->prepare($sql);
-        $st->execute($binds);
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-
-        $series = [];
-        foreach ($rows as $r) {
-            $venta  = floatval($r['venta']);
-            $costo  = floatval($r['costo']);
-            $series[] = [
-                'fecha'         => $r['dia'],
-                'venta'         => $venta,
-                'costo'         => $costo,
-                'ganancia'      => $venta - $costo,
-                'gastos'        => floatval($r['gastos']),
-                'transacciones' => (int)$r['transacciones'],
-            ];
+        $sqlVentas = "SELECT $dia AS dia, COALESCE(SUM(v.total),0) AS venta,
+                              COUNT(CASE WHEN v.total > 0 THEN 1 END) AS transacciones
+                       FROM ventas_cabecera v $join
+                       WHERE v.id_empresa = ? AND $dia BETWEEN ? AND ?
+                         AND " . ventas_reales_where_clause('v') . $sucV . $sesV . "
+                       GROUP BY dia ORDER BY dia";
+        $st = $pdo->prepare($sqlVentas);
+        $st->execute(array_merge([$p['id_empresa'], $p['fecha_inicio'], $p['fecha_fin']], $bindV, $bindSes));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $map[$r['dia']] = ['venta' => (float)$r['venta'], 'costo' => 0.0,
+                'gastos' => 0.0, 'transacciones' => (int)$r['transacciones']];
         }
 
+        $sqlCosto = "SELECT $dia AS dia,
+                            COALESCE(SUM(vd.cantidad * COALESCE(vd.costo_unitario, p.costo)),0) AS costo
+                     FROM ventas_detalle vd
+                     JOIN ventas_cabecera v ON v.id = vd.id_venta_cabecera
+                     JOIN productos p ON p.codigo = vd.id_producto $join
+                     WHERE v.id_empresa = ? AND $dia BETWEEN ? AND ?
+                       AND " . ventas_reales_where_clause('v') . $sucV . $sesV . "
+                     GROUP BY dia ORDER BY dia";
+        $st = $pdo->prepare($sqlCosto);
+        $st->execute(array_merge([$p['id_empresa'], $p['fecha_inicio'], $p['fecha_fin']], $bindV, $bindSes));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $map[$r['dia']] ??= ['venta' => 0.0, 'costo' => 0.0, 'gastos' => 0.0, 'transacciones' => 0];
+            $map[$r['dia']]['costo'] = (float)$r['costo'];
+        }
+
+        $sqlGastos = "SELECT fecha AS dia, COALESCE(SUM(monto),0) AS gastos
+                      FROM gastos_historial
+                      WHERE fecha BETWEEN ? AND ? $sucG
+                      GROUP BY fecha ORDER BY fecha";
+        $st = $pdo->prepare($sqlGastos);
+        $st->execute(array_merge([$p['fecha_inicio'], $p['fecha_fin']], $bindG));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $map[$r['dia']] ??= ['venta' => 0.0, 'costo' => 0.0, 'gastos' => 0.0, 'transacciones' => 0];
+            $map[$r['dia']]['gastos'] = (float)$r['gastos'];
+        }
+
+        ksort($map);
+        $series = [];
+        foreach ($map as $fecha => $r) {
+            $series[] = ['fecha' => $fecha, 'venta' => $r['venta'], 'costo' => $r['costo'],
+                'ganancia' => $r['venta'] - $r['costo'], 'gastos' => $r['gastos'],
+                'transacciones' => $r['transacciones']];
+        }
         return $series;
     }
 }
@@ -728,10 +731,10 @@ if (!function_exists('_bm_calc_pedidos')) {
             $st = $pdo->prepare(
                 "SELECT COUNT(DISTINCT v.id) AS n,
                         COALESCE(SUM(v.total),0) AS venta,
-                        COALESCE(SUM(vd.cantidad * (vd.precio - p.costo)),0) AS ganancia
+                        COALESCE(SUM(vd.cantidad * (vd.precio - COALESCE(vd.costo_unitario, p.costo))),0) AS ganancia
                  FROM ventas_cabecera v
                  LEFT JOIN caja_sesiones cs
-                        ON (v.id_caja = cs.id OR v.id_sesion_caja = cs.id)
+                        ON cs.id = COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0))
                  LEFT JOIN ventas_detalle vd ON vd.id_venta_cabecera = v.id
                  LEFT JOIN productos p ON vd.id_producto = p.codigo
                  WHERE $where AND v.tipo_servicio = 'reserva'"

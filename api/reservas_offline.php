@@ -102,17 +102,17 @@ function crm_upsert_client_for_offline_reservation(PDO $pdo, int $idCliente, str
     return (int)$pdo->lastInsertId();
 }
 
-function calcular_sin_existencia(PDO $pdo, array $items, int $idAlmacen): int {
+function calcular_sin_existencia(PDO $pdo, array $items, int $idAlmacen, int $sucursalID, int $empID): int {
     $sinExistencia = 0;
     foreach ($items as $it) {
         $sku = safe_str($it['codigo'] ?? '', 100);
         if ($sku === '') continue;
-        $stmtEs = $pdo->prepare("SELECT COALESCE(es_servicio,0) FROM productos WHERE codigo=?");
-        $stmtEs->execute([$sku]);
+        $stmtEs = $pdo->prepare("SELECT COALESCE(es_servicio,0) FROM productos WHERE codigo=? AND id_empresa=?");
+        $stmtEs->execute([$sku, $empID]);
         $esServ = intval($stmtEs->fetchColumn());
         if (!$esServ) {
-            $stmtSt = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-            $stmtSt->execute([$sku, $idAlmacen]);
+            $stmtSt = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto=? AND id_almacen=? AND id_sucursal=?");
+            $stmtSt->execute([$sku, $idAlmacen, $sucursalID]);
             $stock = floatval($stmtSt->fetchColumn());
             $qty = floatval($it['cantidad'] ?? 0);
             if ($stock < $qty) $sinExistencia = 1;
@@ -121,7 +121,8 @@ function calcular_sin_existencia(PDO $pdo, array $items, int $idAlmacen): int {
     return $sinExistencia;
 }
 
-function save_items(PDO $pdo, int $idVenta, array $items): void {
+function save_items(PDO $pdo, int $idVenta, array $items, int $empID): void {
+    $stmtCosto = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? AND id_empresa = ? LIMIT 1");
     foreach ($items as $it) {
         $sku = safe_str($it['codigo'] ?? '', 100);
         if ($sku === '') continue;
@@ -129,10 +130,13 @@ function save_items(PDO $pdo, int $idVenta, array $items): void {
         $price = floatval($it['precio'] ?? 0);
         $name = safe_str($it['nombre'] ?? 'Producto', 255);
         $cat = safe_str($it['categoria'] ?? 'General', 100);
+        $stmtCosto->execute([$sku, $empID]);
+        $costoRaw = $stmtCosto->fetchColumn();
+        $costo = is_numeric($costoRaw) ? (float)$costoRaw : null;
         $pdo->prepare("INSERT INTO ventas_detalle
-            (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
-            VALUES (?,?,?,?,?,?,?)")
-            ->execute([$idVenta, $sku, $qty, $price, $name, $sku, $cat]);
+            (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto, categoria_producto)
+            VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$idVenta, $sku, $qty, $price, $costo, $name, $sku, $cat]);
     }
 }
 
@@ -154,8 +158,8 @@ function create_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAl
     if (empty($items)) throw new Exception('La reserva no tiene items');
 
     if ($localUuid !== '') {
-        $stmt = $pdo->prepare("SELECT id, sin_existencia FROM ventas_cabecera WHERE uuid_venta=? LIMIT 1");
-        $stmt->execute([$localUuid]);
+        $stmt = $pdo->prepare("SELECT id, sin_existencia FROM ventas_cabecera WHERE uuid_venta=? AND id_empresa=? LIMIT 1");
+        $stmt->execute([$localUuid, $empID]);
         $exists = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($exists) {
             return ['remote_id' => intval($exists['id']), 'sin_existencia' => intval($exists['sin_existencia'] ?? 0)];
@@ -182,29 +186,29 @@ function create_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAl
         ]);
 
     $idVenta = intval($pdo->lastInsertId());
-    save_items($pdo, $idVenta, $items);
+    save_items($pdo, $idVenta, $items, $empID);
 
-    $sinExistencia = calcular_sin_existencia($pdo, $items, $idAlmacen);
+    $sinExistencia = calcular_sin_existencia($pdo, $items, $idAlmacen, $sucursalID, $empID);
     $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=? WHERE id=?")->execute([$sinExistencia, $idVenta]);
 
     return ['remote_id' => $idVenta, 'sin_existencia' => $sinExistencia, 'remote_client_id' => $idCliente];
 }
 
-function get_reservation_server_updated_epoch(PDO $pdo, int $remoteId): int {
+function get_reservation_server_updated_epoch(PDO $pdo, int $remoteId, int $empID): int {
     $hasUpdatedAt = has_column($pdo, 'ventas_cabecera', 'updated_at');
     $field = $hasUpdatedAt ? 'updated_at' : 'fecha';
-    $stmt = $pdo->prepare("SELECT UNIX_TIMESTAMP(COALESCE({$field}, fecha)) FROM ventas_cabecera WHERE id=? LIMIT 1");
-    $stmt->execute([$remoteId]);
+    $stmt = $pdo->prepare("SELECT UNIX_TIMESTAMP(COALESCE({$field}, fecha)) FROM ventas_cabecera WHERE id=? AND id_empresa=? LIMIT 1");
+    $stmt->execute([$remoteId, $empID]);
     return intval($stmt->fetchColumn() ?: 0);
 }
 
-function update_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAlmacen): array {
+function update_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAlmacen, int $empID): array {
     $remoteId = intval($payload['remote_id'] ?? 0);
     if ($remoteId <= 0) throw new Exception('remote_id requerido para actualizar');
 
     $clientTs = intval($payload['client_updated_at_epoch'] ?? 0);
     if ($clientTs > 0) {
-        $serverTs = get_reservation_server_updated_epoch($pdo, $remoteId);
+        $serverTs = get_reservation_server_updated_epoch($pdo, $remoteId, $empID);
         if ($serverTs > $clientTs) throw new Exception('CONFLICT server_updated_at=' . $serverTs);
     }
 
@@ -261,18 +265,19 @@ function update_reservation(PDO $pdo, array $payload, int $sucursalID, int $idAl
     if (!empty($set)) {
         $vals[] = $remoteId;
         $vals[] = $sucursalID;
-        $pdo->prepare("UPDATE ventas_cabecera SET " . implode(',', $set) . " WHERE id=? AND id_sucursal=? AND tipo_servicio='reserva'")
+        $vals[] = $empID;
+        $pdo->prepare("UPDATE ventas_cabecera SET " . implode(',', $set) . " WHERE id=? AND id_sucursal=? AND id_empresa=? AND tipo_servicio='reserva'")
             ->execute($vals);
     }
 
     $itemsChanged = $applyAll || in_array('items', $changedFields, true);
     if ($itemsChanged) {
         $pdo->prepare("DELETE FROM ventas_detalle WHERE id_venta_cabecera=?")->execute([$remoteId]);
-        save_items($pdo, $remoteId, $items);
+        save_items($pdo, $remoteId, $items, $empID);
     }
 
-    $sinExistencia = $itemsChanged ? calcular_sin_existencia($pdo, $items, $idAlmacen) : 0;
-    $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=? WHERE id=?")->execute([$sinExistencia, $remoteId]);
+    $sinExistencia = $itemsChanged ? calcular_sin_existencia($pdo, $items, $idAlmacen, $sucursalID, $empID) : 0;
+    $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=? WHERE id=? AND id_empresa=?")->execute([$sinExistencia, $remoteId, $empID]);
 
     return ['remote_id' => $remoteId, 'sin_existencia' => $sinExistencia];
 }
@@ -288,13 +293,13 @@ function fetch_products(PDO $pdo, int $sucursalID, int $idAlmacen, int $empID): 
                            COALESCE(p.es_reservable,0) AS es_reservable,
                            COALESCE(SUM(sa.cantidad),0) AS stock
                     FROM productos p
-                    LEFT JOIN stock_almacen sa ON sa.id_producto=p.codigo AND sa.id_almacen=?
+                    LEFT JOIN stock_almacen sa ON sa.id_producto=p.codigo AND sa.id_almacen=? AND sa.id_sucursal=?
                     WHERE p.activo=1 AND p.id_empresa=? AND p.es_materia_prima=0 {$sucFilter} {$updatedFilter}
                     GROUP BY p.codigo, p.nombre, p.precio, p.categoria, p.es_servicio, p.es_reservable
                     HAVING stock > 0 OR COALESCE(p.es_reservable,0)=1 OR COALESCE(p.es_servicio,0)=1
                     ORDER BY p.nombre ASC";
     $stmtP = $pdo->prepare($sqlProducts);
-    $stmtP->execute([$idAlmacen, $empID]);
+    $stmtP->execute([$idAlmacen, $sucursalID, $empID]);
     return $stmtP->fetchAll(PDO::FETCH_ASSOC);
 }
 
@@ -328,24 +333,24 @@ function fetch_reservations(PDO $pdo, int $sucursalID, int $idAlmacen): array {
                                    COALESCE(abono,0) AS abono, COALESCE(total,0) AS total,
                                    COALESCE(sin_existencia,0) AS sin_existencia
                             FROM ventas_cabecera
-                            WHERE id_sucursal=? AND tipo_servicio='reserva'
+                            WHERE id_sucursal=? AND id_empresa=? AND tipo_servicio='reserva'
                               AND fecha_reserva >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
                               AND fecha_reserva < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
                               {$activeFilter}
                               {$updatedFilter}
                             ORDER BY fecha_reserva ASC
                             LIMIT 5000");
-    $stmtR->execute([$sucursalID]);
+    $stmtR->execute([$sucursalID, $empID]);
     $reservations = $stmtR->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($reservations as &$r) {
         $stmtD = $pdo->prepare("SELECT id_producto AS codigo, nombre_producto AS nombre,
                                        categoria_producto AS categoria, cantidad, precio,
-                                       COALESCE((SELECT es_servicio FROM productos WHERE codigo=id_producto),0) AS es_servicio,
-                                       COALESCE((SELECT SUM(cantidad) FROM stock_almacen WHERE id_producto=ventas_detalle.id_producto AND id_almacen=?),0) AS stock
+                                       COALESCE((SELECT es_servicio FROM productos WHERE codigo=id_producto AND id_empresa=?),0) AS es_servicio,
+                                       COALESCE((SELECT SUM(cantidad) FROM stock_almacen WHERE id_producto=ventas_detalle.id_producto AND id_almacen=? AND id_sucursal=?),0) AS stock
                                 FROM ventas_detalle
                                 WHERE id_venta_cabecera=?");
-        $stmtD->execute([$idAlmacen, intval($r['id'])]);
+        $stmtD->execute([$empID, $idAlmacen, $sucursalID, intval($r['id'])]);
         $r['items'] = $stmtD->fetchAll(PDO::FETCH_ASSOC);
         $r['local_uuid'] = $r['uuid_venta'] ?: ('remote-' . $r['id']);
         $r['estado_reserva'] = normalize_reservation_status($r['estado_reserva'] ?? 'PENDIENTE');
@@ -359,7 +364,7 @@ function fetch_reservations(PDO $pdo, int $sucursalID, int $idAlmacen): array {
     return $reservations;
 }
 
-function fetch_reservation_detail(PDO $pdo, int $id, int $sucursalID, int $idAlmacen): ?array {
+function fetch_reservation_detail(PDO $pdo, int $id, int $sucursalID, int $idAlmacen, int $empID): ?array {
     $hasUpdatedAt = has_column($pdo, 'ventas_cabecera', 'updated_at');
     $updatedField = $hasUpdatedAt ? 'updated_at' : 'fecha';
     $stmt = $pdo->prepare("SELECT id, uuid_venta, cliente_nombre, cliente_telefono, cliente_direccion,
@@ -370,16 +375,16 @@ function fetch_reservation_detail(PDO $pdo, int $id, int $sucursalID, int $idAlm
                                   COALESCE(estado_reserva,'PENDIENTE') AS estado_reserva,
                                   COALESCE(abono,0) AS abono, COALESCE(total,0) AS total,
                                   COALESCE(sin_existencia,0) AS sin_existencia
-                           FROM ventas_cabecera WHERE id=? AND id_sucursal=? AND tipo_servicio='reserva' LIMIT 1");
-    $stmt->execute([$id, $sucursalID]);
+                           FROM ventas_cabecera WHERE id=? AND id_sucursal=? AND id_empresa=? AND tipo_servicio='reserva' LIMIT 1");
+    $stmt->execute([$id, $sucursalID, $empID]);
     $r = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$r) return null;
     $stmtD = $pdo->prepare("SELECT id_producto AS codigo, nombre_producto AS nombre,
                                    categoria_producto AS categoria, cantidad, precio,
-                                   COALESCE((SELECT es_servicio FROM productos WHERE codigo=id_producto),0) AS es_servicio,
-                                   COALESCE((SELECT SUM(cantidad) FROM stock_almacen WHERE id_producto=ventas_detalle.id_producto AND id_almacen=?),0) AS stock
+                                   COALESCE((SELECT es_servicio FROM productos WHERE codigo=id_producto AND id_empresa=?),0) AS es_servicio,
+                                   COALESCE((SELECT SUM(cantidad) FROM stock_almacen WHERE id_producto=ventas_detalle.id_producto AND id_almacen=? AND id_sucursal=?),0) AS stock
                             FROM ventas_detalle WHERE id_venta_cabecera=?");
-    $stmtD->execute([$idAlmacen, intval($r['id'])]);
+    $stmtD->execute([$empID, $idAlmacen, $sucursalID, intval($r['id'])]);
     $r['items'] = $stmtD->fetchAll(PDO::FETCH_ASSOC);
     $r['local_uuid'] = $r['uuid_venta'] ?: ('remote-' . $r['id']);
     $r['estado_reserva'] = normalize_reservation_status($r['estado_reserva'] ?? 'PENDIENTE');
@@ -461,7 +466,7 @@ try {
     if ($action === 'reservation_detail' && $_SERVER['REQUEST_METHOD'] === 'GET') {
         $id = intval($_GET['id'] ?? 0);
         if ($id <= 0) throw new Exception('id requerido');
-        $detail = fetch_reservation_detail($pdo, $id, $sucursalID, $idAlmacen);
+        $detail = fetch_reservation_detail($pdo, $id, $sucursalID, $idAlmacen, $empID);
         if (!$detail) throw new Exception('Reserva no encontrada');
         echo json_encode(['status' => 'success', 'reservation' => $detail]);
         exit;
@@ -533,7 +538,7 @@ try {
                         'sin_existencia' => $r['sin_existencia'],
                     ];
                 } elseif ($type === 'update_reservation') {
-                    $r = update_reservation($pdo, $payload, $sucursalID, $idAlmacen);
+                    $r = update_reservation($pdo, $payload, $sucursalID, $idAlmacen, $empID);
                     $pdo->commit();
                     $results[] = [
                         'ok' => true,
@@ -546,37 +551,37 @@ try {
                     $remoteId = intval($payload['remote_id'] ?? 0);
                     if ($remoteId <= 0) throw new Exception('remote_id requerido');
                     $clientTs = intval($payload['client_updated_at_epoch'] ?? 0);
-                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId) > $clientTs) {
-                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId));
+                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId, $empID) > $clientTs) {
+                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId, $empID));
                     }
-                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva='ENTREGADO' WHERE id=? AND id_sucursal=?")
-                        ->execute([$remoteId, $sucursalID]);
+                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva='ENTREGADO' WHERE id=? AND id_sucursal=? AND id_empresa=?")
+                        ->execute([$remoteId, $sucursalID, $empID]);
                     $pdo->commit();
                     $results[] = ['ok' => true, 'op_id' => $opId, 'msg' => 'Reserva entregada'];
                 } elseif ($type === 'cancel_reservation') {
                     $remoteId = intval($payload['remote_id'] ?? 0);
                     if ($remoteId <= 0) throw new Exception('remote_id requerido');
                     $clientTs = intval($payload['client_updated_at_epoch'] ?? 0);
-                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId) > $clientTs) {
-                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId));
+                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId, $empID) > $clientTs) {
+                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId, $empID));
                     }
-                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva='CANCELADO' WHERE id=? AND id_sucursal=?")
-                        ->execute([$remoteId, $sucursalID]);
+                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva='CANCELADO' WHERE id=? AND id_sucursal=? AND id_empresa=?")
+                        ->execute([$remoteId, $sucursalID, $empID]);
                     $pdo->commit();
                     $results[] = ['ok' => true, 'op_id' => $opId, 'msg' => 'Reserva cancelada'];
                 } elseif ($type === 'update_status') {
                     $remoteId = intval($payload['remote_id'] ?? 0);
                     if ($remoteId <= 0) throw new Exception('remote_id requerido');
                     $clientTs = intval($payload['client_updated_at_epoch'] ?? 0);
-                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId) > $clientTs) {
-                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId));
+                    if ($clientTs > 0 && get_reservation_server_updated_epoch($pdo, $remoteId, $empID) > $clientTs) {
+                        throw new Exception('CONFLICT server_updated_at=' . get_reservation_server_updated_epoch($pdo, $remoteId, $empID));
                     }
                     $estado = safe_str($payload['estado'] ?? 'PENDIENTE', 30);
                     $nota = safe_str($payload['nota'] ?? '', 1000);
                     $validos = ['PENDIENTE','EN_PREPARACION','EN_CAMINO','ENTREGADO','CANCELADO'];
                     if (!in_array($estado, $validos, true)) throw new Exception('Estado invalido');
-                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva=?, notas=? WHERE id=? AND id_sucursal=? AND tipo_servicio='reserva'")
-                        ->execute([$estado, $nota, $remoteId, $sucursalID]);
+                    $pdo->prepare("UPDATE ventas_cabecera SET estado_reserva=?, notas=? WHERE id=? AND id_sucursal=? AND id_empresa=? AND tipo_servicio='reserva'")
+                        ->execute([$estado, $nota, $remoteId, $sucursalID, $empID]);
                     $pdo->commit();
                     $results[] = ['ok' => true, 'op_id' => $opId, 'msg' => 'Estado actualizado'];
                 } elseif ($type === 'create_client') {

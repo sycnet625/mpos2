@@ -59,8 +59,13 @@ try {
     if ($idVenta <= 0) throw new Exception("ID de venta inválido");
 
     // ── 4. Sesión activa (solo ventas de sesión abierta se pueden anular) ─────
-    $stmtSesion = $pdo->query("SELECT id FROM caja_sesiones WHERE estado = 'ABIERTA' ORDER BY id DESC LIMIT 1");
-    $idSesionActiva = $stmtSesion->fetchColumn();
+    $empresaSesion = (int)($_SESSION['id_empresa'] ?? 0);
+    $sucursalSesion = (int)($_SESSION['id_sucursal'] ?? 0);
+    $almacenSesion = (int)($_SESSION['id_almacen'] ?? 0);
+    $stmtSesion = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+    $stmtSesion->execute([$empresaSesion, $sucursalSesion, $almacenSesion]);
+    $sesionActiva = $stmtSesion->fetch(PDO::FETCH_ASSOC);
+    $idSesionActiva = $sesionActiva['id'] ?? 0;
     if (!$idSesionActiva) {
         throw new Exception("No hay sesión de caja activa. Solo se puede anular con sesión abierta.");
     }
@@ -78,7 +83,10 @@ try {
     $venta = $stmtV->fetch(PDO::FETCH_ASSOC);
     if (!$venta) throw new Exception("Venta #{$idVenta} no encontrada");
 
-    if (intval($venta['id_caja']) !== intval($idSesionActiva)) {
+    if (intval($venta['id_caja']) !== intval($idSesionActiva)
+        || (int)$venta['id_empresa'] !== $empresaSesion
+        || (int)$venta['id_sucursal'] !== $sucursalSesion
+        || (int)$venta['id_almacen'] !== $almacenSesion) {
         throw new Exception("Solo se pueden anular ventas de la sesión actual (sesión #{$idSesionActiva})");
     }
     if (floatval($venta['total']) < 0) {
@@ -94,7 +102,7 @@ try {
 
     // ── 7. Configuración local ────────────────────────────────────────────────
     $configFile = __DIR__ . '/pos.cfg';
-    $config = ["id_almacen" => 1, "id_sucursal" => 1, "id_empresa" => 1];
+    $config = ["id_almacen" => $almacenSesion, "id_sucursal" => $sucursalSesion, "id_empresa" => $empresaSesion];
     if (file_exists($configFile)) {
         $loaded = json_decode(file_get_contents($configFile), true);
         if ($loaded) $config = array_merge($config, $loaded);
@@ -128,7 +136,7 @@ try {
         $uuid,
         -1 * abs(floatval($venta['total'])),
         $venta['id_sucursal'] ?: $config['id_sucursal'],
-        $config['id_empresa'],
+        $empresaSesion,
         $venta['id_almacen'] ?: $config['id_almacen'],
         $venta['id_caja'],
         $venta['id_sesion_caja'],
@@ -141,12 +149,13 @@ try {
     // ── 12. Crear detalles negativos y Kardex ─────────────────────────────────
     foreach ($detalles as $item) {
         if (floatval($item['cantidad']) > 0) {
-            $pdo->prepare("INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto) VALUES (?, ?, ?, ?, ?)")
+            $pdo->prepare("INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto) VALUES (?, ?, ?, ?, ?, ?)")
                 ->execute([
                     $newHeadId,
                     $item['id_producto'],
                     -1 * abs(floatval($item['cantidad'])),
                     $item['precio'],
+                    $item['costo_unitario'] ?? null,
                     'DEV: ' . ($item['nombre_producto'] ?? $item['id_producto'])
                 ]);
 

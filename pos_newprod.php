@@ -43,6 +43,11 @@ require_once 'combo_helper.php';
         if(!isset($SUC_ID)) $SUC_ID = 1;
         if(!isset($EMP_ID)) $EMP_ID = 1;
     }
+    // El alta debe usar el mismo contexto que el POS que abrió el formulario.
+    // Así el producto queda visible en la sucursal y almacén activos.
+    $EMP_ID = (int)($_SESSION['id_empresa'] ?? $EMP_ID ?? 1);
+    $SUC_ID = (int)($_SESSION['id_sucursal'] ?? $SUC_ID ?? 1);
+    $ALM_ID = (int)($_SESSION['id_almacen'] ?? ($ALM_ID ?? ($config['id_almacen'] ?? 1)));
 
     // A. OBTENER PRÓXIMO SKU (LOGICA SUCURSAL)
     if (isset($_GET['action']) && $_GET['action'] === 'get_next_sku') {
@@ -211,6 +216,26 @@ require_once 'combo_helper.php';
                 }
             }
 
+            // El catálogo POS identifica la asignación al almacén mediante esta
+            // fila, incluso cuando la existencia inicial es cero.
+            try {
+                $stmtAlmacenContexto = $pdo->prepare(
+                    "SELECT id FROM almacenes
+                     WHERE id = ? AND id_empresa = ? AND id_sucursal = ?
+                       AND COALESCE(activo, 1) = 1 LIMIT 1"
+                );
+                $stmtAlmacenContexto->execute([$ALM_ID, $EMP_ID, $SUC_ID]);
+                if ($stmtAlmacenContexto->fetchColumn()) {
+                    $pdo->prepare(
+                        "INSERT INTO stock_almacen (id_almacen, id_producto, id_sucursal, cantidad)
+                         VALUES (?, ?, ?, 0)
+                         ON DUPLICATE KEY UPDATE id_sucursal = VALUES(id_sucursal)"
+                    )->execute([$ALM_ID, $codigo, $SUC_ID]);
+                }
+            } catch (Throwable $stockInitError) {
+                error_log('pos_newprod stock context warning: ' . $stockInitError->getMessage());
+            }
+
             if (isset($_POST['es_combo'])) {
                 $comboItems = json_decode($_POST['combo_items_json'] ?? '[]', true);
                 combo_save_definition($pdo, $EMP_ID, $codigo, is_array($comboItems) ? $comboItems : []);
@@ -258,7 +283,7 @@ if ($is_direct_access) {
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title fw-bold"><i class="fas fa-box-open me-2"></i> Nuevo Producto</h5>
                 <?php if (!$is_direct_access): ?>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
                 <?php endif; ?>
             </div>
             <div class="modal-body bg-light">
@@ -269,16 +294,16 @@ if ($is_direct_access) {
                         <div class="col-md-3">
                             <label class="small fw-bold">Código SKU</label>
                             <div class="input-group">
-                                <input type="text" class="form-control fw-bold text-center" name="codigo" id="qp_codigo" required placeholder="Cargando...">
+                                <input type="text" class="form-control fw-bold text-center" name="codigo" id="qp_codigo" aria-label="Código del producto" required placeholder="Cargando...">
                                 <button class="btn btn-outline-secondary" type="button" onclick="loadNextSku()" title="Generar Automático"><i class="fas fa-sync"></i></button>
                             </div>
                         </div>
                         <div class="col-md-6">
                             <label class="small fw-bold">Nombre del Producto</label>
-                            <input type="text" class="form-control" name="nombre" required placeholder="Ej: Coca Cola 330ml">
+                            <input type="text" class="form-control" name="nombre" aria-label="Nombre del producto" required placeholder="Ej: Coca Cola 330ml">
                         </div>
                         <div class="col-md-3">
-                            <label class="small fw-bold">Categoría</label>
+                            <label for="qp_categoria" class="small fw-bold">Categoría</label>
                             <input type="text" class="form-control" name="categoria" id="qp_categoria" list="cat_list_qp" placeholder="Seleccione...">
                             <datalist id="cat_list_qp">
                                 <!-- Poblado dinámicamente -->
@@ -289,11 +314,11 @@ if ($is_direct_access) {
                     <div class="row g-2 mb-3">
                         <div class="col-md-6">
                             <label class="small fw-bold">Código de Barras 1</label>
-                            <input type="text" class="form-control font-monospace" name="codigo_barra_1" maxlength="64" placeholder="EAN/UPC principal">
+                            <input type="text" class="form-control font-monospace" name="codigo_barra_1" aria-label="Código de barras principal" maxlength="64" placeholder="EAN/UPC principal">
                         </div>
                         <div class="col-md-6">
                             <label class="small fw-bold">Código de Barras 2</label>
-                            <input type="text" class="form-control font-monospace" name="codigo_barra_2" maxlength="64" placeholder="Código alternativo">
+                            <input type="text" class="form-control font-monospace" name="codigo_barra_2" aria-label="Código de barras alternativo" maxlength="64" placeholder="Código alternativo">
                         </div>
                     </div>
 
@@ -303,30 +328,30 @@ if ($is_direct_access) {
                                 <label class="small fw-bold text-muted">Costo Compra</label>
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" class="form-control" name="costo" value="0.00">
+                                    <input type="number" step="0.01" class="form-control" name="costo" aria-label="Costo" value="0.00">
                                 </div>
                             </div>
                             <div class="col-md-3">
                                 <label class="small fw-bold text-success">Precio Venta</label>
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" class="form-control fw-bold" name="precio" value="0.00" required>
+                                    <input type="number" step="0.01" class="form-control fw-bold" name="precio" aria-label="Precio de venta" value="0.00" required>
                                 </div>
                             </div>
                             <div class="col-md-3">
                                 <label class="small fw-bold text-info">Precio Mayorista</label>
                                 <div class="input-group input-group-sm">
                                     <span class="input-group-text">$</span>
-                                    <input type="number" step="0.01" class="form-control" name="precio_mayorista" value="0.00">
+                                    <input type="number" step="0.01" class="form-control" name="precio_mayorista" aria-label="Precio mayorista" value="0.00">
                                 </div>
                             </div>
                             <div class="col-md-3">
                                 <label class="small fw-bold text-muted">Impuesto %</label>
-                                <input type="number" step="0.01" class="form-control form-control-sm" name="impuesto" value="0">
+                                <input type="number" step="0.01" class="form-control form-control-sm" name="impuesto" aria-label="Impuesto" value="0">
                             </div>
                             <div class="col-md-3">
                                 <label class="small fw-bold text-danger">Stock Mínimo</label>
-                                <input type="number" step="0.01" class="form-control form-control-sm" name="stock_minimo" value="5">
+                                <input type="number" step="0.01" class="form-control form-control-sm" name="stock_minimo" aria-label="Stock mínimo" value="5">
                             </div>
                         </div>
                     </div>
@@ -345,7 +370,7 @@ if ($is_direct_access) {
                             <div class="row g-2">
                                 <div class="col-md-4">
                                     <label class="small">Unidad Medida</label>
-                                    <select class="form-select form-select-sm" name="unidad_medida">
+                                    <select class="form-select form-select-sm" name="unidad_medida" aria-label="Unidad de medida">
                                         <option value="U">Unidad (U)</option>
                                         <option value="kg">Kilogramo (kg)</option>
                                         <option value="lb">Libra (lb)</option>
@@ -356,15 +381,15 @@ if ($is_direct_access) {
                                 </div>
                                 <div class="col-md-4">
                                     <label class="small">Peso (kg/lb)</label>
-                                    <input type="number" step="0.01" class="form-control form-control-sm" name="peso" value="0">
+                                    <input type="number" step="0.01" class="form-control form-control-sm" name="peso" aria-label="Peso" value="0">
                                 </div>
                                 <div class="col-md-4">
                                     <label class="small">Color Etiqueta</label>
-                                    <input type="color" class="form-control form-control-sm w-100" name="color" value="#cccccc">
+                                    <input type="color" class="form-control form-control-sm w-100" name="color" aria-label="Color" value="#cccccc">
                                 </div>
                                 <div class="col-12 mt-2">
                                     <label class="small">Imagen (Opcional)</label>
-                                    <input type="file" class="form-control form-control-sm" name="foto" accept="image/*">
+                                    <input type="file" class="form-control form-control-sm" name="foto" aria-label="Foto del producto" accept="image/*">
                                 </div>
                                 <div class="col-12 mt-2 d-flex gap-3">
                                     <div class="form-check">
@@ -441,9 +466,9 @@ if ($is_direct_access) {
                                         <?php for($s=1; $s<=6; $s++): ?>
                                         <tr>
                                             <td class="fw-bold small">Suc <?= $s ?></td>
-                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_costo[<?= $s ?>]" value="0.00"></td>
-                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end fw-bold" name="suc_precio[<?= $s ?>]" value="0.00"></td>
-                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" name="suc_mayorista[<?= $s ?>]" value="0.00"></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" aria-label="Costo sucursal <?= $s ?>" name="suc_costo[<?= $s ?>]" value="0.00"></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end fw-bold" aria-label="Precio sucursal <?= $s ?>" name="suc_precio[<?= $s ?>]" value="0.00"></td>
+                                            <td><input type="number" step="0.01" min="0" class="form-control form-control-sm text-end" aria-label="Precio mayorista sucursal <?= $s ?>" name="suc_mayorista[<?= $s ?>]" value="0.00"></td>
                                         </tr>
                                         <?php endfor; ?>
                                     </tbody>
@@ -470,11 +495,11 @@ if ($is_direct_access) {
                                 </div>
                                 <div class="col-12">
                                     <label class="small">Descripción Web</label>
-                                    <textarea class="form-control form-control-sm" name="descripcion" rows="2"></textarea>
+                                    <textarea class="form-control form-control-sm" name="descripcion" aria-label="Descripción del producto" rows="2"></textarea>
                                 </div>
                                 <div class="col-12">
                                     <label class="small">IDs Sucursales Web (ej: 1,3)</label>
-                                    <input type="text" class="form-control form-control-sm" name="sucursales_web" value="1" placeholder="1,2,3">
+                                    <input type="text" class="form-control form-control-sm" name="sucursales_web" aria-label="Sucursales web" value="1" placeholder="1,2,3">
                                 </div>
                             </div>
                         </div>
@@ -610,14 +635,14 @@ if ($is_direct_access) {
         row.className = 'row g-2 align-items-center combo-row border rounded p-2 bg-light';
         row.innerHTML = `
             <div class="col-md-5">
-                <input type="text" class="form-control form-control-sm combo-code" list="combo_product_list" placeholder="Código del producto" value="${item.codigo || ''}">
+                <input type="text" aria-label="Código del componente" class="form-control form-control-sm combo-code" list="combo_product_list" placeholder="Código del producto" value="${item.codigo || ''}">
             </div>
             <div class="col-md-5">
                 <div class="small text-muted combo-name">${item.nombre || 'Seleccione un producto existente'}</div>
             </div>
             <div class="col-md-2">
                 <div class="input-group input-group-sm">
-                    <input type="number" min="0.001" step="0.001" class="form-control text-end combo-qty" value="${item.cantidad || 1}">
+                    <input type="number" min="0.001" step="0.001" aria-label="Cantidad del componente" class="form-control text-end combo-qty" value="${item.cantidad || 1}">
                     <button type="button" class="btn btn-outline-danger" title="Eliminar" onclick="this.closest('.combo-row').remove(); syncComboRows();">
                         <i class="fas fa-trash"></i>
                     </button>

@@ -1,3 +1,7 @@
+<?php
+require_once __DIR__ . '/../config_loader.php';
+$posBotPublicOrigin = config_loader_public_origin($config);
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -492,7 +496,7 @@
                     <div class="small text-muted">
                         1. Todos los productos con existencias disponibles.<br>
                         2. Texto final con todos los productos reservables.<br>
-                        3. Cierre con promoción a <b>www.palweb.net</b>.
+                        3. Cierre con promoción a <b><?= htmlspecialchars(parse_url($posBotPublicOrigin, PHP_URL_HOST) ?: $posBotPublicOrigin, ENT_QUOTES, 'UTF-8') ?></b>.
                     </div>
                 </div>
                 <div class="mt-3">

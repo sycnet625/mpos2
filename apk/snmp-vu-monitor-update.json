@@ -1,8 +1,0 @@
-{
-    "product": "PalWeb SNMP VU Tauri",
-    "version": "1.0.20260316050354",
-    "build": "20260316.050354",
-    "zip_url": "https://www.palweb.net/apk/snmp-vu-monitor.zip",
-    "notes": "UI compacta, VU redise\u00f1ado, preview real de ancho y cierre del panel al guardar.",
-    "kind": "portable_zip"
-}

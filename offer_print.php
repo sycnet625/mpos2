@@ -8,8 +8,9 @@ session_start();
 if (!isset($_GET['id'])) { die("ID no especificado."); }
 $id = intval($_GET['id']);
 
-$stmt = $pdo->prepare("SELECT * FROM ofertas WHERE id = ?");
-$stmt->execute([$id]);
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+$stmt = $pdo->prepare("SELECT * FROM ofertas WHERE id = ? AND id_empresa = ?");
+$stmt->execute([$id, $EMP_ID]);
 $oferta = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$oferta) { die("Oferta no encontrada."); }
 

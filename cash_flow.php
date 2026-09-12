@@ -22,6 +22,7 @@ try {
         fecha DATE NOT NULL,
         concepto_key VARCHAR(50) NOT NULL,
         valor TEXT, -- Cambiado a TEXT para soportar notas
+        id_empresa INT NOT NULL DEFAULT 1,
         id_sucursal INT DEFAULT 1,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         UNIQUE KEY uk_celda (fecha, concepto_key, id_sucursal)
@@ -46,8 +47,8 @@ for ($i = 1; $i <= $numDias; $i++) {
 
 // MANEJO DE PETICIONES GET (EXPORTAR RAW)
 if (isset($_GET['action']) && $_GET['action'] === 'export_raw') {
-    $stmtLoad = $pdo->prepare("SELECT fecha, concepto_key, valor FROM flujo_caja_mensual WHERE MONTH(fecha) = ? AND YEAR(fecha) = ? AND id_sucursal = ?");
-    $stmtLoad->execute([$mes, $anio, $sucursal_contexto]);
+    $stmtLoad = $pdo->prepare("SELECT fecha, concepto_key, valor FROM flujo_caja_mensual WHERE MONTH(fecha) = ? AND YEAR(fecha) = ? AND id_empresa = ? AND id_sucursal = ?");
+    $stmtLoad->execute([$mes, $anio, $EMP_ID, $sucursal_contexto]);
     $data = $stmtLoad->fetchAll(PDO::FETCH_ASSOC);
     
     header('Content-Type: application/json');
@@ -65,10 +66,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
             foreach ($input['data'] as $row) {
-                $stmt = $pdo->prepare("INSERT INTO flujo_caja_mensual (fecha, concepto_key, valor, id_sucursal) 
-                                       VALUES (?, ?, ?, ?) 
+                $stmt = $pdo->prepare("INSERT INTO flujo_caja_mensual (fecha, concepto_key, valor, id_empresa, id_sucursal)
+                                       VALUES (?, ?, ?, ?, ?)
                                        ON DUPLICATE KEY UPDATE valor = ?");
-                $stmt->execute([$row['fecha'], $row['concepto_key'], $row['valor'], $sucursal_contexto, $row['valor']]);
+                $stmt->execute([$row['fecha'], $row['concepto_key'], $row['valor'], $EMP_ID, $sucursal_contexto, $row['valor']]);
             }
             $pdo->commit();
             echo json_encode(['status' => 'success']);
@@ -81,10 +82,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     if (isset($input['action']) && $input['action'] === 'save_cell') {
         try {
-            $stmt = $pdo->prepare("INSERT INTO flujo_caja_mensual (fecha, concepto_key, valor, id_sucursal) 
-                                   VALUES (?, ?, ?, ?) 
+            $stmt = $pdo->prepare("INSERT INTO flujo_caja_mensual (fecha, concepto_key, valor, id_empresa, id_sucursal)
+                                   VALUES (?, ?, ?, ?, ?)
                                    ON DUPLICATE KEY UPDATE valor = ?");
-            $stmt->execute([$input['fecha'], $input['key'], $input['val'], $sucursal_contexto, $input['val']]);
+            $stmt->execute([$input['fecha'], $input['key'], $input['val'], $EMP_ID, $sucursal_contexto, $input['val']]);
             echo json_encode(['status' => 'success']);
         } catch (Exception $e) { echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]); }
         exit;
@@ -95,8 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $data = [];
         try {
             // 1. Ventas solo de la sucursal actual
-            $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA')");
-            $stmtV->execute([$fecha, $sucursal_contexto]);
+            $empresa_contexto = intval($config['id_empresa'] ?? 1);
+            $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND s.id_empresa = ? AND s.id_sucursal = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA')");
+            $stmtV->execute([$fecha, $empresa_contexto, $sucursal_contexto, $empresa_contexto, $sucursal_contexto]);
             $data['ventas_suc_'.$sucursal_contexto] = floatval($stmtV->fetchColumn() ?: 0);
 
             // 2. Inventarios por cada almacén de la sucursal
@@ -122,8 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 // CARGAR DATOS
-$stmtLoad = $pdo->prepare("SELECT fecha, concepto_key, valor FROM flujo_caja_mensual WHERE MONTH(fecha) = ? AND YEAR(fecha) = ? AND id_sucursal = ?");
-$stmtLoad->execute([$mes, $anio, $sucursal_contexto]);
+$stmtLoad = $pdo->prepare("SELECT fecha, concepto_key, valor FROM flujo_caja_mensual WHERE MONTH(fecha) = ? AND YEAR(fecha) = ? AND id_empresa = ? AND id_sucursal = ?");
+$stmtLoad->execute([$mes, $anio, $EMP_ID, $sucursal_contexto]);
 $savedData = [];
 while ($row = $stmtLoad->fetch(PDO::FETCH_ASSOC)) $savedData[$row['fecha']][$row['concepto_key']] = $row['valor'];
 

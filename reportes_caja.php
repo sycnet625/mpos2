@@ -17,25 +17,27 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 // 1. CARGAR CONFIG
 require_once 'config_loader.php';
 
-$sucursalID = intval($config['id_sucursal']);
+$empresaID = intval($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+$sucursalID = intval($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$almacenID = intval($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
 
 // 2. DETERMINAR SESIÓN
 $idSesion = isset($_GET['id']) ? intval($_GET['id']) : 0;
 $sesion = null;
 
 if ($idSesion > 0) {
-    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id = ?");
-    $stmt->execute([$idSesion]);
+    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?");
+    $stmt->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
     $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
 } else {
-    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_sucursal = ? ORDER BY id DESC LIMIT 1");
-    $stmt->execute([$sucursalID]);
+    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+    $stmt->execute([$empresaID, $sucursalID, $almacenID]);
     $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
 if (!$sesion) {
-    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id_sucursal = ? ORDER BY id DESC LIMIT 1");
-    $stmt->execute([$sucursalID]);
+    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+    $stmt->execute([$empresaID, $sucursalID, $almacenID]);
     $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
@@ -62,20 +64,20 @@ function getCanalBadgeRC($canal, $map) {
 }
 
 // 3. OBTENER DATOS
-$sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja = ? AND id_sucursal = ? AND " . ventas_reales_where_clause() . " ORDER BY id DESC";
+$sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? AND " . ventas_reales_where_clause() . " ORDER BY id DESC";
 $stmtT = $pdo->prepare($sqlTickets);
-$stmtT->execute([$idSesion, $sucursalID]);
+$stmtT->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
 $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 
 // Detalles
 // CORRECCIÓN: JOIN por p.codigo (El ID numérico ya no existe)
 $sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria
                 FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo
+                JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = v.id_empresa
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-                WHERE v.id_caja = ? AND v.id_sucursal = ? AND " . ventas_reales_where_clause('v');
+                WHERE v.id_caja = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND " . ventas_reales_where_clause('v');
 $stmtD = $pdo->prepare($sqlDetalles);
-$stmtD->execute([$idSesion, $sucursalID]);
+$stmtD->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
 $allDetalles = $stmtD->fetchAll(PDO::FETCH_ASSOC);
 
 $detallesPorTicket = [];
@@ -84,7 +86,7 @@ $totalVentaBruta = 0;
 
 foreach ($allDetalles as $d) {
     $detallesPorTicket[$d['id_venta_cabecera']][] = $d;
-    $totalCosto += ($d['cantidad'] * $d['costo']);
+    $totalCosto += ($d['cantidad'] * ($d['costo_unitario'] ?? $d['costo']));
     $totalVentaBruta += ($d['cantidad'] * $d['precio']);
 }
 
@@ -101,9 +103,9 @@ $horaFin = $sesion['fecha_cierre'] ? strtotime($sesion['fecha_cierre']) : time()
 $horasOperacion = max(1, round(($horaFin - $horaInicio) / 3600, 2));
 
 // Calcular venta neta desde ventas_pagos (todos los pagos registrados)
-$sqlTotalPagos = "SELECT SUM(monto) as total FROM ventas_pagos WHERE id_venta_cabecera IN (SELECT id FROM ventas_cabecera WHERE id_caja = ?)";
+$sqlTotalPagos = "SELECT SUM(monto) as total FROM ventas_pagos WHERE id_venta_cabecera IN (SELECT id FROM ventas_cabecera WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?)";
 $stmtTP = $pdo->prepare($sqlTotalPagos);
-$stmtTP->execute([$idSesion]);
+$stmtTP->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
 $totalVentaNeta = floatval($stmtTP->fetchColumn() ?? 0);
 
 foreach ($tickets as $t) {
@@ -146,10 +148,10 @@ $fechaAyer = date('Y-m-d', strtotime('-1 day', strtotime($sesion['fecha_contable
 $sqlVentasAyer = "SELECT COALESCE(SUM(monto), 0) as total FROM ventas_pagos
                   WHERE id_venta_cabecera IN (
                     SELECT id FROM ventas_cabecera
-                    WHERE DATE(fecha) = ? AND id_sucursal = ?
+                    WHERE DATE(fecha) = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
                   )";
 $stmtAyer = $pdo->prepare($sqlVentasAyer);
-$stmtAyer->execute([$fechaAyer, $sucursalID]);
+$stmtAyer->execute([$fechaAyer, $empresaID, $sucursalID, $almacenID]);
 $ventasAyer = floatval($stmtAyer->fetchColumn() ?? 0);
 // La variable $variacion ya fue calculada como el 10% de ventasReales arriba.
 

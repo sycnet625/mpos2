@@ -139,7 +139,7 @@ function purchase_import_load_locations(PDO $pdo): array
 {
     $empresas = $pdo->query("SELECT id, nombre FROM empresas ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
     $sucursales = $pdo->query("SELECT id, id_empresa, nombre FROM sucursales ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
-    $almacenes = $pdo->query("SELECT id, id_sucursal, nombre FROM almacenes ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
+    $almacenes = $pdo->query("SELECT id, id_empresa, id_sucursal, nombre FROM almacenes ORDER BY nombre")->fetchAll(PDO::FETCH_ASSOC);
 
     $empresaById = [];
     $empresaByName = [];

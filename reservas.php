@@ -65,13 +65,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $idVenta = $pdo->lastInsertId();
 
             $sinExistencia = 0;
+            $stmtCosto = $pdo->prepare("SELECT costo FROM productos WHERE codigo=? AND id_empresa=? LIMIT 1");
             foreach ($items as $it) {
                 $sku = safeStr($it['codigo'], 100);
+                $stmtCosto->execute([$sku, $empID]);
+                $costoRaw = $stmtCosto->fetchColumn();
+                $costo = is_numeric($costoRaw) ? (float)$costoRaw : null;
                 $pdo->prepare("INSERT INTO ventas_detalle
-                    (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
-                    VALUES (?,?,?,?,?,?,?)")
+                    (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto, categoria_producto)
+                    VALUES (?,?,?,?,?,?,?,?)")
                     ->execute([$idVenta, $sku, floatval($it['cantidad']),
-                        floatval($it['precio']), safeStr($it['nombre'], 255),
+                        floatval($it['precio']), $costo, safeStr($it['nombre'], 255),
                         $sku, safeStr($it['categoria'] ?? 'General', 100)]);
                 // Verificar stock (solo productos físicos)
                 $stmtEs = $pdo->prepare("SELECT COALESCE(es_servicio,0) FROM productos WHERE codigo=?");
@@ -349,7 +353,7 @@ if (isset($_GET['action'])) {
                     p.es_servicio, p.es_reservable,
                     COALESCE(SUM(s.cantidad),0) AS stock
                 FROM productos p
-                LEFT JOIN stock_almacen s ON s.id_producto = p.codigo AND s.id_almacen = ?
+                LEFT JOIN stock_almacen s ON s.id_producto = p.codigo AND s.id_almacen = ? AND s.id_sucursal = ?
                 WHERE p.activo = 1
                   AND p.id_empresa = ?
                   AND p.es_materia_prima = 0
@@ -364,7 +368,7 @@ if (isset($_GET['action'])) {
                     p.nombre ASC
                 LIMIT 15";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$idAlmacen, $empID, "%$q%", "%$q%"]);
+        $stmt->execute([$idAlmacen, $sucursalID, $empID, "%$q%", "%$q%"]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } elseif ($_GET['action'] === 'month_data') {
         $year  = intval($_GET['year']  ?? date('Y'));
@@ -376,10 +380,10 @@ if (isset($_GET['action'])) {
             COALESCE(estado_pago,'pendiente')    AS estado_pago,
             metodo_pago, notas
             FROM ventas_cabecera
-            WHERE tipo_servicio='reserva' AND id_sucursal=?
+            WHERE tipo_servicio='reserva' AND id_sucursal=? AND id_empresa=?
               AND YEAR(fecha_reserva)=? AND MONTH(fecha_reserva)=?
             ORDER BY fecha_reserva ASC");
-        $stmt->execute([$sucursalID, $year, $month]);
+        $stmt->execute([$sucursalID, $empID, $year, $month]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
 
     } elseif ($_GET['action'] === 'check_client_phone') {
@@ -406,14 +410,15 @@ if (isset($_GET['action'])) {
                    COUNT(DISTINCT vc.id) AS num_reservas
             FROM ventas_cabecera vc
             JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
-            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
+            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ? AND sa.id_sucursal = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
             WHERE vc.tipo_servicio IN ('reserva','Reserva')
               AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
+              AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
               AND COALESCE(p.es_servicio, 0) = 0
             GROUP BY vd.id_producto, vd.nombre_producto
             ORDER BY deficit DESC, nombre ASC");
-        $stmt->execute([$idAlmacen]);
+        $stmt->execute([$idAlmacen, $sucursalID, $empID, $sucursalID, $idAlmacen]);
         $allProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $sinStock = array_values(array_filter($allProducts, fn($p) => floatval($p['deficit']) > 0));
 
@@ -431,15 +436,16 @@ if (isset($_GET['action'])) {
                    END AS semana
             FROM ventas_cabecera vc
             JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
-            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ?
+            LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ? AND sa.id_sucursal = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
             WHERE vc.tipo_servicio IN ('reserva','Reserva')
               AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
               AND YEAR(vc.fecha_reserva) = ? AND MONTH(vc.fecha_reserva) = ?
+              AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
               AND COALESCE(p.es_servicio, 0) = 0
             GROUP BY vd.id_producto, vd.nombre_producto, semana
             ORDER BY semana ASC, deficit DESC, nombre ASC");
-        $stmt2->execute([$idAlmacen, $year, $month]);
+        $stmt2->execute([$idAlmacen, $sucursalID, $year, $month, $empID, $sucursalID, $idAlmacen]);
         $byWeekRaw = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         $byWeek = [1 => [], 2 => [], 3 => [], 4 => []];
         foreach ($byWeekRaw as $row) { $byWeek[intval($row['semana'])][] = $row; }

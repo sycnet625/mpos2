@@ -2,6 +2,7 @@
 // ARCHIVO: /var/www/palweb/api/pos_controller.php
 header('Content-Type: text/html; charset=utf-8');
 ini_set('display_errors', 0);
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 require_once 'db.php';
 
 require_once 'config_loader.php';
@@ -15,6 +16,14 @@ try {
     // --- NUEVO: FILTROS ESTRICTOS (No Servicios, No Materias Primas) ---
     $cond[] = "p.es_materia_prima = 0";
     $cond[] = "p.es_servicio = 0";
+    $empresaID = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+    $sucursalID = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+    $almacenID = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+    $cond[] = "p.id_empresa = {$empresaID}";
+    $cond[] = "EXISTS (SELECT 1 FROM stock_almacen scope_stock
+                        WHERE scope_stock.id_producto = p.codigo
+                          AND scope_stock.id_sucursal = {$sucursalID}
+                          AND scope_stock.id_almacen = {$almacenID})";
     // ------------------------------------------------------------------
 
     // Filtros dinámicos de categoría (Anti-Inyección SQL)
@@ -25,9 +34,6 @@ try {
     }
 
     $where = implode(" AND ", $cond);
-    $almacenID  = intval($config['id_almacen']);
-    $sucursalID = intval($config['id_sucursal']);
-
     // Categorías
     $stmtCat = $pdo->prepare("SELECT DISTINCT categoria FROM productos p WHERE $where ORDER BY categoria");
     $stmtCat->execute($params);
@@ -42,14 +48,14 @@ try {
                 FROM productos p
                 LEFT JOIN productos_precios_sucursal ps
                        ON ps.codigo_producto = p.codigo AND ps.id_sucursal = $sucursalID
-                LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = $almacenID
+                LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = $almacenID AND s.id_sucursal = $sucursalID
                 WHERE $where
                 ORDER BY p.nombre";
     
     $stmtProd = $pdo->prepare($sqlProd);
     $stmtProd->execute($params);
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-    $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa']), $almacenID);
+    $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa']), $almacenID, $sucursalID);
 
 } catch (Exception $e) { 
     die("Error Crítico BD: " . $e->getMessage()); 

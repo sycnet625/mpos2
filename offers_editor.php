@@ -5,6 +5,8 @@ require_once 'db.php';
 require_once 'config_loader.php';
 session_start();
 
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php'); exit;
 }
@@ -16,15 +18,15 @@ $items     = [];
 
 if ($id > 0) {
     if ($mode === 'offer' || isset($_GET['convert'])) {
-        $stmt = $pdo->prepare("SELECT * FROM ofertas WHERE id = ?");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("SELECT * FROM ofertas WHERE id = ? AND id_empresa = ?");
+        $stmt->execute([$id, $EMP_ID]);
         $offerData = $stmt->fetch(PDO::FETCH_ASSOC);
         $stmtDet = $pdo->prepare("SELECT * FROM ofertas_detalle WHERE id_oferta = ?");
         $stmtDet->execute([$id]);
         $items = $stmtDet->fetchAll(PDO::FETCH_ASSOC);
     } else {
-        $stmt = $pdo->prepare("SELECT * FROM facturas WHERE id = ?");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("SELECT * FROM facturas WHERE id = ? AND id_empresa = ?");
+        $stmt->execute([$id, $EMP_ID]);
         $offerData = $stmt->fetch(PDO::FETCH_ASSOC);
         $stmtDet = $pdo->prepare("SELECT * FROM facturas_detalle WHERE id_factura = ?");
         $stmtDet->execute([$id]);

@@ -1,5 +1,9 @@
 <?php
 session_start();
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
@@ -211,12 +215,7 @@ function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, a
     $removeFlag = !empty($_POST[$fieldName . '_remove']);
 
     $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-    foreach (array_values($allowed) as $ext) {
-        $existing = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
-        if ($removeFlag && file_exists($existing)) {
-            @unlink($existing);
-        }
-    }
+    poscfg_cleanup_uploaded_image_variants($baseName, array_values($allowed));
     if ($removeFlag) {
         return '';
     }
@@ -227,19 +226,64 @@ function poscfg_process_brand_logo_upload(string $fieldName, string $baseName, a
             throw new RuntimeException('Los logos deben ser JPG, PNG o WebP y no superar 2MB.');
         }
 
-        foreach (array_values($allowed) as $ext) {
-            $existing = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
-            if (file_exists($existing)) {
-                @unlink($existing);
-            }
-        }
-
-        $dest = __DIR__ . '/assets/img/' . $baseName . '.webp';
-        poscfg_optimize_uploaded_web_image($_FILES[$fieldName]['tmp_name'], $dest, 720, 320, 160 * 1024, 80);
-        return 'assets/img/' . $baseName . '.webp';
+        return poscfg_store_uploaded_image_with_fallback(
+            $_FILES[$fieldName]['tmp_name'],
+            $baseName,
+            $mime,
+            720,
+            320,
+            160 * 1024,
+            80
+        );
     }
 
     return $currentPath;
+}
+
+function poscfg_cleanup_uploaded_image_variants(string $baseName, array $exts = ['jpg', 'jpeg', 'png', 'webp', 'gif']): void
+{
+    foreach ($exts as $ext) {
+        $path = __DIR__ . '/assets/img/' . $baseName . '.' . $ext;
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+}
+
+function poscfg_store_uploaded_original_image(string $tmpFile, string $baseName, string $mime): string
+{
+    $mimeToExt = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
+        'image/gif'   => 'gif',
+    ];
+    if (!isset($mimeToExt[$mime])) {
+        throw new RuntimeException('No se pudo guardar la imagen original.');
+    }
+
+    $relPath = 'assets/img/' . $baseName . '.' . $mimeToExt[$mime];
+    $absPath = __DIR__ . '/' . $relPath;
+    if (!@copy($tmpFile, $absPath)) {
+        throw new RuntimeException('No se pudo guardar la imagen original.');
+    }
+
+    return $relPath;
+}
+
+function poscfg_store_uploaded_image_with_fallback(string $tmpFile, string $baseName, string $mime, int $maxWidth, int $maxHeight, int $targetBytes, int $startQuality = 82): string
+{
+    poscfg_cleanup_uploaded_image_variants($baseName);
+
+    $destRel = 'assets/img/' . $baseName . '.webp';
+    $destAbs = __DIR__ . '/' . $destRel;
+
+    try {
+        poscfg_optimize_uploaded_web_image($tmpFile, $destAbs, $maxWidth, $maxHeight, $targetBytes, $startQuality);
+        return $destRel;
+    } catch (Throwable $e) {
+        return poscfg_store_uploaded_original_image($tmpFile, $baseName, $mime);
+    }
 }
 
 function poscfg_optimize_uploaded_web_image(string $tmpFile, string $targetPath, int $maxWidth, int $maxHeight, int $targetBytes, int $startQuality = 82): void
@@ -402,10 +446,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!in_array($mime, $allowed)) throw new Exception("Formato de imagen no permitido para el banner.");
 
                 $tmp = $_FILES['sucursal_banner']['tmp_name'];
-                $newBannerName = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time()) . '.webp';
-                $target = __DIR__ . '/assets/img/' . $newBannerName;
-                poscfg_optimize_uploaded_web_image($tmp, $target, 1920, 720, 450 * 1024, 80);
-                $bannerPath = 'assets/img/' . $newBannerName;
+                $bannerBase = 'sucursal_banner_' . ($sucursalId ?: 'new_' . time());
+                $bannerPath = poscfg_store_uploaded_image_with_fallback(
+                    $tmp,
+                    $bannerBase,
+                    $mime,
+                    1920,
+                    720,
+                    450 * 1024,
+                    80
+                );
             }
 
             // Opciones de presentación del hero banner
@@ -1488,7 +1538,7 @@ unset($treeCompany);
                             $sdCurrent = $currentConfig['subdomain_sucursal_map'] ?? [];
                             foreach ($sdCurrent as $sdEntry): ?>
                             <tr>
-                                <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" value="<?php echo htmlspecialchars($sdEntry['host']); ?>" placeholder="ej: marinero.palweb.net"></td>
+                                <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" value="<?php echo htmlspecialchars($sdEntry['host']); ?>" placeholder="ej: sucursal.ejemplo.com"></td>
                                 <td>
                                     <select class="form-select form-select-sm" name="subdomain_map_suc[]">
                                         <option value="0">— Seleccionar —</option>
@@ -1518,7 +1568,7 @@ unset($treeCompany);
                     function addSubdomainRow() {
                         const tr = document.createElement('tr');
                         tr.innerHTML = `
-                            <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" placeholder="ej: tienda.palweb.net"></td>
+                            <td><input type="text" class="form-control form-control-sm" name="subdomain_map_host[]" placeholder="ej: tienda.ejemplo.com"></td>
                             <td><select class="form-select form-select-sm" name="subdomain_map_suc[]"><option value="0">— Seleccionar —</option>${_sdSucOptions}</select></td>
                             <td><select class="form-select form-select-sm" name="subdomain_map_alm[]"><option value="0">— Predeterminado —</option>${_sdAlmOptions}</select></td>
                             <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="fas fa-trash"></i></button></td>`;
@@ -1853,7 +1903,7 @@ unset($treeCompany);
                                                         <label class="form-label small fw-semibold mb-1">URL base del ticket (opcional)</label>
                                                         <input type="text" name="ticket_qr_url_base"
                                                                class="form-control form-control-sm"
-                                                               placeholder="https://www.palweb.net  (vacío = auto)"
+                                                               placeholder="https://ejemplo.com  (vacío = auto)"
                                                                value="<?php echo $ticketQrUrlBase; ?>"
                                                                oninput="updateTicketPreview()">
                                                         <div class="form-text">

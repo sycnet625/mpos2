@@ -103,7 +103,7 @@ switch ($orderBy) {
 $stmt = $pdo->prepare($sql);
 $stmt->execute([':alm' => $ALM_ID, ':suc_stock' => $SUC_ID, ':suc_price' => $SUC_ID, ':emp' => $EMP_ID]);
 $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-$productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
+$productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID, $SUC_ID);
 
 // 3. CÁLCULOS Y PROCESAMIENTO
 $resumenGeneral = [
@@ -187,10 +187,10 @@ if ($isModelView) {
                     COALESCE(p.nombre, d.nombre_producto, d.id_producto) AS nombre,
                     COALESCE(p.categoria, 'SIN CATEGORIA') AS categoria,
                     COALESCE(ps.precio_venta, p.precio, d.precio, 0) AS precio_actual,
-                    COALESCE(p.costo, 0) AS costo_real,
+                    COALESCE(d.costo_unitario, p.costo, 0) AS costo_real,
                     SUM(d.cantidad) AS cantidad_neta,
                     SUM(d.cantidad * d.precio) AS venta_real,
-                    SUM(d.cantidad * (d.precio - COALESCE(p.costo, 0))) AS ganancia_real
+                    SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo, 0))) AS ganancia_real
                 FROM ventas_cabecera v
                 LEFT JOIN caja_sesiones cs ON (v.id_caja = cs.id OR v.id_sesion_caja = cs.id)
                 JOIN ventas_detalle d ON d.id_venta_cabecera = v.id
@@ -201,7 +201,7 @@ if ($isModelView) {
                   AND v.id_sucursal = :suc
                   AND v.id_almacen = :alm
                   AND " . ventas_reales_where_clause('v') . "
-                GROUP BY COALESCE(p.codigo, d.id_producto), COALESCE(p.nombre, d.nombre_producto, d.id_producto), COALESCE(p.categoria, 'SIN CATEGORIA'), COALESCE(ps.precio_venta, p.precio, d.precio, 0), COALESCE(p.costo, 0)
+                GROUP BY COALESCE(p.codigo, d.id_producto), COALESCE(p.nombre, d.nombre_producto, d.id_producto), COALESCE(p.categoria, 'SIN CATEGORIA'), COALESCE(ps.precio_venta, p.precio, d.precio, 0), COALESCE(d.costo_unitario, p.costo, 0)
                 HAVING ABS(SUM(d.cantidad)) > 0
                 ORDER BY categoria ASC, nombre ASC";
 

@@ -2,28 +2,51 @@
 // ARCHIVO: modal_history.php
 // LÓGICA AUTÓNOMA PHP (AJAX)
 if (isset($_GET['render_mode'])) {
-    session_start();
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_start();
+    }
     require_once 'db.php'; 
     ini_set('display_errors', 0);
     error_reporting(E_ALL);
 
     try {
         require_once 'config_loader.php';
-        $idSucursalCtx = intval($config['id_sucursal'] ?? 1);
+        $idEmpresaCtx = intval($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+        $idSucursalCtx = intval($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+        $idAlmacenCtx = intval($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
 
-        // 1. Detectar Sesión Activa
+        // 1. Detectar la sesión real del POS primero, luego fallback por sucursal
         $idSesion = 0;
-        $stmtCaja = $pdo->query("SELECT id FROM caja_sesiones WHERE estado = 'ABIERTA' ORDER BY id DESC LIMIT 1");
-        $idSesion = $stmtCaja->fetchColumn();
+        if (isset($_SESSION['id_caja']) && is_numeric($_SESSION['id_caja'])) {
+            $idSesion = (int)$_SESSION['id_caja'];
+        }
+
+        if ($idSesion > 0) {
+            $stmtCaja = $pdo->prepare("SELECT id FROM caja_sesiones WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? LIMIT 1");
+            $stmtCaja->execute([$idSesion, $idEmpresaCtx, $idSucursalCtx, $idAlmacenCtx]);
+            $idSesion = (int)($stmtCaja->fetchColumn() ?: 0);
+        }
+
+        if ($idSesion <= 0) {
+            $stmtCaja = $pdo->prepare("SELECT id FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+            $stmtCaja->execute([$idEmpresaCtx, $idSucursalCtx, $idAlmacenCtx]);
+            $idSesion = (int)$stmtCaja->fetchColumn();
+        }
 
         $filtroSql = "";
         $params = [];
 
         if ($idSesion) {
-            $filtroSql = "WHERE v.id_caja = ?";
+            $filtroSql = "WHERE v.id_caja = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?";
             $params[] = $idSesion;
+            $params[] = $idEmpresaCtx;
+            $params[] = $idSucursalCtx;
+            $params[] = $idAlmacenCtx;
         } else {
-            $filtroSql = "WHERE DATE(v.fecha) = CURDATE()";
+            $filtroSql = "WHERE DATE(v.fecha) = CURDATE() AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?";
+            $params[] = $idEmpresaCtx;
+            $params[] = $idSucursalCtx;
+            $params[] = $idAlmacenCtx;
         }
 
         // 2. Consulta Tickets (Lista principal)
@@ -40,7 +63,7 @@ if (isset($_GET['render_mode'])) {
                           COALESCE(NULLIF(p.precio_mayorista, 0), NULLIF(ps.precio_mayorista, 0), d.precio) AS precio_mayorista
                    FROM ventas_detalle d 
                    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-                   LEFT JOIN productos p ON d.id_producto = p.codigo
+                   LEFT JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = v.id_empresa
                    LEFT JOIN productos_precios_sucursal ps ON ps.codigo_producto = d.id_producto AND ps.id_sucursal = ?
                    $filtroSql";
         
@@ -107,7 +130,9 @@ if (isset($_GET['render_mode'])) {
         }
 
         // INGRESOS REALES (SOLO TICKETS POSITIVOS)
-        $filtroBase = $idSesion ? "v.id_caja = ?" : "DATE(v.fecha) = CURDATE()";
+        $filtroBase = $idSesion
+            ? "v.id_caja = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?"
+            : "DATE(v.fecha) = CURDATE() AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?";
 
         $sqlIngresosReales = "SELECT metodo_pago, SUM(monto_ajustado) as total_metodo
                               FROM (
@@ -133,7 +158,20 @@ if (isset($_GET['render_mode'])) {
         $paramsReales = [];
         if ($idSesion) {
             $paramsReales[] = $idSesion;
+            $paramsReales[] = $idEmpresaCtx;
+            $paramsReales[] = $idSucursalCtx;
+            $paramsReales[] = $idAlmacenCtx;
             $paramsReales[] = $idSesion;
+            $paramsReales[] = $idEmpresaCtx;
+            $paramsReales[] = $idSucursalCtx;
+            $paramsReales[] = $idAlmacenCtx;
+        } else {
+            $paramsReales[] = $idEmpresaCtx;
+            $paramsReales[] = $idSucursalCtx;
+            $paramsReales[] = $idAlmacenCtx;
+            $paramsReales[] = $idEmpresaCtx;
+            $paramsReales[] = $idSucursalCtx;
+            $paramsReales[] = $idAlmacenCtx;
         }
 
         $stmtReales = $pdo->prepare($sqlIngresosReales);
@@ -237,7 +275,7 @@ if (isset($_GET['render_mode'])) {
         <div class="table-responsive">
             <table class="table mb-0 align-middle" style="font-size:0.92rem;">
                 <thead class="bg-light text-secondary">
-                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th class="text-warning">Mayorista</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
+                    <tr><th width="40"></th><th>ID</th><th>Fecha / hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th class="text-warning">Mayorista</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
                 </thead>
                 <tbody>
                 <?php if (empty($tickets)): ?>
@@ -262,7 +300,7 @@ if (isset($_GET['render_mode'])) {
                     <tr class="<?php echo $rowClass; ?> ticket-row" data-ticket-id="<?php echo $t['id']; ?>" onclick="toggleDetail(<?php echo $t['id']; ?>)">
                         <td class="text-center"><i class="fas fa-chevron-right text-muted icon-collapse-<?php echo $t['id']; ?>"></i></td>
                         <td class="fw-bold">#<?php echo $t['id']; ?></td>
-                        <td><?php echo date('H:i', strtotime($t['fecha'])); ?></td>
+                        <td><?php echo date('j/n/y H:i', strtotime($t['fecha'])); ?></td>
                         <td><?php echo htmlspecialchars($t['cliente_nombre'] ?: 'General'); ?></td>
                         <td><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;"><?php echo $t['tipo_servicio']; ?></small></td>
                         <td class="fw-bold <?php echo $isRef ? 'text-danger' : 'text-dark'; ?>">$<?php echo number_format(abs($total), 2); ?></td>

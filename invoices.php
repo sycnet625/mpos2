@@ -41,8 +41,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         // Si la factura está en período declarado a la ONAT, sólo permitimos cambiar estado_pago.
         // Anularla alteraría las ventas ya reportadas → bloquear.
-        $stCheck = $pdo->prepare("SELECT fecha_emision, estado AS estado_actual FROM facturas WHERE id = ?");
-        $stCheck->execute([$id]);
+        $stCheck = $pdo->prepare("SELECT fecha_emision, estado AS estado_actual FROM facturas WHERE id = ? AND id_empresa = ?");
+        $stCheck->execute([$id, $EMP_ID_INV]);
         $facCheck = $stCheck->fetch(PDO::FETCH_ASSOC);
         if ($facCheck && invoice_lock_period($facCheck['fecha_emision'], $onatPeriodos) && $estado === 'ANULADA' && $facCheck['estado_actual'] !== 'ANULADA') {
             header("Location: invoices.php?msg=onat_locked"); exit;
@@ -50,8 +50,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
         $fechaPago = ($pago === 'PAGADA') ? date('Y-m-d H:i:s') : NULL;
 
-        $stmt = $pdo->prepare("UPDATE facturas SET estado = ?, estado_pago = ?, metodo_pago = ?, fecha_pago = ? WHERE id = ?");
-        $stmt->execute([$estado, $pago, $metodo, $fechaPago, $id]);
+        $stmt = $pdo->prepare("UPDATE facturas SET estado = ?, estado_pago = ?, metodo_pago = ?, fecha_pago = ? WHERE id = ? AND id_empresa = ?");
+        $stmt->execute([$estado, $pago, $metodo, $fechaPago, $id, $EMP_ID_INV]);
 
         header("Location: invoices.php?msg=updated");
         exit;
@@ -62,13 +62,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $bulkAct = $_POST['bulk_act'] ?? '';
         if ($bulkAct === 'mark_paid') {
-            $pdo->prepare("UPDATE facturas SET estado_pago='PAGADA', metodo_pago='Efectivo', fecha_pago=NOW() WHERE id IN ($placeholders)")
-                ->execute($ids);
+            $pdo->prepare("UPDATE facturas SET estado_pago='PAGADA', metodo_pago='Efectivo', fecha_pago=NOW() WHERE id IN ($placeholders) AND id_empresa = ?")
+                ->execute(array_merge($ids, [$EMP_ID_INV]));
         } elseif ($bulkAct === 'cancel') {
             // Filtrar IDs bloqueados por declaración ONAT.
             $idsLibres = [];
-            $sel = $pdo->prepare("SELECT id, fecha_emision, estado FROM facturas WHERE id IN ($placeholders)");
-            $sel->execute($ids);
+            $sel = $pdo->prepare("SELECT id, fecha_emision, estado FROM facturas WHERE id IN ($placeholders) AND id_empresa = ?");
+            $sel->execute(array_merge($ids, [$EMP_ID_INV]));
             foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $f) {
                 if ($f['estado'] === 'ANULADA') continue;
                 if (invoice_lock_period($f['fecha_emision'], $onatPeriodos)) continue;
@@ -76,7 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             }
             if ($idsLibres) {
                 $ph2 = implode(',', array_fill(0, count($idsLibres), '?'));
-                $pdo->prepare("UPDATE facturas SET estado='ANULADA' WHERE id IN ($ph2)")->execute($idsLibres);
+                $pdo->prepare("UPDATE facturas SET estado='ANULADA' WHERE id IN ($ph2) AND id_empresa = ?")->execute(array_merge($idsLibres, [$EMP_ID_INV]));
             }
         }
         header("Location: invoices.php?tab=facturas&msg=bulk_ok");
@@ -92,8 +92,8 @@ $clientFilter = $_GET['cliente'] ?? '';
 $statusFilter = $_GET['status'] ?? 'all';
 
 // 1. Obtener Facturas
-$sqlF = "SELECT * FROM facturas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
-$paramsF = [$start, $end];
+$sqlF = "SELECT * FROM facturas WHERE id_empresa = ? AND DATE(fecha_emision) BETWEEN ? AND ?";
+$paramsF = [$EMP_ID_INV, $start, $end];
 if ($clientFilter) { $sqlF .= " AND cliente_nombre LIKE ?"; $paramsF[] = "%$clientFilter%"; }
 if ($statusFilter === 'pending') { $sqlF .= " AND estado = 'ACTIVA' AND estado_pago = 'PENDIENTE'"; }
 elseif ($statusFilter === 'paid') { $sqlF .= " AND estado = 'ACTIVA' AND estado_pago = 'PAGADA'"; }
@@ -103,8 +103,8 @@ $stmtF = $pdo->prepare($sqlF); $stmtF->execute($paramsF);
 $facturas = $stmtF->fetchAll(PDO::FETCH_ASSOC);
 
 // 2. Obtener Ofertas
-$sqlO = "SELECT * FROM ofertas WHERE DATE(fecha_emision) BETWEEN ? AND ?";
-$paramsO = [$start, $end];
+$sqlO = "SELECT * FROM ofertas WHERE id_empresa = ? AND DATE(fecha_emision) BETWEEN ? AND ?";
+$paramsO = [$EMP_ID_INV, $start, $end];
 if ($clientFilter) { $sqlO .= " AND cliente_nombre LIKE ?"; $paramsO[] = "%$clientFilter%"; }
 $sqlO .= " ORDER BY id DESC";
 $stmtO = $pdo->prepare($sqlO); $stmtO->execute($paramsO);
@@ -122,7 +122,8 @@ foreach ($facturas as $f) {
 }
 
 // Próximo consecutivo lógico
-$stmtNext = $pdo->query("SELECT MAX(numero_factura) FROM facturas");
+$stmtNext = $pdo->prepare("SELECT MAX(numero_factura) FROM facturas WHERE id_empresa = ?");
+$stmtNext->execute([$EMP_ID_INV]);
 $lastNum = $stmtNext->fetchColumn();
 $nextSuggested = $lastNum ? ($lastNum + 1) : date('Ymd')."001";
 ?>

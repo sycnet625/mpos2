@@ -2,14 +2,15 @@
 // ARCHIVO: /var/www/palweb/api/pos.php
 ini_set('display_errors', 1);
 require_once 'db.php';
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 // --- CONFIGURACIÓN ---
 require_once 'config_loader.php';
 require_once 'combo_helper.php';
 
-$almacenID = intval($config['id_almacen']);
-$sucursalID = intval($config['id_sucursal']);
-$empresaID = isset($config['id_empresa']) ? intval($config['id_empresa']) : 1;
+$almacenID = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+$sucursalID = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$empresaID = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
 
 // --- CARGA DE PRODUCTOS ---
 $prods = [];
@@ -19,6 +20,10 @@ try {
     $cond[] = "p.es_pos = 1"; 
     $cond[] = "p.es_suc$sucursalID = 1"; 
     $cond[] = "p.id_empresa = $empresaID"; 
+    $cond[] = "EXISTS (SELECT 1 FROM stock_almacen scope_stock
+                       WHERE scope_stock.id_producto = p.codigo
+                         AND scope_stock.id_sucursal = $sucursalID
+                         AND scope_stock.id_almacen = $almacenID)";
 
     if (!$config['mostrar_materias_primas']) $cond[] = "p.es_materia_prima = 0";
     if (!$config['mostrar_servicios']) $cond[] = "p.es_servicio = 0";
@@ -38,7 +43,7 @@ try {
     $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre, p.precio, p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
                 (SELECT COALESCE(SUM(s.cantidad), 0) 
                  FROM stock_almacen s 
-                 WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID) as stock
+                 WHERE s.id_producto = p.codigo AND s.id_almacen = $almacenID AND s.id_sucursal = $sucursalID) as stock
                 FROM productos p 
                 WHERE $where 
                 ORDER BY p.nombre";
@@ -46,7 +51,7 @@ try {
     $stmtProd = $pdo->prepare($sqlProd);
     $stmtProd->execute($params);
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-    $prods = combo_apply_product_rows($pdo, $prods, $empresaID, $almacenID);
+    $prods = combo_apply_product_rows($pdo, $prods, $empresaID, $almacenID, $sucursalID);
 
 } catch (Exception $e) { 
     error_log("POS DB Error: " . $e->getMessage());

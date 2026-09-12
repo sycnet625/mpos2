@@ -23,8 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
         $pdo->beginTransaction();
 
         // Obtener todos los almacenes que tienen movimientos de este SKU
-        $stmtAlm = $pdo->prepare("SELECT DISTINCT id_almacen FROM kardex WHERE id_producto = ?");
-        $stmtAlm->execute([$skuPost]);
+        $stmtAlm = $pdo->prepare("SELECT DISTINCT id_almacen FROM kardex WHERE id_producto = ? AND id_empresa = ?");
+        $stmtAlm->execute([$skuPost, $EMP_ID]);
         $almacenes = $stmtAlm->fetchAll(PDO::FETCH_COLUMN);
 
         $totalCorregidos = 0;
@@ -33,9 +33,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'recal
             // Recorrer kardex en orden cronológico (ASC) por almacén
             $stmtMov = $pdo->prepare("SELECT id, cantidad, saldo_anterior, saldo_actual
                                        FROM kardex
-                                       WHERE id_producto = ? AND id_almacen = ?
+                                       WHERE id_producto = ? AND id_almacen = ? AND id_empresa = ?
                                        ORDER BY fecha ASC, id ASC");
-            $stmtMov->execute([$skuPost, $almId]);
+            $stmtMov->execute([$skuPost, $almId, $EMP_ID]);
             $movs = $stmtMov->fetchAll(PDO::FETCH_ASSOC);
 
             $saldo = 0;
@@ -89,18 +89,18 @@ try {
         $sqlKardex = "SELECT k.*, a.nombre AS almacen_nombre
                       FROM kardex k
                       LEFT JOIN almacenes a ON k.id_almacen = a.id
-                      WHERE k.id_producto = ?
+                      WHERE k.id_producto = ? AND k.id_empresa = ?
                       ORDER BY k.fecha DESC, k.id DESC LIMIT 500";
         $stmtK = $pdo->prepare($sqlKardex);
-        $stmtK->execute([$sku]);
+        $stmtK->execute([$sku, $EMP_ID]);
     } else {
         $sqlKardex = "SELECT k.*, a.nombre AS almacen_nombre
                       FROM kardex k
                       LEFT JOIN almacenes a ON k.id_almacen = a.id
-                      WHERE k.id_producto = ? AND k.id_almacen = ?
+                      WHERE k.id_producto = ? AND k.id_almacen = ? AND k.id_empresa = ?
                       ORDER BY k.fecha DESC, k.id DESC LIMIT 200";
         $stmtK = $pdo->prepare($sqlKardex);
-        $stmtK->execute([$sku, $ALM_ID]);
+        $stmtK->execute([$sku, $ALM_ID, $EMP_ID]);
     }
     $movimientos = $stmtK->fetchAll(PDO::FETCH_ASSOC);
 
@@ -113,9 +113,9 @@ try {
     if ($stockActual === false) $stockActual = 0;
 
     // Stock global (todas las ubicaciones)
-    $sqlStockGlobal = "SELECT SUM(cantidad) FROM stock_almacen WHERE id_producto = ?";
+    $sqlStockGlobal = "SELECT SUM(s.cantidad) FROM stock_almacen s JOIN productos p ON p.codigo = s.id_producto WHERE s.id_producto = ? AND p.id_empresa = ?";
     $stmtSG = $pdo->prepare($sqlStockGlobal);
-    $stmtSG->execute([$sku]);
+    $stmtSG->execute([$sku, $EMP_ID]);
     $stockGlobal = $stmtSG->fetchColumn() ?: 0;
 
 } catch (Exception $e) { die("Error DB: " . $e->getMessage()); }

@@ -19,6 +19,7 @@ require_once 'business_metrics.php';
 
 $id_almacen = intval($config['id_almacen']);
 $id_sucursal = intval($config['id_sucursal']);
+$id_empresa = intval($config['id_empresa'] ?? 1);
 session_write_close();
 
 // 2. PARÁMETROS DE FILTRO
@@ -82,14 +83,14 @@ try {
                   FROM ventas_detalle d
                   JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                   LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
-                  WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+                  WHERE v.id_empresa = ? AND IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                   AND v.id_almacen = ?
                   AND v.id_sucursal = ?
                   AND v.tipo_servicio != 'devolucion'
                   AND " . ventas_reales_where_clause('v') . "
                   GROUP BY d.id_producto";
     $stmtV = $pdo->prepare($sqlVentas);
-    $stmtV->execute([$startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
+    $stmtV->execute([$id_empresa, $startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
     $ventasDineroMap = $stmtV->fetchAll(PDO::FETCH_KEY_PAIR);
 
     // 6b. TOTAL GLOBAL DESDE CABECERA (venta neta: incluye devoluciones negativas)
@@ -97,11 +98,11 @@ try {
     $sqlTotalGlobal = "SELECT SUM(v.total) as total_global, COUNT(*) as count_global
                        FROM ventas_cabecera v
                        LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
-                       WHERE IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+                       WHERE v.id_empresa = ? AND IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                        AND v.id_almacen = ? AND v.id_sucursal = ?
                        AND " . ventas_reales_where_clause('v');
     $stmtTg = $pdo->prepare($sqlTotalGlobal);
-    $stmtTg->execute([$startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
+    $stmtTg->execute([$id_empresa, $startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
     $totalGlobalRow = $stmtTg->fetch(PDO::FETCH_ASSOC);
     $totalGlobalVenta = floatval($totalGlobalRow['total_global'] ?? 0);
 

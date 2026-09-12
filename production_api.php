@@ -70,13 +70,13 @@ try {
                            COALESCE(p.nombre, 'ITEM BORRADO') as nombre, 
                            COALESCE(p.unidad_medida, 'U') as unidad_medida, 
                            COALESCE(p.costo, 0) as costo_actual, 
-                           (SELECT COALESCE(SUM(s.cantidad),0) FROM stock_almacen s WHERE s.id_producto=d.id_ingrediente AND s.id_almacen=?) as stock_real 
+                           (SELECT COALESCE(SUM(s.cantidad),0) FROM stock_almacen s WHERE s.id_producto=d.id_ingrediente AND s.id_almacen=? AND s.id_sucursal=?) as stock_real
                     FROM recetas_detalle d 
                     LEFT JOIN productos p ON d.id_ingrediente = p.codigo 
                     WHERE d.id_receta = ?";
             
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$ALM_ID, $input['id']]);
+            $stmt->execute([$ALM_ID, $SUC_ID, $input['id']]);
             $resultados = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             ob_clean(); // Limpieza final antes de enviar
@@ -155,8 +155,8 @@ try {
 
             $pdo->prepare("UPDATE productos SET costo = ? WHERE codigo = ? AND id_empresa = ?")->execute([$costoUnitarioResultante, $receta['id_producto_final'], $EMP_ID]);
 
-            $stmtH = $pdo->prepare("INSERT INTO producciones_historial (id_receta, nombre_receta, id_producto_final, cantidad_lotes, unidades_creadas, costo_total, usuario, json_snapshot) VALUES (?, ?, ?, ?, ?, ?, 'Admin', ?)");
-            $stmtH->execute([$idReceta, $receta['nombre_receta'], $receta['id_producto_final'], $lotes, $unidades, $costoRealTotal, json_encode($snapshot)]);
+            $stmtH = $pdo->prepare("INSERT INTO producciones_historial (id_receta, nombre_receta, id_producto_final, cantidad_lotes, unidades_creadas, costo_total, usuario, json_snapshot, id_empresa, id_sucursal, id_almacen) VALUES (?, ?, ?, ?, ?, ?, 'Admin', ?, ?, ?, ?)");
+            $stmtH->execute([$idReceta, $receta['nombre_receta'], $receta['id_producto_final'], $lotes, $unidades, $costoRealTotal, json_encode($snapshot), $EMP_ID, $SUC_ID, $ALM_ID]);
 
             $pdo->commit();
             echo json_encode(['status' => 'success']); exit;
@@ -169,7 +169,9 @@ try {
             $kardex = new KardexEngine($pdo);
             $fechaReversion = date('Y-m-d H:i:s'); // Fecha actual para reversión
 
-            $prod = $pdo->query("SELECT * FROM producciones_historial WHERE id=$idHist AND revertido=0")->fetch(PDO::FETCH_ASSOC);
+            $stmtProdHist = $pdo->prepare("SELECT * FROM producciones_historial WHERE id=? AND id_empresa=? AND id_sucursal=? AND id_almacen=? AND revertido=0");
+            $stmtProdHist->execute([$idHist, $EMP_ID, $SUC_ID, $ALM_ID]);
+            $prod = $stmtProdHist->fetch(PDO::FETCH_ASSOC);
             if (!$prod) throw new Exception("No reversible.");
 
             // Devolver Ingredientes
@@ -213,10 +215,10 @@ try {
             $lotes = floatval($input['lotes']);
 
             $sql = "SELECT d.id_ingrediente, p.nombre, p.unidad_medida, d.cantidad as req_unitario,
-                    (SELECT COALESCE(SUM(s.cantidad),0) FROM stock_almacen s WHERE s.id_producto=d.id_ingrediente AND s.id_almacen=?) as stock
+                    (SELECT COALESCE(SUM(s.cantidad),0) FROM stock_almacen s WHERE s.id_producto=d.id_ingrediente AND s.id_almacen=? AND s.id_sucursal=?) as stock
                     FROM recetas_detalle d LEFT JOIN productos p ON d.id_ingrediente=p.codigo WHERE d.id_receta=?";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([$ALM_ID, $idReceta]);
+            $stmt->execute([$ALM_ID, $SUC_ID, $idReceta]);
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             $maxLotes = 999999;
@@ -240,25 +242,25 @@ try {
         if ($action === 'get_reports') {
             $data = [];
             // R1: Rentabilidad
-            $data['rentabilidad'] = $pdo->query("SELECT nombre_receta, costo_unitario, p.precio, ROUND(((p.precio-r.costo_unitario)/p.precio)*100,1) as margen FROM recetas_cabecera r JOIN productos p ON r.id_producto_final=p.codigo WHERE p.precio>0 ORDER BY margen DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+            $data['rentabilidad'] = $pdo->query("SELECT nombre_receta, costo_unitario, p.precio, ROUND(((p.precio-r.costo_unitario)/p.precio)*100,1) as margen FROM recetas_cabecera r JOIN productos p ON r.id_producto_final=p.codigo WHERE p.id_empresa=$EMP_ID AND p.precio>0 ORDER BY margen DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
             // R2: Volumen
-            $data['volumen'] = $pdo->query("SELECT nombre_receta, SUM(unidades_creadas) as total FROM producciones_historial WHERE revertido=0 GROUP BY nombre_receta ORDER BY total DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+            $data['volumen'] = $pdo->query("SELECT nombre_receta, SUM(unidades_creadas) as total FROM producciones_historial WHERE id_empresa=$EMP_ID AND id_sucursal=$SUC_ID AND id_almacen=$ALM_ID AND revertido=0 GROUP BY nombre_receta ORDER BY total DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
             // R3: Insumos
-            $data['insumos'] = $pdo->query("SELECT p.nombre, COUNT(d.id_receta) as freq FROM recetas_detalle d JOIN productos p ON d.id_ingrediente=p.codigo GROUP BY p.nombre ORDER BY freq DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+            $data['insumos'] = $pdo->query("SELECT p.nombre, COUNT(d.id_receta) as freq FROM recetas_detalle d JOIN productos p ON d.id_ingrediente=p.codigo WHERE p.id_empresa=$EMP_ID GROUP BY p.nombre ORDER BY freq DESC LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
             // R4: Pérdidas
-            $data['perdidas'] = $pdo->query("SELECT nombre_receta, costo_unitario, p.precio FROM recetas_cabecera r JOIN productos p ON r.id_producto_final=p.codigo WHERE r.costo_unitario > p.precio AND p.precio > 0")->fetchAll(PDO::FETCH_ASSOC);
+            $data['perdidas'] = $pdo->query("SELECT nombre_receta, costo_unitario, p.precio FROM recetas_cabecera r JOIN productos p ON r.id_producto_final=p.codigo WHERE p.id_empresa=$EMP_ID AND r.costo_unitario > p.precio AND p.precio > 0")->fetchAll(PDO::FETCH_ASSOC);
             // R5: Valor
-            $data['valor_inventario'] = $pdo->query("SELECT p.categoria, SUM(s.cantidad * p.costo) as valor_total FROM stock_almacen s JOIN productos p ON s.id_producto=p.codigo WHERE p.es_elaborado=1 AND s.id_almacen=$ALM_ID GROUP BY p.categoria")->fetchAll(PDO::FETCH_ASSOC);
+            $data['valor_inventario'] = $pdo->query("SELECT p.categoria, SUM(s.cantidad * p.costo) as valor_total FROM stock_almacen s JOIN productos p ON s.id_producto=p.codigo WHERE p.id_empresa=$EMP_ID AND p.es_elaborado=1 AND s.id_almacen=$ALM_ID AND s.id_sucursal=$SUC_ID GROUP BY p.categoria")->fetchAll(PDO::FETCH_ASSOC);
             // R6: Recientes
-            $data['recent'] = $pdo->query("SELECT DATE(fecha) as dia, COUNT(*) as lotes, SUM(costo_total) as costo FROM producciones_historial WHERE revertido=0 GROUP BY DATE(fecha) ORDER BY dia DESC LIMIT 7")->fetchAll(PDO::FETCH_ASSOC);
+            $data['recent'] = $pdo->query("SELECT DATE(fecha) as dia, COUNT(*) as lotes, SUM(costo_total) as costo FROM producciones_historial WHERE id_empresa=$EMP_ID AND id_sucursal=$SUC_ID AND id_almacen=$ALM_ID AND revertido=0 GROUP BY DATE(fecha) ORDER BY dia DESC LIMIT 7")->fetchAll(PDO::FETCH_ASSOC);
 
             echo json_encode($data); exit;
         }
 
         // 9. HISTORIAL
         if ($action === 'get_history') {
-            $stmt = $pdo->prepare("SELECT * FROM producciones_historial WHERE DATE(fecha) BETWEEN ? AND ? ORDER BY fecha DESC");
-            $stmt->execute([$input['start'], $input['end']]);
+            $stmt = $pdo->prepare("SELECT * FROM producciones_historial WHERE DATE(fecha) BETWEEN ? AND ? AND id_empresa=? ORDER BY fecha DESC");
+            $stmt->execute([$input['start'], $input['end'], $EMP_ID]);
             echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC)); exit;
         }
 
@@ -275,10 +277,10 @@ try {
                                    JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
                                    WHERE vc.tipo_servicio = 'reserva'
                                      AND vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO')
-                                     AND vd.id_producto = ?
+                                     AND vd.id_producto = ? AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
                                    GROUP BY vc.id
                                    ORDER BY vc.fecha_reserva ASC");
-            $stmt->execute([$idProducto]);
+            $stmt->execute([$idProducto, $EMP_ID, $SUC_ID, $ALM_ID]);
             echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC)); exit;
         }
     }

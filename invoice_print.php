@@ -11,8 +11,9 @@ if (!isset($_GET['id'])) { die("ID de factura no especificado."); }
 $id = intval($_GET['id']);
 
 // 1. Obtener Datos de Cabecera
-$stmt = $pdo->prepare("SELECT * FROM facturas WHERE id = ?");
-$stmt->execute([$id]);
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+$stmt = $pdo->prepare("SELECT * FROM facturas WHERE id = ? AND id_empresa = ?");
+$stmt->execute([$id, $EMP_ID]);
 $factura = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$factura) { die("Factura no encontrada."); }

@@ -300,7 +300,7 @@ $menuCategories = [
         <div class="chat-list-p">
             <div class="cl-head">
                 <span><i class="fas fa-comments me-2"></i> Bandeja</span>
-                <button type="button" class="btn-close-custom" style="color:white" onclick="loadChatList()"><i class="fas fa-sync"></i></button>
+                <button type="button" class="btn-close-custom" style="color:white" onclick="loadChatList()" aria-label="Cerrar"><i class="fas fa-sync"></i></button>
             </div>
             <div class="cl-body" id="chatListItems">
                 </div>
@@ -308,14 +308,14 @@ $menuCategories = [
         <div class="chat-view-p">
             <div class="cv-head">
                 <span id="chatUserTitle">Selecciona un chat</span>
-                <button type="button" class="btn-close-custom" onclick="closeAdminChat()">&times;</button>
+                <button type="button" class="btn-close-custom" onclick="closeAdminChat()" aria-label="Cerrar">&times;</button>
             </div>
             <div class="cv-main" id="chatMessages">
                 <div class="text-center text-muted mt-5"><i class="fas fa-inbox fa-3x"></i></div>
             </div>
             <div class="cv-foot">
-                <input type="text" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;" id="chatInput" placeholder="Escribe..." disabled onkeypress="if(event.key==='Enter') sendAdminMsg()">
-                <button style="padding:8px 15px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer;" id="chatSendBtn" disabled onclick="sendAdminMsg()"><i class="fas fa-paper-plane"></i></button>
+                <input type="text" style="flex:1; padding:8px; border:1px solid #ddd; border-radius:4px;" id="chatInput" aria-label="Mensaje del chat" placeholder="Escribe..." disabled onkeypress="if(event.key==='Enter') sendAdminMsg()">
+                <button style="padding:8px 15px; background:#0d6efd; color:white; border:none; border-radius:4px; cursor:pointer;" id="chatSendBtn" aria-label="Enviar mensaje" disabled onclick="sendAdminMsg()"><i class="fas fa-paper-plane"></i></button>
             </div>
         </div>
     </div>
@@ -767,24 +767,24 @@ window.sendAdminMsg = async function() {
         <div class="modal-content border-0 shadow-lg" style="border-radius: 15px;">
             <div class="modal-header bg-primary text-white py-2">
                 <h6 class="modal-title fw-bold"><i class="fas fa-key me-2"></i>Cambiar Contraseña</h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body p-3">
                 <div id="changePassAlert" class="alert d-none py-2 small"></div>
                 <form id="formChangePass">
                     <!-- Campo oculto para accesibilidad / gestores de contraseñas -->
-                    <input type="text" name="username" value="<?php echo htmlspecialchars($_SESSION['admin_user'] ?? 'admin'); ?>" style="display:none;" autocomplete="username">
+                    <input type="text" name="username" aria-label="Nombre de usuario" value="<?php echo htmlspecialchars($_SESSION['admin_user'] ?? 'admin'); ?>" style="display:none;" autocomplete="username">
                     
                     <div class="mb-3">
-                        <label class="small fw-bold text-muted">Contraseña Actual</label>
+                        <label for="cp_current" class="small fw-bold text-muted">Contraseña Actual</label>
                         <input type="password" id="cp_current" class="form-control form-control-sm" required autocomplete="current-password">
                     </div>
                     <div class="mb-3">
-                        <label class="small fw-bold text-muted">Nueva Contraseña</label>
+                        <label for="cp_new" class="small fw-bold text-muted">Nueva Contraseña</label>
                         <input type="password" id="cp_new" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" placeholder="Mín. 8, 1 mayúscula y 1 número">
                     </div>
                     <div class="mb-0">
-                        <label class="small fw-bold text-muted">Confirmar Nueva</label>
+                        <label for="cp_confirm" class="small fw-bold text-muted">Confirmar Nueva</label>
                         <input type="password" id="cp_confirm" class="form-control form-control-sm" required minlength="8" autocomplete="new-password" placeholder="Repite la nueva contraseña">
                     </div>
                     <div class="form-text mt-2">Usa al menos 8 caracteres, una mayúscula y un número.</div>

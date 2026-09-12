@@ -124,6 +124,50 @@ if (!function_exists('config_loader_company_name')) {
     }
 }
 
+if (!function_exists('config_loader_public_origin')) {
+    /**
+     * Obtiene el origen público sin depender de un dominio compilado.
+     * En web usa el host actual; en CLI/cron usa website de pos.cfg.
+     */
+    function config_loader_public_origin(?array $appConfig = null): string
+    {
+        if ($appConfig === null) {
+            global $config;
+            $appConfig = is_array($config ?? null) ? $config : [];
+        }
+
+        $host = trim((string)($_SERVER['HTTP_HOST'] ?? $_SERVER['HTTP_X_FORWARDED_HOST'] ?? ''));
+        $host = (string)preg_replace('/:\d+$/', '', $host);
+        if ($host !== '' && !in_array(strtolower($host), ['127.0.0.1', 'localhost'], true)) {
+            $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+                || (($_SERVER['SERVER_PORT'] ?? '') === '443')
+                || strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https';
+            return ($https ? 'https' : 'http') . '://' . $host;
+        }
+
+        $website = trim((string)($appConfig['website'] ?? ($appConfig['sitio_web'] ?? '')));
+        if ($website !== '' && !preg_match('~^https?://~i', $website)) {
+            $website = 'https://' . ltrim($website, '/');
+        }
+        $parts = $website !== '' ? parse_url($website) : false;
+        if (is_array($parts) && !empty($parts['scheme']) && !empty($parts['host'])) {
+            $origin = strtolower($parts['scheme']) . '://' . $parts['host'];
+            if (!empty($parts['port'])) $origin .= ':' . (int)$parts['port'];
+            return rtrim($origin, '/');
+        }
+
+        return 'https://localhost';
+    }
+}
+
+if (!function_exists('config_loader_public_url')) {
+    function config_loader_public_url(string $path = '', ?array $appConfig = null): string
+    {
+        $path = '/' . ltrim($path, '/');
+        return rtrim(config_loader_public_origin($appConfig), '/') . ($path === '/' ? '' : $path);
+    }
+}
+
 if (!isset($config)) {
     $configFile = __DIR__ . '/pos.cfg';
     $config = [

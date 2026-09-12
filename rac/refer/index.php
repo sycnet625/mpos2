@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../../db.php';
 require_once __DIR__ . '/../../affiliate_network/domain.php';
 
+$racShareUrl = rtrim(config_loader_public_origin(), '/') . ($_SERVER['REQUEST_URI'] ?? '/');
+
 aff_ensure_tables($pdo);
 aff_seed_demo_data($pdo);
 
@@ -130,11 +132,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$error) {
         <div class="field"><label>Tu nombre</label><input type="text" name="client_name" placeholder="Nombre del cliente"></div>
         <div class="field"><label>Tu teléfono</label><input type="text" name="client_phone" placeholder="Teléfono o WhatsApp"></div>
         <button class="btn primary" type="submit">💬 Contactar al vendedor</button>
-        <a class="btn secondary" href="https://wa.me/?text=<?= rawurlencode('Quiero esta oferta RAC: ' . ($data['product']['name'] ?? 'Producto RAC') . ' ' . ('https://' . ($_SERVER['HTTP_HOST'] ?? 'www.palweb.net') . $_SERVER['REQUEST_URI'])) ?>" target="_blank" rel="noopener">📨 Reenviar oferta</a>
+        <a class="btn secondary" href="https://wa.me/?text=<?= rawurlencode('Quiero esta oferta RAC: ' . ($data['product']['name'] ?? 'Producto RAC') . ' ' . $racShareUrl) ?>" target="_blank" rel="noopener">📨 Reenviar oferta</a>
         <div class="cta-row">
           <button class="btn ghost" type="button" id="copyReferLink">📋 Copiar enlace</button>
           <button class="btn ghost" type="button" id="shareReferLink">📤 Compartir</button>
-          <a class="btn ghost" href="https://wa.me/?text=<?= rawurlencode(($data['product']['name'] ?? 'Producto RAC') . ' ' . ('https://' . ($_SERVER['HTTP_HOST'] ?? 'www.palweb.net') . $_SERVER['REQUEST_URI'])) ?>" target="_blank" rel="noopener">💬 WhatsApp</a>
+          <a class="btn ghost" href="https://wa.me/?text=<?= rawurlencode(($data['product']['name'] ?? 'Producto RAC') . ' ' . $racShareUrl) ?>" target="_blank" rel="noopener">💬 WhatsApp</a>
         </div>
         <div class="cta-row">
           <div class="pill">🏪 <?= htmlspecialchars($data['owner']['name'] ?? '', ENT_QUOTES, 'UTF-8') ?></div>

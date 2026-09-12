@@ -12,6 +12,13 @@ require_once 'config_loader.php';
 require_once 'onat_contabilidad_bridge.php';
 $ONAT_DEDUCIBLES = onat_categorias_deducibles();
 $SUC_ID = intval($config['id_sucursal']); 
+$EMP_ID = intval($config['id_empresa'] ?? 1);
+
+try {
+    $pdo->exec("ALTER TABLE gastos_historial ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1 AFTER tipo");
+} catch (Throwable $e) {
+    error_log('pos_expenses schema warning: ' . $e->getMessage());
+}
 
 $mesActual = date('m');
 $anioActual = date('Y');
@@ -26,27 +33,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_GET['api_mode'])) {
 
     try {
         if ($action === 'create') {
-            $stmt = $pdo->prepare("INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_usuario, notas, id_sucursal) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_empresa, id_usuario, notas, id_sucursal) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
                 $input['fecha'], $input['concepto'], $input['monto'], 
                 $input['categoria'], $input['tipo'], 
-                $_SESSION['user_id'] ?? 'Admin', $input['notas'] ?? '',
+                $EMP_ID, $_SESSION['user_id'] ?? 'Admin', $input['notas'] ?? '',
                 $SUC_ID
             ]);
             echo json_encode(['status' => 'success', 'msg' => 'Gasto registrado']);
         }
         elseif ($action === 'update') {
-            $stmt = $pdo->prepare("UPDATE gastos_historial SET fecha=?, concepto=?, monto=?, categoria=?, tipo=?, notas=? WHERE id=? AND id_sucursal=?");
+            $stmt = $pdo->prepare("UPDATE gastos_historial SET fecha=?, concepto=?, monto=?, categoria=?, tipo=?, notas=? WHERE id=? AND id_empresa=? AND id_sucursal=?");
             $stmt->execute([
                 $input['fecha'], $input['concepto'], $input['monto'], 
                 $input['categoria'], $input['tipo'], $input['notas'], 
-                $input['id'], $SUC_ID
+                $input['id'], $EMP_ID, $SUC_ID
             ]);
             echo json_encode(['status' => 'success', 'msg' => 'Gasto actualizado']);
         }
         elseif ($action === 'delete') {
-            $stmt = $pdo->prepare("DELETE FROM gastos_historial WHERE id=? AND id_sucursal=?");
-            $stmt->execute([$input['id'], $SUC_ID]);
+            $stmt = $pdo->prepare("DELETE FROM gastos_historial WHERE id=? AND id_empresa=? AND id_sucursal=?");
+            $stmt->execute([$input['id'], $EMP_ID, $SUC_ID]);
             echo json_encode(['status' => 'success', 'msg' => 'Gasto eliminado']);
         }
         exit;
@@ -57,18 +64,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_GET['api_mode'])) {
 }
 
 // --- CONSULTAS DE DATOS ---
-$sqlTotal = "SELECT SUM(monto) FROM gastos_historial WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_sucursal = $SUC_ID";
+$sqlTotal = "SELECT SUM(monto) FROM gastos_historial WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_empresa = $EMP_ID AND id_sucursal = $SUC_ID";
 $totalMes = $pdo->query($sqlTotal)->fetchColumn() ?: 0;
 
 $sqlCal = "SELECT DAY(fecha) as dia, SUM(monto) as total, COUNT(*) as items 
            FROM gastos_historial 
-           WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_sucursal = $SUC_ID
+           WHERE MONTH(fecha) = '$mesActual' AND YEAR(fecha) = '$anioActual' AND id_empresa = $EMP_ID AND id_sucursal = $SUC_ID
            GROUP BY DAY(fecha)";
 $rawCal = $pdo->query($sqlCal)->fetchAll(PDO::FETCH_ASSOC);
 $calendarData = [];
 foreach($rawCal as $r) $calendarData[$r['dia']] = $r;
 
-$sqlList = "SELECT * FROM gastos_historial WHERE id_sucursal = $SUC_ID ORDER BY fecha DESC LIMIT 100";
+$sqlList = "SELECT * FROM gastos_historial WHERE id_empresa = $EMP_ID AND id_sucursal = $SUC_ID ORDER BY fecha DESC LIMIT 100";
 $gastos = $pdo->query($sqlList)->fetchAll(PDO::FETCH_ASSOC);
 
 // Plantillas simples para botones rápidos

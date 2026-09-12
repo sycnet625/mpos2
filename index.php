@@ -105,6 +105,8 @@ if (!preg_match('/Bearer\s(\S+)/', $auth, $matches) || $matches[1] !== API_TOKEN
 
 $empresaId = isset($headers['X-Empresa-ID']) ? intval($headers['X-Empresa-ID']) : 1;
 if ($empresaId <= 0) $empresaId = 1;
+$sucursalHeader = isset($headers['X-Sucursal-ID']) ? intval($headers['X-Sucursal-ID']) : 1;
+$almacenHeader = isset($headers['X-Almacen-ID']) ? intval($headers['X-Almacen-ID']) : 1;
 
 
 // ============================================================================
@@ -120,13 +122,15 @@ if (strpos($uri, '/products') !== false && $method == 'GET' && strpos($uri, 'upl
         
         $sql = "SELECT p.*, COALESCE(s.cantidad, 0) as stock_servidor 
                 FROM productos p 
-                LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = 1 
+                LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = :alm AND s.id_sucursal = :suc
                 WHERE p.version_row > :ver AND p.id_empresa = :emp 
                 ORDER BY p.version_row ASC LIMIT 2000";
 
         $stmt = $pdo->prepare($sql);
         $stmt->bindValue(':ver', $ver, PDO::PARAM_INT);
         $stmt->bindValue(':emp', $empresaId, PDO::PARAM_INT);
+        $stmt->bindValue(':alm', $almacenHeader, PDO::PARAM_INT);
+        $stmt->bindValue(':suc', $sucursalHeader, PDO::PARAM_INT);
         $stmt->execute();
 
         $result = [];
@@ -162,7 +166,8 @@ elseif (strpos($uri, '/sync/full') !== false && $method == 'POST') {
         $pdo->beginTransaction();
         
         $stmtHead = $pdo->prepare("INSERT INTO ventas_cabecera (uuid_venta, fecha, total, id_empresa, id_sucursal, id_almacen, id_caja, metodo_pago) VALUES (:u, :f, :t, :e, :s, :a, :c, :mp)");
-        $stmtDet  = $pdo->prepare("INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio) VALUES (:h, :p, :c, :pr)");
+        $stmtDet  = $pdo->prepare("INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario) VALUES (:h, :p, :c, :pr, :co)");
+        $stmtCosto = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? AND id_empresa = ? LIMIT 1");
 
         $count = 0;
         foreach ($input as $sale) {
@@ -191,7 +196,9 @@ elseif (strpos($uri, '/sync/full') !== false && $method == 'POST') {
                     
                     if(!$prodCode) continue;
 
-                    $stmtDet->execute([':h' => $idCab, ':p' => $prodCode, ':c' => $qty, ':pr'=> $price]);
+                    $stmtCosto->execute([$prodCode, $empresaId]);
+                    $costo = $stmtCosto->fetchColumn();
+                    $stmtDet->execute([':h' => $idCab, ':p' => $prodCode, ':c' => $qty, ':pr'=> $price, ':co' => is_numeric($costo) ? (float)$costo : null]);
 
                     $cantidadSalida = $qty * -1;
                     
@@ -246,10 +253,10 @@ elseif (strpos($uri, '/products/upload_full') !== false && $method == 'POST') {
                     es_elaborado = VALUES(es_elaborado), es_materia_prima = VALUES(es_materia_prima), es_servicio = VALUES(es_servicio)";
         
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtGetStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+        $stmtGetStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? AND id_sucursal = ?");
 
         $nowUnix = time();
-        $defaultSuc = 1; // Default Sucursal
+        $defaultSuc = $sucursalHeader;
 
         foreach ($input as $obj) {
             $cod = $obj['codigo'] ?? '';
@@ -266,9 +273,9 @@ elseif (strpos($uri, '/products/upload_full') !== false && $method == 'POST') {
 
             if (isset($obj['stock_inicial'])) {
                 $stockEntrante = floatval($obj['stock_inicial']);
-                $idAlm = intval($obj['id_almacen_origen'] ?? 1);
+                $idAlm = intval($obj['id_almacen_origen'] ?? $almacenHeader);
 
-                $stmtGetStock->execute([$cod, $idAlm]);
+                $stmtGetStock->execute([$cod, $idAlm, $defaultSuc]);
                 $stockActualDB = floatval($stmtGetStock->fetchColumn() ?: 0);
 
                 $diferencia = $stockEntrante - $stockActualDB;
@@ -367,4 +374,3 @@ else {
     http_response_code(404); echo json_encode(["error" => "Endpoint no encontrado"]);
 }
 ?>
-

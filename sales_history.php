@@ -15,12 +15,14 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     header('Location: login.php');
     exit;
 }
+$adminName = (string)($_SESSION['admin_name'] ?? 'Admin');
 
 // Cargar Configuración
 require_once 'config_loader.php';
 require_once 'business_metrics.php';
 $ALM_ID_LOCAL = intval($config['id_almacen']);
 $SUC_ID_LOCAL = intval($config['id_sucursal']);
+$EMP_ID_LOCAL = intval($config['id_empresa']);
 
 // Determinar Alcance (Scope)
 $scope = $_GET['scope'] ?? 'local';
@@ -35,8 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $cajero = $_POST['cajero'];
         
         $refCheck = "Cierre de Caja #$sessionId";
-        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM contabilidad_diario WHERE detalle LIKE ?");
-        $stmtCheck->execute(["%$refCheck%"]);
+        $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM contabilidad_diario WHERE id_empresa = ? AND detalle LIKE ?");
+        $stmtCheck->execute([$EMP_ID, "%$refCheck%"]);
         
         if ($stmtCheck->fetchColumn() > 0) {
             header("Location: sales_history.php?msg=duplicate");
@@ -51,19 +53,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo->beginTransaction();
 
         $totalVenta = 0;
-        $insertSQL = "INSERT INTO contabilidad_diario (asiento_id, fecha, cuenta, detalle, debe, haber, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        $insertSQL = "INSERT INTO contabilidad_diario (asiento_id, fecha, cuenta, detalle, debe, haber, creado_por, id_empresa) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
         $stmtIns = $pdo->prepare($insertSQL);
 
         foreach ($pagos as $metodo => $monto) {
             if ($monto > 0) {
                 $totalVenta += $monto;
                 $cuentaDebe = (stripos($metodo, 'Transferencia') !== false) ? '104.01' : '101.01'; 
-                $stmtIns->execute([$asientoID, $fechaContablePost, $cuentaDebe, "Ingreso $metodo - $refCheck", $monto, 0, $_SESSION['admin_name'] ?? 'Admin']);
+                $stmtIns->execute([$asientoID, $fechaContablePost, $cuentaDebe, "Ingreso $metodo - $refCheck", $monto, 0, $adminName, $EMP_ID]);
             }
         }
 
         if ($totalVenta > 0) {
-            $stmtIns->execute([$asientoID, $fechaContablePost, '401.01', "Ventas del Día - $cajero ($refCheck)", 0, $totalVenta, $_SESSION['admin_name'] ?? 'Admin']);
+            $stmtIns->execute([$asientoID, $fechaContablePost, '401.01', "Ventas del Día - $cajero ($refCheck)", 0, $totalVenta, $adminName, $EMP_ID]);
         }
 
         $pdo->commit();
@@ -75,16 +77,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 }
 
+// Esta página es de solo lectura después del bloque POST. Liberar el lock del
+// archivo de sesión permite que el mismo usuario abra reportes/AJAX en paralelo.
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 // ---------------------------------------------------------
 // 📊 PREPARACIÓN DE DATOS (LECTURA)
 // ---------------------------------------------------------
 $start = $_GET['start'] ?? date('Y-m-d', strtotime('-7 days'));
 $end = $_GET['end'] ?? date('Y-m-d');
+$sessionIdFilter = max(0, intval($_GET['session_id'] ?? 0));
 
 // Condiciones de SQL según Alcance
-$scopeCondVentas = ($scope === 'global') ? "1=1" : "v.id_sucursal = $SUC_ID_LOCAL";
+$scopeCondVentas = "v.id_empresa = $EMP_ID_LOCAL" . (($scope === 'global') ? "" : " AND v.id_sucursal = $SUC_ID_LOCAL");
 $scopeCondInv = ($scope === 'global') ? "1=1" : "k.id_almacen = $ALM_ID_LOCAL";
-$scopeCondSes = ($scope === 'global') ? "1=1" : "s.id_sucursal = $SUC_ID_LOCAL";
+$scopeCondSes = "s.id_empresa = $EMP_ID_LOCAL" . (($scope === 'global') ? "" : " AND s.id_sucursal = $SUC_ID_LOCAL");
 $sqlDateLogic = "COALESCE(s.fecha_contable, DATE(v.fecha))";
 
 try {
@@ -94,6 +103,7 @@ try {
         'fecha_fin'    => $end,
         'id_empresa'   => intval($config['id_empresa']),
         'id_sucursal'  => ($scope === 'global') ? null : $SUC_ID_LOCAL,
+        'id_sesion_caja' => $sessionIdFilter ?: null,
         'secciones'    => [BM_VENTAS],
     ]);
 
@@ -112,10 +122,16 @@ try {
     $sqlSesiones = "SELECT s.*, 
                     (SELECT COUNT(*) FROM contabilidad_diario cd WHERE cd.detalle LIKE CONCAT('%Cierre de Caja #', s.id, '%')) as es_contabilizado
                     FROM caja_sesiones s
-                    WHERE s.fecha_contable BETWEEN ? AND ? AND $scopeCondSes
+                    WHERE s.fecha_contable BETWEEN ? AND ? AND $scopeCondSes";
+    $sessionBinds = [$start, $end];
+    if ($sessionIdFilter > 0) {
+        $sqlSesiones .= " AND s.id = ?";
+        $sessionBinds[] = $sessionIdFilter;
+    }
+    $sqlSesiones .= "
                     ORDER BY s.fecha_contable DESC, s.id DESC";
     $stmt = $pdo->prepare($sqlSesiones);
-    $stmt->execute([$start, $end]);
+    $stmt->execute($sessionBinds);
     $sesiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 4. TICKETS (solo ventas reales, sin reservas)
@@ -123,7 +139,9 @@ try {
     
     if (!empty($sessionIds)) {
         $inQuery = "v.id_sesion_caja IN (" . implode(',', $sessionIds) . ")";
-        $sqlTickets = "SELECT v.*, $sqlDateLogic as fecha_contable_calc 
+        $sqlTickets = "SELECT v.id, v.fecha, v.total, v.metodo_pago, v.tipo_servicio,
+                              v.cliente_nombre, v.mensajero_nombre, v.id_sesion_caja,
+                              $sqlDateLogic as fecha_contable_calc
                        FROM ventas_cabecera v 
                        LEFT JOIN caja_sesiones s ON v.id_sesion_caja = s.id
                        WHERE $inQuery AND $scopeCondVentas AND v.tipo_servicio != 'reserva'
@@ -131,7 +149,9 @@ try {
         $stmtT = $pdo->prepare($sqlTickets);
         $stmtT->execute();
     } else {
-        $sqlTickets = "SELECT v.*, DATE(v.fecha) as fecha_contable_calc 
+        $sqlTickets = "SELECT v.id, v.fecha, v.total, v.metodo_pago, v.tipo_servicio,
+                              v.cliente_nombre, v.mensajero_nombre, v.id_sesion_caja,
+                              DATE(v.fecha) as fecha_contable_calc
                        FROM ventas_cabecera v 
                        WHERE v.id_sesion_caja = 0 AND DATE(v.fecha) BETWEEN ? AND ? AND $scopeCondVentas AND v.tipo_servicio != 'reserva'
                        ORDER BY v.id DESC";
@@ -139,6 +159,13 @@ try {
         $stmtT->execute([$start, $end]);
     }
     $allTickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
+
+    // La consulta y los totales siguen usando todos los tickets; la paginación
+    // limita únicamente el HTML visible para no generar tablas enormes.
+    $ticketPage = max(1, intval($_GET['ticket_page'] ?? 1));
+    $ticketsPerPage = 100;
+    $ticketPageOffset = ($ticketPage - 1) * $ticketsPerPage;
+    $ticketPageCount = max(1, (int)ceil(count($allTickets) / $ticketsPerPage));
 
     // Siguiente número de factura
     $stmtNextInv = $pdo->query("SELECT id FROM facturas ORDER BY id DESC LIMIT 1");
@@ -162,6 +189,7 @@ try {
         'fecha_fin'    => $end,
         'id_empresa'   => intval($config['id_empresa']),
         'id_sucursal'  => ($scope === 'global') ? null : $SUC_ID_LOCAL,
+        'id_sesion_caja' => $sessionIdFilter ?: null,
         'secciones'    => [BM_SERIES],
     ]);
     foreach ($mSeries[BM_SERIES] as $row) {
@@ -263,7 +291,7 @@ $sqlWeb = "SELECT COUNT(*) as cant, SUM(total) as total FROM pedidos_cabecera WH
 if($scope === 'local') $sqlWeb .= " AND id_sucursal = $SUC_ID_LOCAL";
 $kpiWeb = $pdo->query($sqlWeb)->fetch(PDO::FETCH_ASSOC);
 
-$sqlRes = "SELECT SUM(d.cantidad * (d.precio - p.costo)) as ganancia, SUM(d.cantidad * d.precio) as venta 
+$sqlRes = "SELECT SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as ganancia, SUM(d.cantidad * d.precio) as venta
            FROM ventas_detalle d 
            JOIN productos p ON d.id_producto = p.codigo 
            JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
@@ -605,7 +633,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
                         </tr>
                     </thead>
                     <tbody>
-                    <?php foreach($sessionTickets as $t): 
+                    <?php foreach(array_slice($sessionTickets, $ticketPageOffset, $ticketsPerPage) as $t):
                         $safeClient = htmlspecialchars($t['cliente_nombre'], ENT_QUOTES);
                         $safeMsj = isset($t['mensajero_nombre']) ? htmlspecialchars($t['mensajero_nombre'], ENT_QUOTES) : '';
                         $dateInv = isset($t['fecha_contable_calc']) ? $t['fecha_contable_calc'] : date('Y-m-d', strtotime($t['fecha']));
@@ -632,6 +660,24 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
     </div>
     <?php endforeach; ?>
 </div>
+
+<?php if ($ticketPageCount > 1):
+    $pageQuery = $_GET;
+    unset($pageQuery['ticket_page']);
+?>
+<nav class="my-4" aria-label="Paginación de tickets">
+    <ul class="pagination justify-content-center">
+        <?php for ($p = 1; $p <= $ticketPageCount; $p++):
+            $pageQuery['ticket_page'] = $p;
+            $href = '?' . http_build_query($pageQuery);
+        ?>
+            <li class="page-item <?php echo $p === $ticketPage ? 'active' : ''; ?>">
+                <a class="page-link" href="<?php echo htmlspecialchars($href, ENT_QUOTES); ?>"><?php echo $p; ?></a>
+            </li>
+        <?php endfor; ?>
+    </ul>
+</nav>
+<?php endif; ?>
 
 <div class="modal fade" id="resumenTextoModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">

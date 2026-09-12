@@ -1,10 +1,24 @@
 // ARCHIVO: /var/www/palweb/api/pos.js
 // VERSION: 3.2 - Sistema Offline Completo
 
-const CACHE_KEY = 'products_cache_v1';
-const QUEUE_KEY = 'pos_pending_sales';
+const POS_STORAGE_SCOPE = window.POS_STORAGE_SCOPE || 'e1_s1_a1_c0';
+const CACHE_KEY = 'products_cache_v2_' + POS_STORAGE_SCOPE;
+const QUEUE_KEY = 'pos_pending_sales_' + POS_STORAGE_SCOPE;
 const CACHE_DURATION = 5 * 60 * 1000;
-const PARKED_ORDERS_KEY = 'pos_parked_orders';
+const PARKED_ORDERS_KEY = 'pos_parked_orders_' + POS_STORAGE_SCOPE;
+const CART_STATE_KEY = 'pos_cart_state_' + POS_STORAGE_SCOPE;
+const LAST_PAYMENT_KEY = 'pos_last_payment_' + POS_STORAGE_SCOPE;
+const CATALOG_SYNC_KEY = 'pos_catalog_sync_' + POS_STORAGE_SCOPE;
+let offlineSyncInProgress = false;
+
+function readStorageArray(key) {
+    try {
+        const value = JSON.parse(localStorage.getItem(key) || '[]');
+        return Array.isArray(value) ? value : [];
+    } catch (e) {
+        return [];
+    }
+}
 
 function getPosJsonHeaders(extra = {}) {
     if (typeof window.posJsonHeaders === 'function') {
@@ -287,9 +301,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     _applyPriceModeUI();
-    clearSearchAndRefreshProductList(false);
-    // Algunos navegadores autocompletan luego del DOMContentLoaded.
-    setTimeout(() => clearSearchAndRefreshProductList(false), 120);
+    // El catálogo se dibuja una sola vez después de elegir servidor o caché.
+    const initialSearch = document.getElementById('searchInput');
+    if (initialSearch) initialSearch.value = '';
     
     setTimeout(() => {
         if (typeof window.initPOSOffline === 'function') {
@@ -319,7 +333,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         recalculateCartPrices();
         renderProducts('all');
-        renderFavoritesBar();
     } else {
         console.log('PRODUCTS_DATA vacio, cargando desde cache...');
         loadFromCacheOrRefresh();
@@ -358,14 +371,14 @@ document.addEventListener('DOMContentLoaded', () => {
 function updateOnlineStatus() {
     const badge = document.getElementById('netStatus');
     const btnSync = document.getElementById('btnSync');
-    const legacyQueue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    const legacyQueue = readStorageArray(QUEUE_KEY);
     let pendingCount = legacyQueue.length;
     
     if (typeof window.connectionMonitor !== 'undefined') {
         const monitor = window.connectionMonitor;
         const latency = monitor.latency;
         
-        if (!navigator.onLine || !monitor.isOnline) {
+        if (!monitor.isOnline) {
             if(badge) { badge.className = 'badge bg-danger'; badge.innerHTML = '🔌 OFF'; }
         } else if (latency < 200) {
             if(badge) { badge.className = 'badge bg-success'; badge.innerHTML = '🚀 ' + latency + 'ms'; }
@@ -384,7 +397,10 @@ function updateOnlineStatus() {
         }
     }
     
-    if (navigator.onLine && pendingCount > 0) {
+    const canSync = typeof window.connectionMonitor !== 'undefined'
+        ? window.connectionMonitor.isOnline
+        : navigator.onLine;
+    if (canSync && pendingCount > 0) {
         if(btnSync) { btnSync.classList.remove('d-none'); btnSync.innerHTML = '<i class="fas fa-sync"></i> ' + pendingCount; }
     } else {
         if(btnSync) btnSync.classList.add('d-none');
@@ -398,7 +414,7 @@ async function updateSyncKeypadButton() {
     if (!btn) return;
     
     let pendingCount = 0;
-    const legacyQueue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    const legacyQueue = readStorageArray(QUEUE_KEY);
     pendingCount += legacyQueue.length;
     
     if (typeof window.posCache !== 'undefined' && typeof window.posCache.getPendingSales === 'function') {
@@ -421,15 +437,66 @@ async function updateSyncKeypadButton() {
     }
 }
 
+function pendingSyncReadLegacyQueue() {
+    try {
+        const value = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+        return Array.isArray(value) ? value : [];
+    } catch (e) { return []; }
+}
+
+async function refreshPendingSyncPanel() {
+    const status = document.getElementById('pendingSyncStatus');
+    const total = document.getElementById('pendingSyncTotal');
+    const errors = document.getElementById('pendingSyncErrors');
+    const sources = document.getElementById('pendingSyncSources');
+    const last = document.getElementById('pendingSyncLast');
+    if (!status) return;
+    status.textContent = 'Consultando pendientes...';
+    const legacy = pendingSyncReadLegacyQueue();
+    let idb = [];
+    if (window.posCache && typeof window.posCache.getPendingSales === 'function') {
+        try { idb = await window.posCache.getPendingSales(); } catch (e) { status.textContent = 'No se pudo leer el almacenamiento local.'; }
+    }
+    const rememberedErrors = Number(sessionStorage.getItem('pos_sync_errors') || 0);
+    const count = legacy.length + idb.length;
+    if (total) total.textContent = count;
+    if (errors) errors.textContent = rememberedErrors;
+    if (sources) sources.textContent = `LocalStorage: ${legacy.length} · Base local: ${idb.length}`;
+    if (last) {
+        const stamp = sessionStorage.getItem('pos_sync_last') || localStorage.getItem('pos_last_sync');
+        last.textContent = stamp ? 'Última actividad: ' + new Date(Number(stamp)).toLocaleString() : 'Sin sincronizaciones en esta sesión.';
+    }
+    status.textContent = count ? 'Hay ventas esperando confirmación del servidor.' : 'No hay ventas pendientes.';
+    const run = document.getElementById('pendingSyncRunBtn');
+    if (run) run.disabled = count === 0;
+    await updateSyncKeypadButton();
+}
+
+function openPendingSyncPanel() {
+    const modalEl = document.getElementById('pendingSyncModal');
+    if (!modalEl) return syncManual();
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    refreshPendingSyncPanel();
+}
+
 async function syncOfflineQueue() {
-    if (!navigator.onLine) return showToast("Sin internet", "error");
+    if (offlineSyncInProgress) return;
+    offlineSyncInProgress = true;
+    if (!navigator.onLine) {
+        offlineSyncInProgress = false;
+        return showToast("Sin internet", "error");
+    }
     if (!await ensurePosCsrfToken(true)) {
+        offlineSyncInProgress = false;
         openSessionLoginModal('Inicio de sesion requerido para sincronizar ventas offline.', () => syncOfflineQueue());
         return showToast('Sin sesion valida para sincronizar', 'warning');
     }
     
-    const queue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
-    if (queue.length === 0) return;
+    const queue = readStorageArray(QUEUE_KEY);
+    if (queue.length === 0) {
+        offlineSyncInProgress = false;
+        return;
+    }
     
     const btn = document.getElementById('btnSync'); 
     if(btn) btn.innerHTML = '<i class="fas fa-spin fa-spinner"></i>';
@@ -447,6 +514,7 @@ async function syncOfflineQueue() {
             const res = await resp.json();
             if (res.status === 'success') {
                 syncedCount++;
+                try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
             } else {
                 if (await handleSessionAuthFailure(res, () => syncOfflineQueue(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
                     failedQueue.push(sale);
@@ -467,24 +535,33 @@ async function syncOfflineQueue() {
         Synth.tada(); 
     }
     if (btn) btn.innerHTML = '<i class="fas fa-sync"></i>';
+    offlineSyncInProgress = false;
 }
 
 async function syncAllPending() {
-    if (!navigator.onLine) return;
+    if (offlineSyncInProgress) return { synced: 0, errors: 0, busy: true };
+    offlineSyncInProgress = true;
+    if (!navigator.onLine) {
+        offlineSyncInProgress = false;
+        return { synced: 0, errors: 1 };
+    }
     if (!await ensurePosCsrfToken(true)) {
+        offlineSyncInProgress = false;
         openSessionLoginModal('Inicio de sesion requerido para sincronizar ventas offline.', () => syncAllPending());
         showToast('Sin sesion valida para sincronizar', 'warning');
-        return;
+        return { synced: 0, errors: 1 };
     }
     
     let totalSynced = 0;
     let totalErrors = 0;
+    const processedSaleUuids = new Set();
     
     // localStorage
-    const legacyQueue = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]');
+    const legacyQueue = readStorageArray(QUEUE_KEY);
     if (legacyQueue.length > 0) {
         const failedQueue = [];
         for (const sale of legacyQueue) {
+            if (sale && sale.uuid) processedSaleUuids.add(String(sale.uuid));
             try {
                 const resp = await fetch('pos_save.php', { 
                     method: 'POST', 
@@ -494,6 +571,7 @@ async function syncAllPending() {
                 const res = await resp.json();
                 if (res.status === 'success') {
                     totalSynced++;
+                    try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
                 } else {
                     if (await handleSessionAuthFailure(res, () => syncAllPending(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
                         failedQueue.push(sale);
@@ -515,6 +593,11 @@ async function syncAllPending() {
         try {
             const idbPending = await window.posCache.getPendingSales();
             for (const sale of idbPending) {
+                if (sale && sale.uuid && processedSaleUuids.has(String(sale.uuid))) {
+                    await window.posCache.markSaleSynced(sale.id);
+                    continue;
+                }
+                if (sale && sale.uuid) processedSaleUuids.add(String(sale.uuid));
                 try {
                     const resp = await fetch('pos_save.php', { 
                         method: 'POST', 
@@ -524,6 +607,7 @@ async function syncAllPending() {
                     const res = await resp.json();
                     if (res.status === 'success') {
                         await window.posCache.markSaleSynced(sale.id);
+                        try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
                         totalSynced++;
                     } else {
                         if (await handleSessionAuthFailure(res, () => syncAllPending(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
@@ -546,6 +630,10 @@ async function syncAllPending() {
     }
     
     updateOnlineStatus();
+    sessionStorage.setItem('pos_sync_last', String(Date.now()));
+    sessionStorage.setItem('pos_sync_errors', String(totalErrors));
+    offlineSyncInProgress = false;
+    return { synced: totalSynced, errors: totalErrors };
 }
 
 async function syncManual() {
@@ -562,7 +650,12 @@ async function syncManual() {
         return;
     }
     
-    await syncAllPending();
+    const result = await syncAllPending();
+    const status = document.getElementById('pendingSyncStatus');
+    if (status && result) status.textContent = result.errors
+        ? `Sincronizadas: ${result.synced}. Errores: ${result.errors}.`
+        : `Sincronización completada: ${result.synced} ventas.`;
+    await refreshPendingSyncPanel();
     updateSyncKeypadButton();
 }
 
@@ -606,7 +699,7 @@ function saveToCache(data) {
     } catch (e) {} 
 }
 
-async function refreshProducts(almId = null) {
+async function refreshProducts(almId = null, forceFull = false) {
     const btn = document.getElementById('btnRefresh');
     if (btn) { btn.innerHTML = '<i class="fas fa-spin fa-spinner"></i>'; btn.disabled = true; }
 
@@ -615,22 +708,14 @@ async function refreshProducts(almId = null) {
     let loadTimeoutId = null;
 
     try {
-        localStorage.removeItem(CACHE_KEY);
-
-        if (typeof window.posCache !== 'undefined' && window.posCache.db) {
-            try {
-                const tx = window.posCache.db.transaction(['products', 'metadata'], 'readwrite');
-                tx.objectStore('products').clear();
-                tx.objectStore('metadata').delete('products_timestamp');
-                await new Promise(resolve => tx.oncomplete = resolve);
-            } catch (e) {}
-        }
-
         const almParam = almId ? '&alm=' + parseInt(almId, 10) : '';
+        const existing = Array.isArray(window.productsDB) ? window.productsDB : [];
+        const storedSync = Number(localStorage.getItem(CATALOG_SYNC_KEY) || window.POS_CATALOG_SYNC_AT || 0);
+        const sinceParam = !forceFull && existing.length && storedSync ? '&since=' + storedSync : '';
         if (loadAbort) {
             loadTimeoutId = setTimeout(() => loadAbort.abort(), loadTimeoutMs);
         }
-        const response = await fetch('pos.php?load_products=1&t=' + Date.now() + almParam, {
+        const response = await fetch('pos.php?load_products=1&t=' + Date.now() + almParam + sinceParam, {
             method: 'GET',
             cache: 'no-store',
             headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' },
@@ -642,16 +727,31 @@ async function refreshProducts(almId = null) {
         const result = await response.json();
         
         if (result.status === 'success' && Array.isArray(result.products)) { 
-            window.productsDB = result.products;
+            const merged = result.incremental
+                ? new Map(existing.map(product => [String(product.codigo), product]))
+                : new Map();
+            result.products.forEach(product => {
+                if (result.incremental && Number(product.activo) === 0) merged.delete(String(product.codigo));
+                else merged.set(String(product.codigo), product);
+            });
+            window.productsDB = Array.from(merged.values());
             productsDB = window.productsDB;
-            saveToCache(result.products);
+            localStorage.setItem(CATALOG_SYNC_KEY, String(result.timestamp || Math.floor(Date.now() / 1000)));
+            saveToCache(window.productsDB);
             
             if (typeof window.posCache !== 'undefined' && window.posCache.saveProducts) {
-                await window.posCache.saveProducts(result.products);
+                await window.posCache.saveProducts(window.productsDB);
             }
+            try {
+                if (window.PalWebNative && typeof window.PalWebNative.cacheProducts === 'function') {
+                    window.PalWebNative.cacheProducts(JSON.stringify(window.productsDB));
+                }
+            } catch (e) { console.warn('No se pudo copiar catálogo a Room:', e); }
             
             renderProducts('all', document.getElementById('searchInput')?.value || ''); 
-            showToast('Catalogo actualizado (' + result.products.length + ' productos)'); 
+            showToast(result.incremental
+                ? 'Catálogo sincronizado (' + result.products.length + ' cambios)'
+                : 'Catálogo actualizado (' + result.products.length + ' productos)');
         }
     } catch(e) {
         const msg = (e && e.name === 'AbortError')
@@ -666,6 +766,39 @@ async function refreshProducts(almId = null) {
     } finally { 
         if (loadTimeoutId) clearTimeout(loadTimeoutId);
         if (btn) { btn.innerHTML = '<i class="fas fa-sync-alt"></i>'; btn.disabled = false; } 
+    }
+}
+
+// La venta actualiza stock_almacen, pero no necesariamente productos.updated_at.
+// Reconciliar solo las líneas cobradas mantiene visible la existencia real sin
+// descargar de nuevo todo el catálogo.
+async function refreshProductStock(codes) {
+    if (!navigator.onLine || !Array.isArray(codes) || codes.length === 0) return;
+    const uniqueCodes = [...new Set(codes.map(code => String(code || '').trim()).filter(Boolean))];
+    if (uniqueCodes.length === 0) return;
+    try {
+        const response = await fetch('pos.php?load_product_stock=1&codes=' + encodeURIComponent(uniqueCodes.join(',')) + '&t=' + Date.now(), {
+            method: 'GET',
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
+        });
+        if (!response.ok) return;
+        const result = await response.json();
+        if (result.status !== 'success' || !Array.isArray(result.products)) return;
+        const stockByCode = new Map(result.products.map(product => [String(product.codigo), Number(product.stock || 0)]));
+        (window.productsDB || []).forEach(product => {
+            const code = String(product.codigo || '');
+            if (stockByCode.has(code)) product.stock = stockByCode.get(code);
+        });
+        productsDB = window.productsDB || [];
+        saveToCache(productsDB);
+        if (window.posCache && typeof window.posCache.saveProducts === 'function') {
+            await window.posCache.saveProducts(productsDB);
+        }
+        const activeCategory = document.querySelector('.category-btn.active')?.dataset?.category || 'all';
+        renderProducts(activeCategory, document.getElementById('searchInput')?.value || '');
+    } catch (error) {
+        console.warn('No se pudo actualizar el stock visible:', error);
     }
 }
 
@@ -884,6 +1017,9 @@ async function verifyPin() {
     let loginSuccess = false;
     let cajeroRol    = 'cajero';
     let loginContext = null;
+    // Contexto con el que se abrió esta página, antes de aplicar el PIN nuevo.
+    // Debe conservarse para detectar cambios de sucursal/almacén.
+    const pageContextBeforeLogin = Object.assign({}, window.POS_ACTIVE_CONTEXT || {});
 
     if (navigator.onLine) {
         try {
@@ -963,6 +1099,13 @@ async function verifyPin() {
                     window.setProgressOverlay(45, 'Cargando productos del almacén...');
                 }
 
+                // Al cambiar de contexto, las claves de caché son inmutables
+                // durante esta página. Recargar automáticamente evita mezclar
+                // el catálogo del almacén anterior con el nuevo.
+                const previousEmpresa = Number(pageContextBeforeLogin.id_empresa || 0);
+                const previousSucursal = Number(pageContextBeforeLogin.id_sucursal || 0);
+                const previousAlmacen = Number(pageContextBeforeLogin.id_almacen || 0);
+
                 // Actualizar contexto con el almacén elegido
                 if (almId && loginContext) loginContext.id_almacen = almId;
                 window.POS_ACTIVE_CONTEXT = Object.assign({}, window.POS_ACTIVE_CONTEXT || {}, {
@@ -970,6 +1113,15 @@ async function verifyPin() {
                     id_sucursal: parseInt(loginContext?.id_sucursal || (window.POS_ACTIVE_CONTEXT || {}).id_sucursal || 1, 10),
                     id_almacen: parseInt(almId || loginContext?.id_almacen || (window.POS_ACTIVE_CONTEXT || {}).id_almacen || 1, 10)
                 });
+
+                const contextChanged = previousEmpresa !== Number(window.POS_ACTIVE_CONTEXT.id_empresa)
+                    || previousSucursal !== Number(window.POS_ACTIVE_CONTEXT.id_sucursal)
+                    || previousAlmacen !== Number(window.POS_ACTIVE_CONTEXT.id_almacen);
+                if (contextChanged && navigator.onLine) {
+                    showToast('Cambiando al catálogo del nuevo almacén...', 'info');
+                    window.location.reload();
+                    return;
+                }
 
                 // Actualizar fondo del carrito con el banner de la sucursal
                 const sucId = loginContext ? loginContext.id_sucursal : null;
@@ -981,6 +1133,11 @@ async function verifyPin() {
                 // que se usa el correcto incluso si el POST set_almacen no llegó al servidor.
                 if (navigator.onLine) {
                     await refreshProducts(almId || null);
+                    // El estado de caja puede pertenecer al PIN/contexto anterior
+                    // (por ejemplo, tras cambiar de sucursal sin recargar la página).
+                    // Consultar siempre al servidor después del login evita cerrar
+                    // una sesión de otra sucursal por usar un cashId obsoleto.
+                    await checkCashStatusSilent();
                 }
 
                 if (typeof window.setProgressOverlay === 'function') {
@@ -1229,15 +1386,16 @@ async function checkCashStatusSilent() {
             cashOpen = true;
             cashId = data.data.id;
             accountingDate = data.data.fecha_contable;
+            const cashLabel = 'ABIERTA #' + cashId + ' (' + accountingDate + ')';
             if(btn) {
                 btn.classList.remove('btn-outline-secondary');
                 btn.classList.add('btn-success');
-                btn.innerText = 'ABIERTA (' + accountingDate + ')';
+                btn.innerText = cashLabel;
             }
             if(badge) {
                 badge.className = 'cash-status cash-open ms-2';
                 badge.style.cssText = 'font-size: 0.7rem; background-color: #28a745 !important; color: white !important; padding: 2px 8px; border-radius: 4px;';
-                badge.innerText = 'ABIERTA (' + accountingDate + ')';
+                badge.innerText = cashLabel;
             }
         } else {
             cashOpen = false;
@@ -1319,7 +1477,14 @@ window.toggleImages = function() {
     }
 };
 
+let productSearchTimer = null;
+function scheduleProductSearch() {
+    clearTimeout(productSearchTimer);
+    productSearchTimer = setTimeout(filterProducts, 150);
+}
+
 function renderProducts(category, searchTerm) {
+    clearTimeout(productSearchTimer);
     if (typeof category === 'undefined') {
         const activeBtn = document.querySelector('.category-btn.active');
         category = activeBtn ? (activeBtn.innerText === 'TODOS' ? 'all' : activeBtn.innerText) : 'all';
@@ -1361,7 +1526,17 @@ function renderProducts(category, searchTerm) {
         return;
     }
 
-    filtered.forEach(p => {
+    // Construir 48 tarjetas por bloque; el catálogo completo sigue disponible al escáner.
+    let renderedCount = 0;
+    const moreButton = document.createElement('button');
+    moreButton.type = 'button';
+    moreButton.className = 'btn btn-outline-primary m-2';
+    moreButton.style.gridColumn = '1 / -1';
+    moreButton.onclick = () => appendProductBatch();
+    function appendProductBatch() {
+    moreButton.remove();
+    const fragment = document.createDocumentFragment();
+    filtered.slice(renderedCount, renderedCount + 48).forEach(p => {
         const stock = parseFloat(p.stock) || 0;
         const hasStock = stock > 0 || p.es_servicio == 1;
         
@@ -1378,7 +1553,7 @@ function renderProducts(category, searchTerm) {
         let imgHTML = '<div class="product-img-container" style="background:' + (p.color || '#ccc') + '"><span class="placeholder-text">' + (p.nombre || '??').substring(0,2).toUpperCase() + '</span></div>';
         if(p.has_image) {
             const imgV = p.img_version ? '&v=' + p.img_version : '';
-            imgHTML = '<div class="product-img-container"><img src="image.php?code=' + p.codigo + imgV + '" class="product-img" onerror="this.style.display=\'none\'"></div>';
+            imgHTML = '<div class="product-img-container"><img src="image.php?w=200&code=' + encodeURIComponent(p.codigo) + imgV + '" class="product-img" width="200" height="200" loading="lazy" decoding="async" onerror="this.style.display=\'none\'"></div>';
         }
 
         card.innerHTML = 
@@ -1415,6 +1590,8 @@ function renderProducts(category, searchTerm) {
             card.style.cursor = 'not-allowed';
         }
         bindProductQuantityGesture(card, p);
+        const productImage = card.querySelector('img');
+        if (productImage) productImage.alt = p.nombre || 'Producto';
 
         // Botón estrella ★ para favoritos
         const starBtn = document.createElement('button');
@@ -1425,10 +1602,18 @@ function renderProducts(category, searchTerm) {
         starBtn.onclick = (e) => toggleFavorite(p.codigo, e);
         card.appendChild(starBtn);
 
-        grid.appendChild(card);
+        fragment.appendChild(card);
     });
+    renderedCount = Math.min(renderedCount + 48, filtered.length);
+    grid.appendChild(fragment);
+    if (renderedCount < filtered.length) {
+        moreButton.textContent = `Mostrar más (${renderedCount} de ${filtered.length})`;
+        grid.appendChild(moreButton);
+    }
     // Sincronizar badges inmediatamente
     updateStockBadges();
+    }
+    appendProductBatch();
     renderFavoritesBar();
 }
 
@@ -1572,6 +1757,7 @@ function filterCategory(cat, btn) {
 }
 
 function filterProducts() { 
+    clearTimeout(productSearchTimer);
     renderProducts('all', document.getElementById('searchInput').value); 
 }
 
@@ -1627,7 +1813,7 @@ function renderCart() {
         let src = getCartPriceOriginBadge();
         let nt = i.note ? '<span class="cart-note">📝 ' + i.note + '</span>' : '';
         
-        d.innerHTML = '<div class="d-flex justify-content-between fw-bold"><span>' + i.qty + ' x ' + i.name + bdg + src + '</span><span>$' + lineT.toFixed(2) + '</span></div><div class="small text-muted">$' + (i.price*(1-i.discountPct/100)).toFixed(2) + '</div>' + nt;
+        d.innerHTML = '<div class="d-flex justify-content-between fw-bold"><span><button type="button" class="cart-remove-btn" aria-label="Eliminar producto" onclick="event.stopPropagation(); removeCartItem(' + idx + ')">−</button>' + i.qty + ' x ' + i.name + bdg + src + '</span><span>$' + lineT.toFixed(2) + '</span></div><div class="small text-muted">$' + (i.price*(1-i.discountPct/100)).toFixed(2) + '</div>' + nt;
         c.appendChild(d);
     });
     
@@ -1657,6 +1843,155 @@ function renderCart() {
     const linesEl = document.getElementById('totalLines');
     if (linesEl) linesEl.innerText = productLines;
 }
+
+// Imprime el contenido actual del carrito como oferta comercial, sin crear venta ni ticket.
+window.printCartOffer = function() {
+    if (!Array.isArray(cart) || cart.length === 0) {
+        showToast('El carrito está vacío', 'warning');
+        return;
+    }
+
+    const printWindow = window.open('', 'CartOfferPrint', 'width=380,height=700');
+    if (!printWindow) {
+        showToast('El navegador bloqueó la ventana de impresión', 'warning');
+        return;
+    }
+
+    const safe = value => String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const money = value => Number(value || 0).toFixed(2);
+    const subtotal = cart.reduce((sum, item) => sum + (Number(item.price || 0) * (1 - Number(item.discountPct || 0) / 100) * Number(item.qty || 0)), 0);
+    const total = subtotal * (1 - Number(globalDiscountPct || 0) / 100);
+    const now = new Date();
+    const fecha = now.toLocaleString('es', { dateStyle: 'short', timeStyle: 'short' });
+    const rows = cart.map(item => {
+        const qty = Number(item.qty || 0);
+        const unitPrice = Number(item.price || 0) * (1 - Number(item.discountPct || 0) / 100);
+        const lineTotal = unitPrice * qty;
+        const discount = Number(item.discountPct || 0) > 0 ? ` <small>-${money(item.discountPct)}%</small>` : '';
+        const note = item.note ? `<div class="note">${safe(item.note)}</div>` : '';
+        return `<div class="line">
+            <div class="name">${safe(item.name)}${discount}</div>
+            <div class="line-values"><span>${qty} x $${money(unitPrice)}</span><strong>$${money(lineTotal)}</strong></div>
+            ${note}
+        </div>`;
+    }).join('');
+    const globalDiscount = Number(globalDiscountPct || 0) !== 0
+        ? `<div class="summary"><span>${Number(globalDiscountPct) > 0 ? 'Descuento' : 'Recargo'} ${Math.abs(Number(globalDiscountPct))}%</span><strong>${Number(globalDiscountPct) > 0 ? '-' : '+'}$${money(Math.abs(subtotal - total))}</strong></div>`
+        : '';
+    const clientName = (document.getElementById('cliName')?.value || '').trim();
+
+    printWindow.onload = () => {
+        setTimeout(() => {
+            printWindow.print();
+            printWindow.onafterprint = () => printWindow.close();
+        }, 150);
+    };
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Oferta comercial - Carrito</title>
+        <style>
+            @page { size: 58mm auto; margin: 0; }
+            * { box-sizing: border-box; }
+            html, body { width: 58mm; margin: 0; padding: 0; background: #fff; }
+            body { color: #000; font-family: Arial, Helvetica, sans-serif; font-size: 11px; padding: 3mm 2mm; }
+            .center { text-align: center; }
+            .title { font-size: 17px; font-weight: 900; letter-spacing: .5px; }
+            .subtitle { font-size: 14px; font-weight: 800; margin-top: 2px; }
+            .muted { font-size: 10px; margin-top: 4px; }
+            .rule { border-top: 1px dashed #000; margin: 8px 0; }
+            .line { padding: 4px 0; border-bottom: 1px dotted #777; }
+            .name { font-weight: 700; overflow-wrap: anywhere; }
+            .line-values, .summary { display: flex; justify-content: space-between; gap: 5px; margin-top: 2px; }
+            .line-values span { white-space: nowrap; }
+            .note { font-size: 9px; font-style: italic; margin-top: 2px; overflow-wrap: anywhere; }
+            .summary { font-size: 12px; margin-top: 5px; }
+            .total { display: flex; justify-content: space-between; align-items: baseline; font-size: 22px; font-weight: 900; margin-top: 8px; }
+            .footer { text-align: center; font-size: 10px; margin-top: 12px; }
+            @media print { body { padding: 3mm 2mm; } }
+        </style></head><body>
+            <div class="center title">OFERTA COMERCIAL</div>
+            <div class="center subtitle">CARRITO</div>
+            <div class="center muted">${safe(fecha)}</div>
+            ${clientName ? `<div class="center muted">Cliente: ${safe(clientName)}</div>` : ''}
+            <div class="rule"></div>
+            ${rows}
+            <div class="rule"></div>
+            <div class="summary"><span>Subtotal</span><strong>$${money(subtotal)}</strong></div>
+            ${globalDiscount}
+            <div class="total"><span>TOTAL</span><span>$${money(total)}</span></div>
+            <div class="rule"></div>
+            <div class="footer">Documento sin número de ticket<br>No constituye una venta</div>
+        </body></html>`);
+    printWindow.document.close();
+    printWindow.focus();
+};
+
+// Imprime el inventario actual, agrupado por categoría y nombre, para conteo manual.
+window.printInventoryList = async function() {
+    const printWindow = window.open('', 'InventoryPrint', 'width=380,height=700');
+    if (!printWindow) {
+        showToast('El navegador bloqueó la ventana de impresión', 'warning');
+        return;
+    }
+    printWindow.document.write('<p style="font-family:Arial;padding:12px">Cargando inventario...</p>');
+    try {
+        const response = await fetch('pos.php?inventory_print_data=1', { cache: 'no-store' });
+        const data = await response.json();
+        if (!response.ok || data.status !== 'success') throw new Error(data.msg || 'Error');
+        const safe = value => String(value ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        const quantity = value => Number(value || 0).toLocaleString('es', { maximumFractionDigits: 3 });
+        let currentCategory = '';
+        let rows = '';
+        (data.products || []).forEach(product => {
+            const category = product.categoria || 'General';
+            if (category !== currentCategory) {
+                currentCategory = category;
+                rows += `<tr class="category"><td colspan="3">${safe(category)}</td></tr>`;
+            }
+            rows += `<tr><td class="name">${safe(product.nombre)}</td><td class="stock">${quantity(product.existencia)}</td><td class="real"></td></tr>`;
+        });
+        if (!rows) rows = '<tr><td colspan="3" class="empty">No hay productos activos</td></tr>';
+        printWindow.document.open();
+        printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Inventario</title>
+            <style>
+                @page { size: 58mm auto; margin: 0; } * { box-sizing: border-box; }
+                html, body { width: 58mm; margin: 0; padding: 0; }
+                body { color:#000; background:#fff; font-family:Arial,Helvetica,sans-serif; font-size:10px; padding:3mm 3mm 3mm 4mm; }
+                .center { text-align:center; } .title { font-size:15px; font-weight:900; }
+                .meta { font-size:9px; margin-top:2px; } .rule { border-top:1px dashed #000; margin:6px 0; }
+                table { width:100%; border-collapse:collapse; table-layout:fixed; }
+                th { border-bottom:1px solid #000; padding:3px 1px; font-size:9px; }
+                td { border-bottom:1px dotted #888; padding:4px 1px; vertical-align:top; }
+                th:first-child, td.name { width:56%; text-align:left; overflow-wrap:anywhere; }
+                th.stock, td.stock { width:19%; text-align:right; } th.real, td.real { width:25%; }
+                td.stock { font-size:13px; font-weight:900; padding-left:3px; padding-right:3px; }
+                td.real { height:23px; }
+                tr.category td { border-top:1px solid #000; border-bottom:1px solid #000; padding:5px 1px 3px; font-weight:900; text-transform:uppercase; }
+                .empty { text-align:center; padding:12px 0; } .sign { margin-top:18px; text-align:center; font-size:9px; }
+                .signature { margin:14px 4px 3px; border-top:1px solid #000; padding-top:3px; }
+                @media print { body { padding:3mm 3mm 3mm 4mm; } }
+            </style></head><body>
+            <div class="center title">INVENTARIO</div><div class="center meta">${safe(data.empresa)}</div>
+            <div class="center meta">Impreso: ${safe(data.fecha)}</div><div class="rule"></div>
+            <table><thead><tr><th>Nombre</th><th class="stock">Exist.</th><th class="real">Real</th></tr></thead><tbody>${rows}</tbody></table>
+            <div class="rule"></div><div class="sign">Conteo realizado por: ${safe(data.usuario)}</div>
+            <div class="signature">Firma de quien hizo el conteo</div>
+            <div class="center meta">Fecha y hora de impresión: ${safe(data.fecha)}</div>
+            </body></html>`);
+        printWindow.document.close();
+        printWindow.focus();
+        setTimeout(() => { printWindow.print(); printWindow.onafterprint = () => printWindow.close(); }, 150);
+    } catch (error) {
+        printWindow.close();
+        showToast('No se pudo cargar el inventario para imprimir', 'warning');
+        console.error(error);
+    }
+};
 
 // NUEVA FUNCIÓN: Actualizar badges de stock en tiempo real
 window.updateStockBadges = function() {
@@ -1749,6 +2084,16 @@ function removeItem() {
     } 
 }
 
+function removeCartItem(index) {
+    if (index < 0 || index >= cart.length) return;
+    Synth.removeCart();
+    cart.splice(index, 1);
+    selectedIndex = cart.length ? Math.min(selectedIndex, cart.length - 1) : -1;
+    renderCart();
+    saveCartState();
+    updateStockBadges();
+}
+
 function clearCart() { 
     if(cart.length > 0 && confirm('Vaciar carrito?')) { 
         Synth.clear(); 
@@ -1756,7 +2101,7 @@ function clearCart() {
         globalDiscountPct = 0; 
         selectedIndex = -1; 
         renderCart();
-        localStorage.removeItem('pos_cart_state');
+        localStorage.removeItem(CART_STATE_KEY);
         updateStockBadges(); // Restaurar todo el stock visual
     } 
 }
@@ -1932,14 +2277,14 @@ function saveCartState() {
             timestamp: Date.now()
         };
         // Guardar en localStorage (síncrono, rápido)
-        try { localStorage.setItem('pos_cart_state', JSON.stringify(state)); } catch(e) {}
+        try { localStorage.setItem(CART_STATE_KEY, JSON.stringify(state)); } catch(e) {}
         // Backup en IndexedDB (más resistente a fallo eléctrico / crash de navegador)
         if (typeof window.posCache !== 'undefined' && window.posCache.db &&
             typeof window.posCache.saveCart === 'function') {
             window.posCache.saveCart(state).catch(() => {});
         }
     } else {
-        try { localStorage.removeItem('pos_cart_state'); } catch(e) {}
+        try { localStorage.removeItem(CART_STATE_KEY); } catch(e) {}
         if (typeof window.posCache !== 'undefined' && window.posCache.db &&
             typeof window.posCache.clearCart === 'function') {
             window.posCache.clearCart().catch(() => {});
@@ -1952,13 +2297,13 @@ async function restoreCartState() {
 
     // 1) Intentar localStorage primero (más rápido)
     try {
-        const saved = localStorage.getItem('pos_cart_state');
+        const saved = localStorage.getItem(CART_STATE_KEY);
         if (saved) {
             const parsed = JSON.parse(saved);
             if (Date.now() - parsed.timestamp < CART_EXPIRY_MS) {
                 state = parsed;
             } else {
-                localStorage.removeItem('pos_cart_state');
+                localStorage.removeItem(CART_STATE_KEY);
             }
         }
     } catch(e) {}
@@ -2087,6 +2432,41 @@ window.confirmPaymentSafe = async function() {
 async function confirmPayment() {
     let sub = cart.reduce((acc, i) => acc + ((i.price * (1 - i.discountPct/100)) * i.qty), 0);
     let tot = sub * (1 - globalDiscountPct/100);
+
+    // Aviso preventivo: permite continuar, pero deja claro cuando el precio
+    // efectivo de una línea queda por debajo de su costo actual.
+    const ventasEnPerdida = [];
+    const factorDescuentoGlobal = 1 - (Number(globalDiscountPct) || 0) / 100;
+    cart.forEach(i => {
+        const producto = (window.productsDB || []).find(p => String(p.codigo) === String(i.id));
+        const costo = Number(producto?.costo || 0);
+        const precioBase = Number(i.price || 0);
+        const cantidad = Number(i.qty || 0);
+        const descuentoItem = 1 - (Number(i.discountPct) || 0) / 100;
+        const precioEfectivo = precioBase * descuentoItem * factorDescuentoGlobal;
+        if (costo > 0 && cantidad > 0 && precioEfectivo < costo - 0.005) {
+            ventasEnPerdida.push({
+                nombre: i.name || i.id,
+                cantidad,
+                precio: precioEfectivo,
+                costo,
+                perdida: (costo - precioEfectivo) * cantidad
+            });
+        }
+    });
+    if (ventasEnPerdida.length > 0) {
+        const detallePerdida = ventasEnPerdida.map(item =>
+            `• ${item.nombre}: vende $${item.precio.toFixed(2)}, costo $${item.costo.toFixed(2)} ` +
+            `(${item.cantidad} ud., pérdida estimada $${item.perdida.toFixed(2)})`
+        ).join('\n');
+        const perdidaTotal = ventasEnPerdida.reduce((sum, item) => sum + item.perdida, 0);
+        const continuar = window.confirm(
+            '⚠️ ADVERTENCIA: esta venta contiene productos vendidos por debajo del costo.\n\n' +
+            detallePerdida +
+            `\n\nPérdida estimada total: $${perdidaTotal.toFixed(2)}\n\n¿Desea continuar con el cobro?`
+        );
+        if (!continuar) return;
+    }
     
     const metEl = document.querySelector('input[name="payMethod"]:checked');
     const met = metEl ? metEl.value : 'Efectivo';
@@ -2099,7 +2479,15 @@ async function confirmPayment() {
     
     const cliNameEl = document.getElementById('cliName');
     let cN = (cliNameEl ? cliNameEl.value : '').trim() || 'Consumidor Final';
-    const itms = cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, note: i.note }));
+    const itms = cart.map(i => ({
+        id: i.id,
+        name: i.name,
+        qty: i.qty,
+        price: i.price,
+        discountPct: Number(i.discountPct || 0),
+        customPrice: !!i.customPrice,
+        note: i.note
+    }));
 
     if (navigator.onLine) {
         const liveCheck = await checkLiveStockForCart(itms);
@@ -2151,7 +2539,9 @@ async function confirmPayment() {
         id_almacen: parseInt((window.POS_ACTIVE_CONTEXT || {}).id_almacen || 1, 10),
         estado_pago: 'confirmado',
         descuentos_items:  descuentosItems,
-        descuento_global:  globalDiscountPct
+        descuento_global:  globalDiscountPct,
+        price_mode: priceMode,
+        price_adjust_pct: priceAdjustPct
     };
 
     payModal.hide();
@@ -2160,7 +2550,7 @@ async function confirmPayment() {
     if(met === 'Efectivo') {
         const cashReceived = parseFloat(document.getElementById('cashReceived')?.value || 0);
         if(cashReceived > tot) {
-            localStorage.setItem('pos_last_payment', JSON.stringify({
+            localStorage.setItem(LAST_PAYMENT_KEY, JSON.stringify({
                 method: 'Efectivo',
                 total: tot,
                 received: cashReceived,
@@ -2185,6 +2575,7 @@ async function confirmPayment() {
                 else showToast('Venta #' + res.id + ' registrada');
                 paymentProcessing = false;
                 finishSale();
+                await refreshProductStock(itms.map(item => item.id));
                 return;
             } else {
                 const errMsg = String(res.msg || '');
@@ -2217,13 +2608,20 @@ async function confirmPayment() {
 }
 
 function saveOffline(p) {
-    const q = JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); 
-    q.push(p); 
+    const q = readStorageArray(QUEUE_KEY);
+    if (!p || !p.uuid || !q.some(item => item && item.uuid === p.uuid)) {
+        q.push(p);
+    }
     localStorage.setItem(QUEUE_KEY, JSON.stringify(q));
     
     if (typeof window.posCache !== 'undefined' && typeof window.posCache.saveOfflineSale === 'function') {
         window.posCache.saveOfflineSale(p).catch(e => console.error('Error guardando en IDB:', e));
     }
+    try {
+            if (window.PalWebNative && typeof window.PalWebNative.queueSale === 'function') {
+            window.PalWebNative.queueSale(JSON.stringify(p));
+        }
+    } catch (e) { console.warn('No se pudo copiar venta a Room:', e); }
     
     Synth.warning();
     showToast('Venta guardada OFFLINE (pendiente)', 'warning');
@@ -2237,7 +2635,7 @@ function finishSale() {
     globalDiscountPct = 0; 
     selectedIndex = -1; 
     renderCart(); 
-    localStorage.removeItem('pos_cart_state');
+    localStorage.removeItem(CART_STATE_KEY);
     
     const fields = ['cliName', 'cliPhone', 'cliAddr', 'deliveryDriver', 'reservationDate', 'reservationAbono'];
     fields.forEach(id => {
@@ -2245,9 +2643,6 @@ function finishSale() {
         if (el) el.value = '';
     });
     
-    if (navigator.onLine) {
-        refreshProducts();
-    }
 }
 
 // ==========================================
@@ -2283,7 +2678,7 @@ function parkOrder() {
     globalDiscountPct = 0;
     selectedIndex = -1;
     renderCart();
-    localStorage.removeItem('pos_cart_state');
+    localStorage.removeItem(CART_STATE_KEY);
 }
 
 function showParkedOrders() {
@@ -2364,10 +2759,90 @@ function deleteParkedOrder(index) {
 // ==========================================
 // HISTORIAL DE TICKETS (RECTIFICADO: LLAMA A MODAL_HISTORY.PHP)
 // ==========================================
+function bindHistorialTicketFilters(body) {
+    const filters = body?.querySelector('#historialFilters');
+    if (!filters || filters._bound) return;
+    filters._bound = true;
+
+    const apply = () => {
+        const query = String(filters.querySelector('[data-filter="query"]')?.value || '').trim().toLocaleLowerCase();
+        const values = name => filters.querySelector(`[data-filter="${name}"]`)?.value || '';
+        const type = values('type');
+        const client = values('client');
+        const status = values('status');
+        const payment = values('payment');
+        const cashier = values('cashier');
+        const channel = values('channel');
+        const dateFrom = values('date-from');
+        const dateTo = values('date-to');
+        let visible = 0;
+
+        body.querySelectorAll('.historial-ticket-table tbody tr.ticket-row').forEach(row => {
+            const d = row.dataset;
+            const matches = (!query || String(d.search || '').toLocaleLowerCase().includes(query))
+                && (!type || d.type === type) && (!client || d.client === client)
+                && (!status || d.status === status) && (!payment || d.payment === payment)
+                && (!cashier || d.cashier === cashier)
+                && (!channel || d.channel === channel)
+                && (!dateFrom || (d.date || '') >= dateFrom) && (!dateTo || (d.date || '') <= dateTo);
+            row.classList.toggle('d-none', !matches);
+            const detail = body.querySelector('#det-row-' + row.dataset.ticketId);
+            if (detail) {
+                detail.classList.toggle('d-none', !matches);
+                if (!matches) detail.classList.remove('show');
+            }
+            if (matches) visible++;
+        });
+
+        const counter = filters.querySelector('[data-filter-count]');
+        if (counter) counter.textContent = `${visible} ticket${visible === 1 ? '' : 's'} visibles`;
+        const empty = body.querySelector('[data-filter-empty]');
+        if (empty) empty.classList.toggle('d-none', visible !== 0);
+    };
+
+    const applyColumns = () => {
+        filters.querySelectorAll('[data-column-toggle]').forEach(control => {
+            const column = control.dataset.columnToggle;
+            body.querySelectorAll(`[data-column="${column}"]`).forEach(cell => {
+                cell.classList.toggle('d-none', !control.checked);
+            });
+        });
+    };
+
+    filters.addEventListener('input', apply);
+    filters.addEventListener('change', apply);
+    filters.querySelectorAll('[data-column-toggle]').forEach(control => control.addEventListener('change', applyColumns));
+    body.querySelectorAll('[data-toggle-history-top]').forEach(button => button.addEventListener('click', () => {
+        const topPanel = body.querySelector('#historialTopPanel');
+        const showWrap = body.querySelector('.historial-show-top-wrap');
+        const hide = !topPanel.classList.contains('d-none');
+        topPanel.classList.toggle('d-none', hide);
+        showWrap.classList.toggle('d-none', !hide);
+    }));
+    body.querySelectorAll('[data-toggle-payment-summary]').forEach(button => button.addEventListener('click', () => {
+        const panel = body.querySelector('[data-payment-summary-panel]');
+        if (!panel) return;
+        const collapsed = panel.classList.toggle('d-none');
+        button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        button.innerHTML = collapsed
+            ? '<i class="fas fa-chevron-down me-1"></i>Expandir'
+            : '<i class="fas fa-chevron-up me-1"></i>Recoger';
+    }));
+    filters.querySelector('[data-filter-reset]')?.addEventListener('click', () => {
+        filters.querySelectorAll('input, select').forEach(control => { control.value = ''; });
+        apply();
+    });
+    apply();
+    applyColumns();
+}
+
 function renderHistorialModalFromJson(data) {
     const tickets = Array.isArray(data?.tickets) ? data.tickets : [];
     const detalles = Array.isArray(data?.detalles) ? data.detalles : [];
     const totales = data?.totales || {};
+    const sesion = data?.sesion || {};
+    const alertas = Array.isArray(data?.alertas) ? data.alertas : [];
+    const metricas = data?.metricas_tickets || {};
     const detallesMap = detalles.reduce((acc, d) => {
         const key = String(d.id_venta_cabecera || '');
         if (!key) return acc;
@@ -2383,6 +2858,43 @@ function renderHistorialModalFromJson(data) {
         const total = Number(t.total || 0);
         return acc + (total > 0 ? total : 0);
     }, 0);
+
+    const pagos = Object.assign({ efectivo: 0, transferencia: 0, tarjeta: 0, otros: 0 }, totales.pagos || {});
+    const money = value => '$' + Number(value || 0).toLocaleString('es', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const ventasPorCajero = tickets.reduce((acc, ticket) => {
+        const cajero = String(ticket.cajero_ticket || sesion.cajero || 'Sin asignar');
+        if (!acc[cajero]) acc[cajero] = { tickets: 0, total: 0 };
+        acc[cajero].tickets++;
+        if (Number(ticket.total || 0) > 0) acc[cajero].total += Number(ticket.total || 0);
+        return acc;
+    }, {});
+    const resumenCajeros = Object.entries(ventasPorCajero).map(([cajero, resumen]) => `<span class="badge bg-light text-dark border me-1 mb-1"><i class="fas fa-user me-1"></i>${escapeHtml(cajero)}: ${resumen.tickets} · ${money(resumen.total)}</span>`).join('');
+    const optionList = (values, placeholder) => `<option value="">${placeholder}</option>${values.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}`;
+    const typeOptions = [...new Set(tickets.map(t => String(t.tipo_servicio || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const clientOptions = [...new Set(tickets.map(t => String(t.cliente_nombre || 'General').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const cashierOptions = [...new Set(tickets.map(t => String(t.cajero_ticket || sesion.cajero || 'Sin asignar').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const paymentOptions = [...new Set(tickets.map(t => String(t.metodo_pago || 'Mixto').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const channelOptions = [...new Set(tickets.map(t => String(t.canal_origen || 'POS').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const getTicketStatus = ticket => {
+        const estadoPago = String(ticket.estado_pago || '').toLowerCase();
+        const estadoReserva = String(ticket.estado_reserva || '').toLowerCase();
+        if (ticket.motivo_anulacion || estadoPago.includes('anulad') || estadoReserva.includes('anulad')) return ['Anulado', 'bg-danger'];
+        if (Number(ticket.total || 0) < 0 || String(ticket.cliente_nombre || '').toUpperCase() === 'DEVOLUCIÓN') return ['Devuelto', 'bg-warning text-dark'];
+        if (estadoReserva.includes('reserv') || estadoPago.includes('reserv')) return ['Reservado', 'bg-info text-dark'];
+        if (estadoPago.includes('pend') || estadoPago === '') return ['Pendiente', 'bg-secondary'];
+        return ['Pagado', 'bg-success'];
+    };
+    const getLocation = ticket => {
+        const sucursalId = Number(ticket.sucursal_ticket || ticket.id_sucursal || 0);
+        const almacenId = Number(ticket.almacen_ticket || ticket.id_almacen || 0);
+        const sessionId = Number(ticket.sesion_ticket || ticket.id_sesion_caja || ticket.id_caja || 0);
+        const sucursal = ticket.sucursal_nombre || ('Sucursal ' + (sucursalId || '-'));
+        const almacen = ticket.almacen_nombre || ('Almacén ' + (almacenId || '-'));
+        const cajero = ticket.cajero_ticket || sesion.cajero || 'Sin asignar';
+        return { sucursalId, almacenId, sessionId, html: `${escapeHtml(sucursal)}<br><small class="text-muted">${escapeHtml(almacen)} · Caja #${sessionId || '-'} · ${escapeHtml(cajero)}</small>` };
+    };
+    const sessionSummary = `Sesión #${Number(sesion.id || 0)} · ${escapeHtml(sesion.cajero || 'Sin cajero')} · ${escapeHtml(sesion.estado || '')}`;
+    const alertHtml = alertas.map(alerta => `<div class="alert alert-warning d-flex align-items-start gap-2 mb-2 py-2 px-3 small"><i class="fas fa-triangle-exclamation mt-1"></i><div><strong>Revisión de sesión:</strong> ${escapeHtml(alerta.mensaje || '')}<br><span class="text-muted">Los tickets de otras sucursales o cajas no se modificarán desde este historial.</span></div></div>`).join('');
 
     const renderTicketDetailRows = (ticket) => {
         const rows = detallesMap[String(ticket.id)] || [];
@@ -2428,7 +2940,58 @@ function renderHistorialModalFromJson(data) {
     };
 
     let html = `
-        <div class="sticky-top bg-white shadow-sm border-bottom z-index-2 p-3">
+        <style>
+            .historial-ticket-table .ticket-row.ticket-otra-ubicacion { background-color:#fff3cd !important; border-left:5px solid #ffc107; }
+            .historial-ticket-table .ticket-row td { vertical-align:middle; }
+            @media (max-width: 767.98px) {
+                .historial-ticket-table { font-size:.82rem !important; }
+                .historial-ticket-table thead { display:none; }
+                .historial-ticket-table, .historial-ticket-table tbody, .historial-ticket-table tr.ticket-row { display:block; width:100%; }
+                .historial-ticket-table tr.ticket-row { margin:.55rem .5rem; width:calc(100% - 1rem); border:1px solid #dee2e6; border-radius:.6rem; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,.06); }
+                .historial-ticket-table tr.ticket-row td { display:flex; justify-content:space-between; align-items:center; gap:.75rem; border:0; border-bottom:1px solid #f0f0f0; padding:.42rem .65rem; text-align:right !important; }
+                .historial-ticket-table tr.ticket-row td:first-child { display:none; }
+                .historial-ticket-table tr.ticket-row td::before { content:attr(data-label); color:#6c757d; font-size:.68rem; font-weight:700; text-transform:uppercase; text-align:left; }
+                .historial-ticket-table tr.ticket-row td:last-child { justify-content:flex-end; flex-wrap:wrap; border-bottom:0; }
+                .historial-ticket-table tr.ticket-row td:last-child::before { width:100%; }
+                .historial-ticket-table tr[id^="det-row-"] { display:table-row; margin:0; width:100%; border:0; box-shadow:none; }
+                .historial-ticket-table tr[id^="det-row-"] td { display:table-cell; }
+                .historial-ticket-table .ticket-location { max-width:68%; }
+            }
+        </style>
+        <div id="historialTopPanel" class="sticky-top bg-white shadow-sm border-bottom z-index-2 p-3 historial-top-panel d-none">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <div><div class="fw-bold"><i class="fas fa-cash-register text-info me-1"></i>${sessionSummary}</div><small class="text-muted">Sucursal ${Number(sesion.id_sucursal || 0)} · Almacén ${Number(sesion.id_almacen || 0)} · Apertura ${escapeHtml(String(sesion.fecha_apertura || '').slice(0, 16))}</small><div class="mt-1"><span class="small text-muted me-1">Ventas por cajero:</span>${resumenCajeros || '<span class="small text-muted">Sin datos</span>'}</div></div>
+                <span class="badge ${String(sesion.estado).toUpperCase() === 'ABIERTA' ? 'bg-success' : 'bg-secondary'}">${escapeHtml(sesion.estado || 'SIN ESTADO')}</span>
+            </div>
+            ${alertHtml}
+            <div id="historialFilters" class="border rounded-3 bg-light p-2 mb-3">
+                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                    <span class="small fw-bold text-uppercase text-muted"><i class="fas fa-filter me-1"></i>Filtros del historial</span>
+                    <span class="small text-muted" data-filter-count></span>
+                </div>
+                <div class="row g-2">
+                    <div class="col-12 col-md-4"><input type="search" class="form-control form-control-sm" data-filter="query" placeholder="Ticket, cliente, producto, cajero..."></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="type">${optionList(typeOptions, 'Todos los tipos')}</select></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="client">${optionList(clientOptions, 'Todos los clientes')}</select></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="status">${optionList(['Pagado', 'Pendiente', 'Anulado', 'Devuelto', 'Reservado'], 'Todos los estados')}</select></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="payment">${optionList(paymentOptions, 'Todos los pagos')}</select></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="cashier">${optionList(cashierOptions, 'Todos los cajeros')}</select></div>
+                    <div class="col-6 col-md-2"><select class="form-select form-select-sm" data-filter="channel">${optionList(channelOptions, 'Todos los canales')}</select></div>
+                    <div class="col-6 col-md-2"><input type="date" class="form-control form-control-sm" data-filter="date-from" title="Desde"></div>
+                    <div class="col-6 col-md-2"><input type="date" class="form-control form-control-sm" data-filter="date-to" title="Hasta"></div>
+                    <div class="col-12 col-md-2"><button type="button" class="btn btn-sm btn-outline-secondary w-100" data-filter-reset><i class="fas fa-rotate-left me-1"></i>Limpiar</button></div>
+                </div>
+                <div class="d-flex flex-wrap align-items-center gap-2 mt-2 pt-2 border-top">
+                    <span class="small fw-bold text-muted"><i class="fas fa-eye-slash me-1"></i>Columnas:</span>
+                    <label class="small"><input type="checkbox" data-column-toggle="type" checked> Tipo</label>
+                    <label class="small"><input type="checkbox" data-column-toggle="items" checked> Artículos</label>
+                    <label class="small"><input type="checkbox" data-column-toggle="status" checked> Estado</label>
+                    <label class="small"><input type="checkbox" data-column-toggle="wholesale" checked> Mayorista</label>
+                    <label class="small"><input type="checkbox" data-column-toggle="payment" checked> Pago</label>
+                    <label class="small"><input type="checkbox" data-column-toggle="location" checked> Ubicación</label>
+                    <button type="button" class="btn btn-sm btn-outline-dark ms-md-auto" data-toggle-history-top><i class="fas fa-compress me-1"></i>Solo tickets</button>
+                </div>
+            </div>
             <div class="row g-2 align-items-stretch">
                 <div class="col-6 col-md-3">
                     <div class="card h-100 border-0 bg-light shadow-sm text-center p-2">
@@ -2448,20 +3011,35 @@ function renderHistorialModalFromJson(data) {
                         <div class="fs-4 fw-bold text-danger">$${totalDev.toFixed(2)}</div>
                     </div>
                 </div>
-                <div class="col-6 col-md-5">
+                <div class="col-12 col-md-5">
                     <div class="card h-100 border-0 shadow-sm rounded-3 overflow-hidden">
-                        <div class="bg-dark text-white py-1 px-2 fw-bold text-uppercase text-center" style="font-size:0.6rem; letter-spacing:1px;">
-                            <i class="fas fa-wallet me-1 text-warning"></i> Resumen
+                        <div class="bg-dark text-white py-1 px-2 fw-bold text-uppercase d-flex justify-content-between align-items-center" style="font-size:0.6rem; letter-spacing:1px;">
+                            <span><i class="fas fa-wallet me-1 text-warning"></i> Resumen por tipo de pago</span>
+                            <button type="button" class="btn btn-sm btn-link text-white text-decoration-none p-0" data-toggle-payment-summary aria-expanded="false">
+                                <i class="fas fa-chevron-down me-1"></i>Expandir
+                            </button>
                         </div>
-                        <div class="p-0">
+                        <div class="p-0 d-none" data-payment-summary-panel>
                             <ul class="list-group list-group-flush small">
                                 <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
                                     <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-receipt me-1"></i> Total tickets</span>
                                     <span class="fw-bold text-dark" style="font-size:0.9rem;">${tickets.length}</span>
                                 </li>
                                 <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
-                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-dollar-sign me-1"></i> Total bruto</span>
-                                    <span class="fw-bold text-success" style="font-size:0.9rem;">$${totalVenta.toFixed(2)}</span>
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-money-bill me-1"></i> Efectivo</span>
+                                    <span class="fw-bold text-success" style="font-size:0.9rem;">${money(pagos.efectivo)}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-building-columns me-1"></i> Transferencia</span>
+                                    <span class="fw-bold text-primary" style="font-size:0.9rem;">${money(pagos.transferencia)}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-credit-card me-1"></i> Tarjeta</span>
+                                    <span class="fw-bold text-warning" style="font-size:0.9rem;">${money(pagos.tarjeta)}</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center py-1 px-3 border-0">
+                                    <span class="fw-bold text-muted text-uppercase" style="font-size:0.65rem;"><i class="fas fa-ellipsis me-1"></i> Otros</span>
+                                    <span class="fw-bold text-dark" style="font-size:0.9rem;">${money(pagos.otros)}</span>
                                 </li>
                             </ul>
                         </div>
@@ -2474,15 +3052,18 @@ function renderHistorialModalFromJson(data) {
                 </button>
             </div>
         </div>
+        <div class="d-flex justify-content-end p-2 border-bottom historial-show-top-wrap">
+            <button type="button" class="btn btn-sm btn-outline-info historial-show-top" data-toggle-history-top><i class="fas fa-expand me-1"></i>Mostrar estadísticas y filtros</button>
+        </div>
         <div class="table-responsive">
-            <table class="table mb-0 align-middle" style="font-size:0.92rem;">
+            <table class="table mb-0 align-middle historial-ticket-table" style="font-size:0.92rem;">
                 <thead class="bg-light text-secondary">
-                    <tr><th width="40"></th><th>ID</th><th>Hora</th><th>Cliente</th><th>Tipo</th><th>Total</th><th class="text-warning">Mayorista</th><th>Pago Real</th><th class="text-end">Acción</th></tr>
+                    <tr><th width="40"></th><th>ID</th><th>Fecha / hora</th><th>Cliente</th><th data-column="type">Tipo</th><th data-column="items">Artículos / unidades</th><th data-column="status">Estado</th><th>Total</th><th data-column="wholesale" class="text-warning">Mayorista</th><th data-column="payment">Pago</th><th data-column="location">Sucursal / almacén / caja / cajero</th><th class="text-end">Acción</th></tr>
                 </thead>
                 <tbody>`;
 
     if (!tickets.length) {
-        html += '<tr><td colspan="9" class="text-center p-5 text-muted"><i class="fas fa-receipt fa-2x mb-3 opacity-50"></i><br>Sin movimientos</td></tr>';
+        html += '<tr><td colspan="12" class="text-center p-5 text-muted"><i class="fas fa-receipt fa-2x mb-3 opacity-50"></i><br>Sin movimientos</td></tr>';
     } else {
         tickets.forEach(t => {
             const total = Number(t.total || 0);
@@ -2494,17 +3075,34 @@ function renderHistorialModalFromJson(data) {
             const ticketType = escapeHtml(t.tipo_servicio || '-');
             const clientLabel = String(t.cliente_nombre || ('Ticket #' + t.id));
             const clientLabelJs = JSON.stringify(clientLabel);
+            const location = getLocation(t);
+            const [statusLabel, statusClass] = getTicketStatus(t);
+            const itemCount = Number(metricas.articulos?.[String(t.id)] || tDetalles.length || 0);
+            const unitCount = Number(metricas.unidades?.[String(t.id)] ?? tDetalles.reduce((sum, d) => sum + Number(d.cantidad || 0), 0));
+            const otherLocation = location.sucursalId !== Number(sesion.id_sucursal || location.sucursalId) || location.almacenId !== Number(sesion.id_almacen || location.almacenId);
+            const fechaTicket = String(t.fecha || '');
+            const productSearch = tDetalles.map(item => item.nombre || item.nombre_producto || '').join(' ');
+            const searchText = [t.id, t.cliente_nombre || 'General', productSearch, t.tipo_servicio || '', t.metodo_pago || '', t.canal_origen || 'POS', t.cajero_ticket || sesion.cajero || ''].join(' ');
+            const dateOnly = fechaTicket.slice(0, 10);
+            const partesFecha = fechaTicket.slice(0, 10).split('-');
+            const fechaReducida = partesFecha.length === 3
+                ? `${Number(partesFecha[2])}/${Number(partesFecha[1])}/${partesFecha[0].slice(-2)}`
+                : '';
+            const fechaHora = [fechaReducida, fechaTicket.slice(11, 16)].filter(Boolean).join(' ');
             html += `
-                <tr class="${renderTicketRowClass(t)} ticket-row" data-ticket-id="${t.id}" onclick="toggleDetail(${t.id})">
+                <tr class="${renderTicketRowClass(t)} ticket-row${otherLocation ? ' ticket-otra-ubicacion' : ''}" data-ticket-id="${t.id}" data-search="${escapeHtml(searchText)}" data-type="${escapeHtml(t.tipo_servicio || '')}" data-client="${escapeHtml(t.cliente_nombre || 'General')}" data-status="${escapeHtml(statusLabel)}" data-payment="${escapeHtml(t.metodo_pago || 'Mixto')}" data-channel="${escapeHtml(t.canal_origen || 'POS')}" data-cashier="${escapeHtml(t.cajero_ticket || sesion.cajero || 'Sin asignar')}" data-date="${escapeHtml(dateOnly)}" onclick="toggleDetail(${t.id})">
                     <td class="text-center"><i class="fas fa-chevron-right text-muted icon-collapse-${t.id}"></i></td>
-                    <td class="fw-bold">#${t.id}</td>
-                    <td>${escapeHtml((t.fecha || '').slice(11, 16) || '')}</td>
-                    <td>${escapeHtml(t.cliente_nombre || 'General')}</td>
-                    <td><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;">${ticketType}</small></td>
-                    <td class="fw-bold ${isRef ? 'text-danger' : 'text-dark'}">$${Math.abs(total).toFixed(2)}</td>
-                    <td class="text-warning fw-bold">$${Math.abs(wholesaleTotal).toFixed(2)}</td>
-                    <td>${renderPaymentBadge(t)}</td>
-                    <td class="text-end" onclick="event.stopPropagation()">
+                    <td class="fw-bold" data-label="Ticket">#${t.id}</td>
+                    <td data-label="Fecha / hora">${escapeHtml(fechaHora)}</td>
+                    <td data-label="Cliente">${escapeHtml(t.cliente_nombre || 'General')}</td>
+                    <td data-column="type" data-label="Tipo"><small class="text-uppercase text-muted fw-bold" style="font-size:0.65rem;">${ticketType}</small></td>
+                    <td data-column="items" data-label="Artículos / unidades"><span class="badge bg-light text-dark border">${itemCount} art. · ${Math.abs(unitCount)} ud.</span></td>
+                    <td data-column="status" data-label="Estado"><span class="badge ${statusClass}">${statusLabel}</span></td>
+                    <td data-label="Total" class="fw-bold ${isRef ? 'text-danger' : 'text-dark'}">$${Math.abs(total).toFixed(2)}</td>
+                    <td data-column="wholesale" data-label="Mayorista" class="text-warning fw-bold">$${Math.abs(wholesaleTotal).toFixed(2)}</td>
+                    <td data-column="payment" data-label="Pago">${renderPaymentBadge(t)}</td>
+                    <td data-column="location" data-label="Sucursal / almacén / caja / cajero" class="ticket-location small">${location.html}</td>
+                    <td data-label="Acción" class="text-end" onclick="event.stopPropagation()">
                         ${isRef ? '' : `<button class="btn btn-sm btn-success py-0 px-2 shadow-sm me-1" onclick="loadSaleToCart(${t.id})" title="Cargar pedido al carrito"><i class="fas fa-cart-plus"></i></button>`}
                         ${isRef ? '' : `<button class="btn btn-sm btn-secondary py-0 px-2 shadow-sm me-1" onclick="saveSaleAsTemplate(${t.id}, ${clientLabelJs})" title="Guardar como plantilla"><i class="fas fa-bookmark"></i></button>`}
                         ${isRef ? '' : `<button class="btn btn-sm btn-warning py-0 px-2 shadow-sm me-1" onclick="voidTicket(${t.id})" title="Anular con motivo (sesión activa)"><i class="fas fa-ban"></i></button>`}
@@ -2518,7 +3116,7 @@ function renderHistorialModalFromJson(data) {
                     </td>
                 </tr>
                 <tr id="det-row-${t.id}" class="collapse bg-light">
-                    <td colspan="9" class="p-0">
+                    <td colspan="12" class="p-0">
                         <div class="p-3">
                             <table class="table table-sm mb-0">
                                 <thead>
@@ -2537,6 +3135,7 @@ function renderHistorialModalFromJson(data) {
                     </td>
                 </tr>`;
         });
+        html += '<tr data-filter-empty class="d-none"><td colspan="12" class="text-center p-4 text-muted"><i class="fas fa-filter-circle-xmark me-1"></i>Ningún ticket coincide con los filtros.</td></tr>';
     }
 
     html += `
@@ -2596,6 +3195,7 @@ async function loadHistorialModalContent() {
         const data = await response.json();
         if (data && data.status === 'success') {
             body.innerHTML = renderHistorialModalFromJson(data);
+            bindHistorialTicketFilters(body);
             return;
         }
         throw new Error(data?.message || 'No se pudo cargar el historial');
@@ -3488,6 +4088,7 @@ window.toggleInventarioMode = function() {
     if (invPanel) invPanel.style.display = invModeActive ? 'block' : 'none';
     if (btnInv)   btnInv.classList.toggle('inv-active', invModeActive);
     if (banner)   banner.style.display   = invModeActive ? '' : 'none';
+    document.body.classList.toggle('inventory-mode-active', invModeActive);
 
     if (invModeActive) {
         // Limpiar carrito al entrar en modo inventario
@@ -3500,6 +4101,13 @@ window.toggleInventarioMode = function() {
     }
     // Refrescar productos: en modo inv se muestran todos (incluye stock=0)
     renderProducts();
+};
+
+// En móvil permite aplicar explícitamente el texto escrito al catálogo de inventario.
+window.forceInventorySearch = function() {
+    const input = document.getElementById('searchInput');
+    renderProducts('all', input ? input.value : '');
+    if (input) input.focus();
 };
 
 window.openInvModal = function(tipo) {
@@ -3641,6 +4249,7 @@ window.invConfirmar = async function() {
             // Refrescar catálogo completo desde servidor para dejar lista/stock 100% sincronizados.
             await refreshProducts();
         } else {
+            console.error('[POS INVENTARIO] Error del servidor:', d);
             if (await handleSessionAuthFailure(d, () => invConfirmar(), 'Inicio de sesion requerido para completar la operacion de inventario.')) {
                 return;
             }

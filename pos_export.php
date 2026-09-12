@@ -1,19 +1,41 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_export.php
+session_start();
+if (empty($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    header('Location: login.php');
+    exit;
+}
 require_once 'db.php';
 require_once 'config_loader.php';
 
 // --- CONFIGURACIÓN ---
 $localPath = '/var/www/assets/product_images/'; // Ruta definida en pos.php y products_table.php
 
+$contextEmpresa = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+$contextSucursal = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$contextAlmacen = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+
+// Un administrador puede escoger otra sucursal/almacén, pero siempre dentro
+// de su empresa y con una relación válida entre ambos.
+$empresaID = $contextEmpresa;
+$sucursalID = isset($_GET['f_sucursal']) && is_numeric($_GET['f_sucursal'])
+    ? (int)$_GET['f_sucursal'] : $contextSucursal;
+$almacenID = isset($_GET['f_almacen']) && is_numeric($_GET['f_almacen'])
+    ? (int)$_GET['f_almacen'] : $contextAlmacen;
+$stmtScope = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND COALESCE(activo, 1) = 1 LIMIT 1");
+$stmtScope->execute([$almacenID, $empresaID, $sucursalID]);
+if (!$stmtScope->fetchColumn()) {
+    http_response_code(400);
+    exit('Sucursal o almacén inválido para la empresa activa.');
+}
+
 // OBTENER CATEGORÍAS PARA EL FILTRO
-$cats = $pdo->query("SELECT DISTINCT categoria FROM productos ORDER BY categoria")->fetchAll(PDO::FETCH_COLUMN);
+$stmtCats = $pdo->prepare("SELECT DISTINCT categoria FROM productos WHERE id_empresa = ? ORDER BY categoria");
+$stmtCats->execute([$empresaID]);
+$cats = $stmtCats->fetchAll(PDO::FETCH_COLUMN);
 
 // --- PROCESAR DESCARGAS (CSV o ZIP) ---
 if (isset($_GET['action'])) {
-    $empresaID  = intval($_GET['f_empresa']  ?? 1);
-    $almacenID  = intval($_GET['f_almacen']  ?? 1);
-    
     // Construcción dinámica de filtros
     $where = ["p.id_empresa = :emp"];
     $params = [':emp' => $empresaID];
@@ -26,11 +48,13 @@ if (isset($_GET['action'])) {
     if (!empty($_GET['f_cat']))    { $where[] = "p.categoria = :cat"; $params[':cat'] = $_GET['f_cat']; }
 
     $sql = "SELECT p.*, COALESCE(s.cantidad, 0) as stock_actual 
-            FROM productos p 
-            LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = :alm
+            FROM productos p
+            LEFT JOIN stock_almacen s ON p.codigo = s.id_producto
+                AND s.id_almacen = :alm AND s.id_sucursal = :suc_stock
             WHERE " . implode(" AND ", $where) . " ORDER BY p.nombre ASC";
     
     $params[':alm'] = $almacenID;
+    $params[':suc_stock'] = $sucursalID;
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -129,9 +153,9 @@ if (isset($_GET['action'])) {
         <div class="card-body p-4">
             <form method="GET" id="exportForm">
                 <div class="row g-3">
-                    <div class="col-md-4"><label class="small fw-bold">Empresa ID</label><input type="number" name="f_empresa" class="form-control" value="1"></div>
-                    <div class="col-md-4"><label class="small fw-bold">Sucursal ID</label><input type="number" name="f_sucursal" class="form-control" value="1"></div>
-                    <div class="col-md-4"><label class="small fw-bold">Almacén (para Stock)</label><input type="number" name="f_almacen" class="form-control" value="1"></div>
+                    <div class="col-md-4"><label class="small fw-bold">Empresa ID</label><input type="number" name="f_empresa" class="form-control" value="<?= $empresaID ?>" readonly></div>
+                    <div class="col-md-4"><label class="small fw-bold">Sucursal ID</label><input type="number" name="f_sucursal" class="form-control" value="<?= $sucursalID ?>"></div>
+                    <div class="col-md-4"><label class="small fw-bold">Almacén (para Stock)</label><input type="number" name="f_almacen" class="form-control" value="<?= $almacenID ?>"></div>
                     
                     <div class="col-md-6">
                         <label class="small fw-bold">Categoría</label>
@@ -178,4 +202,3 @@ if (isset($_GET['action'])) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

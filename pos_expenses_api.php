@@ -4,12 +4,21 @@
 
 session_start();
 require_once 'db.php';
+require_once 'config_loader.php';
 header('Content-Type: application/json');
 
 date_default_timezone_set('America/Havana');
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true) ?? [];
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+$SUC_ID = (int)($config['id_sucursal'] ?? 1);
+
+try {
+    $pdo->exec("ALTER TABLE gastos_historial ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1 AFTER tipo");
+} catch (Throwable $e) {
+    error_log('pos_expenses_api schema warning: ' . $e->getMessage());
+}
 
 try {
     switch ($action) {
@@ -39,9 +48,9 @@ try {
                 FROM gastos_historial 
                 WHERE tipo = 'FIJO' 
                 AND MONTH(fecha) = ? 
-                AND YEAR(fecha) = ?
+                AND YEAR(fecha) = ? AND id_empresa = ? AND id_sucursal = ?
             ");
-            $stmt->execute([$mesAnterior, $anioAnterior]);
+            $stmt->execute([$mesAnterior, $anioAnterior, $EMP_ID, $SUC_ID]);
             $gastosFijos = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             if (empty($gastosFijos)) {
@@ -58,9 +67,9 @@ try {
                 SELECT COUNT(*) FROM gastos_historial 
                 WHERE tipo = 'FIJO' 
                 AND MONTH(fecha) = ? 
-                AND YEAR(fecha) = ?
+                AND YEAR(fecha) = ? AND id_empresa = ? AND id_sucursal = ?
             ");
-            $stmtCheck->execute([$mesActual, $anioActual]);
+            $stmtCheck->execute([$mesActual, $anioActual, $EMP_ID, $SUC_ID]);
             $existentes = $stmtCheck->fetchColumn();
             
             if ($existentes > 0 && !($input['force'] ?? false)) {
@@ -77,8 +86,8 @@ try {
             $copiados = 0;
             
             $stmtInsert = $pdo->prepare("
-                INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_usuario, notas) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_empresa, id_sucursal, id_usuario, notas)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             
             foreach ($gastosFijos as $gasto) {
@@ -95,7 +104,7 @@ try {
                     $gasto['monto'],
                     $gasto['categoria'],
                     'FIJO',
-                    $usuario,
+                    $EMP_ID, $SUC_ID, $usuario,
                     $gasto['notas']
                 ]);
                 $copiados++;
@@ -128,10 +137,10 @@ try {
                 FROM gastos_historial 
                 WHERE tipo = 'FIJO' 
                 AND MONTH(fecha) = ? 
-                AND YEAR(fecha) = ?
+                AND YEAR(fecha) = ? AND id_empresa = ? AND id_sucursal = ?
                 ORDER BY DAY(fecha), monto DESC
             ");
-            $stmt->execute([$mesAnterior, $anioAnterior]);
+            $stmt->execute([$mesAnterior, $anioAnterior, $EMP_ID, $SUC_ID]);
             $gastos = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             $total = array_sum(array_column($gastos, 'monto'));
@@ -160,8 +169,8 @@ try {
             
             $guardados = 0;
             $stmtInsert = $pdo->prepare("
-                INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_usuario, notas) 
-                VALUES (?, ?, ?, ?, 'VARIABLE', ?, ?)
+                INSERT INTO gastos_historial (fecha, concepto, monto, categoria, tipo, id_empresa, id_sucursal, id_usuario, notas)
+                VALUES (?, ?, ?, ?, 'VARIABLE', ?, ?, ?, ?)
             ");
             
             foreach ($gastos as $gasto) {
@@ -171,7 +180,7 @@ try {
                         $gasto['concepto'],
                         $gasto['monto'],
                         $gasto['categoria'] ?? 'OPERATIVO',
-                        $usuario,
+                        $EMP_ID, $SUC_ID, $usuario,
                         $gasto['notas'] ?? ''
                     ]);
                     $guardados++;
@@ -193,10 +202,10 @@ try {
             
             $stmt = $pdo->prepare("
                 SELECT * FROM gastos_historial 
-                WHERE fecha = ? AND tipo = 'VARIABLE'
+                WHERE fecha = ? AND tipo = 'VARIABLE' AND id_empresa = ? AND id_sucursal = ?
                 ORDER BY id DESC
             ");
-            $stmt->execute([$fecha]);
+            $stmt->execute([$fecha, $EMP_ID, $SUC_ID]);
             $gastos = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
             echo json_encode([
@@ -337,9 +346,9 @@ try {
                     COALESCE(SUM(CASE WHEN total > 0 THEN total ELSE 0 END), 0) as ventas_brutas,
                     COALESCE(SUM(CASE WHEN total < 0 THEN ABS(total) ELSE 0 END), 0) as devoluciones
                 FROM ventas_cabecera 
-                WHERE DATE(fecha) = ?
+                WHERE DATE(fecha) = ? AND id_empresa = ? AND id_sucursal = ?
             ");
-            $stmt->execute([$fecha]);
+            $stmt->execute([$fecha, $EMP_ID, $SUC_ID]);
             $ventas = $stmt->fetch(PDO::FETCH_ASSOC);
             
             echo json_encode([
@@ -531,4 +540,3 @@ function calcularSalario($plantilla, $ventasTotales, $horasTrabajadas = 8) {
     ];
 }
 ?>
-

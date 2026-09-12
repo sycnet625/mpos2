@@ -12,6 +12,7 @@ ini_set('display_errors', 0);
 
 require_once 'db.php';
 require_once 'config_loader.php';
+session_write_close();
 require_once 'accounting_helpers.php';
 require_once 'business_metrics.php';
 date_default_timezone_set('America/Havana');
@@ -148,7 +149,7 @@ try {
 // 9. Sesiones de caja activas
 $cajasAbiertas = [];
 try {
-    $cajasAbiertas = q($pdo, "SELECT nombre_cajero, monto_inicial, fecha_apertura FROM caja_sesiones WHERE estado='ABIERTA'");
+$cajasAbiertas = q($pdo, "SELECT nombre_cajero, monto_inicial, fecha_apertura, id_empresa, id_sucursal, id_almacen FROM caja_sesiones WHERE estado='ABIERTA' AND id_empresa=?", [$EMP_ID]);
 } catch (Exception $e) {}
 
 // 10. Última venta (solo positivos, no devoluciones)

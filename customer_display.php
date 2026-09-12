@@ -1,7 +1,13 @@
 <?php
 // ARCHIVO: customer_display.php
+if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once 'db.php';
 require_once 'config_loader.php';
 $insectType = $config['customer_display_insect'] ?? 'mosca';
+$displayScope = 'e' . (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1)
+    . '_s' . (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1)
+    . '_a' . (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1)
+    . '_c' . (int)($_SESSION['id_caja'] ?? $config['id_caja'] ?? 0);
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -277,7 +283,7 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
 <div class="display-container">
     <div class="brand-side">
         <div class="qr-container" style="padding: 10px; background: rgba(255,255,255,0.2);">
-            <img src="<?php echo $qrUrl; ?>" style="width: 120px; height: 120px; filter: brightness(1.1);">
+            <img src="<?php echo $qrUrl; ?>" alt="Código QR para pedidos" style="width: 120px; height: 120px; filter: brightness(1.1);">
         </div>
         <h2 class="fw-bold m-0"><?php echo $config['nombre_empresa'] ?? 'PalWeb'; ?></h2>
         <p class="fs-6 opacity-75 mt-2">Pide desde tu móvil</p>
@@ -616,8 +622,11 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
             .replace(/'/g,'&#39;');
     }
     function updateDisplay() {
-        const cartState = JSON.parse(localStorage.getItem('pos_cart_state') || '{"cart":[], "globalDiscountPct":0}');
-        const lastPayment = JSON.parse(localStorage.getItem('pos_last_payment') || 'null');
+        const displayScope = <?php echo json_encode($displayScope, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
+        const cartStateKey = 'pos_cart_state_' + displayScope;
+        const lastPaymentKey = 'pos_last_payment_' + displayScope;
+        const cartState = JSON.parse(localStorage.getItem(cartStateKey) || '{"cart":[], "globalDiscountPct":0}');
+        const lastPayment = JSON.parse(localStorage.getItem(lastPaymentKey) || 'null');
         const currentJson = JSON.stringify(cartState) + JSON.stringify(lastPayment);
         if (currentJson === lastRenderedJson) return;
         lastRenderedJson = currentJson;
@@ -674,7 +683,7 @@ $insectType = $config['customer_display_insect'] ?? 'mosca';
             changeContainer.style.display = 'block';
             document.getElementById('changeAmount').innerText = '$' + parseFloat(lastPayment.change).toFixed(2);
             if(!window.changeTimer) {
-                window.changeTimer = setTimeout(() => { localStorage.removeItem('pos_last_payment'); window.changeTimer = null; updateDisplay(); }, 15000);
+                window.changeTimer = setTimeout(() => { localStorage.removeItem(lastPaymentKey); window.changeTimer = null; updateDisplay(); }, 15000);
             }
         } else { changeContainer.style.display = 'none'; }
     }

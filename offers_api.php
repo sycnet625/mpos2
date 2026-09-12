@@ -5,6 +5,14 @@ require_once 'db.php';
 require_once 'config_loader.php';
 session_start();
 
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+try {
+    $pdo->exec("ALTER TABLE ofertas ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1");
+    $pdo->exec("ALTER TABLE facturas ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1");
+} catch (Throwable $e) {
+    error_log('offers_api schema warning: ' . $e->getMessage());
+}
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     die("Acceso denegado");
 }
@@ -18,10 +26,10 @@ if ($action === 'search_products') {
     if (strlen($q) < 1) { echo '[]'; exit; }
     $stmt = $pdo->prepare(
         "SELECT codigo, nombre, COALESCE(unidad_medida,'UND') AS unidad_medida, precio
-         FROM productos WHERE activo=1 AND (nombre LIKE ? OR codigo LIKE ?)
+         FROM productos WHERE activo=1 AND id_empresa=? AND (nombre LIKE ? OR codigo LIKE ?)
          ORDER BY nombre LIMIT 15"
     );
-    $stmt->execute(["%$q%", "%$q%"]);
+    $stmt->execute([$EMP_ID, "%$q%", "%$q%"]);
     echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC), JSON_UNESCAPED_UNICODE);
     exit;
 }
@@ -81,14 +89,14 @@ if ($action === 'create' || $action === 'update') {
 
         if ($type === 'offer') {
             if ($action === 'create') {
-                $sql = "INSERT INTO ofertas (numero_oferta, fecha_emision, cliente_nombre, cliente_direccion, cliente_telefono, subtotal, total, creado_por, notas, id_cliente) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO ofertas (numero_oferta, fecha_emision, cliente_nombre, cliente_direccion, cliente_telefono, subtotal, total, creado_por, notas, id_cliente, id_empresa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $total, $admin, $notas, $id_cliente]);
+                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $total, $admin, $notas, $id_cliente, $EMP_ID]);
                 $mainId = $pdo->lastInsertId();
             } else {
-                $sql = "UPDATE ofertas SET numero_oferta = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?, cliente_telefono = ?, subtotal = ?, total = ?, notas = ?, id_cliente = ? WHERE id = ?";
+                $sql = "UPDATE ofertas SET numero_oferta = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?, cliente_telefono = ?, subtotal = ?, total = ?, notas = ?, id_cliente = ? WHERE id = ? AND id_empresa = ?";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $total, $notas, $id_cliente, $id]);
+                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $total, $notas, $id_cliente, $id, $EMP_ID]);
                 $mainId = $id;
                 // Borrar detalles anteriores
                 $pdo->prepare("DELETE FROM ofertas_detalle WHERE id_oferta = ?")->execute([$mainId]);
@@ -108,14 +116,14 @@ if ($action === 'create' || $action === 'update') {
             $totalConEnvio = $subtotal + $costoEnvio;
 
             if ($action === 'create') {
-                $sql = "INSERT INTO facturas (numero_factura, fecha_emision, cliente_nombre, cliente_direccion, cliente_telefono, subtotal, total, costo_envio, notas, mensajero_nombre, vehiculo, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+                $sql = "INSERT INTO facturas (numero_factura, fecha_emision, cliente_nombre, cliente_direccion, cliente_telefono, subtotal, total, costo_envio, notas, mensajero_nombre, vehiculo, creado_por, id_empresa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $totalConEnvio, $costoEnvio, $notas, $mensajero, $vehiculo, $admin]);
+                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $totalConEnvio, $costoEnvio, $notas, $mensajero, $vehiculo, $admin, $EMP_ID]);
                 $mainId = $pdo->lastInsertId();
             } else {
-                $sql = "UPDATE facturas SET numero_factura = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?, cliente_telefono = ?, subtotal = ?, total = ?, costo_envio = ?, notas = ?, mensajero_nombre = ?, vehiculo = ? WHERE id = ?";
+                $sql = "UPDATE facturas SET numero_factura = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?, cliente_telefono = ?, subtotal = ?, total = ?, costo_envio = ?, notas = ?, mensajero_nombre = ?, vehiculo = ? WHERE id = ? AND id_empresa = ?";
                 $stmt = $pdo->prepare($sql);
-                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $totalConEnvio, $costoEnvio, $notas, $mensajero, $vehiculo, $id]);
+                $stmt->execute([$numero, $fecha, $cliente_nombre, $cliente_direccion, $cliente_telefono, $subtotal, $totalConEnvio, $costoEnvio, $notas, $mensajero, $vehiculo, $id, $EMP_ID]);
                 $mainId = $id;
                 $pdo->prepare("DELETE FROM facturas_detalle WHERE id_factura = ?")->execute([$mainId]);
             }
@@ -130,7 +138,7 @@ if ($action === 'create' || $action === 'update') {
             // Si veníamos de una oferta, marcarla como FACTURADA
             if (isset($_POST['convert_from_offer_id'])) {
                 $offerId = intval($_POST['convert_from_offer_id']);
-                $pdo->prepare("UPDATE ofertas SET estado = 'FACTURADA', id_factura_generada = ? WHERE id = ?")->execute([$mainId, $offerId]);
+                $pdo->prepare("UPDATE ofertas SET estado = 'FACTURADA', id_factura_generada = ? WHERE id = ? AND id_empresa = ?")->execute([$mainId, $offerId, $EMP_ID]);
             }
         }
 
@@ -145,7 +153,7 @@ if ($action === 'create' || $action === 'update') {
 
 if ($action === 'delete_offer') {
     $id = intval($_GET['id']);
-    $pdo->prepare("DELETE FROM ofertas WHERE id = ?")->execute([$id]);
+    $pdo->prepare("DELETE FROM ofertas WHERE id = ? AND id_empresa = ?")->execute([$id, $EMP_ID]);
     $pdo->prepare("DELETE FROM ofertas_detalle WHERE id_oferta = ?")->execute([$id]);
     header("Location: invoices.php?msg=deleted");
     exit;
@@ -154,7 +162,7 @@ if ($action === 'delete_offer') {
 if ($action === 'update_offer_status') {
     $id = intval($_GET['id']);
     $status = $_GET['status'];
-    $pdo->prepare("UPDATE ofertas SET estado = ? WHERE id = ?")->execute([$status, $id]);
+    $pdo->prepare("UPDATE ofertas SET estado = ? WHERE id = ? AND id_empresa = ?")->execute([$status, $id, $EMP_ID]);
     header("Location: invoices.php?msg=updated");
     exit;
 }

@@ -78,7 +78,7 @@ if (!function_exists('combo_fetch_definitions')) {
                     COALESCE(p.es_elaborado, 0) AS es_elaborado
              FROM producto_combo_items ci
              INNER JOIN productos p ON p.codigo = ci.componente_codigo AND p.id_empresa = ?
-             WHERE ci.combo_codigo IN ($ph)
+             WHERE ci.combo_codigo IN ($ph) AND p.activo = 1
              ORDER BY ci.combo_codigo ASC, ci.orden ASC, ci.id ASC"
         );
         $stmt->execute(array_merge([$idEmpresa], $comboCodes));
@@ -105,18 +105,28 @@ if (!function_exists('combo_fetch_definitions')) {
 }
 
 if (!function_exists('combo_stock_levels')) {
-    function combo_stock_levels(PDO $pdo, int $idAlmacen, array $codes): array {
+    function combo_stock_levels(PDO $pdo, int $idAlmacen, array $codes, int $idSucursal = 0, int $idEmpresa = 0): array {
         $codes = array_values(array_unique(array_filter(array_map('strval', $codes))));
         if (!$codes) {
             return [];
         }
 
         $ph = implode(',', array_fill(0, count($codes), '?'));
-        $params = array_merge([$idAlmacen], $codes);
+        $where = ['s.id_almacen = ?'];
+        $params = [$idAlmacen];
+        if ($idSucursal > 0) {
+            $where[] = 's.id_sucursal = ?';
+            $params[] = $idSucursal;
+        }
+        if ($idEmpresa > 0) {
+            $where[] = 'EXISTS (SELECT 1 FROM productos sp WHERE sp.codigo = s.id_producto AND sp.id_empresa = ?)';
+            $params[] = $idEmpresa;
+        }
+        $params = array_merge($params, $codes);
         $stmt = $pdo->prepare(
             "SELECT id_producto, COALESCE(SUM(cantidad), 0) AS cantidad
-             FROM stock_almacen
-             WHERE id_almacen = ? AND id_producto IN ($ph)
+             FROM stock_almacen s
+             WHERE " . implode(' AND ', $where) . " AND s.id_producto IN ($ph)
              GROUP BY id_producto"
         );
         $stmt->execute($params);
@@ -153,7 +163,7 @@ if (!function_exists('combo_virtual_stock')) {
 }
 
 if (!function_exists('combo_apply_product_rows')) {
-    function combo_apply_product_rows(PDO $pdo, array $rows, int $idEmpresa, int $idAlmacen): array {
+    function combo_apply_product_rows(PDO $pdo, array $rows, int $idEmpresa, int $idAlmacen, int $idSucursal = 0): array {
         combo_ensure_schema($pdo);
 
         if (!$rows) {
@@ -176,7 +186,7 @@ if (!function_exists('combo_apply_product_rows')) {
                 }
             }
         }
-        $stockMap = combo_stock_levels($pdo, $idAlmacen, $componentCodes);
+        $stockMap = combo_stock_levels($pdo, $idAlmacen, $componentCodes, $idSucursal, $idEmpresa);
 
         foreach ($rows as &$row) {
             $code = (string)($row['codigo'] ?? $row['id'] ?? '');
@@ -306,11 +316,17 @@ if (!function_exists('combo_expand_sale_items')) {
                 "SELECT codigo, nombre, COALESCE(es_servicio, 0) AS es_servicio,
                         COALESCE(es_elaborado, 0) AS es_elaborado, COALESCE(es_combo, 0) AS es_combo
                  FROM productos
-                 WHERE id_empresa = ? AND codigo IN ($ph)"
+                 WHERE id_empresa = ? AND activo = 1 AND codigo IN ($ph)"
             );
             $stmt->execute(array_merge([$idEmpresa], $saleCodes));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $productMap[(string)$row['codigo']] = $row;
+            }
+        }
+
+        foreach ($saleCodes as $code) {
+            if (!isset($productMap[$code])) {
+                throw new Exception("El producto {$code} no existe, está inactivo o no pertenece a la empresa.");
             }
         }
 
@@ -332,13 +348,7 @@ if (!function_exists('combo_expand_sale_items')) {
                 continue;
             }
 
-            $product = $productMap[$saleCode] ?? [
-                'codigo' => $saleCode,
-                'nombre' => (string)($item['name'] ?? $saleCode),
-                'es_servicio' => 0,
-                'es_elaborado' => 0,
-                'es_combo' => 0,
-            ];
+            $product = $productMap[$saleCode];
 
             $note = trim((string)($item['note'] ?? ''));
             if (intval($product['es_combo'] ?? 0) === 1) {
@@ -400,10 +410,10 @@ if (!function_exists('combo_expand_sale_items')) {
 }
 
 if (!function_exists('combo_check_stock')) {
-    function combo_check_stock(PDO $pdo, int $idEmpresa, int $idAlmacen, array $saleItems): array {
+    function combo_check_stock(PDO $pdo, int $idEmpresa, int $idAlmacen, array $saleItems, int $idSucursal = 0): array {
         $expanded = combo_expand_sale_items($pdo, $idEmpresa, $saleItems);
         $codes = array_column($expanded['inventory_items'], 'id');
-        $stockMap = combo_stock_levels($pdo, $idAlmacen, $codes);
+        $stockMap = combo_stock_levels($pdo, $idAlmacen, $codes, $idSucursal, $idEmpresa);
 
         $allOk = true;
         $out = [];

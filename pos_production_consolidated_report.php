@@ -8,6 +8,8 @@ require_once 'db.php';
 // Cargar Config
 require_once 'config_loader.php';
 $ALM_ID = intval($config['id_almacen']);
+$EMP_ID = intval($config['id_empresa'] ?? 1);
+$SUC_ID = intval($config['id_sucursal'] ?? 1);
 
 $ids = $_GET['ids'] ?? '';
 if (empty($ids)) die("No se seleccionaron recetas.");
@@ -19,7 +21,8 @@ $idList = implode(',', $idArray);
 
 try {
     // 1. Obtener nombres de las recetas seleccionadas
-    $stmtNames = $pdo->query("SELECT nombre_receta FROM recetas_cabecera WHERE id IN ($idList)");
+    $stmtNames = $pdo->prepare("SELECT rc.nombre_receta FROM recetas_cabecera rc LEFT JOIN productos pf ON pf.codigo = rc.id_producto_final WHERE rc.id IN ($idList) AND (pf.id_empresa = ? OR pf.id_empresa IS NULL)");
+    $stmtNames->execute([$EMP_ID]);
     $recetasNombres = $stmtNames->fetchAll(PDO::FETCH_COLUMN);
 
     // 2. Consulta Maestra: Agrupar ingredientes de todas las recetas
@@ -29,9 +32,9 @@ try {
                 p.unidad_medida, 
                 p.costo as costo_actual,
                 SUM(rd.cantidad) as cantidad_requerida_total,
-                (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = rd.id_ingrediente AND s.id_almacen = $ALM_ID) as stock_actual
+                (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = rd.id_ingrediente AND s.id_almacen = $ALM_ID AND s.id_sucursal = $SUC_ID) as stock_actual
             FROM recetas_detalle rd
-            JOIN productos p ON rd.id_ingrediente = p.codigo
+            JOIN productos p ON rd.id_ingrediente = p.codigo AND p.id_empresa = $EMP_ID
             WHERE rd.id_receta IN ($idList)
             GROUP BY rd.id_ingrediente
             ORDER BY p.nombre ASC";
@@ -63,9 +66,9 @@ try {
                 COALESCE(pf.nombre, '')                 AS nombre_producto_final
             FROM recetas_cabecera rc
             JOIN recetas_detalle rd ON rc.id = rd.id_receta
-            LEFT JOIN productos p  ON rd.id_ingrediente = p.codigo
-            LEFT JOIN productos pf ON rc.id_producto_final = pf.codigo
-            WHERE rc.id IN ($idList)
+            LEFT JOIN productos p  ON rd.id_ingrediente = p.codigo AND p.id_empresa = $EMP_ID
+            LEFT JOIN productos pf ON rc.id_producto_final = pf.codigo AND pf.id_empresa = $EMP_ID
+            WHERE rc.id IN ($idList) AND (pf.id_empresa = $EMP_ID OR pf.id_empresa IS NULL)
             ORDER BY FIELD(rc.id, $idList), p.nombre ASC";
 
     $desgloseRows = $pdo->query($sqlDesglose)->fetchAll(PDO::FETCH_ASSOC);
@@ -480,4 +483,3 @@ function getCanalBadgeCR($canal, $map) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

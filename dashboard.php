@@ -10,6 +10,10 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
 // 1. CONFIGURACIÓN Y CONEXIÓN
 ini_set('display_errors', 0);
 error_reporting(E_ALL);
@@ -25,6 +29,7 @@ try {
 }
 
 require_once 'config_loader.php';
+session_write_close();
 require_once 'inventory_suite_layout.php';
 
 $EMP_ID = intval($config['id_empresa']);
@@ -265,7 +270,7 @@ $_escError  = escapeshellarg($errorLogPath);
 $logIps = parseLogStats("tail -n 10000 $_escAccess | awk '{print \$1}' | sort | uniq -c | sort -nr | head -n 10");
 $logPages = parseLogStats("tail -n 10000 $_escAccess | awk '{print \$7}' | sort | uniq -c | sort -nr | head -n 10");
 $logBrowsers = parseLogStats("tail -n 10000 $_escAccess | awk -F'\"' '{print \$6}' | sort | uniq -c | sort -nr | head -n 10");
-$logAttacks = shell_exec("grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-login|config\.php|\\.env' $_escAccess | awk '{print \$1 \" -> \" \$7}' | tail -n 10");
+$logAttacks = shell_exec("tail -n 10000 $_escAccess | grep -Ei 'union.*select|sqlmap|etc/passwd|phpinfo|wp-login|config\.php|\\.env' | awk '{print \$1 \" -> \" \$7}' | tail -n 10");
 $logErrors = shell_exec("tail -n 50 $_escError | grep 'error' | tail -n 5");
 
 

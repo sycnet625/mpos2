@@ -7,7 +7,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
 
     class POSCache {
         constructor() {
-            this.dbName = 'POS_Offline_DB';
+            this.dbName = 'POS_Offline_DB_' + (window.POS_STORAGE_SCOPE || 'e1_s1_a1_c0');
             this.dbVersion = 14;
             this.db = null;
         }
@@ -52,7 +52,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
 
         async hydrateProductsFromLocalStorage() {
             try {
-                const raw = localStorage.getItem('products_cache_v1');
+                const raw = localStorage.getItem('products_cache_v2_' + (window.POS_STORAGE_SCOPE || 'e1_s1_a1_c0'));
                 if (!raw) return 0;
                 const parsed = JSON.parse(raw);
                 const products = Array.isArray(parsed.data) ? parsed.data : [];
@@ -230,15 +230,23 @@ if (typeof window.posOfflineLoaded === 'undefined') {
             this.isOnline = navigator.onLine;
             this.latency = 0;
             this.checkInterval = null;
+            this.consecutiveFailures = 0;
+            this.failureThreshold = 2;
+            this.lastOkAt = 0;
+            this.lastError = '';
         }
 
         getPingUrl() {
-            return window.POS_PING_URL || 'pos.php?netcheck=1';
+            const baseUrl = window.POS_PING_URL || 'pos.php?netcheck=1';
+            const url = new URL(baseUrl, window.location.href);
+            url.searchParams.set('_', String(Date.now()));
+            return url.toString();
         }
 
         fetchWithTimeout(url, timeoutMs) {
+            const headers = { 'Accept': 'application/json' };
             if (typeof AbortController === 'undefined') {
-                return fetch(url, { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
+                return fetch(url, { method: 'GET', cache: 'no-store', credentials: 'same-origin', headers });
             }
 
             const controller = new AbortController();
@@ -247,6 +255,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
                 method: 'GET',
                 cache: 'no-store',
                 credentials: 'same-origin',
+                headers,
                 signal: controller.signal
             }).finally(() => clearTimeout(timeoutId));
         }
@@ -254,20 +263,29 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         async checkConnection() {
             try {
                 const start = performance.now();
-                const res = await this.fetchWithTimeout(this.getPingUrl(), 5000);
+                const res = await this.fetchWithTimeout(this.getPingUrl(), 8000);
                 if (!res.ok) throw new Error('No OK');
                 // El SW devuelve {offline:true} cuando no hay red real
                 // (evita falso positivo por la caché de pos.php)
                 const ct = res.headers.get('Content-Type') || '';
-                if (ct.includes('application/json')) {
-                    const data = await res.clone().json().catch(() => ({}));
-                    if (data.offline === true) throw new Error('Offline SW');
+                if (!ct.includes('application/json')) throw new Error('Respuesta no JSON');
+                const data = await res.clone().json().catch(() => ({}));
+                if (data.offline === true) throw new Error('Offline SW');
+                if (data.pong !== true) {
+                    throw new Error('Netcheck inválido');
                 }
                 this.latency = Math.round(performance.now() - start);
                 this.isOnline = true;
+                this.consecutiveFailures = 0;
+                this.lastOkAt = Date.now();
+                this.lastError = '';
             } catch (e) {
-                this.isOnline = false;
-                this.latency = 9999;
+                this.consecutiveFailures += 1;
+                this.lastError = e && e.message ? e.message : 'Error de red';
+                if (this.consecutiveFailures >= this.failureThreshold || Date.now() - this.lastOkAt > 60000) {
+                    this.isOnline = false;
+                    this.latency = 9999;
+                }
             }
             this.updateUI();
         }
@@ -286,13 +304,11 @@ if (typeof window.posOfflineLoaded === 'undefined') {
             }, 15000);
             
             window.addEventListener('online', () => {
-                this.isOnline = true;
                 this.checkConnection();
             });
             window.addEventListener('offline', () => {
-                this.isOnline = false;
-                this.latency = 9999;
-                this.updateUI();
+                this.consecutiveFailures = Math.max(this.consecutiveFailures, 1);
+                this.checkConnection();
             });
         }
         

@@ -7,6 +7,8 @@ ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'config_loader.php';
 
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+
 $idVenta = isset($_GET['id']) ? intval($_GET['id']) : 0;
 if ($idVenta <= 0) die('ID de venta inválido.');
 
@@ -26,8 +28,8 @@ if ($ecoMode) {
 }
 
 // ── Cabecera de venta ─────────────────────────────────────────────────────────
-$stmtH = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ?");
-$stmtH->execute([$idVenta]);
+$stmtH = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE id = ? AND id_empresa = ?");
+$stmtH->execute([$idVenta, $EMP_ID]);
 $venta = $stmtH->fetch(PDO::FETCH_ASSOC);
 if (!$venta) die('Venta no encontrada.');
 
@@ -118,8 +120,9 @@ if (!function_exists('ticket_invoice_item_description')) {
 if (!function_exists('ticket_invoice_register')) {
     function ticket_invoice_register(PDO $pdo, array $venta, array $items, array $data): int {
         $idVenta = (int)$data['idVenta'];
-        $stmt = $pdo->prepare("SELECT id FROM facturas WHERE id_ticket_origen = ? ORDER BY id ASC LIMIT 1");
-        $stmt->execute([$idVenta]);
+        $empresaId = (int)($venta['id_empresa'] ?? 1);
+        $stmt = $pdo->prepare("SELECT id FROM facturas WHERE id_ticket_origen = ? AND id_empresa = ? ORDER BY id ASC LIMIT 1");
+        $stmt->execute([$idVenta, $empresaId]);
         $facturaId = (int)($stmt->fetchColumn() ?: 0);
 
         $estadoPago = (($venta['estado_pago'] ?? '') === 'confirmado') ? 'PAGADA' : 'PENDIENTE';
@@ -135,7 +138,7 @@ if (!function_exists('ticket_invoice_register')) {
                         SET numero_factura = ?, fecha_emision = ?, cliente_nombre = ?, cliente_direccion = ?,
                             cliente_telefono = ?, mensajero_nombre = ?, vehiculo = ?, subtotal = ?, total = ?,
                             costo_envio = ?, notas = ?, estado_pago = ?, metodo_pago = ?, fecha_pago = ?, tipo = 'FACTURA'
-                        WHERE id = ?";
+                        WHERE id = ? AND id_empresa = ?";
                 $pdo->prepare($sql)->execute([
                     $data['numFactura'],
                     $venta['fecha'],
@@ -151,15 +154,16 @@ if (!function_exists('ticket_invoice_register')) {
                     $estadoPago,
                     $venta['metodo_pago'] ?? '',
                     $fechaPago,
-                    $facturaId
+                    $facturaId,
+                    $empresaId
                 ]);
                 $pdo->prepare("DELETE FROM facturas_detalle WHERE id_factura = ?")->execute([$facturaId]);
             } else {
                 $sql = "INSERT INTO facturas
                         (numero_factura, fecha_emision, id_ticket_origen, cliente_nombre, cliente_direccion,
                          cliente_telefono, mensajero_nombre, vehiculo, subtotal, total, creado_por, estado,
-                         estado_pago, metodo_pago, fecha_pago, costo_envio, notas, tipo)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVA', ?, ?, ?, ?, ?, 'FACTURA')";
+                         estado_pago, metodo_pago, fecha_pago, costo_envio, notas, tipo, id_empresa)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ACTIVA', ?, ?, ?, ?, ?, 'FACTURA', ?)";
                 $pdo->prepare($sql)->execute([
                     $data['numFactura'],
                     $venta['fecha'],
@@ -176,7 +180,8 @@ if (!function_exists('ticket_invoice_register')) {
                     $venta['metodo_pago'] ?? '',
                     $fechaPago,
                     max(0, (float)$data['costoEnvio']),
-                    $notas
+                    $notas,
+                    $empresaId
                 ]);
                 $facturaId = (int)$pdo->lastInsertId();
             }
@@ -249,6 +254,8 @@ $web       = $config['website']          ?? '';
 $cuenta    = $config['cuenta_bancaria']  ?? '';
 $banco     = $config['banco']            ?? '';
 $email     = $config['email']            ?? '';
+$publicOrigin = config_loader_public_origin($config);
+$publicHost = (string)(parse_url($publicOrigin, PHP_URL_HOST) ?: $publicOrigin);
 
 // Logo: 1. Banner de sucursal de la venta, 2. Logo empresa en config
 $logoUrl = '';
@@ -567,6 +574,7 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
     $cajero       = $cfg['cajero'];
     $idVenta      = $cfg['idVenta'];
     $sysName      = $cfg['sysName'];
+    $webHost      = $cfg['webHost'];
     $cliNombre    = $cfg['cliNombre'];
     $cliTelefono  = $cfg['cliTelefono'];
     $cliDireccion = $cfg['cliDireccion'];
@@ -733,7 +741,7 @@ function render_half_invoice(array $venta, array $items, array $cfg): void {
     <div style="margin-top:4px; border-top:1px solid #ccc; padding-top:2px; font-size:7px; color:#555;">
         Emitido por: <i><?= htmlspecialchars($cajero) ?></i>
         <?php if ($email): ?> · <?= htmlspecialchars($email) ?><?php endif; ?>
-        · <?= htmlspecialchars($sysName) ?> v3.0 · palweb.net
+        · <?= htmlspecialchars($sysName) ?> v3.0 · <?= htmlspecialchars($webHost) ?>
     </div>
 
 </div>
@@ -752,6 +760,7 @@ $cfg = [
     'cajero'       => $cajero,
     'idVenta'      => $idVenta,
     'sysName'      => config_loader_system_name(),
+    'webHost'      => $publicHost,
     'cliNombre'    => $cliNombre,
     'cliTelefono'  => $cliTelefono,
     'cliDireccion' => $cliDireccion,
@@ -956,7 +965,7 @@ $cfg = [
         <?php if ($email): ?> · Contacto: <b><?= htmlspecialchars($email) ?></b><?php endif; ?>
     </div>
     <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">
-        Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · VISITANOS EN https://www.palweb.net
+        Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v3.0 · VISITANOS EN <?= htmlspecialchars($publicOrigin) ?>
     </div>
 
 </div>

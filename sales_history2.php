@@ -18,6 +18,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 // Cargar Configuración
 require_once 'config_loader.php';
 $ALM_ID = intval($config['id_almacen']);
+$EMP_ID = intval($config['id_empresa'] ?? 1);
+$SUC_ID = intval($config['id_sucursal'] ?? 1);
 
 // ---------------------------------------------------------
 // 🧠 LÓGICA DE CONTABILIZACIÓN (POST)
@@ -42,10 +44,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmtTotales = $pdo->prepare("
             SELECT metodo_pago, SUM(total) as total 
             FROM ventas_cabecera 
-            WHERE id_caja = ? 
+            WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
             GROUP BY metodo_pago
         ");
-        $stmtTotales->execute([$sessionId]);
+        $stmtTotales->execute([$sessionId, $EMP_ID, $SUC_ID, $ALM_ID]);
         $pagos = $stmtTotales->fetchAll(PDO::FETCH_KEY_PAIR);
 
         // 3. Preparar Asiento
@@ -104,16 +106,16 @@ try {
     // 1. RESUMEN FINANCIERO
     $sqlFinanzas = "SELECT
                         SUM(d.cantidad * d.precio) as venta_total,
-                        SUM(d.cantidad * p.costo) as costo_total,
+                        SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo)) as costo_total,
                         SUM(d.cantidad) as total_items
                     FROM ventas_detalle d
                     JOIN productos p ON d.id_producto = p.codigo
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                     LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                    WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v');
+                    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v');
     
     $stmtF = $pdo->prepare($sqlFinanzas);
-    $stmtF->execute([$start, $end]);
+    $stmtF->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $finanzas = $stmtF->fetch(PDO::FETCH_ASSOC);
 
     $ventaTotal = floatval($finanzas['venta_total'] ?? 0);
@@ -126,30 +128,30 @@ try {
     $sqlPagos = "SELECT v.metodo_pago, SUM(v.total) as total
                  FROM ventas_cabecera v
                  LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                 WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . "
+                 WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . "
                  GROUP BY v.metodo_pago";
     $stmtP = $pdo->prepare($sqlPagos);
-    $stmtP->execute([$start, $end]);
+    $stmtP->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $pagos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
 
     // 3. SESIONES DE CAJA
     $sqlSesiones = "SELECT s.*, 
                     (SELECT COUNT(*) FROM contabilidad_diario cd WHERE cd.detalle LIKE CONCAT('%Cierre de Caja #', s.id, '%')) as es_contabilizado
                     FROM caja_sesiones s
-                    WHERE s.fecha_contable BETWEEN ? AND ? 
+                    WHERE s.id_empresa = ? AND s.id_sucursal = ? AND s.id_almacen = ? AND s.fecha_contable BETWEEN ? AND ?
                     ORDER BY s.fecha_contable DESC, s.id DESC";
     $stmt = $pdo->prepare($sqlSesiones);
-    $stmt->execute([$start, $end]);
+    $stmt->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $sesiones = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 4. TICKETS
     $sqlTickets = "SELECT v.*, $sqlDateLogic as fecha_contable_calc 
                    FROM ventas_cabecera v 
                    LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                   WHERE $sqlDateLogic BETWEEN ? AND ? 
+                   WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ?
                    ORDER BY v.id DESC";
     $stmtT = $pdo->prepare($sqlTickets);
-    $stmtT->execute([$start, $end]);
+    $stmtT->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $allTickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
     
     // --- PROCESAMIENTO DE KPIS ---
@@ -188,19 +190,19 @@ try {
     
     // KPI RESERVAS
     $stmtRes = $pdo->prepare("
-        SELECT SUM(d.cantidad * (d.precio - p.costo)) as ganancia, SUM(d.cantidad * d.precio) as venta 
+        SELECT SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as ganancia, SUM(d.cantidad * d.precio) as venta
         FROM ventas_detalle d 
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-        WHERE v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ?
+        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ?
     ");
-    $stmtRes->execute([$start, $end]);
+    $stmtRes->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $kpiReserva = $stmtRes->fetch(PDO::FETCH_ASSOC);
 
     // PROMEDIOS DIARIOS
-    $stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . " GROUP BY dia HAVING venta_dia >= 1");
-    $stmtActive->execute([$start, $end]);
+    $stmtActive = $pdo->prepare("SELECT $sqlDateLogic as dia, SUM(v.total) as venta_dia FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v') . " GROUP BY dia HAVING venta_dia >= 1");
+    $stmtActive->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $activeDays = $stmtActive->fetchAll(PDO::FETCH_ASSOC);
     
     $numActiveDays = count($activeDays);
@@ -226,15 +228,15 @@ try {
         SELECT 
             $sqlDateLogic as dia, 
             SUM(d.cantidad * d.precio) as venta, 
-            SUM(d.cantidad * (d.precio - p.costo)) as ganancia 
+            SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as ganancia
         FROM ventas_detalle d 
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-        WHERE $sqlDateLogic BETWEEN ? AND ? 
+        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ?
         GROUP BY dia
     ");
-    $stmtChart->execute([$start, $end]);
+    $stmtChart->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     while ($row = $stmtChart->fetch(PDO::FETCH_ASSOC)) {
         if (isset($dataMap[$row['dia']])) {
             $dataMap[$row['dia']]['venta'] = floatval($row['venta']);
@@ -243,14 +245,14 @@ try {
     }
 
     // INVENTARIO (Físico - Kardex)
-    $sqlInvInicial = "SELECT SUM(k.cantidad * p.costo) FROM kardex k JOIN productos p ON k.id_producto = p.codigo WHERE k.fecha < ? AND k.id_almacen = ?";
+    $sqlInvInicial = "SELECT SUM(k.cantidad * p.costo) FROM kardex k JOIN productos p ON k.id_producto = p.codigo WHERE k.fecha < ? AND k.id_almacen = ? AND k.id_empresa = ? AND p.id_empresa = ?";
     $stmtInvIni = $pdo->prepare($sqlInvInicial);
-    $stmtInvIni->execute([$start . ' 00:00:00', $ALM_ID]);
+    $stmtInvIni->execute([$start . ' 00:00:00', $ALM_ID, $EMP_ID, $EMP_ID]);
     $valorInv = floatval($stmtInvIni->fetchColumn() ?: 0);
 
-    $sqlInvChg = "SELECT DATE(k.fecha) as dia, SUM(k.cantidad * p.costo) as cambio FROM kardex k JOIN productos p ON k.id_producto = p.codigo WHERE k.fecha BETWEEN ? AND ? AND k.id_almacen = ? GROUP BY DATE(k.fecha)";
+    $sqlInvChg = "SELECT DATE(k.fecha) as dia, SUM(k.cantidad * p.costo) as cambio FROM kardex k JOIN productos p ON k.id_producto = p.codigo WHERE k.fecha BETWEEN ? AND ? AND k.id_almacen = ? AND k.id_empresa = ? AND p.id_empresa = ? GROUP BY DATE(k.fecha)";
     $stmtInvChg = $pdo->prepare($sqlInvChg);
-    $stmtInvChg->execute([$start . ' 00:00:00', $end . ' 23:59:59', $ALM_ID]);
+    $stmtInvChg->execute([$start . ' 00:00:00', $end . ' 23:59:59', $ALM_ID, $EMP_ID, $EMP_ID]);
     $cambios = $stmtInvChg->fetchAll(PDO::FETCH_KEY_PAIR);
 
     foreach ($dataMap as $date => &$vals) {
@@ -748,4 +750,3 @@ try {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

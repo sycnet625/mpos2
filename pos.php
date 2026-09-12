@@ -27,6 +27,7 @@ if (isset($_GET['netcheck']) || isset($_GET['ping'])) {
     exit;
 }
 
+/*
 $posRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/pos\.php$~i', $posRequestPath)) {
     $posPrettyPath = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/pos.php')), '/');
@@ -34,6 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
     header('Location: ' . $posPrettyPath, true, 302);
     exit;
 }
+*/
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_set_cookie_params([
@@ -61,7 +63,7 @@ if ($posBasePath === '') {
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
 $posScopePath = $posPrefix . '/';
-$posUiVersion = 'v9.73';
+$posUiVersion = 'v9.82';
 
 function pos_is_authenticated(): bool
 {
@@ -198,6 +200,11 @@ function pos_normalize_items($items): array
 
 pos_enforce_session_security();
 $POS_CSRF_TOKEN = pos_ensure_csrf_token();
+// Las lecturas conservan el contexto, pero no bloquean otras peticiones del cajero.
+// Los POST (por ejemplo cambiar almacén) mantienen la sesión escribible.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
 
 function pos_image_meta(string $code): array {
     $safe = trim($code);
@@ -338,19 +345,43 @@ if (isset($_GET['load_products'])) {
     }
 
     try {
-        $cond = ["p.activo = 1"];
+        $since = isset($_GET['since']) ? (int)$_GET['since'] : 0;
+        $cond = [];
+        if ($since <= 0) $cond[] = "p.activo = 1";
+        $sucursalID = (int)$ctxConfig['id_sucursal'];
+        $almacenID = (int)$ctxConfig['id_almacen'];
+        $cond[] = "((p.es_servicio = 1 AND p.id_sucursal_origen = {$sucursalID})
+            OR EXISTS (SELECT 1 FROM stock_almacen scope_stock
+                WHERE scope_stock.id_producto = p.codigo
+                  AND scope_stock.id_sucursal = {$sucursalID}
+                  AND scope_stock.id_almacen = {$almacenID})
+            OR (p.id_sucursal_origen = {$sucursalID} AND NOT EXISTS (
+                SELECT 1 FROM stock_almacen any_stock WHERE any_stock.id_producto = p.codigo
+            )))";
         if (empty($ctxConfig['mostrar_materias_primas'])) $cond[] = "p.es_materia_prima = 0";
         if (empty($ctxConfig['mostrar_servicios'])) $cond[] = "p.es_servicio = 0";
         if (!empty($ctxConfig['categorias_ocultas'])) {
             $placeholders = implode(',', array_fill(0, count($ctxConfig['categorias_ocultas']), '?'));
-            $cond[] = "p.categoria NOT IN ($placeholders)";
+            $cond[] = "(p.categoria NOT IN ($placeholders)
+                        OR (COALESCE(p.es_pos, 0) = 1 AND COALESCE(p.es_materia_prima, 0) = 0))";
         }
 
-        $where = implode(" AND ", $cond);
-        $almacenID = (int)$ctxConfig['id_almacen'];
         $params = $ctxConfig['categorias_ocultas'] ?? [];
+        if ($since > 0) {
+            $cond[] = '(p.updated_at > FROM_UNIXTIME(?) OR EXISTS (
+                SELECT 1 FROM stock_almacen sync_stock
+                WHERE sync_stock.id_producto = p.codigo
+                  AND sync_stock.id_sucursal = ?
+                  AND sync_stock.id_almacen = ?
+                  AND sync_stock.ultima_actualizacion > FROM_UNIXTIME(?)
+            ))';
+            $params[] = $since;
+            $params[] = $sucursalID;
+            $params[] = $almacenID;
+            $params[] = $since;
+        }
+        $where = implode(" AND ", $cond);
         
-        $sucursalID = (int)$ctxConfig['id_sucursal'];
         $sqlProd = "SELECT p.codigo as id, p.codigo, p.nombre,
                     p.precio                                                         AS precio_global,
                     COALESCE(p.precio_mayorista, 0)                                  AS precio_mayorista_global,
@@ -358,11 +389,19 @@ if (isset($_GET['load_products'])) {
                     COALESCE(ps.precio_mayorista, p.precio_mayorista, p.precio)      AS precio_mayorista_suc,
                     COALESCE(ps.precio_venta,    p.precio)                           AS precio,
                     p.categoria, p.es_elaborado, p.es_servicio, COALESCE(p.es_combo, 0) AS es_combo,
-                    p.codigo_barra_1, p.codigo_barra_2,
+                    p.codigo_barra_1, p.codigo_barra_2, p.activo,
+                    GREATEST(
+                        COALESCE(UNIX_TIMESTAMP(p.updated_at), 0),
+                        COALESCE((SELECT UNIX_TIMESTAMP(MAX(s2.ultima_actualizacion))
+                                  FROM stock_almacen s2
+                                  WHERE s2.id_producto = p.codigo
+                                    AND s2.id_sucursal = ?
+                                    AND s2.id_almacen = ?), 0)
+                    ) AS updated_at_epoch,
                     COALESCE(p.favorito,0) as favorito,
                     (SELECT COALESCE(SUM(s.cantidad), 0)
                      FROM stock_almacen s
-                     WHERE s.id_producto = p.codigo AND s.id_almacen = ?
+                     WHERE s.id_producto = p.codigo AND s.id_almacen = ? AND s.id_sucursal = ?
                        AND EXISTS (SELECT 1 FROM productos ep WHERE ep.codigo = s.id_producto AND ep.id_empresa = ?)) as stock
                     FROM productos p
                     LEFT JOIN productos_precios_sucursal ps
@@ -371,9 +410,9 @@ if (isset($_GET['load_products'])) {
                     ORDER BY p.nombre";
 
         $stmtProd = $pdo->prepare($sqlProd);
-        $stmtProd->execute(array_merge([$almacenID, (int)$ctxConfig['id_empresa'], $sucursalID, (int)$ctxConfig['id_empresa']], $params));
+        $stmtProd->execute(array_merge([$sucursalID, $almacenID, $almacenID, $sucursalID, (int)$ctxConfig['id_empresa'], $sucursalID, (int)$ctxConfig['id_empresa']], $params));
         $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-        $prods = combo_apply_product_rows($pdo, $prods, (int)$ctxConfig['id_empresa'], $almacenID);
+        $prods = combo_apply_product_rows($pdo, $prods, (int)$ctxConfig['id_empresa'], $almacenID, $sucursalID);
 
         // Procesar para incluir colores e imágenes
         foreach ($prods as &$p) {
@@ -385,13 +424,52 @@ if (isset($_GET['load_products'])) {
         }
         unset($p);
         
-        echo json_encode(['status' => 'success', 'products' => $prods, 'timestamp' => time()]);
+        if ($since > 0) {
+            $prods = array_values(array_filter($prods, static function (array $product) use ($since): bool {
+                return (int)($product['updated_at_epoch'] ?? 0) > $since;
+            }));
+        }
+        echo json_encode(['status' => 'success', 'products' => $prods,
+            'incremental' => $since > 0, 'timestamp' => time()]);
         exit;
         
     } catch (Exception $e) {
         echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
         exit;
     }
+}
+
+// ENDPOINT: Actualización rápida del stock visible de productos vendidos
+if (isset($_GET['load_product_stock'])) {
+    header('Content-Type: application/json');
+    try {
+        $ctxConfig = array_merge(["id_empresa" => 1, "id_sucursal" => 1, "id_almacen" => 1], $config ?? []);
+        if (!empty($_SESSION['id_almacen'])) $ctxConfig['id_almacen'] = (int)$_SESSION['id_almacen'];
+        if (!empty($_SESSION['id_sucursal'])) $ctxConfig['id_sucursal'] = (int)$_SESSION['id_sucursal'];
+        $codes = array_values(array_unique(array_filter(array_map('trim', explode(',', (string)($_GET['codes'] ?? ''))))));
+        if (!$codes) {
+            echo json_encode(['status' => 'success', 'products' => []]);
+            exit;
+        }
+        $placeholders = implode(',', array_fill(0, count($codes), '?'));
+        $sql = "SELECT p.codigo, p.es_combo, COALESCE(SUM(s.cantidad), 0) AS stock
+                FROM productos p
+                LEFT JOIN stock_almacen s ON s.id_producto = p.codigo
+                    AND s.id_sucursal = ? AND s.id_almacen = ?
+                WHERE p.id_empresa = ? AND p.codigo IN ($placeholders)
+                GROUP BY p.codigo";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge([(int)$ctxConfig['id_sucursal'], (int)$ctxConfig['id_almacen'], (int)$ctxConfig['id_empresa']], $codes));
+        $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $products = combo_apply_product_rows($pdo, $products, (int)$ctxConfig['id_empresa'], (int)$ctxConfig['id_almacen'], (int)$ctxConfig['id_sucursal']);
+        $products = array_map(static function (array $row): array {
+            return ['codigo' => $row['codigo'], 'stock' => (float)$row['stock']];
+        }, $products);
+        echo json_encode(['status' => 'success', 'products' => $products]);
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    }
+    exit;
 }
 
 // ENDPOINT: Actualizar almacén de sesión (selección tras login multi-almacén)
@@ -440,9 +518,10 @@ if (isset($_GET['toggle_fav']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     pos_require_csrf($inp);
     $codigo = pos_clean_sku($inp['codigo'] ?? '');
     if ($codigo) {
-        $pdo->prepare("UPDATE productos SET favorito = 1 - favorito WHERE codigo = ? AND id_empresa = ?")->execute([$codigo, (int)($config['id_empresa'] ?? 1)]);
+        $favEmpresa = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+        $pdo->prepare("UPDATE productos SET favorito = 1 - favorito WHERE codigo = ? AND id_empresa = ?")->execute([$codigo, $favEmpresa]);
         $favStmt = $pdo->prepare("SELECT favorito FROM productos WHERE codigo = ? AND id_empresa = ?");
-        $favStmt->execute([$codigo, (int)($config['id_empresa'] ?? 1)]);
+        $favStmt->execute([$codigo, $favEmpresa]);
         echo json_encode(['status' => 'success', 'favorito' => (int)$favStmt->fetchColumn()]);
     } else {
         echo json_encode(['status' => 'error', 'msg' => 'Código inválido']);
@@ -512,8 +591,8 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($skus as $s) {
             $s = pos_clean_sku($s);
             if (!$s) continue;
-            $q = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-            $q->execute([$s, $ALM]);
+            $q = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=? AND id_sucursal=?");
+            $q->execute([$s, $ALM, $SUC]);
             $stocks[$s] = floatval($q->fetchColumn() ?: 0);
         }
         echo json_encode(['status'=>'success','stocks'=>$stocks]);
@@ -525,12 +604,21 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $ke = new KardexEngine($pdo);
     $results = [];
     $stocks_updated = [];
+    $debugStep = 'inicio';
 
     try {
+        $debugStep = 'abrir transacción';
         if (!$pdo->inTransaction()) $pdo->beginTransaction();
         // Crear tablas merma si hacen falta (solo una vez)
         if ($accion === 'merma') {
+            $debugStep = 'preparar tablas de merma';
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_cabecera (id INT AUTO_INCREMENT PRIMARY KEY, usuario VARCHAR(100), motivo_general TEXT, total_costo_perdida DECIMAL(12,2) DEFAULT 0, estado VARCHAR(20) DEFAULT 'PROCESADA', id_sucursal INT DEFAULT 1, id_empresa INT DEFAULT 1, id_almacen INT DEFAULT 1, fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            // CREATE TABLE IF NOT EXISTS no modifica tablas antiguas. Las
+            // instalaciones existentes pueden no tener aún estas columnas.
+            $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN IF NOT EXISTS id_sucursal INT DEFAULT 1");
+            $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN IF NOT EXISTS id_empresa INT DEFAULT 1");
+            $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN IF NOT EXISTS id_almacen INT DEFAULT 1");
+            $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN IF NOT EXISTS fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP");
             $pdo->exec("CREATE TABLE IF NOT EXISTS mermas_detalle (id INT AUTO_INCREMENT PRIMARY KEY, id_merma INT, id_producto VARCHAR(50), cantidad DECIMAL(10,3), costo_al_momento DECIMAL(12,2), motivo_especifico TEXT) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             $totalCosto = 0;
             foreach ($items as $it) {
@@ -538,6 +626,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $p->execute([trim($it['sku']??''), $EMP]);
                 $totalCosto += abs(floatval($it['cantidad']??0)) * floatval($p->fetchColumn()?:0);
             }
+            $debugStep = 'insertar cabecera de merma';
             $pdo->prepare("INSERT INTO mermas_cabecera (usuario,motivo_general,total_costo_perdida,id_sucursal,id_empresa,id_almacen,fecha_registro) VALUES(?,?,?,?,?,?,?)")->execute([$usuario,$motivo,$totalCosto,$SUC,$EMP,$ALM,$fecha]);
             $idMerma = $pdo->lastInsertId();
         }
@@ -608,10 +697,11 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     "SELECT a.id as alm_id, a.id_sucursal as suc_id
                      FROM almacenes a
                      LEFT JOIN sucursales s ON a.id_sucursal = s.id
-                     WHERE a.nombre LIKE ? OR s.nombre LIKE ?
+                     WHERE a.id_empresa = ? AND COALESCE(a.activo, 1) = 1
+                       AND (a.nombre LIKE ? OR s.nombre LIKE ?)
                      LIMIT 1"
                 );
-                $stmtDA->execute(["%$destino%", "%$destino%"]);
+                $stmtDA->execute([$EMP, "%$destino%", "%$destino%"]);
                 $rowDA = $stmtDA->fetch(PDO::FETCH_ASSOC);
                 if ($rowDA) {
                     $destAlmID = (int)$rowDA['alm_id'];
@@ -630,6 +720,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         foreach ($items as $item) {
+            $debugStep = 'validar producto';
             $sku = trim($item['sku'] ?? '');
             $qty = floatval($item['cantidad'] ?? 0);
             // Para conteo se permite qty=0 (el usuario contó cero unidades)
@@ -643,46 +734,63 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$prod) { $results[] = "SKU no encontrado: $sku"; continue; }
             $costo = floatval($prod['costo']);
 
+            if ($accion === 'transferencia') {
+                $stockTransfer = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? AND id_sucursal = ? FOR UPDATE");
+                $stockTransfer->execute([$sku, $ALM, $SUC]);
+                $stockDisponible = 0.0;
+                foreach ($stockTransfer->fetchAll(PDO::FETCH_COLUMN) as $stockRow) {
+                    $stockDisponible += (float)$stockRow;
+                }
+                if ($stockDisponible + 0.000001 < abs($qty)) {
+                    throw new Exception("Stock insuficiente para transferir {$sku}. Disponible: {$stockDisponible}. Requerido: " . abs($qty) . ".");
+                }
+            }
+
             if ($accion === 'entrada') {
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'ENTRADA',abs($qty),"ENTRADA POS: $motivo",$costo,$usuario,$fecha);
+                $debugStep = "registrar entrada SKU $sku";
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'ENTRADA',abs($qty),"ENTRADA POS: $motivo",$costo,$usuario,$fecha,$EMP);
                 $pdo->prepare("INSERT INTO entradas_detalle (id_entrada,id_producto,cantidad,costo_unitario,subtotal) VALUES(?,?,?,?,?)")->execute([$idEntrada,$sku,abs($qty),$costo,abs($qty)*$costo]);
                 $results[] = "+".abs($qty)." ".$prod['nombre'];
 
             } elseif ($accion === 'merma') {
+                $debugStep = "insertar detalle de merma SKU $sku";
                 $pdo->prepare("INSERT INTO mermas_detalle (id_merma,id_producto,cantidad,costo_al_momento,motivo_especifico) VALUES(?,?,?,?,?)")->execute([$idMerma,$sku,abs($qty),$costo,$motivo]);
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',-abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha);
+                $debugStep = "registrar kardex MERMA SKU $sku";
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'MERMA',-abs($qty),"MERMA #$idMerma POS",$costo,$usuario,$fecha,$EMP);
                 $results[] = "-".abs($qty)." ".$prod['nombre'];
 
             } elseif ($accion === 'ajuste') {
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$qty,"AJUSTE POS: $motivo",$costo,$usuario,$fecha);
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$qty,"AJUSTE POS: $motivo",$costo,$usuario,$fecha,$EMP);
                 $results[] = ($qty>0?"+":"").$qty." ".$prod['nombre'];
 
             } elseif ($accion === 'conteo') {
-                $sq = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-                $sq->execute([$sku,$ALM]);
+                $sq = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=? AND id_sucursal=?");
+                $sq->execute([$sku,$ALM,$SUC]);
                 $stockAnt = floatval($sq->fetchColumn() ?: 0);
                 $delta = $qty - $stockAnt;
                 // Registrar incluso cuando delta=0 (confirma el stock real)
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: {$stockAnt}→{$qty}",$costo,$usuario,$fecha);
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',$delta,"CONTEO FISICO POS: {$stockAnt}→{$qty}",$costo,$usuario,$fecha,$EMP);
                 $results[] = $prod['nombre'].": ".($delta >= 0 ? "+$delta" : "$delta");
 
             } elseif ($accion === 'transferencia') {
                 // Débito en almacén origen
-                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSF_SALIDA→{$destino} POS: $motivo",$costo,$usuario,$fecha);
+                $ke->registrarMovimiento($sku,$ALM,$SUC,'AJUSTE',-abs($qty),"TRANSF_SALIDA→{$destino} POS: $motivo",$costo,$usuario,$fecha,$EMP);
                 $pdo->prepare("INSERT INTO transferencias_detalle (id_transferencia,id_producto,cantidad,costo_unitario,subtotal) VALUES(?,?,?,?,?)")->execute([$idTransferencia,$sku,abs($qty),$costo,abs($qty)*$costo]);
                 // Crédito en almacén destino si existe en la misma BD
                 if ($destAlmID) {
-                    $ke->registrarMovimiento($sku,$destAlmID,$destSucID,'ENTRADA',abs($qty),"TRANSF_ENTRADA desde Alm#{$ALM} POS: $motivo",$costo,$usuario,$fecha);
+                    $ke->registrarMovimiento($sku,$destAlmID,$destSucID,'ENTRADA',abs($qty),"TRANSF_ENTRADA desde Alm#{$ALM} POS: $motivo",$costo,$usuario,$fecha,$EMP);
                 }
                 $results[] = "-".abs($qty)." ".$prod['nombre']." → $destino";
             }
 
             // Stock actualizado para caché JS
-            $sq2 = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=?");
-            $sq2->execute([$sku,$ALM]);
+            $debugStep = "consultar stock actualizado SKU $sku";
+            $sq2 = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto=? AND id_almacen=? AND id_sucursal=?");
+            $sq2->execute([$sku,$ALM,$SUC]);
             $stocks_updated[] = ['sku'=>$sku, 'nuevo_stock'=>floatval($sq2->fetchColumn()?:0)];
         }
 
+        $debugStep = 'confirmar transacción';
         if ($pdo->inTransaction()) $pdo->commit();
 
         // ── Registro en Audit Trail ──────────────────────────────────────────
@@ -693,6 +801,7 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
             'ajuste'        => AUDIT_INV_AJUSTE,
             'conteo'        => AUDIT_INV_CONTEO
         ];
+        $debugStep = 'registrar auditoría';
         if (isset($auditActions[$accion])) {
             log_audit($pdo, $auditActions[$accion], $usuario, [
                 'motivo'      => $motivo,
@@ -707,10 +816,26 @@ if (isset($_GET['inventario_api']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $preview = implode(', ', array_slice($results,0,3)) . ($n>3 ? '…':'');
         echo json_encode(['status'=>'success','msg'=>"$n items procesados: $preview",'stocks_updated'=>$stocks_updated]);
 
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
-        error_log('inventario_api error: ' . $e->getMessage());
-        echo json_encode(['status'=>'error','msg'=>'Error al procesar inventario. Intente nuevamente.']);
+        $debugId = bin2hex(random_bytes(4));
+        error_log('inventario_api error [' . $debugId . '] ' . json_encode([
+            'step' => $debugStep,
+            'accion' => $accion,
+            'empresa' => $EMP,
+            'sucursal' => $SUC,
+            'almacen' => $ALM,
+            'usuario' => $usuario,
+            'items' => $items,
+            'error' => $e->getMessage(),
+            'exception' => get_class($e),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+            'trace' => $e->getTraceAsString()
+        ], JSON_UNESCAPED_UNICODE));
+        $isAdmin = !empty($_SESSION['admin_logged_in']) || (($_SESSION['pos_rol'] ?? '') === 'admin');
+        $detail = $isAdmin ? " [debug $debugId | $debugStep: " . $e->getMessage() . "]" : '';
+        echo json_encode(['status'=>'error','msg'=>'Error al procesar inventario.' . $detail, 'debug_id'=>$debugId]);
     }
     exit;
 }
@@ -734,6 +859,55 @@ $posLoginBrandLogo = trim((string)($config['marca_pos_login_logo'] ?? ''));
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 $dynamicCashiers = pos_get_dynamic_cashiers($pdo, $config);
+
+// Listado de inventario para impresión térmica desde el teclado del POS.
+if (isset($_GET['inventory_print_data'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    pos_require_auth_json();
+    $ctxConfig = array_merge([
+        'id_almacen' => 1, 'id_sucursal' => 1, 'id_empresa' => 1,
+        'mostrar_materias_primas' => false, 'mostrar_servicios' => true,
+        'categorias_ocultas' => []
+    ], $config);
+    if (!empty($_SESSION['id_almacen'])) $ctxConfig['id_almacen'] = (int)$_SESSION['id_almacen'];
+    if (!empty($_SESSION['id_sucursal'])) $ctxConfig['id_sucursal'] = (int)$_SESSION['id_sucursal'];
+    if (!empty($_SESSION['id_empresa'])) $ctxConfig['id_empresa'] = (int)$_SESSION['id_empresa'];
+
+    $conditions = ['p.activo = 1', 'p.id_empresa = ?',
+        '((p.es_servicio = 1 AND p.id_sucursal_origen = ' . (int)$ctxConfig['id_sucursal'] . ') OR EXISTS (SELECT 1 FROM stock_almacen scope_stock WHERE scope_stock.id_producto = p.codigo
+            AND scope_stock.id_sucursal = ' . (int)$ctxConfig['id_sucursal'] . '
+            AND scope_stock.id_almacen = ' . (int)$ctxConfig['id_almacen'] . '))'];
+    $params = [(int)$ctxConfig['id_empresa']];
+    if (empty($ctxConfig['mostrar_materias_primas'])) $conditions[] = 'p.es_materia_prima = 0';
+    if (empty($ctxConfig['mostrar_servicios'])) $conditions[] = 'p.es_servicio = 0';
+    if (!empty($ctxConfig['categorias_ocultas'])) {
+        $placeholders = implode(',', array_fill(0, count($ctxConfig['categorias_ocultas']), '?'));
+        $conditions[] = "(p.categoria NOT IN ($placeholders)
+                          OR (COALESCE(p.es_pos, 0) = 1 AND COALESCE(p.es_materia_prima, 0) = 0))";
+        $params = array_merge($params, $ctxConfig['categorias_ocultas']);
+    }
+    try {
+        $stockSubquery = "(SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s
+                            WHERE s.id_producto = p.codigo AND s.id_almacen = ? AND s.id_sucursal = ?)";
+        $sql = "SELECT p.nombre, COALESCE(NULLIF(TRIM(p.categoria), ''), 'General') AS categoria,
+                       $stockSubquery AS existencia
+                  FROM productos p WHERE " . implode(' AND ', $conditions) . "
+                    AND $stockSubquery > 0
+                 ORDER BY categoria ASC, p.nombre ASC";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge([(int)$ctxConfig['id_almacen'], (int)$ctxConfig['id_sucursal']], $params, [(int)$ctxConfig['id_almacen'], (int)$ctxConfig['id_sucursal']]));
+        echo json_encode([
+            'status' => 'success', 'products' => $stmt->fetchAll(PDO::FETCH_ASSOC),
+            'fecha' => date('d/m/Y H:i:s'),
+            'usuario' => (string)($_SESSION['cajero'] ?? $_SESSION['admin_user'] ?? $_SESSION['admin_name'] ?? 'POS-Admin'),
+            'empresa' => $companyBrandName
+        ], JSON_UNESCAPED_UNICODE);
+    } catch (Throwable $e) {
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'msg' => 'No se pudo cargar el inventario.']);
+    }
+    exit;
+}
 
 // Banners por sucursal — fondo del carrito y selector de login
 $sucursalesBanners = [];
@@ -759,7 +933,10 @@ try {
 } catch (Throwable $e) { /* tabla puede no existir */ }
 
 // Migración de columnas — se ejecuta una única vez y crea un flag file para no repetirla
-$_posMigFlag = __DIR__ . '/.pos_schema_v2';
+$_posMigFlagPrimary = __DIR__ . '/.pos_schema_v2';
+$_posMigFlag = (file_exists($_posMigFlagPrimary) || is_writable(__DIR__))
+    ? $_posMigFlagPrimary
+    : rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'palweb_pos_schema_v2';
 if (!file_exists($_posMigFlag)) {
     try {
         // ADD COLUMN IF NOT EXISTS requiere MySQL 8.0+ o MariaDB 10.3+
@@ -774,10 +951,10 @@ if (!file_exists($_posMigFlag)) {
             $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_1 VARCHAR(64) NULL AFTER codigo");
         if (!isset($existingCols['codigo_barra_2']))
             $pdo->exec("ALTER TABLE productos ADD COLUMN codigo_barra_2 VARCHAR(64) NULL AFTER codigo_barra_1");
-        file_put_contents($_posMigFlag, date('Y-m-d H:i:s'));
+        @file_put_contents($_posMigFlag, date('Y-m-d H:i:s'));
     } catch (Exception $e) { /* silenciar — la próxima carga lo reintentará */ }
 }
-unset($_posMigFlag);
+unset($_posMigFlag, $_posMigFlagPrimary);
 
 // Carga de Datos
 $prods = [];
@@ -786,23 +963,35 @@ $clientsData = [];
 $mensajeros = []; // Array para mensajeros
 
 try {
-    $cond = ["p.activo = 1"];
+    // Si ya existe una sesión de cajero, su contexto es la fuente de verdad.
+    // Esto hace que una recarga posterior al PIN nunca vuelva al pos.cfg.
+    $sucursalID = intval($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+    $almacenID = intval($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+    $empresaID = intval($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+    // Solo catálogo asignado a la sucursal y al almacén de la caja.
+    $cond = ["p.activo = 1",
+        "((p.es_servicio = 1 AND p.id_sucursal_origen = {$sucursalID})
+            OR EXISTS (SELECT 1 FROM stock_almacen scope_stock
+                WHERE scope_stock.id_producto = p.codigo
+                  AND scope_stock.id_sucursal = {$sucursalID}
+                  AND scope_stock.id_almacen = {$almacenID})
+            OR (p.id_sucursal_origen = {$sucursalID} AND NOT EXISTS (
+                SELECT 1 FROM stock_almacen any_stock WHERE any_stock.id_producto = p.codigo
+            )))"];
     if (!$config['mostrar_materias_primas']) $cond[] = "p.es_materia_prima = 0";
     if (!$config['mostrar_servicios']) $cond[] = "p.es_servicio = 0";
     if (!empty($config['categorias_ocultas'])) {
         $placeholders = implode(',', array_fill(0, count($config['categorias_ocultas']), '?'));
-        $cond[] = "p.categoria NOT IN ($placeholders)";
+        $cond[] = "(p.categoria NOT IN ($placeholders)
+                    OR (COALESCE(p.es_pos, 0) = 1 AND COALESCE(p.es_materia_prima, 0) = 0))";
     }
     
     $where = implode(" AND ", $cond);
-    $almacenID = intval($config['id_almacen']);
-    $sucursalID = intval($config['id_sucursal'] ?? 1);
-    $empresaID = intval($config['id_empresa'] ?? 1);
     $params = $config['categorias_ocultas'];
 
     // Categorias
     $stmtCat = $pdo->prepare("SELECT DISTINCT p.categoria as nombre_categoria, c.color, c.emoji FROM productos p LEFT JOIN categorias c ON p.categoria = c.nombre WHERE p.id_empresa = ? AND $where ORDER BY p.categoria");
-    $stmtCat->execute(array_merge([$empresaID], $params));
+    $stmtCat->execute(array_merge([$empresaID, $empresaID], $params));
     $catsData = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
     // Productos
@@ -817,7 +1006,7 @@ try {
                 COALESCE(p.favorito,0) as favorito,
                 (SELECT COALESCE(SUM(s.cantidad), 0)
                  FROM stock_almacen s
-                 WHERE s.id_producto = p.codigo AND s.id_almacen = ?
+                 WHERE s.id_producto = p.codigo AND s.id_almacen = ? AND s.id_sucursal = ?
                    AND EXISTS (SELECT 1 FROM productos ep WHERE ep.codigo = s.id_producto AND ep.id_empresa = ?)) as stock
                 FROM productos p
                 LEFT JOIN productos_precios_sucursal ps
@@ -826,9 +1015,9 @@ try {
                 ORDER BY p.nombre";
 
     $stmtProd = $pdo->prepare($sqlProd);
-    $stmtProd->execute(array_merge([$almacenID, $empresaID, $sucursalID, $empresaID], $params));
+    $stmtProd->execute(array_merge([$almacenID, $sucursalID, $empresaID, $sucursalID, $empresaID], $params));
     $prods = $stmtProd->fetchAll(PDO::FETCH_ASSOC);
-    $prods = combo_apply_product_rows($pdo, $prods, intval($config['id_empresa'] ?? 1), $almacenID);
+    $prods = combo_apply_product_rows($pdo, $prods, $empresaID, $almacenID, $sucursalID);
 
     // CARGA DE CLIENTES (NUEVO - YA ORDENADO)
     $stmtCli = $pdo->query("SELECT id, nombre, telefono, direccion, nit_ci FROM clientes WHERE activo = 1 ORDER BY nombre ASC");
@@ -854,16 +1043,17 @@ foreach ($prods as &$p) {
 
 // Query de más vendidos (para sugerencias cuando no hay favoritos)
 $mostSoldCodes = [];
-$mostSoldEmpId = (int)($config['id_empresa'] ?? 1);
+$mostSoldEmpId = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
 $mostSoldSucId = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$mostSoldAlmId = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
 try {
     $stmtMs = $pdo->prepare(
         "SELECT d.id_producto FROM ventas_detalle d
          JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
-         WHERE v.id_empresa = ? AND v.id_sucursal = ?
+         WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?
          GROUP BY d.id_producto ORDER BY SUM(d.cantidad) DESC LIMIT 10"
     );
-    $stmtMs->execute([$mostSoldEmpId, $mostSoldSucId]);
+    $stmtMs->execute([$mostSoldEmpId, $mostSoldSucId, $mostSoldAlmId]);
     $mostSoldCodes = $stmtMs->fetchAll(PDO::FETCH_COLUMN);
 } catch (Exception $e) { $mostSoldCodes = []; }
 ?>
@@ -872,13 +1062,22 @@ try {
 <head>
 <base href="<?php echo htmlspecialchars($posDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
 <!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
 
   gtag('config', 'G-ZM015S9N6M');
+  window.addEventListener('load', () => {
+    const loadAnalytics = () => {
+      const script = document.createElement('script');
+      script.async = true;
+      script.src = 'https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M';
+      document.head.appendChild(script);
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(loadAnalytics, {timeout: 5000});
+    else setTimeout(loadAnalytics, 1500);
+  }, {once: true});
 </script>
 
     <meta charset="UTF-8">
@@ -892,13 +1091,16 @@ try {
         .pos-container { display: flex; height: 100vh; width: 100vw; overflow: hidden; }
         .left-panel { background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; z-index: 20; box-shadow: 2px 0 5px rgba(0,0,0,0.05); height: 100%; overflow-y: auto; }
         .top-bar { flex-shrink: 0; }
+        #btnApplyInventorySearch { display: none; }
         .cart-list { flex-grow: 1; overflow-y: auto; background: #fff; border-bottom: 1px solid #eee; min-height: 150px; }
         .controls-wrapper { padding: 8px; padding-bottom: 60px; background: #fff; flex-shrink: 0; border-top: 1px solid #eee; }
         .right-panel { flex-grow: 1; display: flex; flex-direction: column; background: #e9ecef; padding: 10px; overflow: hidden; position: relative; }
         @media (orientation: landscape) { .pos-container { flex-direction: row; } .left-panel { width: 35%; min-width: 340px; max-width: 420px; } .right-panel { width: 65%; } #keypadContainer { display: grid !important; } #toggleKeypadBtn { display: none !important; } }
-        @media (orientation: portrait) { .pos-container { flex-direction: column; } .left-panel { width: 100%; height: 45%; border-right: none; border-bottom: 2px solid #ccc; order: 1; } .right-panel { width: 100%; height: 55%; order: 2; padding: 5px; } #keypadContainer { display: none; } #toggleKeypadBtn { display: block; width: 100%; margin-bottom: 5px; } .controls-wrapper { padding-bottom: 10px; } }
+        @media (orientation: portrait) { .pos-container { flex-direction: column; } .left-panel { width: 100%; height: 45%; border-right: none; border-bottom: 2px solid #ccc; order: 1; } .right-panel { width: 100%; height: 55%; order: 2; padding: 5px; } #keypadContainer { display: none; } #toggleKeypadBtn { display: block; width: 100%; margin-bottom: 5px; } .controls-wrapper { padding-bottom: 10px; } body.inventory-mode-active #btnApplyInventorySearch { display: block !important; } }
         .cart-item { padding: 8px 12px; border-bottom: 1px solid #f0f0f0; cursor: pointer; position: relative; font-size: 0.95rem; }
         .cart-item.selected { background: #e8f0fe; border-left: 4px solid #0d6efd; }
+        .cart-remove-btn { display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; width: 20px; height: 20px; margin: 0 4px 0 0; padding: 0; border: 0; border-radius: 50%; background: #dc3545; color: #fff; font-size: 15px; font-weight: 900; line-height: 1; cursor: pointer; }
+        .cart-remove-btn:hover { background: #b02a37; }
         .cart-note { font-size: 0.75rem; color: #d63384; font-style: italic; display: block; }
         .discount-tag { font-size: 0.7rem; background: #dc3545; color: white; padding: 1px 4px; border-radius: 3px; margin-left: 5px; }
         .price-origin-tag { font-size: 0.68rem; background: #d9f7ff; color: #0b7285; padding: 1px 5px; border-radius: 999px; margin-left: 5px; font-weight: 700; border: 1px solid #9eeaf9; }
@@ -1121,7 +1323,7 @@ try {
         .stock-badge { position: absolute !important; top: 5px; right: 5px; border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.75rem; z-index: 10; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
         .stock-ok { background: #ffc107; color: black; } .stock-zero { background: #dc3545; color: white; }
         #pinOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px); }
-        .pin-box { background: white; padding: 30px; border-radius: 15px; text-align: center; width: 320px; box-sizing: border-box; }
+        .pin-box { background: white; padding: 30px; border-radius: 15px; text-align: center; width: 320px; max-height: calc(100vh - 24px); overflow-y: auto; box-sizing: border-box; overscroll-behavior: contain; }
         #pinDisplay { min-width: 8ch; display: inline-block; letter-spacing: 0.5ch; height: 1.2em; line-height: 1.2em; }
         #pinAttemptsDots { height: 1.2em; }
         #pinLockMsg { min-height: 0; }
@@ -1156,6 +1358,25 @@ try {
             background: linear-gradient(135deg, #f8fafc, #e2e8f0);
             border: 1px solid #cbd5e1;
             box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+        }
+        /* En teléfonos/tablets apaisados el teclado del sistema y la barra del
+           navegador reducen la altura útil. El login debe poder desplazarse y
+           no quedar cortado debajo del borde inferior. */
+        @media (orientation: landscape) and (max-height: 700px) {
+            #pinOverlay { align-items: flex-start; justify-content: center; overflow-y: auto; padding: 8px max(8px, env(safe-area-inset-left)) 8px max(8px, env(safe-area-inset-right)); box-sizing: border-box; }
+            .pin-box { width: min(360px, calc(100vw - 16px)); max-height: calc(100dvh - 16px); padding: 14px 18px; border-radius: 12px; }
+            .pin-brand-logo { width: 140px; height: 48px; margin-bottom: 5px; padding: 3px; border-radius: 10px; }
+            .pin-box h3 { font-size: 1.05rem; margin-bottom: 0 !important; }
+            .pin-box > .small { font-size: 0.72rem; margin-bottom: 2px !important; }
+            .pin-version-badge { margin-top: 1px; padding: 1px 6px; font-size: 0.58rem; }
+            #pinDisplay { font-size: 1.8rem !important; margin-bottom: 2px !important; }
+            #pinAttemptsDots { height: 0.9em; margin-bottom: 3px !important; }
+            .pin-grid { gap: 5px; margin-top: 5px; }
+            .pin-btn { height: 44px; min-height: 44px; font-size: 1.1rem; border-radius: 8px; }
+            #almacenPicker { margin-top: 8px !important; }
+            #almacenPicker .mb-2 { margin-bottom: 4px !important; }
+            #almacenPicker select { margin-bottom: 6px !important; }
+            #pwaBanner { display: none !important; }
         }
         .pin-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
         .pin-btn { height: 60px; font-size: 1.5rem; border-radius: 10px; border: 1px solid #ccc; background: #f8f9fa; }
@@ -1553,6 +1774,30 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     </div>
 </div>
 
+<div class="modal fade" id="pendingSyncModal" tabindex="-1" aria-labelledby="pendingSyncModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-sm">
+        <div class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold" id="pendingSyncModalLabel"><i class="fas fa-cloud-upload-alt me-2 text-warning"></i>Sincronización</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div id="pendingSyncStatus" class="text-center text-muted py-2">Consultando pendientes...</div>
+                <div class="row g-2 text-center mb-3">
+                    <div class="col-6"><div class="border rounded p-2"><div id="pendingSyncTotal" class="fs-3 fw-bold text-warning">0</div><small class="text-muted">Pendientes</small></div></div>
+                    <div class="col-6"><div class="border rounded p-2"><div id="pendingSyncErrors" class="fs-3 fw-bold text-danger">0</div><small class="text-muted">Errores</small></div></div>
+                </div>
+                <div id="pendingSyncSources" class="small text-muted mb-2"></div>
+                <div id="pendingSyncLast" class="small text-muted"></div>
+            </div>
+            <div class="modal-footer p-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="refreshPendingSyncPanel()"><i class="fas fa-sync me-1"></i>Actualizar</button>
+                <button type="button" id="pendingSyncRunBtn" class="btn btn-warning btn-sm fw-bold" onclick="syncManual()"><i class="fas fa-cloud-upload-alt me-1"></i>Sincronizar ahora</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="pos-container">
     <div class="left-panel">
         <div class="px-2 pt-2 pb-1 bg-dark-blue text-white top-bar shadow-sm" style="display:flex; flex-direction:column; gap:6px;">
@@ -1586,10 +1831,10 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <i class="fas fa-layer-group"></i> <?php echo htmlspecialchars($companyBrandName); ?>
                     </span>
                     <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Sucursal">
-                        <i class="fas fa-building"></i> <span id="ctxSucursalBadge"><?php echo intval($config['id_sucursal'] ?? 1); ?></span>
+                        <i class="fas fa-building"></i> <span id="ctxSucursalBadge"><?php echo $sucursalID; ?></span>
                     </span>
                     <span class="badge bg-secondary" style="font-size:0.68rem; padding:3px 6px;" title="Almacén">
-                        <i class="fas fa-warehouse"></i> <span id="ctxAlmacenBadge"><?php echo intval($config['id_almacen']); ?></span>
+                        <i class="fas fa-warehouse"></i> <span id="ctxAlmacenBadge"><?php echo $almacenID; ?></span>
                     </span>
                 </div>
                 <div class="d-flex align-items-center gap-1">
@@ -1622,7 +1867,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         <?php
         // Fondo del carrito: banner de la sucursal activa (si existe), o logo corporativo
         $cartBannerUrl = '';
-        $sucActiva = (int)($config['id_sucursal'] ?? 1);
+        $sucActiva = $sucursalID;
         if (!empty($sucursalesBanners[$sucActiva])) {
             $cartBannerUrl = '/' . ltrim($sucursalesBanners[$sucActiva], '/');
         }
@@ -1677,9 +1922,14 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                         <button class="btn-ctrl c-red" onclick="clearCart()">Vaciar</button>
                         <button id="btnEditPrice" class="btn-ctrl c-yellow" onclick="editPrice()" disabled title="Requiere supervisor o administrador"><i class="fas fa-dollar-sign"></i> Precio</button>
                         <button class="btn-ctrl c-teal" onclick="showHistorialModal()"><i class="fas fa-history"></i> HIST</button>
-                        <button class="btn-ctrl c-blue" onclick="openOrderTemplatesModal()"><i class="fas fa-bookmark"></i> PLANT</button>
-                        <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="syncManual()" disabled><i class="fas fa-cloud-upload-alt"></i> 0</button>
+                        <button id="btnSyncKeypad" class="btn-ctrl c-orange" style="opacity:0.4;" onclick="openPendingSyncPanel()" disabled aria-label="Ver ventas pendientes de sincronización"><i class="fas fa-cloud-upload-alt"></i> 0</button>
                         <button class="btn-ctrl c-green" onclick="modifyQty(10)" title="Sumar 10 unidades">+10</button>
+                        <button id="btnPrintInventory" class="btn-ctrl c-grey" onclick="printInventoryList()" title="Imprimir inventario para conteo físico">
+                            <i class="fas fa-print"></i> PRINT I
+                        </button>
+                        <button id="btnPrintCartOffer" class="btn-ctrl c-grey" onclick="printCartOffer()" title="Imprimir oferta comercial del carrito">
+                            <i class="fas fa-print"></i> PRINT
+                        </button>
                     </div>
                 </div>
                 <button class="btn btn-primary btn-pay fw-bold shadow-sm" onclick="openPaymentModal()">
@@ -1722,7 +1972,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     <div class="right-panel">
         <div class="d-flex align-items-stretch gap-2 mb-2" style="flex-shrink:0;">
             <div class="input-group shadow-sm" style="flex:1;">
-                <button id="btnRefresh" onclick="refreshProducts()" class="btn btn-primary border-0"><i class="fas fa-sync-alt"></i></button>
+                <button id="btnRefresh" onclick="refreshProducts(null, true)" class="btn btn-primary border-0" title="Actualizar catálogo completo"><i class="fas fa-sync-alt"></i></button>
 
                 <button id="btnForceDownload" onclick="forceDownloadProducts()" class="btn btn-danger border-0" title="Forzar descarga del servidor">
                     <i class="fas fa-cloud-download-alt"></i>
@@ -1741,7 +1991,8 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                 </button>
 
                 <span class="input-group-text bg-white border-0"><i class="fas fa-search"></i></span>
-                <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." onkeyup="filterProducts()" autocomplete="off" autocorrect="off" spellcheck="false">
+                <input type="text" id="searchInput" class="form-control border-0" placeholder="Buscar / Escanear..." oninput="scheduleProductSearch()" onkeydown="if(event.key==='Enter') filterProducts()" autocomplete="off" autocorrect="off" spellcheck="false">
+                <button id="btnApplyInventorySearch" class="btn btn-light border-0" onclick="forceInventorySearch()" title="Aplicar filtro por nombre"><i class="fas fa-filter"></i><span class="d-none d-sm-inline ms-1">Filtrar</span></button>
                 <button class="btn btn-light border-0" onclick="document.getElementById('searchInput').value='';filterProducts()">X</button>
                 <button id="btnHotkeyHelp" class="btn btn-light border-0" onclick="toggleHotkeyPanel()" title="Atajos de teclado">⌨</button>
             </div>
@@ -1915,11 +2166,13 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     let currentPaymentMode = 'cash';
     window.POS_CSRF_TOKEN_VALUE = <?php echo json_encode($POS_CSRF_TOKEN); ?>;
     window.POS_ACTIVE_CONTEXT = {
-        id_empresa: <?php echo (int)($config['id_empresa'] ?? 1); ?>,
-        id_sucursal: <?php echo (int)($config['id_sucursal'] ?? 1); ?>,
-        id_almacen: <?php echo (int)($config['id_almacen'] ?? 1); ?>
+        id_empresa: <?php echo (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1); ?>,
+        id_sucursal: <?php echo (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1); ?>,
+        id_almacen: <?php echo (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1); ?>
     };
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
+    window.POS_STORAGE_SCOPE = 'e<?php echo (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1); ?>_s<?php echo (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1); ?>_a<?php echo (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1); ?>_c<?php echo (int)($_SESSION['id_caja'] ?? $config['id_caja'] ?? 0); ?>';
+    window.POS_CATALOG_SYNC_AT = <?php echo time(); ?>;
     // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
     const CAJEROS_CONFIG = <?php
         echo json_encode(array_map(static function(array $c): array {
@@ -2036,7 +2289,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
 </script>
 
 <script src="pos1.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
-<script src="pos-offline-system.js?v=20260529-ui2"></script>
+<script src="pos-offline-system.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
 
 <script>
 // ── PWA Install Banner ────────────────────────────────────────────────────────
@@ -2461,7 +2714,7 @@ window.updateCartBackground = function (sucursalId) {
 </div>
 
 <?php include_once 'modal_payment.php'; ?>
-<?php include_once 'modal_edit_sale.php'; ?>
+<?php $posLazySaleEditor = true; include_once 'modal_edit_sale.php'; ?>
 <div class="modal fade" id="orderTemplatesModal" tabindex="-1" data-bs-backdrop="static">
     <div class="modal-dialog modal-lg modal-dialog-scrollable">
         <div class="modal-content border-0 shadow-lg">

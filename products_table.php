@@ -2,7 +2,32 @@
 // ARCHIVO: products_table.php v3.2 (MEJORAS DE AUDITORÍA, KPI, IMPORT/EXPORT, MOBILE)
 ini_set('display_errors', 0);
 if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+
+if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    $ptableReturnUrl = $_SERVER['REQUEST_URI'] ?? '/products/';
+    // El login vive en la raíz; una ruta relativa produciría /products/login.php.
+    header('Location: /login.php?redirect=' . rawurlencode($ptableReturnUrl));
+    exit;
+}
+
 ob_start();
+
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
+
+$ptableScriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/products_table.php'));
+$ptableBasePath = rtrim($ptableScriptDir === '.' ? '/' : $ptableScriptDir, '/');
+if ($ptableBasePath === '') $ptableBasePath = '/';
+// La aplicación y sus endpoints viven en la raíz; /products/ es solo una ruta
+// amigable que incluye este archivo.
+$ptableDocumentBase = '/';
+$ptableRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/products_table\.php$~i', $ptableRequestPath)) {
+    $ptablePrettyPath = $ptableBasePath === '/' ? '/products/' : $ptableBasePath . '/products/';
+    header('Location: ' . $ptablePrettyPath, true, 302);
+    exit;
+}
 
 // Si es AJAX, registrar un manejador de errores que devuelva JSON
 if (isset($_GET['ajax_load'])) {
@@ -21,7 +46,8 @@ require_once 'product_image_pipeline.php';
 // 1. CARGAR CONFIGURACIÓN
 // ---------------------------------------------------------
 require_once 'config_loader.php';
-require_once 'inventory_suite_layout.php';
+// Las operaciones usan el contexto resuelto, sin escribir en la sesión.
+session_write_close();
 
 $EMP_ID = intval($config['id_empresa']);
 $SUC_ID = intval($config['id_sucursal']);
@@ -336,6 +362,23 @@ function ptable_json_exit(array $payload, int $statusCode = 200): void {
     exit;
 }
 
+function ptable_execute_timed(PDO $pdo, string $sql, array $params = [], float $thresholdSeconds = 0.5): PDOStatement {
+    $startedAt = microtime(true);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $elapsed = microtime(true) - $startedAt;
+
+    if ($elapsed >= $thresholdSeconds) {
+        error_log(sprintf(
+            '[SQL LENTA][products_table] %.3fs | %s',
+            $elapsed,
+            preg_replace('/\s+/', ' ', trim($sql))
+        ));
+    }
+
+    return $stmt;
+}
+
 function ptable_register_upload_shutdown(): void {
     register_shutdown_function(static function () {
         $error = error_get_last();
@@ -404,8 +447,8 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
                 ?>
                 <article class="product-mini-card <?php echo $isActive ? '' : 'card-inactive'; ?>">
                     <div class="product-mini-image">
-                        <img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>"
-                             class="product-mini-img" data-code="<?php echo $p['codigo']; ?>"
+                        <img src="<?php echo $hasImg ? 'image.php?w=400&code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>"
+                             loading="lazy" decoding="async" width="400" height="400" class="product-mini-img" data-code="<?php echo $p['codigo']; ?>"
                              onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"
                              alt="<?php echo htmlspecialchars($p['nombre']); ?>">
                         <?php if (!$isActive): ?>
@@ -419,7 +462,7 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
                         <div class="d-flex justify-content-between align-items-start mb-2">
                             <span class="product-mini-sku"><?php echo htmlspecialchars($p['codigo']); ?></span>
                             <div class="dropdown">
-                                <button class="btn btn-sm btn-link text-muted p-0" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-v"></i></button>
+                                <button class="btn btn-sm btn-link text-muted p-0" aria-label="Más opciones" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-v"></i></button>
                                 <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0">
                                     <li><a class="dropdown-item" href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>"><i class="fas fa-history me-2"></i>Historial</a></li>
                                     <li><a class="dropdown-item" href="#" onclick="cloneProduct('<?php echo $p['codigo']; ?>')"><i class="fas fa-clone me-2"></i>Clonar</a></li>
@@ -456,13 +499,13 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
             $rowClass = $isActive ? '' : 'table-danger opacity-75';
     ?>
     <tr class="<?php echo $rowClass; ?>">
-        <td class="no-print ps-3"><input type="checkbox" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
+        <td class="no-print ps-3"><input type="checkbox" aria-label="Seleccionar producto" class="form-check-input bulk-check" value="<?php echo $p['codigo']; ?>"></td>
         <td class="text-center no-print">
             <a href="product_history.php?sku=<?php echo urlencode($p['codigo']); ?>" class="btn btn-sm btn-outline-secondary border-0" title="Historial"><i class="fas fa-history"></i></a>
         </td>
         <td class="no-print col-img">
-            <img src="<?php echo $hasImg ? 'image.php?code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>" 
-                 class="prod-img-table" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"
+            <img src="<?php echo $hasImg ? 'image.php?w=96&code='.urlencode($p['codigo']).$imgV : 'assets/img/no-image-50.png'; ?>"
+                 alt="<?php echo htmlspecialchars($p['nombre'], ENT_QUOTES, 'UTF-8'); ?>" loading="lazy" decoding="async" width="50" height="50" data-code="<?php echo htmlspecialchars($p['codigo'], ENT_QUOTES, 'UTF-8'); ?>" class="prod-img-table" onclick="openImageSourceModal('<?php echo $p['codigo']; ?>')"
                  style="cursor:pointer">
         </td>
         
@@ -486,10 +529,10 @@ function renderProductRows($rows, $localPath, string $viewMode = 'list') {
 
         <td class="text-center col-web_reserv">
             <div class="form-check form-switch d-flex justify-content-center mb-1" title="Visible en WEB">
-                <input class="form-check-input" type="checkbox" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
+                <input class="form-check-input" type="checkbox" aria-label="Visible en la web" onchange="toggleWeb('<?php echo $p['codigo']; ?>', this)" <?php echo $p['es_web'] ? 'checked' : ''; ?>>
             </div>
             <div class="form-check form-switch d-flex justify-content-center" title="Aceptar reservas sin stock">
-                <input class="form-check-input bg-warning border-warning" type="checkbox" onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)" <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
+                <input class="form-check-input bg-warning border-warning" type="checkbox" aria-label="Producto reservable" onchange="toggleReservable('<?php echo $p['codigo']; ?>', this)" <?php echo ($p['es_reservable'] ?? 0) ? 'checked' : ''; ?>>
             </div>
         </td>
 
@@ -1316,6 +1359,7 @@ $integrityAlertCount = 0;
 // Paginación y Ordenamiento
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 10;
+$limit = max(10, min($limit, 100));
 if ($page < 1) $page = 1;
 $offset = ($page - 1) * $limit;
 
@@ -1337,7 +1381,7 @@ elseif ($filterStatus === 'inactive') $whereClauses[] = "p.activo = 0";
 if ($onlyProd) $whereClauses[] = "p.es_materia_prima = 0 AND p.es_servicio = 0";
 if ($filterCode) { $whereClauses[] = "(p.codigo LIKE :c OR p.codigo_barra_1 LIKE :c OR p.codigo_barra_2 LIKE :c)"; $params[':c'] = "%$filterCode%"; }
 if ($filterName) { $whereClauses[] = "p.nombre LIKE :n"; $params[':n'] = "%$filterName%"; }
-if ($onlyWithStock) { $whereClauses[] = ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " > 0"; }
+if ($onlyWithStock) { $whereClauses[] = "COALESCE(stock_scope.stock_total, 0) > 0"; }
 
 // Soporte para sincronización incremental
 if (isset($_GET['since'])) {
@@ -1347,38 +1391,75 @@ if (isset($_GET['since'])) {
 
 $whereSQL = implode(" AND ", $whereClauses);
 
-// HAVING (Stock)
-$havingClause = "";
+// Filtro de stock. Se aplica sobre el stock agregado del JOIN para evitar
+// repetir una subconsulta correlacionada por cada producto.
+$stockWhereClauses = [];
 if ($filterStockRange !== '') {
     $val = $filterStockRange;
     if (strpos($val, '-') !== false) {
         $parts = explode('-', $val);
-        $havingClause = "HAVING stock_total BETWEEN " . floatval($parts[0]) . " AND " . floatval($parts[1]);
+        $stockWhereClauses[] = "COALESCE(stock_scope.stock_total, 0) BETWEEN " . floatval($parts[0]) . " AND " . floatval($parts[1]);
     } elseif (strpos($val, '<') === 0) {
-        $havingClause = "HAVING stock_total < " . floatval(substr($val, 1));
+        $stockWhereClauses[] = "COALESCE(stock_scope.stock_total, 0) < " . floatval(substr($val, 1));
     } elseif (strpos($val, '>') === 0) {
-        $havingClause = "HAVING stock_total > " . floatval(substr($val, 1));
+        $stockWhereClauses[] = "COALESCE(stock_scope.stock_total, 0) > " . floatval(substr($val, 1));
     } else {
-        $havingClause = "HAVING stock_total = " . floatval($val);
+        $stockWhereClauses[] = "COALESCE(stock_scope.stock_total, 0) = " . floatval($val);
     }
 }
+if ($stockWhereClauses) {
+    $whereClauses = array_merge($whereClauses, $stockWhereClauses);
+}
+$whereSQL = implode(" AND ", $whereClauses);
 
 // QUERY DATOS
+$almIdsCsv = !empty($SCOPE_ALM_IDS) ? implode(',', array_map('intval', $SCOPE_ALM_IDS)) : '0';
+$stockJoinSql = "LEFT JOIN (
+                SELECT id_producto, SUM(cantidad) AS stock_total
+                FROM stock_almacen
+                WHERE id_almacen IN ($almIdsCsv)
+                GROUP BY id_producto
+            ) stock_scope ON stock_scope.id_producto = p.codigo";
 $sqlBase = "SELECT p.*, 
-            " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " as stock_total,
+            COALESCE(stock_scope.stock_total, 0) as stock_total,
             (p.precio - p.costo) as ganancia_neta,
             (CASE WHEN p.precio > 0 THEN ((p.precio - p.costo) / p.precio) * 100 ELSE 0 END) as ganancia_pct,
             p.precio_mayorista
             FROM productos p 
-            WHERE $whereSQL 
-            $havingClause";
+            $stockJoinSql
+            WHERE $whereSQL";
 
-$stmtAll = $pdo->prepare($sqlBase . " ORDER BY $sort $dir");
-$stmtAll->execute($params);
-$allRows = $stmtAll->fetchAll(PDO::FETCH_ASSOC); // Traemos todo para poder filtrar con HAVING y paginar en PHP
-$totalProducts = count($allRows);
-$totalPages = ceil($totalProducts / $limit);
-$productosPagina = array_slice($allRows, $offset, $limit);
+// La sincronización no necesita contar páginas, calcular indicadores ni renderizar filas.
+if ($isAjax && isset($_GET['sync_mode'])) {
+    $syncPage = max(1, (int)($_GET['sync_page'] ?? 1));
+    $syncLimit = 200;
+    $syncStmt = ptable_execute_timed($pdo, $sqlBase . ' ORDER BY p.codigo ASC LIMIT '
+        . ($syncLimit + 1) . ' OFFSET ' . (($syncPage - 1) * $syncLimit), $params);
+    $syncRows = $syncStmt->fetchAll(PDO::FETCH_ASSOC);
+    $hasMore = count($syncRows) > $syncLimit;
+    if ($hasMore) array_pop($syncRows);
+    ptable_json_exit(['status' => 'success', 'products' => $syncRows,
+        'has_more' => $hasMore, 'server_time' => date('Y-m-d H:i:s')]);
+}
+
+$countStockJoinSql = ($onlyWithStock || $stockWhereClauses) ? $stockJoinSql : '';
+$countSql = "SELECT COUNT(DISTINCT p.codigo)
+             FROM productos p
+             $countStockJoinSql
+             WHERE $whereSQL";
+$stmtCount = ptable_execute_timed($pdo, $countSql, $params);
+$totalProducts = (int)$stmtCount->fetchColumn();
+$totalPages = max(1, (int)ceil($totalProducts / $limit));
+
+$pagedSql = $sqlBase . " ORDER BY $sort $dir LIMIT " . (int)$limit . " OFFSET " . (int)$offset;
+$stmtPage = $pdo->prepare($pagedSql);
+$startedAt = microtime(true);
+$stmtPage->execute($params);
+$elapsed = microtime(true) - $startedAt;
+if ($elapsed >= 0.5) {
+    error_log(sprintf('[SQL LENTA][products_table] %.3fs | %s', $elapsed, preg_replace('/\s+/', ' ', trim($pagedSql))));
+}
+$productosPagina = $stmtPage->fetchAll(PDO::FETCH_ASSOC);
 
 $kpiData = [
     'total_empresa' => 0,
@@ -1388,65 +1469,38 @@ $kpiData = [
     'bajo_stock' => 0
 ];
 try {
-    $stmtKpi = $pdo->prepare("
-        SELECT
-            COUNT(*) AS total_empresa,
-            SUM(CASE WHEN activo = 1 THEN 1 ELSE 0 END) AS activos,
-            SUM(CASE WHEN activo = 0 THEN 1 ELSE 0 END) AS inactivos
-        FROM productos
-        WHERE id_empresa = ?
-          AND " . str_replace('p.', '', ptable_scope_sql('productos', $SUC_ID, $SCOPE_ALM_IDS)) . "
-    ");
-    $stmtKpi->execute([$EMP_ID]);
+    // Una agregación de stock para todos los indicadores, sin subconsultas por producto.
+    $stmtKpi = ptable_execute_timed($pdo, "
+        SELECT COUNT(*) AS total_empresa,
+            COALESCE(SUM(p.activo = 1), 0) AS activos,
+            COALESCE(SUM(p.activo = 0), 0) AS inactivos,
+            COALESCE(SUM(COALESCE(stock_scope.stock_total, 0) <= 0), 0) AS sin_stock,
+            COALESCE(SUM(COALESCE(stock_scope.stock_total, 0) > 0
+                AND stock_scope.stock_total <= COALESCE(p.stock_minimo, 0)), 0) AS bajo_stock
+        FROM productos p
+        $stockJoinSql
+        WHERE p.id_empresa = ? AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS), [$EMP_ID]);
     $k = $stmtKpi->fetch(PDO::FETCH_ASSOC) ?: [];
-    $kpiData = [
-        'total_empresa' => (int)($k['total_empresa'] ?? 0),
-        'activos' => (int)($k['activos'] ?? 0),
-        'inactivos' => (int)($k['inactivos'] ?? 0),
-        'sin_stock' => 0,
-        'bajo_stock' => 0
-    ];
-    $stmtSinStock = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM productos p
-        WHERE p.id_empresa = ?
-        AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . "
-          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " <= 0
-    ");
-    $stmtSinStock->execute([$EMP_ID]);
-    $kpiData['sin_stock'] = (int)$stmtSinStock->fetchColumn();
-    $stmtBajoStock = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM productos p
-        WHERE p.id_empresa = ?
-          AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . "
-          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " > 0
-          AND " . ptable_stock_total_sql('p', $SCOPE_ALM_IDS) . " <= COALESCE(p.stock_minimo, 0)
-    ");
-    $stmtBajoStock->execute([$EMP_ID]);
-    $kpiData['bajo_stock'] = (int)$stmtBajoStock->fetchColumn();
-    $stmtIntegrity = $pdo->prepare("
-        SELECT COUNT(*) FROM (
-            SELECT codigo FROM productos p
-            WHERE p.id_empresa = ?
-              AND (COALESCE(p.precio,0) <= 0 OR TRIM(COALESCE(p.nombre,'')) = '' OR TRIM(COALESCE(p.categoria,'')) = '')
-              OR EXISTS (
-                  SELECT 1 FROM stock_almacen s
-                  WHERE s.id_producto = p.codigo AND s.id_almacen IN (" . (!empty($SCOPE_ALM_IDS) ? implode(',', array_map('intval', $SCOPE_ALM_IDS)) : '0') . ")
-                  AND s.cantidad < 0
-              )
-              OR EXISTS (
-                  SELECT 1 FROM productos p2
-                  WHERE p2.id_empresa = p.id_empresa
-                    AND p2.codigo_barra_1 IS NOT NULL
-                    AND p2.codigo_barra_1 <> ''
-                    AND p2.codigo_barra_1 = p.codigo_barra_1
-                    AND p2.codigo <> p.codigo
-              )
-        ) x
-    ");
-    $stmtIntegrity->execute([$EMP_ID]);
+    foreach (array_keys($kpiData) as $key) {
+        $kpiData[$key] = (int)($k[$key] ?? 0);
+    }
+    // Esta alerta solo se muestra en el documento, no en respuestas de paginación.
+    if (!$isAjax) {
+    $stmtIntegrity = ptable_execute_timed($pdo, "
+        SELECT COUNT(*) FROM productos p
+        LEFT JOIN (
+            SELECT codigo_barra_1 FROM productos
+            WHERE id_empresa = ? AND codigo_barra_1 IS NOT NULL AND codigo_barra_1 <> ''
+            GROUP BY codigo_barra_1 HAVING COUNT(DISTINCT codigo) > 1
+        ) duplicados ON duplicados.codigo_barra_1 = p.codigo_barra_1
+        WHERE p.id_empresa = ? AND " . ptable_scope_sql('p', $SUC_ID, $SCOPE_ALM_IDS) . "
+          AND (COALESCE(p.precio, 0) <= 0 OR TRIM(COALESCE(p.nombre, '')) = ''
+            OR TRIM(COALESCE(p.categoria, '')) = '' OR duplicados.codigo_barra_1 IS NOT NULL
+            OR EXISTS (SELECT 1 FROM stock_almacen s
+                WHERE s.id_producto = p.codigo AND s.id_almacen IN ($almIdsCsv) AND s.cantidad < 0))
+    ", [$EMP_ID, $EMP_ID]);
     $integrityAlertCount = (int)$stmtIntegrity->fetchColumn();
+    }
 } catch (Exception $e) {
     // no-op, deja valores por defecto
 }
@@ -1460,16 +1514,6 @@ $valorInventario = floatval($stmtValor->fetchColumn() ?: 0);
 // --- RESPUESTA AJAX ---
 if ($isAjax) {
     try {
-        if (isset($_GET['sync_mode'])) {
-            // Modo sincronización: Devolver datos crudos para IndexedDB
-            ptable_json_exit([
-                'status' => 'success',
-                'products' => $allRows,
-                'server_time' => date('Y-m-d H:i:s'),
-                'kpi' => $kpiData
-            ]);
-        }
-
         ptable_json_exit([
             'status' => 'success',
             'html' => renderProductRows($productosPagina, $localPath, $ajaxViewMode),
@@ -1484,27 +1528,20 @@ if ($isAjax) {
     }
     exit;
 }
-$ptableScriptDir = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/products_table.php'));
-$ptableBasePath = rtrim($ptableScriptDir === '.' ? '/' : $ptableScriptDir, '/');
-if ($ptableBasePath === '') $ptableBasePath = '/';
-$ptableDocumentBase = $ptableBasePath === '/' ? '/' : $ptableBasePath . '/';
-$ptableRequestPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
-if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && preg_match('~/products_table\.php$~i', $ptableRequestPath)) {
-    $ptablePrettyPath = $ptableBasePath === '/' ? '/products/' : $ptableBasePath . '/products/';
-    header('Location: ' . $ptablePrettyPath, true, 302);
-    exit;
-}
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
+    <meta name="description" content="Gestiona productos, precios y existencias por sucursal y almacén con el inventario de PalWeb.">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <base href="<?php echo htmlspecialchars($ptableDocumentBase, ENT_QUOTES, 'UTF-8'); ?>">
     <title>Inventario & Web</title>
     <link rel="manifest" href="manifest-products.php?v=20260522-fix1">
-    <link href="assets/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/all.min.css">
-    <link rel="stylesheet" href="assets/css/inventory-suite.css">
+    <link href="assets/css/bootstrap.min.css?v=<?= filemtime(__DIR__ . '/assets/css/bootstrap.min.css') ?>" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/all.min.css?v=<?= filemtime(__DIR__ . '/assets/css/all.min.css') ?>">
+    <link rel="stylesheet" href="assets/css/inventory-suite.css?v=<?= filemtime(__DIR__ . '/assets/css/inventory-suite.css') ?>">
+    <?php require_once 'inventory_suite_layout.php'; ?>
     <style>
         :root {
             --pt-ink: #0f172a;
@@ -1820,9 +1857,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
         .status-offline .status-dot { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
         
         @keyframes pulse-green {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+            0%, 100% { transform: scale(0.95); opacity: 0.65; }
+            70% { transform: scale(1.15); opacity: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .status-online .status-dot { animation: none; }
         }
 
         /* --- Responsive Adjustments --- */
@@ -1849,6 +1888,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
         }
 
         @media (max-width: 480px) {
+            body.inventory-suite {
+                overflow-x: hidden;
+            }
+            .inventory-products-shell {
+                padding-left: .5rem !important;
+                padding-right: .5rem !important;
+            }
+            .inventory-products-shell > section {
+                padding: 1.25rem !important;
+                border-radius: 1rem !important;
+            }
+            .inventory-products-shell > section h1 {
+                font-size: 1.35rem;
+            }
+            .inventory-products-shell > section .btn {
+                flex: 1 1 calc(50% - .5rem);
+                min-width: 0;
+                white-space: normal;
+            }
+            .pt-filter-drawer,
+            .inventory-products-shell .bg-white.border.rounded-4 {
+                padding: 1rem !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+            }
+            .inventory-products-shell .form-select,
+            .inventory-products-shell .form-control {
+                min-height: 42px;
+            }
+            .inventory-products-shell .table-responsive {
+                border-radius: 1rem;
+                -webkit-overflow-scrolling: touch;
+            }
             .products-cards-grid {
                 grid-template-columns: 1fr;
             }
@@ -1882,9 +1954,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && empty($_SERVER['QUERY_STRING']) && p
             <div class="d-flex flex-wrap gap-2">
                 <a href="inventory_report.php" target="_blank" rel="noopener" class="btn btn-light fw-bold px-3"><i class="fas fa-chart-line me-1"></i>Reporte</a>
                 <a href="inventory_report.php?view=model" target="_blank" rel="noopener" class="btn btn-outline-light fw-bold px-3"><i class="fas fa-flask me-1"></i>Modelaje</a>
+                <a href="products_mobile.php" class="btn btn-outline-light fw-bold px-3"><i class="fas fa-mobile-screen-button me-1"></i>Móvil</a>
                 <button onclick="forceImageCacheReset()" class="btn btn-outline-light px-3" title="Limpia caché de imágenes"><i class="fas fa-sync me-1"></i>Caché</button>
                 <button onclick="printInventoryCount()" class="btn btn-warning text-dark fw-bold px-3"><i class="fas fa-clipboard-list me-1"></i>Conteo</button>
-                <a href="dashboard.php" class="btn btn-dark px-3"><i class="fas fa-home"></i></a>
+                <a href="dashboard.php" class="btn btn-dark px-3" aria-label="Ir al panel principal"><i class="fas fa-home"></i></a>
             </div>
         </div>
         <!-- Decorative elements -->
@@ -1983,9 +2056,12 @@ $selectedAlmIdJs = (string)(int)$selectedAlmId;
         <div class="d-flex flex-grow-1 gap-2 align-items-center">
             <div class="pt-search-wrap flex-grow-1">
                 <i class="fas fa-search"></i>
-                <input type="text" class="pt-search-input form-control border-0 shadow-sm" id="f_name" placeholder="Buscar por nombre, SKU o código de barras..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
+                <input type="text" class="pt-search-input form-control border-0 shadow-sm" id="f_name" aria-label="Buscar productos" placeholder="Buscar por nombre, SKU o código de barras..." value="{$filterNameEsc}" onkeydown="if(event.key==='Enter'){event.preventDefault();loadData(1);}">
             </div>
-            <select class="form-select border-0 shadow-sm w-auto" id="warehouseSelect" onchange="changeWarehouseScope()">
+            <button type="button" class="pt-btn pt-btn-primary shadow-sm" id="btnForceNameFilter" onclick="forceNameFilter()" title="Aplicar el filtro por nombre">
+                <i class="fas fa-filter me-1"></i>Filtrar
+            </button>
+            <select class="form-select border-0 shadow-sm w-auto" id="warehouseSelect" aria-label="Almacén" onchange="changeWarehouseScope()">
                 {$warehouseOptionsHtml}
             </select>
         </div>
@@ -1995,7 +2071,7 @@ $selectedAlmIdJs = (string)(int)$selectedAlmId;
             <button class="pt-btn pt-btn-secondary shadow-sm" id="btnWithStock" onclick="toggleWithStock()"><i class="fas fa-box-open"></i> <span id="withStockLabel">Todos</span></button>
             <button class="pt-btn pt-btn-secondary shadow-sm" onclick="toggleViewMode()"><i class="fas fa-th-large"></i> <span id="viewModeLabel">{$viewModeLabelText}</span></button>
             <div class="dropdown d-inline-block">
-                <button class="pt-btn pt-btn-secondary shadow-sm" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-h"></i></button>
+                <button class="pt-btn pt-btn-secondary shadow-sm" aria-label="Más opciones" data-bs-toggle="dropdown"><i class="fas fa-ellipsis-h"></i></button>
                 <ul class="dropdown-menu shadow-lg border-0">
                     <li><a class="dropdown-item" href="#" onclick="exportCsv()"><i class="fas fa-download me-2"></i>Exportar CSV</a></li>
                     <li><a class="dropdown-item" href="#" onclick="document.getElementById('importFileInput').click()"><i class="fas fa-file-import me-2"></i>Importar CSV</a></li>
@@ -2018,11 +2094,11 @@ echo $integrityAlertHtml;
         <form id="filterForm" onsubmit="event.preventDefault(); loadData(1);">
             <div class="row g-3">
                 <div class="col-md-2 col-6">
-                    <label class="form-label small fw-bold text-muted">SKU / Cód. Barras</label>
+                    <label for="f_code" class="form-label small fw-bold text-muted">SKU / Cód. Barras</label>
                     <input type="text" class="form-control" id="f_code" placeholder="Ej: 230001" value="<?= $filterCodeEsc ?>">
                 </div>
                 <div class="col-md-2 col-6">
-                    <label class="form-label small fw-bold text-muted">Estado</label>
+                    <label for="f_status" class="form-label small fw-bold text-muted">Estado</label>
                     <select class="form-select" id="f_status">
                         <option value="active">Activos</option>
                         <option value="inactive">Inactivos</option>
@@ -2030,11 +2106,11 @@ echo $integrityAlertHtml;
                     </select>
                 </div>
                 <div class="col-md-2 col-6">
-                    <label class="form-label small fw-bold text-muted">Rango stock</label>
+                    <label for="f_stock" class="form-label small fw-bold text-muted">Rango stock</label>
                     <input type="text" class="form-control" id="f_stock" placeholder="Ej: <5, >10, 0">
                 </div>
                 <div class="col-md-2 col-6">
-                    <label class="form-label small fw-bold text-muted">Por página</label>
+                    <label for="f_limit" class="form-label small fw-bold text-muted">Por página</label>
                     <select class="form-select" id="f_limit" onchange="loadData(1)">
                         <option value="10">10</option>
                         <option value="20">20</option>
@@ -2043,7 +2119,7 @@ echo $integrityAlertHtml;
                     </select>
                 </div>
                 <div class="col-md-2 col-12">
-                    <label class="form-label small fw-bold text-muted">Modo import</label>
+                    <label for="importMode" class="form-label small fw-bold text-muted">Modo import</label>
                     <select class="form-select" id="importMode">
                         <option value="update_create">Actualizar o crear</option>
                         <option value="update_only">Solo actualizar</option>
@@ -2063,7 +2139,7 @@ echo $integrityAlertHtml;
         </div>
         
         <div class="d-flex flex-grow-1 flex-wrap gap-2">
-            <select class="form-select form-select-sm w-auto border-0 bg-light fw-bold" id="bulkActionSelect" style="min-width:200px">
+            <select class="form-select form-select-sm w-auto border-0 bg-light fw-bold" id="bulkActionSelect" aria-label="Acción masiva" style="min-width:200px">
                 <option value="">-- Acción masiva --</option>
                 <option value="print_labels">🏷️ Imprimir etiquetas</option>
                 <option value="web_on">🌐 Activar en WEB</option>
@@ -2074,8 +2150,8 @@ echo $integrityAlertHtml;
                 <option value="change_cat">📂 Cambiar categoría</option>
                 <option value="clone_selected">📑 Clonar seleccionados</option>
             </select>
-            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" list="bulk_cat_list" placeholder="Nueva categoría" style="width:150px">
-            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" placeholder="S.Min" style="width:100px">
+            <input type="text" class="form-control form-control-sm d-none" id="bulkCatInput" aria-label="Nueva categoría" list="bulk_cat_list" placeholder="Nueva categoría" style="width:150px">
+            <input type="number" step="0.01" class="form-control form-control-sm d-none" id="bulkStockMinInput" aria-label="Stock mínimo" placeholder="S.Min" style="width:100px">
             <button class="btn btn-dark btn-sm fw-bold px-3" onclick="applyBulkAction()">Aplicar</button>
         </div>
 
@@ -2343,14 +2419,14 @@ function setTextSafe(id, value) {
                     </tr>
                 </thead>
                 <tbody class="bg-white" id="tableBody">
-                    <?php echo renderProductRows($productosPagina, $localPath, 'list'); ?>
+                    <?php if ($viewMode !== 'cards') echo renderProductRows($productosPagina, $localPath, 'list'); ?>
                 </tbody>
             </table>
         </div>
     </div>
 
     <div id="cardsView" class="<?php echo $viewMode === 'cards' ? '' : 'd-none'; ?>">
-        <?php echo renderProductRows($productosPagina, $localPath, 'cards'); ?>
+        <?php if ($viewMode === 'cards') echo renderProductRows($productosPagina, $localPath, 'cards'); ?>
     </div>
 
     <nav class="mt-4 no-print d-flex justify-content-center align-items-center gap-3" id="paginationNav">
@@ -2366,7 +2442,7 @@ function setTextSafe(id, value) {
         </ul>
         <div class="d-flex align-items-center gap-2 ms-3">
             <span class="small text-muted fw-bold text-uppercase" style="font-size: 0.65rem;">Ver:</span>
-            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" onchange="syncLimit(this.value)">
+            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" aria-label="Productos por página" onchange="syncLimit(this.value)">
                 <option value="10" <?php echo $limit==10?'selected':''; ?>>10</option>
                 <option value="20" <?php echo $limit==20?'selected':''; ?>>20</option>
                 <option value="50" <?php echo $limit==50?'selected':''; ?>>50</option>
@@ -2377,9 +2453,9 @@ function setTextSafe(id, value) {
     </nav>
 </div>
 
-<input type="file" id="fileInput"       accept="image/jpeg, image/webp, image/png" style="display:none" onchange="uploadPhoto()">
-<input type="file" id="editorFileInput" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
-<input type="file" id="importFileInput" accept=".csv,text/csv" style="display:none" onchange="runImportCsv()">
+<input type="file" id="fileInput" aria-label="Imagen del producto"       accept="image/jpeg, image/webp, image/png" style="display:none" onchange="uploadPhoto()">
+<input type="file" id="editorFileInput" aria-label="Imagen para el editor" accept="image/jpeg,image/webp,image/png" style="display:none" onchange="handleEditorUpload()">
+<input type="file" id="importFileInput" aria-label="Archivo CSV de productos" accept=".csv,text/csv" style="display:none" onchange="runImportCsv()">
 <div id="uploadProgressBox" style="display:none;position:fixed;right:18px;bottom:18px;z-index:2055;width:min(340px,calc(100vw - 36px));background:#fff;border:1px solid #dbeafe;border-radius:14px;box-shadow:0 18px 40px rgba(15,23,42,.18);padding:14px 14px 12px">
     <div class="d-flex align-items-center justify-content-between mb-2">
         <div class="fw-semibold text-dark"><i class="fas fa-cloud-upload-alt text-primary me-2"></i>Subiendo imagen</div>
@@ -2396,7 +2472,7 @@ function setTextSafe(id, value) {
         <div class="modal-content border-0 shadow-lg">
             <div class="modal-header bg-dark text-white">
                 <h5 class="modal-title"><i class="fas fa-edit me-2"></i> Editar Producto</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body" id="modalEditorContent">
                 <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
@@ -2410,7 +2486,7 @@ function setTextSafe(id, value) {
         <div class="modal-content">
             <div class="modal-header bg-info text-white py-2">
                 <h6 class="modal-title mb-0">Historial Precios</h6>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body small p-0"><ul class="list-group list-group-flush" id="historyList"></ul></div>
         </div>
@@ -2422,7 +2498,7 @@ function setTextSafe(id, value) {
         <div class="modal-content border-0 shadow">
             <div class="modal-header bg-primary text-white">
                 <h5 class="modal-title"><i class="fas fa-image me-2"></i> Cambiar imagen del producto</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body">
                 <p class="mb-2">Seleccione cómo quiere cargar la nueva imagen del producto <strong id="imageSourceSkuLabel">-</strong>.</p>
@@ -2448,7 +2524,7 @@ function setTextSafe(id, value) {
         <div class="modal-content border-0 shadow-lg">
             <div class="modal-header bg-danger text-white">
                 <h5 class="modal-title fw-bold"><i class="fas fa-exclamation-triangle me-2"></i> AJUSTE DE KARDEX</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
             </div>
             <div class="modal-body p-4">
                 <div class="alert alert-warning border-warning">
@@ -2458,7 +2534,7 @@ function setTextSafe(id, value) {
                 <h6 class="fw-bold mb-3" id="adjProdName">---</h6>
                 
                 <div class="mb-3">
-                    <label class="form-label small fw-bold">Tipo de Movimiento:</label>
+                    <label for="adjType" class="form-label small fw-bold">Tipo de Movimiento:</label>
                     <select class="form-select" id="adjType">
                         <option value="IN">➕ Entrada (Suma al stock)</option>
                         <option value="OUT">➖ Salida (Resta del stock)</option>
@@ -2466,12 +2542,12 @@ function setTextSafe(id, value) {
                 </div>
                 
                 <div class="mb-3">
-                    <label class="form-label small fw-bold">Cantidad:</label>
+                    <label for="adjQty" class="form-label small fw-bold">Cantidad:</label>
                     <input type="number" class="form-control form-control-lg fw-bold" id="adjQty" placeholder="0.00" step="0.01" min="0.01">
                 </div>
                 
                 <div class="mb-3">
-                    <label class="form-label small fw-bold">Motivo / Observación:</label>
+                    <label for="adjNote" class="form-label small fw-bold">Motivo / Observación:</label>
                     <textarea class="form-control" id="adjNote" rows="2" placeholder="Ej: Ajuste de inventario físico, error de ingreso..."></textarea>
                 </div>
             </div>
@@ -2485,7 +2561,7 @@ function setTextSafe(id, value) {
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toastContainer"></div>
 
-<script src="assets/js/bootstrap.bundle.min.js"></script>
+<script defer src="assets/js/bootstrap.bundle.min.js?v=<?= filemtime(__DIR__ . '/assets/js/bootstrap.bundle.min.js') ?>"></script>
 <script>
 // --- AJUSTE DE KARDEX ---
 let adjSku = '';
@@ -2538,7 +2614,7 @@ function showToast(msg) {
         <div id="${id}" class="toast align-items-center text-white border-0 ${type} mb-2" role="alert" aria-live="assertive" aria-atomic="true">
             <div class="d-flex">
                 <div class="toast-body">${msg}</div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Cerrar"></button>
             </div>
         </div>
     `;
@@ -2550,11 +2626,11 @@ function showToast(msg) {
 }
 
 // VARIABLES GLOBALES
-let currentPage = 1;
+let currentPage = <?= (int)$page ?>;
 let currentCode = '';
 let imageSourceModalInstance = null;
-let currentSort = 'nombre';
-let currentDir = 'ASC';
+let currentSort = <?= json_encode($sort) ?>;
+let currentDir = <?= json_encode($dir) ?>;
 const initialKpi = <?php echo json_encode($kpiData, JSON_UNESCAPED_UNICODE); ?>;
 
 function renderKpi(kpi) {
@@ -2640,6 +2716,12 @@ function resetColumns() {
 }
 
 // Modificar loadData para aplicar visibilidad después de cargar
+function forceNameFilter() {
+    const nameInput = document.getElementById('f_name');
+    if (nameInput) nameInput.focus();
+    loadData(1);
+}
+
 async function loadData(page) {
     currentPage = page;
     const limit = document.getElementById('f_limit').value;
@@ -2670,8 +2752,10 @@ async function loadData(page) {
 
         if (view === 'cards') {
             if (cardsView) cardsView.innerHTML = data.html;
+            if (tableBody) tableBody.innerHTML = '';
         } else if (tableBody) {
             tableBody.innerHTML = data.html;
+            if (cardsView) cardsView.innerHTML = '';
         }
         setTextSafe('totalCountDisplay', data.total);
         setTextSafe('currentPageDisplay', data.page);
@@ -2811,7 +2895,7 @@ function renderPagination(curr, total) {
     html += `
         <div class="d-flex align-items-center gap-2 ms-3">
             <span class="small text-muted fw-bold text-uppercase" style="font-size: 0.65rem;">Ver:</span>
-            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" onchange="syncLimit(this.value)">
+            <select class="form-select form-select-sm border-0 bg-light fw-bold" style="width: 80px;" aria-label="Productos por página" onchange="syncLimit(this.value)">
                 <option value="10" ${limit === '10' ? 'selected' : ''}>10</option>
                 <option value="20" ${limit === '20' ? 'selected' : ''}>20</option>
                 <option value="50" ${limit === '50' ? 'selected' : ''}>50</option>
@@ -3285,7 +3369,7 @@ async function chooseInternetImage() {
         if (img) {
             img.src = 'assets/img/no-image-50.png?t=' + Date.now();
         }
-        const targetUrl = `image_smart_hunter.php?focus=${encodeURIComponent(currentCode)}&autorun=sku`;
+        const targetUrl = `image_smart_hunter.php?focus=${encodeURIComponent(currentCode)}&autorun=elyerromenu`;
         window.open(targetUrl, '_blank');
         showToast('🌐 Abriendo buscador web para ' + currentCode);
     } catch (e) {
@@ -3507,9 +3591,9 @@ async function forceImageCacheReset() {
 
 
 // --- MARINERO SYNC: OFFLINE-FIRST ENGINE ---
-const DB_NAME = 'PalWebInventory';
+const DB_NAME = 'PalWebInventory_<?php echo $EMP_ID . '_' . $SUC_ID . '_' . $ALM_ID; ?>';
 const DB_VERSION = 1;
-const SYNC_KEY = 'last_products_sync';
+const SYNC_KEY = DB_NAME + '_last_sync';
 
 function openDB() {
     return new Promise((resolve, reject) => {
@@ -3530,7 +3614,11 @@ async function saveProductsLocal(products) {
     const tx = db.transaction('products', 'readwrite');
     const store = tx.objectStore('products');
     products.forEach(p => store.put(p));
-    return new Promise((resolve) => tx.oncomplete = resolve);
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+        tx.onabort = () => { db.close(); reject(tx.error); };
+    });
 }
 
 async function getProductsLocal() {
@@ -3538,7 +3626,12 @@ async function getProductsLocal() {
     const tx = db.transaction('products', 'readonly');
     const store = tx.objectStore('products');
     const request = store.getAll();
-    return new Promise((resolve) => request.onsuccess = () => resolve(request.result));
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+        tx.oncomplete = () => db.close();
+        tx.onabort = () => db.close();
+    });
 }
 
 async function marineroSync() {
@@ -3547,11 +3640,21 @@ async function marineroSync() {
     console.log('Sincronizando desde:', lastSync);
     
     try {
-        const res = await fetch(`products_table.php?ajax_load=1&sync_mode=1&since=${encodeURIComponent(lastSync)}`);
+        const progress = JSON.parse(localStorage.getItem(SYNC_KEY + '_progress') || 'null');
+        const syncPage = progress?.since === lastSync ? progress.page : 1;
+        const res = await fetch(`products_table.php?ajax_load=1&sync_mode=1&status=all&sync_page=${syncPage}&since=${encodeURIComponent(lastSync)}`);
         const data = await res.json();
-        if (data.status === 'success' && data.products.length > 0) {
+        if (data.status === 'success' && Array.isArray(data.products)) {
             await saveProductsLocal(data.products);
-            localStorage.setItem(SYNC_KEY, data.server_time);
+            const syncStarted = progress?.since === lastSync ? progress.started : data.server_time;
+            if (data.has_more) {
+                localStorage.setItem(SYNC_KEY + '_progress', JSON.stringify({
+                    since: lastSync, page: syncPage + 1, started: syncStarted
+                }));
+            } else {
+                localStorage.setItem(SYNC_KEY, syncStarted);
+                localStorage.removeItem(SYNC_KEY + '_progress');
+            }
             console.log(`Sincronizados ${data.products.length} productos nuevos/cambiados.`);
             return true;
         }
@@ -3561,32 +3664,23 @@ async function marineroSync() {
     return false;
 }
 
-// Sobrescribir loadData para usar el motor Offline-First
+// La paginación no necesita leer ni sincronizar todo el catálogo local.
 const originalLoadData = loadData;
+let inventorySyncPending = false;
+let inventorySyncAt = 0;
+function scheduleInventorySync() {
+    if (!navigator.onLine || inventorySyncPending || Date.now() - inventorySyncAt < 60000) return;
+    inventorySyncPending = true;
+    const run = async () => {
+        try { await marineroSync(); }
+        finally { inventorySyncAt = Date.now(); inventorySyncPending = false; }
+    };
+    if ('requestIdleCallback' in window) requestIdleCallback(run, {timeout: 10000});
+    else setTimeout(run, 3000);
+}
 loadData = async function(page = 1) {
-    const tableBody = document.getElementById('tableBody');
-    
-    // 1. Mostrar lo que tenemos localmente de inmediato (si es la primera carga o búsqueda vacía)
-    const localProds = await getProductsLocal();
-    if (localProds.length > 0 && page === 1) {
-        // Aquí podríamos filtrar localmente, pero por ahora dejamos que el servidor mande la página
-        // Sin embargo, si no hay internet, mostramos lo local.
-        if (!navigator.onLine) {
-            showToast('⚠️ Modo Offline: Mostrando datos locales');
-        }
-    }
-
-    // 2. Intentar cargar desde el servidor
-    try {
-        await originalLoadData(page);
-        // 3. Después de cargar, sincronizar en segundo plano lo que falta
-        marineroSync();
-    } catch (e) {
-        if (localProds.length > 0) {
-            showToast('Conexión perdida. Usando base de datos local.');
-            // Implementar renderizado local si el servidor falla
-        }
-    }
+    await originalLoadData(page);
+    scheduleInventorySync();
 };
 
 // Inicializar
@@ -3599,7 +3693,6 @@ document.addEventListener('DOMContentLoaded', function() {
     renderKpi(initialKpi);
     // Cargar categorías
     reloadCategorySelects();
-    loadData(<?php echo (int)$page; ?>);
     // sincronizar selects para estado previo
     const statusEl = document.getElementById('f_status');
     if (statusEl) statusEl.value = '<?php echo htmlspecialchars($filterStatus, ENT_QUOTES, 'UTF-8'); ?>';
@@ -3607,6 +3700,24 @@ document.addEventListener('DOMContentLoaded', function() {
     if (limitEl) limitEl.value = '<?php echo (int)$limit; ?>';
     const stockEl = document.getElementById('f_stock');
     if (stockEl) stockEl.value = '<?php echo htmlspecialchars($filterStockRange, ENT_QUOTES, 'UTF-8'); ?>';
+    syncPrefsToInputs();
+    setViewMode(getViewMode());
+    const initialFilters = <?= json_encode([
+        'f_name' => (string)$filterName, 'f_code' => (string)$filterCode,
+        'f_status' => (string)$filterStatus, 'f_stock' => (string)$filterStockRange,
+        'f_limit' => (string)$limit
+    ], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>;
+    const sameFilters = Object.entries(initialFilters).every(([id, value]) =>
+        document.getElementById(id)?.value === value);
+    if (!sameFilters || getViewMode() !== PT_DEFAULT_VIEW_MODE
+        || getWarehouseScope() !== Number(PT_DEFAULT_WAREHOUSE)
+        || getWithStockMode() !== <?= $onlyWithStock ? 'true' : 'false' ?>) {
+        loadData(<?= (int)$page ?>);
+    } else {
+        // El servidor ya entregó esta página: no repetir consultas ni sustituir el DOM.
+        applyColumnVisibility();
+        scheduleInventorySync();
+    }
     const nameEl = document.getElementById('f_name');
     const codeEl = document.getElementById('f_code');
     const statusEl2 = document.getElementById('f_status');
@@ -3632,7 +3743,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Registrar Service Worker Independiente
     if ('serviceWorker' in navigator) {
-        const productsSwUrl = new URL('sw-products.js?v=20260522-fix1', document.baseURI).toString();
+        const productsSwUrl = new URL('sw-products.js?v=20260726-cachefix1', document.baseURI).toString();
         const productsSwScope = new URL('products/', document.baseURI).toString();
         navigator.serviceWorker.register(productsSwUrl, { scope: productsSwScope, updateViaCache: 'none' })
             .then(reg => {
@@ -3656,9 +3767,7 @@ async function reloadCategorySelects() {
                 datalist.appendChild(opt);
             });
         }
-        if (typeof loadCategoriesQP === 'function') {
-            loadCategoriesQP();
-        }
+        // El creador carga sus categorías al abrirse, no durante el primer render.
     } catch(e) { console.error("Error recargando categorías", e); }
 }
 </script>

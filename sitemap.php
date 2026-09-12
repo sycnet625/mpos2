@@ -6,7 +6,7 @@ header('Content-Type: application/xml; charset=UTF-8');
 require_once 'db.php';
 require_once 'config_loader.php';
 
-$base    = 'https://www.palweb.net/marinero';
+$base    = config_loader_public_url('/marinero');
 $EMP_ID  = intval($config['id_empresa']);
 $today   = date('Y-m-d');
 

@@ -8,16 +8,18 @@
 require_once 'db.php';
 require_once 'config_loader.php';
 
-$idSucursal = intval($config['id_sucursal'] ?? 1);
+$idEmpresa = intval($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+$idSucursal = intval($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$idAlmacen = intval($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
 
 // 1. Determinar sesión: abierta preferente, si no la última cerrada
-$stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_sucursal = ? ORDER BY id DESC LIMIT 1");
-$stmt->execute([$idSucursal]);
+$stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+$stmt->execute([$idEmpresa, $idSucursal, $idAlmacen]);
 $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$sesion) {
-    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id_sucursal = ? ORDER BY id DESC LIMIT 1");
-    $stmt->execute([$idSucursal]);
+    $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+    $stmt->execute([$idEmpresa, $idSucursal, $idAlmacen]);
     $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
 }
 
@@ -30,9 +32,9 @@ $tickets = [];
 if ($idSesion > 0) {
     $stmtT = $pdo->prepare("SELECT id, uuid_venta, fecha, cliente_nombre, cliente_telefono, total, tipo_servicio, canal_origen, mensajero_nombre
                             FROM ventas_cabecera
-                            WHERE id_caja = ? AND id_sucursal = ?
+                            WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
                             ORDER BY id ASC");
-    $stmtT->execute([$idSesion, $idSucursal]);
+        $stmtT->execute([$idSesion, $idEmpresa, $idSucursal, $idAlmacen]);
     $cabs = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 
     if ($cabs) {
@@ -58,7 +60,7 @@ if ($idSesion > 0) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Pantalla de Cocina — Sucursal <?= $idSucursal ?></title>
+<title>Pantalla de Cocina — Sucursal <?= $idSucursal ?> · Almacén <?= $idAlmacen ?></title>
 <link href="assets/css/bootstrap.min.css" rel="stylesheet">
 <link rel="stylesheet" href="assets/css/all.min.css">
 <style>
@@ -301,7 +303,7 @@ if ($idSesion > 0) {
             <i class="fas fa-fire"></i> PANTALLA DE COCINA
         </div>
         <div class="kds-meta">
-            <span>Sesión <span class="dot">#<?= $idSesion ?></span></span>
+            <span>Sesión <span class="dot">#<?= $idSesion ?></span> · Almacén <span class="dot">#<?= $idAlmacen ?></span></span>
             <span>
                 Estado:
                 <?php if ($estadoSesion === 'ABIERTA'): ?>

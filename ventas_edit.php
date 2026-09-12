@@ -94,7 +94,7 @@ if ($action === 'load') {
     $hasNotaCocina = ventas_edit_has_nota_cocina($pdo);
 
     $stmtD = $pdo->prepare(
-        "SELECT vd.id, vd.id_producto, vd.cantidad, vd.precio" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
+                "SELECT vd.id, vd.id_producto, vd.cantidad, vd.precio, vd.costo_unitario" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
                 vd.nombre_producto, vd.codigo_producto,
                 COALESCE(p.es_servicio, 0) AS es_servicio
          FROM ventas_detalle vd
@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
 
         // 2. Detalles originales — clave = codigo (varchar)
         $stmtD = $pdo->prepare(
-            "SELECT vd.id_producto, vd.cantidad" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
+            "SELECT vd.id_producto, vd.cantidad, vd.costo_unitario" . ($hasNotaCocina ? ", vd.nota_cocina" : ", NULL AS nota_cocina") . ",
                     COALESCE(p.es_servicio, 0) AS es_servicio
              FROM ventas_detalle vd
              LEFT JOIN productos p ON p.codigo = vd.id_producto
@@ -269,24 +269,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
         if ($hasNotaCocina) {
             $stmtIns = $pdo->prepare(
                 "INSERT INTO ventas_detalle
-                 (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, nota_cocina)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+                 (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto, nota_cocina)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
             );
         } else {
             $stmtIns = $pdo->prepare(
                 "INSERT INTO ventas_detalle
-                 (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto)
-                 VALUES (?, ?, ?, ?, ?, ?)"
+                 (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
             );
         }
         foreach ($newItems as $ni) {
             $codigo = (string)($ni['id'] ?? '');
+            $oldCost = $oldMap[$codigo]['costo_unitario'] ?? null;
+            if ($oldCost === null) {
+                $costStmt = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? LIMIT 1");
+                $costStmt->execute([$codigo]);
+                $oldCost = $costStmt->fetchColumn();
+            }
             if ($hasNotaCocina) {
                 $stmtIns->execute([
                     $idVenta,
                     $codigo,
                     floatval($ni['qty']),
                     floatval($ni['price']),
+                    $oldCost !== null ? (float)$oldCost : null,
                     substr(trim($ni['name']   ?? ''), 0, 200),
                     substr(trim($ni['codigo'] ?? $codigo), 0, 50),
                     substr(trim($ni['note']   ?? ''), 0, 255),
@@ -297,6 +304,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'save') {
                     $codigo,
                     floatval($ni['qty']),
                     floatval($ni['price']),
+                    $oldCost !== null ? (float)$oldCost : null,
                     substr(trim($ni['name']   ?? ''), 0, 200),
                     substr(trim($ni['codigo'] ?? $codigo), 0, 50),
                 ]);

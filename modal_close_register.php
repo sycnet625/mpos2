@@ -93,7 +93,7 @@ window.showOpenCashModal = function() {
     new bootstrap.Modal(document.getElementById('cashModal')).show();
 };
 
-window.doOpen = async function() {
+window.doOpen = async function(usarExistente = false) {
     const m = document.getElementById('startAmount').value;
     const f = document.getElementById('startOpenDate').value;
     
@@ -106,7 +106,8 @@ window.doOpen = async function() {
             body: JSON.stringify({
                 monto: m, 
                 fecha: f,
-                cajero: currentCashier
+                cajero: currentCashier,
+                usar_existente: usarExistente
             })
         });
         const res = await resp.json();
@@ -115,7 +116,13 @@ window.doOpen = async function() {
             bootstrap.Modal.getInstance(document.getElementById('cashModal')).hide();
             checkCashStatusSilent(); 
             if(typeof Synth !== 'undefined') Synth.openCash();
-            showToast("Turno abierto correctamente");
+            showToast(res.reused ? "Caja existente activada" : "Turno abierto correctamente");
+        } else if(res.status === 'already_open') {
+            const sesion = res.data || {};
+            const detalle = `Caja #${sesion.id || ''} abierta desde ${sesion.fecha_apertura || 'fecha no disponible'} por ${sesion.nombre_cajero || 'otro cajero'}.`;
+            if (confirm(`${detalle}\n\nYa existe una sesion abierta para esta sucursal y almacen. ¿Continuar usando esa caja?`)) {
+                await window.doOpen(true);
+            }
         } else {
             if (await handleCashPermissionError(res, () => { window.showOpenCashModal(); setTimeout(() => { const amt=document.getElementById('startAmount'); const dt=document.getElementById('startOpenDate'); if(amt) amt.value = m; if(dt) dt.value = f; doOpen(); }, 120); }, 'Inicio de sesion requerido para abrir caja.')) {
                 return;

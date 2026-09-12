@@ -9,6 +9,7 @@ require_once 'config_loader.php';
 
 try {
     $almacenID = intval($config['id_almacen']);
+    $empresaID = intval($config['id_empresa'] ?? 1);
     
     // 2. FILTROS
     $cond = ["p.activo = 1"];
@@ -38,12 +39,12 @@ try {
                 p.es_materia_prima,
                 COALESCE(s.cantidad, 0) as stock
             FROM productos p 
-            LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = ?
-            WHERE $where 
+            LEFT JOIN stock_almacen s ON p.codigo = s.id_producto AND s.id_almacen = ? AND s.id_sucursal = ?
+            WHERE p.id_empresa = ? AND $where
             ORDER BY p.nombre";
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$almacenID]);
+    $stmt->execute([$almacenID, intval($config['id_sucursal'] ?? 1), $empresaID]);
     $prods = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     // 4. PROCESAMIENTO ADICIONAL
@@ -67,4 +68,3 @@ try {
     echo json_encode(["error" => "Error DB: " . $e->getMessage()]);
 }
 ?>
-

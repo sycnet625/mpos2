@@ -1,12 +1,25 @@
 // ==========================================
 // 🔧 SERVICE WORKER - ONLINE FIRST
-// Versión 9.6 - Online first + POS offline completo
+// Versión 9.9 - Online first + POS offline completo
 // ==========================================
 
-const SW_VERSION = 'v9.6';
-const CACHE_NAME = 'palweb-pos-v96';
+const SW_VERSION = 'v9.9';
+const CACHE_NAME = 'palweb-pos-v101';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
+
+async function responseForCache(response) {
+    const headers = new Headers(response.headers);
+    headers.delete('content-encoding');
+    headers.delete('content-length');
+    headers.delete('transfer-encoding');
+
+    return new Response(await response.clone().arrayBuffer(), {
+        status: response.status,
+        statusText: response.statusText,
+        headers
+    });
+}
 
 // Recursos estáticos mínimos para offline
 const OFFLINE_ASSETS = [
@@ -22,6 +35,7 @@ const OFFLINE_ASSETS = [
     './assets/css/bootstrap.min.css',
     './assets/css/all.min.css',
     './assets/js/bootstrap.bundle.min.js',
+    './assets/js/pos-sale-editor.js',
     './assets/img/no-image-50.png',
     './assets/webfonts/fa-solid-900.woff2',
     './assets/webfonts/fa-regular-400.woff2',
@@ -39,11 +53,17 @@ self.addEventListener('install', (event) => {
         caches.open(CACHE_NAME).then(async (cache) => {
             // Cachear cada asset individualmente: un 404 aislado no arruina toda la instalación
             const results = await Promise.allSettled(
-                OFFLINE_ASSETS.map(url =>
-                    cache.add(url).catch(err => {
+                OFFLINE_ASSETS.map(async (url) => {
+                    try {
+                        const request = new Request(url, { credentials: 'same-origin' });
+                        const response = await fetch(request, { credentials: 'same-origin', cache: 'no-store' });
+                        if (response && response.ok && response.type !== 'opaqueredirect') {
+                            await cache.put(request, await responseForCache(response));
+                        }
+                    } catch (err) {
                         console.warn('[SW-POS] No se pudo cachear:', url, err.message);
-                    })
-                )
+                    }
+                })
             );
             const ok  = results.filter(r => r.status === 'fulfilled').length;
             const bad = results.filter(r => r.status === 'rejected').length;
@@ -112,6 +132,22 @@ self.addEventListener('fetch', (event) => {
     }
     
     const swUrl = new URL(event.request.url);
+    const authPagePaths = new Set([
+        appUrl('login').replace(swUrl.origin, ''),
+        appUrl('login/').replace(swUrl.origin, ''),
+        appUrl('login.php').replace(swUrl.origin, ''),
+        appUrl('dashboard').replace(swUrl.origin, ''),
+        appUrl('dashboard/').replace(swUrl.origin, ''),
+        appUrl('dashboard.php').replace(swUrl.origin, ''),
+        appUrl('dashboard_rt_api.php').replace(swUrl.origin, ''),
+        appUrl('pos_config2.php').replace(swUrl.origin, ''),
+        appUrl('logout.php').replace(swUrl.origin, '')
+    ]);
+
+    if (authPagePaths.has(swUrl.pathname)) {
+        event.respondWith(fetch(event.request, { credentials: 'same-origin', cache: 'no-store' }));
+        return;
+    }
 
     // Otras PWAs tienen sus propios service workers. No permitir que el SW del POS
     // sirva HTML/cache de esas rutas, aunque el scope del POS sea raiz por sus APIs/assets.
@@ -141,7 +177,7 @@ self.addEventListener('fetch', (event) => {
                 .then(async (response) => {
                     if (response && response.ok) {
                         const cache = await caches.open(CACHE_NAME);
-                        cache.put(event.request, response.clone());
+                        cache.put(event.request, await responseForCache(response));
                     }
                     return response;
                 })
@@ -200,7 +236,7 @@ async function onlineFirst(request) {
             const localResp = await fetch(localReq);
             if (localResp && localResp.ok) {
                 const cache = await caches.open(CACHE_NAME);
-                cache.put(localReq, localResp.clone());
+                await cache.put(localReq, await responseForCache(localResp));
                 return localResp;
             }
         } catch (e) {}
@@ -230,11 +266,10 @@ async function onlineFirst(request) {
                 request.url.endsWith('.svg') ||
                 request.url.endsWith('.woff2') ||
                 request.url.includes('bootstrap') ||
-                request.url.includes('fontawesome') ||
-                (request.url.includes('.php') && !url.search && !request.url.includes('simple_weather')); // PHP sin parámetros
+                request.url.includes('fontawesome');
             
             if (shouldCache) {
-                cache.put(request, networkResponse.clone());
+                await cache.put(request, await responseForCache(networkResponse));
             }
         }
         
@@ -253,7 +288,7 @@ async function onlineFirst(request) {
         
         if (cachedResponse && cachedResponse.type !== 'opaqueredirect') {
             console.log('[SW-POS] Servido desde caché:', request.url);
-            return cachedResponse;
+            return responseForCache(cachedResponse);
         }
         
         // Si es un PHP con parámetros (API), devolver respuesta offline
@@ -297,7 +332,7 @@ self.addEventListener('message', (event) => {
     }
     
     if (event.data && event.data.type === 'GET_VERSION') {
-        event.ports[0].postMessage({ version: 'v96-online-first-pos-offline' });
+        event.ports[0].postMessage({ version: 'v99-online-first-pos-offline' });
     }
 });
 

@@ -155,7 +155,9 @@ function bot_public_base_url(array $appCfg = []): string {
             return $origin;
         }
     }
-    return 'https://www.palweb.net';
+    return function_exists('config_loader_public_origin')
+        ? config_loader_public_origin($appCfg)
+        : 'https://localhost';
 }
 
 function bot_public_product_image(string $sku): string {

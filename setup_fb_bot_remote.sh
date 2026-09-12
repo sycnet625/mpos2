@@ -7,7 +7,9 @@ DISPLAY_NUM=":99"
 VNC_PORT="5909"
 NOVNC_PORT="6080"
 PHP_FPM_SERVICE="${PHP_FPM_SERVICE:-php8.3-fpm}"
+PUBLIC_ORIGIN="${MIRROR_PUBLIC_ORIGIN:-}"
 NGINX_SITE_CANDIDATES=(
+  "/etc/nginx/sites-enabled/palweb-ssl.conf"
   "/etc/nginx/sites-enabled/palweb"
   "/etc/nginx/sites-available/palweb"
   "/etc/nginx/sites-enabled/default"
@@ -18,6 +20,25 @@ require_root() {
     echo "Este script debe correr como root." >&2
     exit 1
   fi
+}
+
+detect_public_origin() {
+  if [[ -n "${PUBLIC_ORIGIN}" ]]; then
+    echo "${PUBLIC_ORIGIN%/}"
+    return 0
+  fi
+  if [[ -f "${REPO_DIR}/pos.cfg" ]] && command -v php >/dev/null 2>&1; then
+    local configured
+    configured="$(php -r 'require $argv[1]; echo function_exists("config_loader_public_origin") ? config_loader_public_origin() : "";' "${REPO_DIR}/config_loader.php" 2>/dev/null || true)"
+    if [[ -n "${configured}" && "${configured}" != "https://localhost" ]]; then
+      echo "${configured%/}"
+      return 0
+    fi
+  fi
+  local host
+  host="$(hostname -f 2>/dev/null || hostname 2>/dev/null || true)"
+  [[ -n "${host}" ]] || host="localhost"
+  echo "https://${host}"
 }
 
 detect_novnc_web() {
@@ -191,7 +212,7 @@ show_status() {
   systemctl is-active palweb-fb-novnc.service || true
   echo
   echo "Visor:"
-  echo "https://www.palweb.net/fbnovnc/vnc_lite.html?autoconnect=1&resize=remote&path=fbnovnc/websockify"
+  echo "$(detect_public_origin)/fbnovnc/vnc_lite.html?autoconnect=1&resize=remote&path=fbnovnc/websockify"
 }
 
 main() {

@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/../config_loader.php';
+
 if (!defined('AFF_OWNER_CODE')) {
     define('AFF_OWNER_CODE', 'D-0042');
 }
@@ -781,7 +783,13 @@ function aff_base64url_decode(string $value): string {
 
 function aff_vapid_subject(PDO $pdo): string {
     $subject = trim(aff_get_setting($pdo, 'vapid_subject', ''));
-    return $subject !== '' ? $subject : 'https://www.palweb.net';
+    return $subject !== '' ? $subject : config_loader_public_origin();
+}
+
+function aff_public_origin(): string {
+    return function_exists('config_loader_public_origin')
+        ? config_loader_public_origin()
+        : 'https://localhost';
 }
 
 function aff_vapid_keys(PDO $pdo): array {
@@ -1322,7 +1330,7 @@ function aff_trace_links_for_gestor(PDO $pdo, string $gestorId): array {
         $rows[] = [
             'productId' => (string)$row['productId'],
             'product' => (string)$row['product'],
-            'link' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode((string)$row['productId']) . '&ref=' . rawurlencode((string)$row['refToken']),
+            'link' => aff_public_origin() . '/rac/refer/?product=' . rawurlencode((string)$row['productId']) . '&ref=' . rawurlencode((string)$row['refToken']),
             'maskedRef' => (string)$row['maskedRef'],
             'clicks' => (int)$row['clicks'],
             'leads' => (int)$row['contactOpens'],
@@ -2788,7 +2796,7 @@ function aff_admin_link_rankings(PDO $pdo): array {
         $sold = (int)$row['soldCount'];
         $rows[] = [
             'maskedRef' => (string)$row['maskedRef'],
-            'link' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode((string)$row['productId']) . '&ref=' . rawurlencode((string)$row['refToken']),
+            'link' => aff_public_origin() . '/rac/refer/?product=' . rawurlencode((string)$row['productId']) . '&ref=' . rawurlencode((string)$row['refToken']),
             'product' => (string)$row['product'],
             'gestor' => (string)$row['gestor'],
             'gestorId' => (string)$row['gestorId'],
@@ -3136,7 +3144,7 @@ function aff_create_trace_link(PDO $pdo, string $productId, string $gestorId): a
     $found = $existing->fetch();
     if ($found) {
         return [
-            'link' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode($productId) . '&ref=' . rawurlencode((string)$found['ref_token']),
+            'link' => aff_public_origin() . '/rac/refer/?product=' . rawurlencode($productId) . '&ref=' . rawurlencode((string)$found['ref_token']),
             'ref' => (string)$found['ref_token'],
             'masked_ref' => (string)$found['masked_ref'],
             'gestor' => ['id' => $gestor['id'], 'name' => $gestor['name']],
@@ -3157,7 +3165,7 @@ function aff_create_trace_link(PDO $pdo, string $productId, string $gestorId): a
         'context' => ['masked_ref' => $masked, 'gestor' => $gestor['name']],
     ]);
     return [
-        'link' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode($productId) . '&ref=' . rawurlencode($token),
+        'link' => aff_public_origin() . '/rac/refer/?product=' . rawurlencode($productId) . '&ref=' . rawurlencode($token),
         'ref' => $token,
         'masked_ref' => $masked,
         'gestor' => ['id' => $gestor['id'], 'name' => $gestor['name']],
@@ -3341,7 +3349,7 @@ function aff_public_gestor_landing(PDO $pdo, string $gestorId): array {
             'ownerName' => (string)$row['owner_name'],
             'zone' => (string)$row['geo_zone'],
             'reputationScore' => (float)$row['reputation_score'],
-            'referLink' => 'https://www.palweb.net/rac/refer/?product=' . rawurlencode((string)$row['id']) . '&ref=' . rawurlencode((string)$row['ref_token']),
+            'referLink' => aff_public_origin() . '/rac/refer/?product=' . rawurlencode((string)$row['id']) . '&ref=' . rawurlencode((string)$row['ref_token']),
         ], aff_product_media($row));
     }, $st->fetchAll());
     return [

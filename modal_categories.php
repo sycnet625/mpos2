@@ -82,8 +82,8 @@ function renderCategoriesList() {
                 <span class="fw-bold">${cat.nombre}</span>
             </div>
             <div>
-                <button class="btn btn-sm btn-outline-primary me-1" onclick='editCategory(${JSON.stringify(cat)})'><i class="fas fa-edit"></i></button>
-                <button class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})"><i class="fas fa-trash"></i></button>
+                <button aria-label="Editar categoría" class="btn btn-sm btn-outline-primary me-1" onclick='editCategory(${JSON.stringify(cat)})'><i class="fas fa-edit"></i></button>
+                <button aria-label="Eliminar categoría" class="btn btn-sm btn-outline-danger" onclick="deleteCategory(${cat.id})"><i class="fas fa-trash"></i></button>
             </div>
         `;
         list.appendChild(item);

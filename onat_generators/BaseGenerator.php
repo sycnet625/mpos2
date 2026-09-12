@@ -257,7 +257,7 @@ abstract class BaseGenerator
     protected function costoVentasRango(string $desde, string $hasta): float
     {
         require_once __DIR__ . '/../accounting_helpers.php';
-        $sql = "SELECT SUM(d.cantidad * p.costo)
+        $sql = "SELECT SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo))
                 FROM ventas_detalle d
                 JOIN productos p ON d.id_producto = p.codigo
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id

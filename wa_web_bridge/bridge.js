@@ -609,7 +609,7 @@ function extractProductCodeFromImageUrl(rawUrl) {
   const mediaUrl = String(rawUrl || '').trim();
   if (!mediaUrl) return '';
   try {
-    const parsed = new URL(normalizeProductImageUrl(mediaUrl, ''), API_ORIGIN || 'https://www.palweb.net');
+    const parsed = new URL(normalizeProductImageUrl(mediaUrl, ''), API_ORIGIN || 'http://127.0.0.1');
     if (!/image\.php$/i.test(parsed.pathname)) return '';
     return String(parsed.searchParams.get('code') || '').trim();
   } catch (_) {

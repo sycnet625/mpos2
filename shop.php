@@ -269,7 +269,8 @@ $igUrl     = $config['instagram_url'] ?? '';
 $ytUrl     = $config['youtube_url'] ?? '';
 $https     = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (($_SERVER['SERVER_PORT'] ?? '') === '443');
 $scheme    = $https ? 'https' : 'http';
-$host      = $_SERVER['HTTP_HOST'] ?? 'palweb.net';
+$publicOrigin = config_loader_public_origin($config);
+$host      = $_SERVER['HTTP_HOST'] ?? (parse_url($publicOrigin, PHP_URL_HOST) ?: 'localhost');
 $baseDir   = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/shop.php')), '/');
 $baseDir   = $baseDir === '.' ? '' : $baseDir;
 $shopBasePath = ($baseDir !== '' ? $baseDir : '') . '/shop.php';
@@ -391,7 +392,7 @@ if (isset($_GET['ajax_search'])) {
             $q, $q, $searchStart
         ]);
         $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        $results = combo_apply_product_rows($pdo, $results, $EMP_ID, $ALM_ID);
+        $results = combo_apply_product_rows($pdo, $results, $EMP_ID, $ALM_ID, $SUC_ID);
         
         foreach ($results as &$r) {
             shop_apply_price_config_to_row($r, $config);
@@ -469,7 +470,7 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    $productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID);
+    $productos = combo_apply_product_rows($pdo, $productos, $EMP_ID, $ALM_ID, $SUC_ID);
     foreach ($productos as &$productoRow) {
         shop_apply_price_config_to_row($productoRow, $config);
     }

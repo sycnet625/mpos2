@@ -294,7 +294,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'recalc_kardex') {
             $pdo->beginTransaction();
             $pdo->exec("UPDATE stock_almacen SET cantidad = 0");
-            $sqlSync = "INSERT INTO stock_almacen (id_almacen, id_producto, cantidad, id_sucursal) SELECT id_almacen, id_producto, SUM(cantidad), 1 FROM kardex GROUP BY id_almacen, id_producto ON DUPLICATE KEY UPDATE cantidad = VALUES(cantidad)";
+            $sqlSync = "INSERT INTO stock_almacen (id_almacen, id_producto, cantidad, id_sucursal) SELECT id_almacen, id_producto, SUM(cantidad), MAX(COALESCE(id_sucursal, 1)) FROM kardex GROUP BY id_almacen, id_producto ON DUPLICATE KEY UPDATE cantidad = VALUES(cantidad), id_sucursal = VALUES(id_sucursal)";
             $stmt = $pdo->prepare($sqlSync);
             $stmt->execute();
             $pdo->commit();

@@ -48,6 +48,30 @@ function poscash_error(string $msg, int $httpCode = 400): void {
     exit;
 }
 
+function poscash_context(array $config): array {
+    return [
+        'id_empresa' => (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1),
+        'id_sucursal' => (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1),
+        'id_almacen' => (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1),
+    ];
+}
+
+function poscash_find_open_session(PDO $pdo, int $idEmpresa, int $idSucursal, int $idAlmacen): ?array {
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM caja_sesiones
+        WHERE estado = 'ABIERTA'
+          AND id_empresa = ?
+          AND id_sucursal = ?
+          AND id_almacen = ?
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$idEmpresa, $idSucursal, $idAlmacen]);
+    $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $sesion ?: null;
+}
+
 function poscash_ensure_csrf_token(): string {
     if (empty($_SESSION['pos_csrf_token']) || !is_string($_SESSION['pos_csrf_token'])) {
         $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
@@ -112,7 +136,17 @@ function poscash_require_csrf(array $input): void {
 
 $action = $_GET['action'] ?? '';
 $input = poscash_json_input();
-$sucursalID = intval($config['id_sucursal']);
+$cashContext = poscash_context($config);
+$empresaID = $cashContext['id_empresa'];
+$sucursalID = $cashContext['id_sucursal'];
+$almacenID = $cashContext['id_almacen'];
+
+// Compatibilidad con bases creadas antes de activar el aislamiento por empresa.
+try {
+    $pdo->exec("ALTER TABLE caja_sesiones ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1 AFTER id_usuario");
+} catch (Throwable $e) {
+    error_log('pos_cash schema warning: ' . $e->getMessage());
+}
 
 poscash_enforce_session_security();
 
@@ -207,9 +241,7 @@ try {
     }
 
     elseif ($action === 'status') {
-        $stmt = $pdo->prepare("SELECT * FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_sucursal = ? ORDER BY id DESC LIMIT 1");
-        $stmt->execute([$sucursalID]);
-        $sesion = $stmt->fetch(PDO::FETCH_ASSOC);
+        $sesion = poscash_find_open_session($pdo, $empresaID, $sucursalID, $almacenID);
 
         if ($sesion) {
             // RECTIFICACIÓN: Obtener desglose real desglosando pagos mixtos
@@ -267,24 +299,68 @@ try {
             }
         }
 
-        $stmt = $pdo->prepare("INSERT INTO caja_sesiones 
-            (nombre_cajero, monto_inicial, fecha_contable, id_sucursal, estado, fecha_apertura) 
-            VALUES (?, ?, ?, ?, 'ABIERTA', NOW())");
-        
-        if ($stmt->execute([$cajero, $monto, $fechaContable, $sucursalID])) {
-            $sessionId = (int)$pdo->lastInsertId();
-            push_notify(
-                $pdo,
-                'operador',
-                '🟢 Sesión de caja abierta',
-                "{$cajero} — fondo inicial $" . number_format($monto, 2),
-                '/marinero/pos.php',
-                'cash_session_opened'
-            );
-            echo json_encode(['status' => 'success']);
-        } else {
-            echo json_encode(['status' => 'error', 'msg' => 'No se pudo abrir el turno en la BD']);
+        $lockName = 'pos_cash_open_' . $empresaID . '_' . $sucursalID . '_' . $almacenID;
+        $stmtLock = $pdo->prepare("SELECT GET_LOCK(?, 5)");
+        $stmtLock->execute([$lockName]);
+        if ((int)$stmtLock->fetchColumn() !== 1) {
+            poscash_error('No se pudo validar la caja abierta. Intente nuevamente.', 409);
         }
+
+        $lockAcquired = true;
+        $openResponse = null;
+        try {
+            $sesionAbierta = poscash_find_open_session($pdo, $empresaID, $sucursalID, $almacenID);
+            if ($sesionAbierta) {
+                if (!empty($input['usar_existente'])) {
+                    $openResponse = [
+                        'status' => 'success',
+                        'reused' => true,
+                        'session_id' => (int)$sesionAbierta['id'],
+                        'data' => $sesionAbierta,
+                    ];
+                } else {
+                    $openResponse = [
+                        'status' => 'already_open',
+                        'msg' => 'Ya existe una sesion de caja abierta para esta sucursal y almacen.',
+                        'data' => $sesionAbierta,
+                    ];
+                }
+            } else {
+                $stmt = $pdo->prepare("INSERT INTO caja_sesiones
+                    (id_usuario, id_empresa, nombre_cajero, monto_inicial, fecha_contable, id_sucursal, id_almacen, estado, fecha_apertura)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'ABIERTA', NOW())");
+
+                if ($stmt->execute([
+                    (int)($_SESSION['cajero_id'] ?? 0) ?: null,
+                    $empresaID,
+                    $cajero,
+                    $monto,
+                    $fechaContable,
+                    $sucursalID,
+                    $almacenID
+                ])) {
+                    $sessionId = (int)$pdo->lastInsertId();
+                    push_notify(
+                        $pdo,
+                        'operador',
+                        '🟢 Sesión de caja abierta',
+                        "{$cajero} — fondo inicial $" . number_format($monto, 2),
+                        '/marinero/pos.php',
+                        'cash_session_opened'
+                    );
+                    $openResponse = ['status' => 'success'];
+                } else {
+                    $openResponse = ['status' => 'error', 'msg' => 'No se pudo abrir el turno en la BD'];
+                }
+            }
+        } finally {
+            if (!empty($lockAcquired)) {
+                $stmtRelease = $pdo->prepare("SELECT RELEASE_LOCK(?)");
+                $stmtRelease->execute([$lockName]);
+            }
+        }
+
+        echo json_encode($openResponse ?: ['status' => 'error', 'msg' => 'No se pudo procesar la apertura de caja']);
     } 
 
     elseif ($action === 'close') {
@@ -299,7 +375,7 @@ try {
                     diferencia = ?, 
                     nota = ?, 
                     estado = 'CERRADA' 
-                WHERE id = ?";
+                    WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?";
         
         $stmt = $pdo->prepare($sql);
         $sessionId = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
@@ -353,8 +429,14 @@ try {
             $montoReal, 
             $diff, 
             $nota, 
-            $sessionId
+            $sessionId,
+            $empresaID,
+            $sucursalID,
+            $almacenID
         ])) {
+            if ($stmt->rowCount() < 1) {
+                poscash_error('No se encontro una caja abierta para esta sucursal y almacen.', 404);
+            }
             push_notify(
                 $pdo,
                 'operador',

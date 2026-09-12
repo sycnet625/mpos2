@@ -102,18 +102,20 @@ try {
 
     // Recuperar sesión y su fecha contable
     if ($idSesion > 0) {
-        $stmtSesion = $pdo->prepare("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE id = ? AND id_sucursal = ? LIMIT 1");
-        $stmtSesion->execute([$idSesion, $idSucursal]);
+        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_contable FROM caja_sesiones WHERE id = ? AND estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? LIMIT 1");
+        $stmtSesion->execute([$idSesion, $idEmpresa, $idSucursal, $idAlmacen]);
     } else {
-        $stmtSesion = $pdo->prepare("SELECT id, nombre_cajero, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_sucursal = ? ORDER BY id DESC LIMIT 1");
-        $stmtSesion->execute([$idSucursal]);
+        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+        $stmtSesion->execute([$idEmpresa, $idSucursal, $idAlmacen]);
     }
 
-    if ($row = $stmtSesion->fetch(PDO::FETCH_ASSOC)) {
-        $idSesion = $row['id'];
-        $usuarioNombre = $row['nombre_cajero'];
-        $fechaContable = $row['fecha_contable'];
+    $row = $stmtSesion->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        throw new Exception("No hay una sesión de caja abierta para la empresa {$idEmpresa}, sucursal {$idSucursal} y almacén {$idAlmacen}.");
     }
+    $idSesion = (int)$row['id'];
+    $usuarioNombre = $row['nombre_cajero'];
+    $fechaContable = $row['fecha_contable'];
 
     // La fecha de la venta será la fecha contable + la hora actual
     $fechaVenta = $fechaContable . ' ' . date('H:i:s');
@@ -169,17 +171,128 @@ try {
         throw new Exception('La venta no contiene productos');
     }
 
-    // Agregar columnas de moneda si no existen (idempotente)
-    try {
-        $pdo->exec("ALTER TABLE ventas_cabecera
-            ADD COLUMN IF NOT EXISTS moneda CHAR(3) NOT NULL DEFAULT 'CUP',
-            ADD COLUMN IF NOT EXISTS tipo_cambio DECIMAL(10,4) NOT NULL DEFAULT 1.0000,
-            ADD COLUMN IF NOT EXISTS monto_moneda_original DECIMAL(12,2) NOT NULL DEFAULT 0.00");
-    } catch (Throwable $_e) {}
-    try {
-        $pdo->exec("ALTER TABLE ventas_detalle
-            ADD COLUMN IF NOT EXISTS nota_cocina VARCHAR(255) NULL AFTER nombre_producto");
-    } catch (Throwable $_e) {}
+    // El navegador solo propone precios y cantidades. La venta se recalcula aquí
+    // contra el catálogo de la empresa/sucursal/almacén de la sesión.
+    $priceMode = (string)($input['price_mode'] ?? 'sucursal');
+    if (!in_array($priceMode, ['sucursal', 'mayorista_suc', 'custom_pct'], true)) {
+        $priceMode = 'sucursal';
+    }
+    $priceAdjustPct = isset($input['price_adjust_pct']) && is_numeric($input['price_adjust_pct'])
+        ? (float)$input['price_adjust_pct'] : 0.0;
+    if (!is_finite($priceAdjustPct) || $priceAdjustPct < -99.99 || $priceAdjustPct > 999.99) {
+        throw new Exception('Porcentaje de precio inválido');
+    }
+    $globalDiscountPct = isset($input['descuento_global']) && is_numeric($input['descuento_global'])
+        ? (float)$input['descuento_global'] : 0.0;
+    if (!is_finite($globalDiscountPct) || $globalDiscountPct < -100 || $globalDiscountPct > 100) {
+        throw new Exception('Descuento global inválido');
+    }
+
+    $requestedCodes = [];
+    foreach ($saleItems as $item) {
+        if (!is_array($item)) {
+            throw new Exception('Detalle de venta inválido');
+        }
+        $sku = pos_security_clean_code($item['id'] ?? $item['codigo'] ?? '', 64);
+        $qty = isset($item['qty']) && is_numeric($item['qty']) ? (float)$item['qty'] : 0.0;
+        $clientPrice = isset($item['price']) && is_numeric($item['price']) ? (float)$item['price'] : 0.0;
+        if ($sku === '' || !is_finite($qty) || $qty <= 0 || !is_finite($clientPrice) || $clientPrice < 0) {
+            throw new Exception('Detalle de venta inválido');
+        }
+        $requestedCodes[$sku] = true;
+    }
+
+    $codeList = array_keys($requestedCodes);
+    $codePlaceholders = implode(',', array_fill(0, count($codeList), '?'));
+    $catalogScopeSql = "((p.es_servicio = 1 AND p.id_sucursal_origen = ?)
+                OR EXISTS (
+                    SELECT 1 FROM stock_almacen scope_stock
+                    WHERE scope_stock.id_producto = p.codigo
+                      AND scope_stock.id_sucursal = ?
+                      AND scope_stock.id_almacen = ?
+                )";
+    if ($esReserva) {
+        // Una reserva puede no tener existencia todavía, pero debe seguir
+        // perteneciendo a la sucursal de origen; nunca se acepta un producto
+        // global de otra sucursal.
+        $catalogScopeSql .= " OR p.id_sucursal_origen = ?";
+    }
+    $catalogScopeSql .= ')';
+    $stmtCatalog = $pdo->prepare(
+        "SELECT p.codigo, p.nombre, p.activo, p.es_servicio, p.es_elaborado,
+                COALESCE(p.es_combo, 0) AS es_combo, COALESCE(p.costo, 0) AS costo,
+                COALESCE(ps.precio_venta, p.precio) AS precio_suc,
+                COALESCE(ps.precio_mayorista, p.precio_mayorista, p.precio) AS precio_mayorista_suc
+         FROM productos p
+         LEFT JOIN productos_precios_sucursal ps
+                ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+         WHERE p.id_empresa = ?
+           AND p.codigo IN ($codePlaceholders)
+           AND p.activo = 1
+           AND {$catalogScopeSql}"
+    );
+    $catalogParams = [$idSucursal, $idEmpresa];
+    $catalogParams = array_merge($catalogParams, $codeList, [$idSucursal, $idSucursal, $idAlmacen]);
+    if ($esReserva) $catalogParams[] = $idSucursal;
+    $stmtCatalog->execute($catalogParams);
+    $catalog = [];
+    foreach ($stmtCatalog->fetchAll(PDO::FETCH_ASSOC) as $product) {
+        $catalog[(string)$product['codigo']] = $product;
+    }
+    if (count($catalog) !== count($codeList)) {
+        $missing = array_values(array_diff($codeList, array_keys($catalog)));
+        throw new Exception('Producto fuera del contexto POS o inactivo: ' . implode(', ', $missing));
+    }
+
+    $canCustomPrice = !empty($_SESSION['admin_logged_in'])
+        || in_array((string)($_SESSION['pos_rol'] ?? ''), ['admin', 'supervisor'], true);
+    $normalizedSaleItems = [];
+    $computedSubtotal = 0.0;
+    foreach ($saleItems as $item) {
+        $sku = pos_security_clean_code($item['id'] ?? $item['codigo'] ?? '', 64);
+        $product = $catalog[$sku];
+        $qty = (float)$item['qty'];
+        $discountPct = isset($item['discountPct']) && is_numeric($item['discountPct'])
+            ? (float)$item['discountPct'] : 0.0;
+        if (!is_finite($discountPct) || $discountPct < 0 || $discountPct > 100) {
+            throw new Exception("Descuento inválido para '{$product['nombre']}'");
+        }
+        $customPrice = !empty($item['customPrice']);
+        if ($customPrice && !$canCustomPrice) {
+            throw new Exception('Solo un supervisor o administrador puede modificar precios.');
+        }
+
+        $basePrice = (float)$product['precio_suc'];
+        $serverPrice = $basePrice;
+        if ($priceMode === 'mayorista_suc') {
+            $serverPrice = (float)$product['precio_mayorista_suc'];
+        } elseif ($priceMode === 'custom_pct') {
+            $serverPrice = $basePrice * (1 + ($priceAdjustPct / 100));
+        }
+        if ($customPrice) {
+            $serverPrice = (float)$item['price'];
+        }
+        if (!is_finite($serverPrice) || $serverPrice < 0) {
+            throw new Exception("Precio inválido para '{$product['nombre']}'");
+        }
+
+        $computedSubtotal += $serverPrice * (1 - ($discountPct / 100)) * $qty;
+        $normalizedSaleItems[] = [
+            'id' => $sku,
+            'name' => safe_str(pos_security_clean_text($product['nombre'] ?? $sku, 150), 150),
+            'qty' => $qty,
+            'price' => round($serverPrice, 2),
+            'discountPct' => $discountPct,
+            'customPrice' => $customPrice,
+            'note' => safe_str(pos_security_clean_text($item['note'] ?? '', 255), 255),
+        ];
+    }
+    $computedTotal = round($computedSubtotal * (1 - ($globalDiscountPct / 100)), 2);
+    if (abs($computedTotal - $saleTotal) > 0.01) {
+        throw new Exception('El total de la venta no coincide con los precios autorizados. Actualice el carrito.');
+    }
+    $saleTotal = $computedTotal;
+    $saleItems = $normalizedSaleItems;
 
     // 4. TRANSACCIÓN GLOBAL
     $pdo->beginTransaction();
@@ -211,6 +324,22 @@ try {
         $mainMethod = pos_security_clean_text($payments[0]['method'] ?? '', 50) ?: 'Efectivo';
     }
 
+    $paymentTotal = 0.0;
+    foreach ($payments as $pay) {
+        if (!is_array($pay)) {
+            throw new Exception('Pago inválido');
+        }
+        $payAmount = isset($pay['amount']) && is_numeric($pay['amount']) ? (float)$pay['amount'] : 0.0;
+        $payMethod = pos_security_clean_text($pay['method'] ?? '', 50);
+        if (!is_finite($payAmount) || $payAmount <= 0 || $payMethod === '') {
+            throw new Exception('Pago inválido');
+        }
+        $paymentTotal += $payAmount;
+    }
+    if ($saleTotal > 0 && abs(round($paymentTotal, 2) - $saleTotal) > 0.01) {
+        throw new Exception('La suma de los pagos no coincide con el total de la venta.');
+    }
+
     // B. Insertar Cabecera
     $sqlCab = "INSERT INTO ventas_cabecera (
         uuid_venta, fecha, total, metodo_pago, id_sucursal, id_almacen, id_caja,
@@ -221,7 +350,8 @@ try {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)";
 
     $stmtCab = $pdo->prepare($sqlCab);
-    $stmtCab->execute([
+    try {
+        $stmtCab->execute([
         $uuid,
         $fechaVenta,
         $saleTotal,
@@ -243,8 +373,18 @@ try {
         $canalOrigen,
         $moneda,
         $tipoCambio,
-        $montoMonedaOriginal > 0 ? $montoMonedaOriginal : $saleTotal
-    ]);
+            $montoMonedaOriginal > 0 ? $montoMonedaOriginal : $saleTotal
+        ]);
+    } catch (PDOException $duplicateError) {
+        // El índice único uk_uuid_venta protege también dos peticiones simultáneas.
+        if ((string)$duplicateError->getCode() === '23000'
+            && stripos($duplicateError->getMessage(), 'uuid') !== false) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            echo json_encode(['status' => 'success', 'id' => 0, 'uuid' => $uuid, 'msg' => 'Venta ya registrada']);
+            exit;
+        }
+        throw $duplicateError;
+    }
 
     $idVenta = $pdo->lastInsertId();
 
@@ -265,10 +405,11 @@ try {
 
     // D. Procesar Detalles e Inventario
     $sqlDet = "INSERT INTO ventas_detalle (
-        id_venta_cabecera, id_producto, cantidad, precio, 
+        id_venta_cabecera, id_producto, cantidad, precio, costo_unitario,
         nombre_producto, codigo_producto, nota_cocina
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
     $stmtDet = $pdo->prepare($sqlDet);
+    $stmtCostoProducto = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? AND id_empresa = ? LIMIT 1");
 
     $itemsCocina = [];
 
@@ -287,12 +428,18 @@ try {
             throw new Exception('Detalle de venta inválido');
         }
 
+        $stmtCostoProducto->execute([$sku, $idEmpresa]);
+        $costoUnitario = $stmtCostoProducto->fetchColumn();
+        $costoUnitario = is_numeric($costoUnitario) ? (float)$costoUnitario : 0.0;
+
         // Insertar Detalle
-        $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku, $note !== '' ? $note : null]);
+        $stmtDet->execute([$idVenta, $sku, $qty, $price, $costoUnitario, $name, $sku, $note !== '' ? $note : null]);
 
     }
 
-    $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
+    // Bloquea las filas de stock durante la venta para evitar dos cobros
+    // simultáneos que consuman la misma existencia.
+    $stmtStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? AND id_sucursal = ? FOR UPDATE");
     foreach ($resolvedSale['inventory_items'] as $resolvedItem) {
         $realSku = $resolvedItem['id'];
         $realQty = floatval($resolvedItem['qty'] ?? 0);
@@ -301,8 +448,11 @@ try {
             continue;
         }
 
-        $stmtStock->execute([$realSku, $idAlmacen]);
-        $stockActual = floatval($stmtStock->fetchColumn());
+        $stmtStock->execute([$realSku, $idAlmacen, $idSucursal]);
+        $stockActual = 0.0;
+        foreach ($stmtStock->fetchAll(PDO::FETCH_COLUMN) as $stockRow) {
+            $stockActual += (float)$stockRow;
+        }
 
         if ($esReserva) {
             if ($stockActual < $realQty) {
@@ -322,7 +472,19 @@ try {
             throw new Exception("Stock insuficiente para '" . $realName . "'. Disponible: " . $stockActual . ". Requerido: " . $realQty . ". " . $debugContext);
         }
         if ($kardexAvailable) {
-            $kardex->registrarVenta($realSku, $realQty, $idVenta, $usuarioNombre, $fechaVenta, $idAlmacen);
+            $registered = $kardex->registrarVenta(
+                $realSku,
+                $realQty,
+                $idVenta,
+                $usuarioNombre,
+                $fechaVenta,
+                $idAlmacen,
+                $idSucursal,
+                $idEmpresa
+            );
+            if ($registered !== true) {
+                throw new Exception("No se pudo registrar el movimiento de kardex para {$realSku}.");
+            }
         }
     }
 

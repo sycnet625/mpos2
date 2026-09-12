@@ -13,6 +13,9 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 
 require_once 'db.php';
 require_once 'config_loader.php';
+
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+try { $pdo->exec("ALTER TABLE contabilidad_diario ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1"); } catch (Throwable $e) { error_log('onat_taxes schema warning: ' . $e->getMessage()); }
 require_once 'accounting_helpers.php';
 require_once 'empresa_fiscal_helpers.php';
 
@@ -58,14 +61,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         }
 
         $fechaContable = date("Y-m-t", strtotime($_POST['anio'].'-'.$_POST['mes'].'-01'));
-        $pdo->prepare("DELETE FROM contabilidad_diario WHERE asiento_tipo = 'IMPUESTOS' AND referencia_id = ?")->execute([$declId]);
+        $pdo->prepare("DELETE FROM contabilidad_diario WHERE id_empresa = ? AND asiento_tipo = 'IMPUESTOS' AND referencia_id = ?")->execute([$EMP_ID, $declId]);
 
-        $addAsiento = function($ctaGasto, $ctaPasivo, $monto, $detalle) use ($pdo, $fechaContable, $declId) {
+        $addAsiento = function($ctaGasto, $ctaPasivo, $monto, $detalle) use ($pdo, $fechaContable, $declId, $EMP_ID) {
             if($monto > 0) {
-                $pdo->prepare("INSERT INTO contabilidad_diario (fecha, asiento_tipo, referencia_id, cuenta, debe, haber, detalle) VALUES (?, 'IMPUESTOS', ?, ?, ?, 0, ?)")
-                    ->execute([$fechaContable, $declId, $ctaGasto, $monto, $detalle]);
-                $pdo->prepare("INSERT INTO contabilidad_diario (fecha, asiento_tipo, referencia_id, cuenta, debe, haber, detalle) VALUES (?, 'IMPUESTOS', ?, ?, 0, ?, ?)")
-                    ->execute([$fechaContable, $declId, $ctaPasivo, $monto, $detalle]);
+                $pdo->prepare("INSERT INTO contabilidad_diario (fecha, asiento_tipo, referencia_id, cuenta, debe, haber, detalle, id_empresa) VALUES (?, 'IMPUESTOS', ?, ?, ?, 0, ?, ?)")
+                    ->execute([$fechaContable, $declId, $ctaGasto, $monto, $detalle, $EMP_ID]);
+                $pdo->prepare("INSERT INTO contabilidad_diario (fecha, asiento_tipo, referencia_id, cuenta, debe, haber, detalle, id_empresa) VALUES (?, 'IMPUESTOS', ?, ?, 0, ?, ?, ?)")
+                    ->execute([$fechaContable, $declId, $ctaPasivo, $monto, $detalle, $EMP_ID]);
             }
         };
 
@@ -110,7 +113,7 @@ $stmtV = $pdo->prepare("SELECT SUM(v.total)
 $stmtV->execute([$EMP_ID, $fecha_inicio, $fecha_fin]);
 $ingresos_brutos = floatval($stmtV->fetchColumn() ?: 0);
 
-$stmtC = $pdo->prepare("SELECT SUM(d.cantidad * p.costo) 
+$stmtC = $pdo->prepare("SELECT SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo))
                         FROM ventas_detalle d 
                         JOIN productos p ON d.id_producto = p.codigo 
                         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 

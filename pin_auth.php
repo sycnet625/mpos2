@@ -47,6 +47,7 @@ $configFile = __DIR__ . '/pos.cfg';
 $config = [
     "tienda_nombre" => "MI TIENDA",
     "cajeros" => [["nombre" => "Admin", "pin" => "0000"]],
+    "id_empresa" => 1,
     "id_sucursal" => 1,
     "id_almacen" => 1
 ];
@@ -69,11 +70,12 @@ try {
         SELECT fecha_contable, id
         FROM caja_sesiones 
         WHERE estado = 'ABIERTA' 
-        AND id_sucursal = ? 
+        AND id_empresa = ?
+        AND id_sucursal = ?
         ORDER BY fecha_apertura DESC 
         LIMIT 1
     ");
-    $stmtSesion->execute([$config['id_sucursal']]);
+    $stmtSesion->execute([$config['id_empresa'], $config['id_sucursal']]);
     $sesionActiva = $stmtSesion->fetch(PDO::FETCH_ASSOC);
     
     if ($sesionActiva) {
@@ -113,6 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['pin'])) {
         // PIN correcto - Crear sesión (sin guardar el PIN)
         // NO usar session_regenerate_id(true) — destruye la sesión y rompe requests paralelos
         $_SESSION['cajero'] = $cajeroEncontrado['nombre'];
+        $_SESSION['id_empresa'] = (int)$config['id_empresa'];
         $_SESSION['fecha_contable'] = $fechaContable;
         $_SESSION['id_sucursal'] = $config['id_sucursal'];
         $_SESSION['id_almacen'] = $config['id_almacen'];

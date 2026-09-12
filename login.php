@@ -10,7 +10,8 @@ session_set_cookie_params([
     'httponly' => true,
     'samesite' => 'Strict',   // Login no necesita tráfico cross-site
 ]);
-session_start();
+// Mostrar el formulario no necesita bloquear ni abrir la sesión del usuario.
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') session_start();
 
 // ── Cabeceras de Seguridad HTTP ──────────────────────────────────────────────
 header("Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
@@ -19,10 +20,27 @@ header("Strict-Transport-Security: max-age=31536000; includeSubDomains; preload"
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 header("X-XSS-Protection: 1; mode=block");
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+header("Expires: 0");
 // ─────────────────────────────────────────────────────────────────────────────
 define('PALWEB_DB_ERROR_FORMAT', 'html');
-require_once 'db.php';
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') require_once 'db.php';
 require_once 'config_loader.php';
+
+function login_safe_redirect(string $target): string {
+    $target = trim($target);
+    if ($target === '' || $target[0] !== '/' || substr($target, 0, 2) === '//') {
+        return 'dashboard.php';
+    }
+
+    $parsed = parse_url($target);
+    if ($parsed === false || isset($parsed['scheme']) || isset($parsed['host'])) {
+        return 'dashboard.php';
+    }
+
+    return $target;
+}
 
 // --- Rate Limiting por IP ---
 function rl_file($ip) {
@@ -49,16 +67,13 @@ function rl_clear($ip) {
 
 $error = '';
 $rl_ip = $_SERVER['REMOTE_ADDR'];
+$loginRedirect = login_safe_redirect((string)($_POST['redirect'] ?? $_GET['redirect'] ?? ''));
 $systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
 $systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    // Aplicar delay si hay 5+ intentos fallidos previos (ventana: 10 min)
     $rl = rl_get($rl_ip);
-    if ($rl['count'] >= 5) {
-        sleep(min(2 * ($rl['count'] - 4), 30));
-    }
 
     $user = trim($_POST['user'] ?? '');
     $pass = $_POST['pass'] ?? '';
@@ -79,10 +94,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $_SESSION['admin_user'] = $user_data['nombre']; // CORRECCIÓN: Usar 'nombre'
                 $_SESSION['user_id'] = $user_data['id'];
 
-                header('Location: dashboard.php');
+                header('Location: ' . $loginRedirect);
                 exit;
             } else {
-                rl_fail($rl_ip);
+                $failCount = rl_fail($rl_ip);
+                if ($failCount >= 5) {
+                    usleep(300000); // frena fuerza bruta sin castigar logins válidos por minutos
+                }
                 $error = "Usuario o contraseña incorrectos.";
             }
         } catch (PDOException $e) {
@@ -97,16 +115,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-ZM015S9N6M"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-ZM015S9N6M');
-</script>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Acceso Admin | <?php echo htmlspecialchars($systemBrandName); ?></title>
@@ -177,6 +185,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         <?php endif; ?>
 
         <form method="POST">
+            <input type="hidden" name="redirect" value="<?php echo htmlspecialchars($loginRedirect, ENT_QUOTES, 'UTF-8'); ?>">
             <div class="mb-3">
                 <label class="form-label fw-bold small text-muted">Usuario</label>
                 <div class="input-group">
@@ -201,6 +210,5 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     </div>
 </div>
 
-<?php include_once 'menu_master.php'; ?>
 </body>
 </html>

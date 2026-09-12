@@ -9,6 +9,7 @@ require_once 'db.php';
 require_once 'config_loader.php';
 $ALM_ID = intval($config['id_almacen']);
 $EMP_ID = intval($config['id_empresa']);
+$SUC_ID = intval($config['id_sucursal'] ?? 1);
 
 // Parámetros de Costo Indirecto (Por defecto 0 si no existen)
 $pctSalario = floatval($config['salario_elaborador_pct'] ?? 0);
@@ -22,20 +23,20 @@ try {
     $stmt = $pdo->prepare("SELECT r.*, p.nombre as nombre_prod, p.precio as precio_venta, p.codigo as sku_final 
                            FROM recetas_cabecera r 
                            LEFT JOIN productos p ON r.id_producto_final = p.codigo 
-                           WHERE r.id = ?");
-    $stmt->execute([$idReceta]);
+                           WHERE r.id = ? AND (p.id_empresa = ? OR p.id_empresa IS NULL)");
+    $stmt->execute([$idReceta, $EMP_ID]);
     $receta = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$receta) die("Receta no encontrada.");
 
     // 2. Detalles + Stock en Tiempo Real
     $sqlDet = "SELECT d.*, p.nombre, p.unidad_medida, p.costo as costo_actual,
-               (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = d.id_ingrediente AND s.id_almacen = ?) as stock_real
+               (SELECT COALESCE(SUM(s.cantidad), 0) FROM stock_almacen s WHERE s.id_producto = d.id_ingrediente AND s.id_almacen = ? AND s.id_sucursal = ?) as stock_real
                FROM recetas_detalle d 
-               LEFT JOIN productos p ON d.id_ingrediente = p.codigo 
+               LEFT JOIN productos p ON d.id_ingrediente = p.codigo AND p.id_empresa = ?
                WHERE d.id_receta = ?";
     $stmtD = $pdo->prepare($sqlDet);
-    $stmtD->execute([$ALM_ID, $idReceta]);
+    $stmtD->execute([$ALM_ID, $SUC_ID, $EMP_ID, $idReceta]);
     $detalles = $stmtD->fetchAll(PDO::FETCH_ASSOC);
 
     // Cálculos Materia Prima
@@ -82,10 +83,11 @@ try {
         JOIN ventas_detalle vd ON vd.id_venta_cabecera = vc.id
         WHERE vd.id_producto = ?
           AND vc.tipo_servicio = 'reserva'
+          AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
           AND (vc.estado_reserva = 'PENDIENTE' OR vc.estado_reserva IS NULL)
         ORDER BY vc.fecha_reserva ASC
         LIMIT 50");
-    $stmtRes->execute([$receta['id_producto_final']]);
+    $stmtRes->execute([$receta['id_producto_final'], $EMP_ID, $SUC_ID, $ALM_ID]);
     $reservasPendientes = $stmtRes->fetchAll(PDO::FETCH_ASSOC);
     $totalReservado = array_sum(array_column($reservasPendientes, 'cant_reservada'));
 
@@ -374,4 +376,3 @@ function getCanalBadgePR($canal, $map) {
 
 </body>
 </html>
-

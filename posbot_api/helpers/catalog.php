@@ -540,7 +540,11 @@ function bot_site_url(array $appCfg): string {
         return ($https ? 'https' : 'http') . '://' . $host;
     }
     $url = trim((string)($appCfg['website'] ?? ''));
-    if ($url === '') $url = 'https://www.palweb.net';
+    if ($url === '') {
+        $url = function_exists('config_loader_public_origin')
+            ? config_loader_public_origin($appCfg)
+            : 'https://localhost';
+    }
     if (!preg_match('~^https?://~i', $url)) $url = 'https://' . ltrim($url, '/');
     return $url;
 }

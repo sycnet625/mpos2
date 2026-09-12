@@ -26,15 +26,17 @@ try {
 
 // --- 1. CONFIGURACIÓN ---
 require_once 'config_loader.php';
-$ALM_ID = intval($config['id_almacen']);
-$SUC_ID = intval($config['id_sucursal']);
-$EMP_ID = intval($config['id_empresa']);
+$ALM_ID = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+$SUC_ID = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
+$EMP_ID = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+
+try { $pdo->exec("ALTER TABLE mermas_cabecera ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1"); } catch (Throwable $e) { error_log('pos_shrinkage schema warning: ' . $e->getMessage()); }
 
 // --- CARGAR ALMACENES DE LA SUCURSAL ---
 $almacenes = [];
 try {
-    $stmtA = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id_sucursal = ? AND activo = 1 ORDER BY nombre ASC");
-    $stmtA->execute([$SUC_ID]);
+    $stmtA = $pdo->prepare("SELECT id, nombre FROM almacenes WHERE id_empresa = ? AND id_sucursal = ? AND activo = 1 ORDER BY nombre ASC");
+    $stmtA->execute([$EMP_ID, $SUC_ID]);
     $almacenes = $stmtA->fetchAll(PDO::FETCH_ASSOC);
 } catch (Exception $e) {}
 
@@ -46,16 +48,27 @@ if (isset($_GET['action']) && $_GET['action'] === 'search_products') {
     if (strlen($q) < 2) { echo json_encode([]); exit; }
 
     try {
+        $idAlmacenBusqueda = isset($_GET['id_almacen']) ? intval($_GET['id_almacen']) : $ALM_ID;
+        $stmtScopeBusqueda = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND COALESCE(activo, 1) = 1 LIMIT 1");
+        $stmtScopeBusqueda->execute([$idAlmacenBusqueda, $EMP_ID, $SUC_ID]);
+        if (!$stmtScopeBusqueda->fetchColumn()) {
+            echo json_encode([]);
+            exit;
+        }
         $sql = "SELECT p.codigo, p.nombre,
-                COALESCE(ps.precio_costo, p.costo) AS costo
+                COALESCE(ps.precio_costo, p.costo) AS costo,
+                COALESCE(SUM(sa.cantidad), 0) AS existencias_actuales
                 FROM productos p
                 LEFT JOIN productos_precios_sucursal ps
                     ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
+                LEFT JOIN stock_almacen sa
+                    ON sa.id_producto = p.codigo AND sa.id_almacen = ? AND sa.id_sucursal = ?
                 WHERE (p.nombre LIKE ? OR p.codigo LIKE ?)
                 AND p.id_empresa = ? AND p.activo = 1
+                GROUP BY p.codigo, p.nombre, ps.precio_costo, p.costo
                 LIMIT 20";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$SUC_ID, "%$q%", "%$q%", $EMP_ID]);
+        $stmt->execute([$SUC_ID, $idAlmacenBusqueda, $SUC_ID, "%$q%", "%$q%", $EMP_ID]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
     } catch (Exception $e) { echo json_encode([]); }
     exit;
@@ -73,10 +86,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             $kardex = new KardexEngine($pdo);
 
-            $stmtCheck = $pdo->prepare("SELECT estado, id_almacen FROM mermas_cabecera WHERE id = ?");
-            $stmtCheck->execute([$idMerma]);
+            $stmtCheck = $pdo->prepare("SELECT estado, id_almacen FROM mermas_cabecera WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND (id_almacen = ? OR id_almacen IS NULL)");
+            $stmtCheck->execute([$idMerma, $EMP_ID, $SUC_ID, $ALM_ID]);
             $mermaData = $stmtCheck->fetch(PDO::FETCH_ASSOC);
 
+            if (!$mermaData) throw new Exception("Merma no encontrada en el almacén activo.");
             if ($mermaData['estado'] === 'CANCELADA') throw new Exception("Esta merma ya fue revertida.");
             $mermaAlmId = !empty($mermaData['id_almacen']) ? intval($mermaData['id_almacen']) : $ALM_ID;
 
@@ -90,7 +104,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo,
                     $item['id_producto'], $mermaAlmId, $item['cantidad'], 'ENTRADA', 
                     "REVERSION MERMA #$idMerma", $item['costo_al_momento'],
-                    $SUC_ID
+                    $SUC_ID,
+                    date('Y-m-d H:i:s'),
+                    'Admin',
+                    $EMP_ID
                 );
             }
 
@@ -115,9 +132,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $motivo_gral = $input['motivo'] ?? 'General';
         $mermaAlmId = isset($input['id_almacen']) ? intval($input['id_almacen']) : $ALM_ID;
 
+        if (!is_array($input['items'] ?? null) || count($input['items']) === 0) {
+            throw new Exception('Debe agregar al menos un producto.');
+        }
+
+        // Validar el almacén y consolidar líneas repetidas antes de tocar el stock.
+        $stmtAlmacen = $pdo->prepare("SELECT id FROM almacenes WHERE id = ? AND id_empresa = ? AND id_sucursal = ? AND COALESCE(activo, 1) = 1 LIMIT 1");
+        $stmtAlmacen->execute([$mermaAlmId, $EMP_ID, $SUC_ID]);
+        if (!$stmtAlmacen->fetchColumn()) {
+            throw new Exception('El almacén seleccionado no es válido.');
+        }
+
+        $cantidadesSolicitadas = [];
+        foreach ($input['items'] as $item) {
+            $sku = trim((string)($item['sku'] ?? ''));
+            $qty = floatval($item['cantidad'] ?? 0);
+            if ($sku === '' || $qty <= 0) {
+                throw new Exception('Producto o cantidad inválida.');
+            }
+            $cantidadesSolicitadas[$sku] = ($cantidadesSolicitadas[$sku] ?? 0) + $qty;
+        }
+
+        $stmtStock = $pdo->prepare("SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? AND id_sucursal = ? FOR UPDATE");
+        foreach ($cantidadesSolicitadas as $sku => $cantidadSolicitada) {
+            $stmtStock->execute([$sku, $mermaAlmId, $SUC_ID]);
+            $existenciasActuales = 0.0;
+            foreach ($stmtStock->fetchAll(PDO::FETCH_COLUMN) as $stockRow) {
+                $existenciasActuales += (float)$stockRow;
+            }
+            if ($cantidadSolicitada > $existenciasActuales + 0.000001) {
+                throw new Exception("No se puede dar de baja {$cantidadSolicitada} unidades de {$sku}. Existencias actuales: {$existenciasActuales}.");
+            }
+        }
+
         // MODIFICADO: Guardar id_sucursal e id_almacen
-        $stmtHead = $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, estado, id_sucursal, id_almacen, fecha_registro) VALUES (?, ?, ?, 'PROCESADA', ?, ?, ?)");
-        $stmtHead->execute([$_SESSION['user_id']??'Admin', $motivo_gral, $input['total'], $SUC_ID, $mermaAlmId, $fecha_salida]);
+        $stmtHead = $pdo->prepare("INSERT INTO mermas_cabecera (usuario, motivo_general, total_costo_perdida, estado, id_empresa, id_sucursal, id_almacen, fecha_registro) VALUES (?, ?, ?, 'PROCESADA', ?, ?, ?, ?)");
+        $stmtHead->execute([$_SESSION['user_id']??'Admin', $motivo_gral, $input['total'], $EMP_ID, $SUC_ID, $mermaAlmId, $fecha_salida]);
         $idMerma = $pdo->lastInsertId();
 
         foreach ($input['items'] as $item) {
@@ -129,10 +179,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  FROM productos p
                  LEFT JOIN productos_precios_sucursal ps
                      ON ps.codigo_producto = p.codigo AND ps.id_sucursal = ?
-                 WHERE p.codigo = ? AND p.id_empresa = ?"
+                WHERE p.codigo = ? AND p.id_empresa = ? AND p.activo = 1"
             );
             $stmtCosto->execute([$SUC_ID, $sku, $EMP_ID]);
-            $costo = floatval($stmtCosto->fetchColumn() ?: 0);
+            $costoRaw = $stmtCosto->fetchColumn();
+            if ($costoRaw === false) {
+                throw new Exception("Producto {$sku} inexistente, inactivo o fuera de la empresa.");
+            }
+            $costo = floatval($costoRaw);
 
             $pdo->prepare("INSERT INTO mermas_detalle (id_merma, id_producto, cantidad, costo_al_momento, motivo_especifico) VALUES (?, ?, ?, ?, ?)")
                 ->execute([$idMerma, $sku, $qty, $costo, $item['motivo']]);
@@ -140,10 +194,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Salida de stock
             KardexEngine::registrarMovimiento(
                 $pdo,
-                $sku, $mermaAlmId, ($qty * -1), 'SALIDA', 
+                $sku, $mermaAlmId, ($qty * -1), 'MERMA',
                 "MERMA #$idMerma", $costo, 
                 $SUC_ID,
-                $fecha_salida
+                $fecha_salida,
+                'Admin',
+                $EMP_ID
             );
         }
 
@@ -161,17 +217,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // --- CARGAR HISTORIAL ---
 $recentMermas = [];
 try {
-    $stmtH = $pdo->query("SELECT m.*, a.nombre as nombre_almacen FROM mermas_cabecera m LEFT JOIN almacenes a ON m.id_almacen = a.id ORDER BY m.id DESC LIMIT 15");
+    $stmtH = $pdo->prepare("SELECT m.*, a.nombre as nombre_almacen FROM mermas_cabecera m LEFT JOIN almacenes a ON m.id_almacen = a.id WHERE m.id_empresa = ? AND m.id_sucursal = ? AND (m.id_almacen = ? OR m.id_almacen IS NULL) ORDER BY m.id DESC LIMIT 15");
+    $stmtH->execute([$EMP_ID, $SUC_ID, $ALM_ID]);
     $headers = $stmtH->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($headers as $h) {
         $stmtD = $pdo->prepare("
             SELECT d.*, p.nombre 
             FROM mermas_detalle d 
-            LEFT JOIN productos p ON d.id_producto = p.codigo
+            LEFT JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = ?
             WHERE d.id_merma = ?
         ");
-        $stmtD->execute([$h['id']]);
+        $stmtD->execute([$EMP_ID, $h['id']]);
         $h['details'] = $stmtD->fetchAll(PDO::FETCH_ASSOC);
         
         $h['expanded'] = false;
@@ -236,7 +293,7 @@ try {
                     </div>
                     <div class="col-md-3">
                         <label class="fw-bold text-muted small"><i class="fas fa-warehouse me-1"></i> ALMACÉN</label>
-                        <select class="form-select" v-model="selectedAlmacen">
+                        <select class="form-select" v-model="selectedAlmacen" @change="filterProds">
                             <option v-for="a in almacenes" :value="a.id">{{a.nombre}}</option>
                         </select>
                     </div>
@@ -259,7 +316,7 @@ try {
                         <ul class="list-group position-absolute w-100 shadow" style="z-index:1000;max-height:250px;overflow:auto;" v-if="filteredProds.length > 0">
                             <li class="list-group-item list-group-item-action cursor-pointer" v-for="p in filteredProds" @click="selectProd(p)">
                                 <div class="d-flex justify-content-between">
-                                    <strong>{{p.nombre}}</strong><small class="text-muted">{{p.codigo}}</small>
+                                    <strong>{{p.nombre}}</strong><small class="text-muted">Código: {{p.codigo}} · Existencias: {{formatStock(p.existencias_actuales)}}</small>
                                 </div>
                                 <div class="small text-danger">Costo: ${{p.costo}}</div>
                             </li>
@@ -403,11 +460,12 @@ try {
                 this.isLoadingSearch = true; clearTimeout(this.debounceTimer);
                 this.debounceTimer = setTimeout(async () => {
                     try {
-                        const res = await fetch(`pos_shrinkage.php?action=search_products&q=${encodeURIComponent(this.search)}`);
+                        const res = await fetch(`pos_shrinkage.php?action=search_products&q=${encodeURIComponent(this.search)}&id_almacen=${encodeURIComponent(this.selectedAlmacen)}`);
                         this.filteredProds = await res.json();
                     } catch (e) {} finally { this.isLoadingSearch = false; }
                 }, 300);
             },
+            formatStock(value) { return Number(value || 0).toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 2 }); },
             selectProd(p) {
                 this.selectedSku = p.codigo; this.currentProd = p; this.search = p.nombre; this.filteredProds = [];
             },

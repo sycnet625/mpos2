@@ -442,10 +442,10 @@ function bot_create_reserva(PDO $pdo, array $appCfg, string $wa, string $name, s
         $idReserva = (int)$pdo->lastInsertId();
 
         $d = $pdo->prepare("INSERT INTO ventas_detalle
-            (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto, categoria_producto)
-            VALUES (?,?,?,?,?,?,?)");
+            (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto, categoria_producto)
+            VALUES (?,?,?,?,?,?,?,?)");
         foreach ($valid as $it) {
-            $d->execute([$idReserva, $it['sku'], $it['qty'], $it['price'], $it['name'], $it['sku'], $it['category']]);
+            $d->execute([$idReserva, $it['sku'], $it['qty'], $it['price'], isset($it['cost']) ? (float)$it['cost'] : null, $it['name'], $it['sku'], $it['category']]);
         }
         if ($sinExistencia) {
             $pdo->prepare("UPDATE ventas_cabecera SET sin_existencia=1 WHERE id=?")->execute([$idReserva]);

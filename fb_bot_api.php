@@ -110,7 +110,7 @@ function fb_public_base_url(): string {
     $scheme = $https ? 'https' : 'http';
     $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
     if ($host === '') $host = trim((string)($_SERVER['SERVER_NAME'] ?? 'localhost'));
-    if (in_array($host, ['127.0.0.1', 'localhost'], true)) return 'https://www.palweb.net';
+    if (in_array($host, ['127.0.0.1', 'localhost'], true)) return config_loader_public_origin();
     return $scheme . '://' . $host;
 }
 
@@ -255,7 +255,7 @@ function fb_my_page_payload(PDO $pdo, array $config): array {
         $lines[] = 'Productos reservables:';
         foreach ($reservables as $name) $lines[] = '- ' . $name;
     }
-    $lines[] = 'En www.palweb.net se pueden comprar automaticamente.';
+    $lines[] = 'En ' . preg_replace('~^https?://~i', '', fb_public_base_url()) . ' se pueden comprar automaticamente.';
     return ['products' => $products, 'reservables' => $reservables, 'outro_text' => implode("\n", $lines)];
 }
 

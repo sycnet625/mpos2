@@ -6,6 +6,9 @@ require_once 'db.php';
 require_once 'config_loader.php';
 session_start();
 
+$invoicePublicOrigin = config_loader_public_origin($config);
+$invoiceContactEmail = trim((string)($config['facturacion_email'] ?? $config['email'] ?? ''));
+
 // 1. PROCESAR EL FORMULARIO
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
@@ -19,21 +22,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $cliTel     = $_POST['cliente_telefono'] ?? '';
     $mensajero  = $_POST['mensajero'] ?? '';
     $vehiculo   = $_POST['vehiculo'] ?? '';
-    $admin      = $_SESSION['admin_name'] ?? 'Administrador'; 
+    $admin      = $_SESSION['admin_name'] ?? 'Administrador';
+$EMP_ID     = (int)($config['id_empresa'] ?? 1);
 
     // --- LÓGICA DE NUMERACIÓN INTELIGENTE ---
     $numFacturaPost = $_POST['numero_factura'] ?? '';
 
     // 1. Verificamos si el número que viene del formulario ya existe en la BD
-    $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM facturas WHERE numero_factura = ?");
-    $stmtCheck->execute([$numFacturaPost]);
+    $stmtCheck = $pdo->prepare("SELECT COUNT(*) FROM facturas WHERE numero_factura = ? AND id_empresa = ?");
+    $stmtCheck->execute([$numFacturaPost, $EMP_ID]);
     $existe = $stmtCheck->fetchColumn();
 
     // 2. Si está vacío O SI YA EXISTE (Duplicado), calculamos el siguiente libre obligatoriamente
     if (empty($numFacturaPost) || $existe > 0) {
         // Buscamos el último ID real en la base de datos
-        $sqlLast = "SELECT id FROM facturas ORDER BY id DESC LIMIT 1";
-        $stmtL = $pdo->query($sqlLast);
+        $stmtL = $pdo->prepare("SELECT id FROM facturas WHERE id_empresa = ? ORDER BY id DESC LIMIT 1");
+        $stmtL->execute([$EMP_ID]);
         $lastId = $stmtL->fetchColumn(); // Obtiene el ID más alto actual
         
         $nextId = ($lastId) ? $lastId + 1 : 1; // Sumamos 1
@@ -76,10 +80,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $pdo->beginTransaction();
         
-        $sqlCab = "INSERT INTO facturas (numero_factura, fecha_emision, id_ticket_origen, cliente_nombre, cliente_direccion, cliente_telefono, mensajero_nombre, vehiculo, subtotal, total, creado_por) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        $sqlCab = "INSERT INTO facturas (numero_factura, fecha_emision, id_ticket_origen, id_empresa, cliente_nombre, cliente_direccion, cliente_telefono, mensajero_nombre, vehiculo, subtotal, total, creado_por)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         $stmtCab = $pdo->prepare($sqlCab);
-        $stmtCab->execute([$numFactura, $fecha, $ticketID, $cliNombre, $cliDir, $cliTel, $mensajero, $vehiculo, $subtotal, $total, $admin]);
+        $stmtCab->execute([$numFactura, $fecha, $ticketID, $EMP_ID, $cliNombre, $cliDir, $cliTel, $mensajero, $vehiculo, $subtotal, $total, $admin]);
         $facturaDbId = $pdo->lastInsertId();
 
         $sqlDet = "INSERT INTO facturas_detalle (id_factura, descripcion, unidad_medida, cantidad, precio_unitario, importe) VALUES (?, ?, ?, ?, ?, ?)";
@@ -195,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="company-name">PALWEB SURL</div>
                     <div>Magnolia #258 / Parque y Bella Vista<br>Canal, Cerro, La Habana</div>
                     <div>Teléfono: (+53) 5278-3083</div>
-                    <div><a href="http://www.palweb.net/" style="color:blue">http://www.palweb.net</a></div>
+                    <div><a href="<?= htmlspecialchars($invoicePublicOrigin, ENT_QUOTES, 'UTF-8') ?>/" style="color:blue"><?= htmlspecialchars($invoicePublicOrigin, ENT_QUOTES, 'UTF-8') ?></a></div>
                     <div>NIT: 50004328264</div>
                 </td>
                 <td width="40%" valign="top" align="right">
@@ -308,7 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div style="margin-top:30px; border-top:1px solid #ccc; padding-top:5px; font-size:10px;">
         Facturado por: <i><?php echo htmlspecialchars($admin); ?></i> (Administrador PALWEB SURL)<br>
-        Si tiene alguna duda respecto esta factura, por favor contáctenos: <b>admin@palweb.net</b>
+        <?php if ($invoiceContactEmail): ?>Si tiene alguna duda respecto esta factura, por favor contáctenos: <b><?= htmlspecialchars($invoiceContactEmail, ENT_QUOTES, 'UTF-8') ?></b><?php endif; ?>
     </div>
     <div style="margin-top:20px; font-size:10px; color:#999; text-align:center;">Generado por <?= htmlspecialchars(config_loader_system_name()) ?> v2.0</div>
 

@@ -56,6 +56,7 @@ function business_closure_family_label(string $name): string
 try {
     $pdo->exec("CREATE TABLE IF NOT EXISTS reportes_cierre (
         id INT AUTO_INCREMENT PRIMARY KEY,
+        id_empresa INT NOT NULL DEFAULT 1,
         id_sucursal INT NOT NULL,
         fecha_inicio DATE NOT NULL,
         fecha_fin DATE NOT NULL,
@@ -64,9 +65,11 @@ try {
         datos_json TEXT, -- Snapshot de los datos clave
         fecha_creacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )");
+    try { $pdo->exec("ALTER TABLE reportes_cierre ADD COLUMN id_empresa INT NOT NULL DEFAULT 1 AFTER id"); } catch (Throwable $ignored) {}
 } catch (Exception $e) { /* Silencio si ya existe */ }
 
 // 1. CARGAR CONFIGURACIÓN
+$id_empresa = intval($config['id_empresa'] ?? 1);
 $id_sucursal = intval($config['id_sucursal']);
 $id_almacen = intval($config['id_almacen']);
 $week_start_day = intval($config['semana_inicio_dia'] ?? 1);
@@ -78,9 +81,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (isset($_POST['action']) && $_POST['action'] === 'guardar') {
         try {
             // Guardamos un snapshot básico
-            $stmt = $pdo->prepare("INSERT INTO reportes_cierre (id_sucursal, fecha_inicio, fecha_fin, venta_total, ganancia_neta, datos_json) VALUES (?, ?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO reportes_cierre (id_empresa, id_sucursal, fecha_inicio, fecha_fin, venta_total, ganancia_neta, datos_json) VALUES (?, ?, ?, ?, ?, ?, ?)");
             $snapshot = json_encode(['nota' => 'Cierre Generado Manualmente']);
-            $stmt->execute([$id_sucursal, $_POST['f_inicio'], $_POST['f_fin'], $_POST['v_total'], $_POST['g_neta'], $snapshot]);
+            $stmt->execute([$id_empresa, $id_sucursal, $_POST['f_inicio'], $_POST['f_fin'], $_POST['v_total'], $_POST['g_neta'], $snapshot]);
             $mensaje_accion = "<div class='alert alert-success py-2'>Reporte guardado correctamente en el historial.</div>";
         } catch (Exception $e) {
             $mensaje_accion = "<div class='alert alert-danger py-2'>Error al guardar: ".$e->getMessage()."</div>";
@@ -88,8 +91,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     elseif (isset($_POST['action']) && $_POST['action'] === 'borrar') {
         try {
-            $stmt = $pdo->prepare("DELETE FROM reportes_cierre WHERE id = ? AND id_sucursal = ?");
-            $stmt->execute([$_POST['id_reporte'], $id_sucursal]);
+            $stmt = $pdo->prepare("DELETE FROM reportes_cierre WHERE id = ? AND id_empresa = ? AND id_sucursal = ?");
+            $stmt->execute([$_POST['id_reporte'], $id_empresa, $id_sucursal]);
             $mensaje_accion = "<div class='alert alert-warning py-2'>Reporte eliminado del historial.</div>";
         } catch (Exception $e) {
             $mensaje_accion = "<div class='alert alert-danger py-2'>Error al borrar: ".$e->getMessage()."</div>";
@@ -189,13 +192,13 @@ try {
          FROM ventas_pagos vp
          JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id
          LEFT JOIN caja_sesiones cs ON (vc.id_caja = cs.id OR vc.id_sesion_caja = cs.id)
-         WHERE vc.id_sucursal = ? AND vc.total > 0
+         WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.total > 0
            AND IFNULL(cs.fecha_contable, DATE(vc.fecha)) BETWEEN ? AND ?
            AND vp.metodo_pago = 'Transferencia'
            AND $wRealVc
          GROUP BY dia"
     );
-    $stmtTrf->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $stmtTrf->execute([$id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
     $trfPorDia = $stmtTrf->fetchAll(PDO::FETCH_KEY_PAIR);  // ['2026-01-01' => 1234.0, ...]
 
     // Serie diaria (para gráfico y tabla)
@@ -223,8 +226,8 @@ try {
     $ticket_promedio = $total_transacciones > 0 ? $venta_total / $total_transacciones : 0;
 
     // --- CARGAR HISTORIAL DE REPORTES ---
-    $stmt = $pdo->prepare("SELECT * FROM reportes_cierre WHERE id_sucursal = ? ORDER BY fecha_fin DESC, id DESC LIMIT 20");
-    $stmt->execute([$id_sucursal]);
+    $stmt = $pdo->prepare("SELECT * FROM reportes_cierre WHERE id_empresa = ? AND id_sucursal = ? ORDER BY fecha_fin DESC, id DESC LIMIT 20");
+    $stmt->execute([$id_empresa, $id_sucursal]);
     $historial_reportes = $stmt->fetchAll();
 
     $sessionSummary = [];
@@ -234,9 +237,9 @@ try {
     $stmt = $pdo->prepare("SELECT vc.*, $sqlDateLogicTickets as fecha_contable_calc
                            FROM ventas_cabecera vc
                            LEFT JOIN caja_sesiones cs ON vc.id_sesion_caja = cs.id
-                           WHERE vc.id_sucursal = ? AND $sqlDateLogicTickets BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " AND vc.tipo_servicio != 'reserva'
+                           WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ? AND $sqlDateLogicTickets BETWEEN ? AND ? AND " . ventas_reales_where_clause('vc') . " AND vc.tipo_servicio != 'reserva'
                            ORDER BY vc.fecha ASC, vc.id ASC");
-    $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+    $stmt->execute([$id_empresa, $id_sucursal, $id_almacen, $fecha_inicio, $fecha_fin]);
     $sessionTickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!empty($sessionTickets)) {
@@ -287,9 +290,9 @@ try {
             $sessionPlaceholders = implode(',', array_fill(0, count($sessionIds), '?'));
             $stmt = $pdo->prepare("SELECT id, nombre_cajero, fecha_apertura, fecha_cierre, fecha_contable, estado
                                    FROM caja_sesiones
-                                   WHERE id IN ($sessionPlaceholders)
+                                   WHERE id IN ($sessionPlaceholders) AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
                                    ORDER BY fecha_apertura ASC, id ASC");
-            $stmt->execute($sessionIds);
+            $stmt->execute(array_merge($sessionIds, [$id_empresa, $id_sucursal, $id_almacen]));
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $sessionId = intval($row['id']);
                 if (!isset($sessionSummary[$sessionId])) {
@@ -381,13 +384,13 @@ try {
              JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
              LEFT JOIN caja_sesiones s ON v.id_caja = s.id
              JOIN productos p ON vd.id_producto = p.codigo
-             WHERE v.id_sucursal = ?
+             WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?
                AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                AND " . ventas_reales_where_clause('v') . "
              GROUP BY p.codigo, p.nombre, p.categoria
              ORDER BY p.categoria ASC, p.nombre ASC"
         );
-        $stmt->execute([$id_sucursal, $fecha_inicio, $fecha_fin]);
+        $stmt->execute([$id_empresa, $id_sucursal, $id_almacen, $fecha_inicio, $fecha_fin]);
         $productSummary = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 

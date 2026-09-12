@@ -31,37 +31,61 @@ function ticket_session_id(array $ticket): int {
 // LOGICA SEGUN MODO
 if ($mode === 'session') {
     $id = intval($_GET['id']);
-    $stmtS = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id = ?");
-    $stmtS->execute([$id]);
+    // La sesión es la fuente de verdad del contexto. No usar el contexto global
+    // de pos.cfg: puede pertenecer a otra sucursal/almacén que la caja solicitada.
+    $stmtS = $pdo->prepare("SELECT * FROM caja_sesiones WHERE id = ? AND id_empresa = ?");
+    $stmtS->execute([$id, (int)($config['id_empresa'] ?? 1)]);
     $sesion = $stmtS->fetch(PDO::FETCH_ASSOC);
+    if (!$sesion) {
+        http_response_code(404);
+        exit('Sesión de caja no encontrada o no pertenece a la empresa actual.');
+    }
+
+    $sesionEmpresa = (int)$sesion['id_empresa'];
+    $sesionSucursal = (int)$sesion['id_sucursal'];
+    $sesionAlmacen = (int)$sesion['id_almacen'];
     $title = "Cierre Caja #" . $id . " - " . ($sesion['nombre_cajero'] ?? 'Cajero');
 
-    $stmtT = $pdo->prepare("SELECT * FROM ventas_cabecera WHERE (id_sesion_caja = ? OR id_caja = ?) ORDER BY id ASC");
-    $stmtT->execute([$id, $id]);
+    $stmtT = $pdo->prepare("SELECT id, fecha, total, metodo_pago, tipo_servicio,
+                                   cliente_nombre, id_sesion_caja, id_caja,
+                                   id_empresa, id_sucursal, id_almacen
+                            FROM ventas_cabecera
+                            WHERE (id_sesion_caja = ? OR id_caja = ?)
+                              AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
+                            ORDER BY id ASC");
+    $stmtT->execute([$id, $id, $sesionEmpresa, $sesionSucursal, $sesionAlmacen]);
     $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 
-    $whereClause = "(v.id_sesion_caja = ? OR v.id_caja = ?)";
-    $params = [$id, $id];
+    $whereClause = "(v.id_sesion_caja = ? OR v.id_caja = ?)
+                    AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?";
+    $params = [$id, $id, $sesionEmpresa, $sesionSucursal, $sesionAlmacen];
 
 } else {
     $start = $_GET['start']; $end = $_GET['end'];
     $scope = ($_GET['scope'] ?? 'local') === 'global' ? 'global' : 'local';
-    $scopeWhere = $scope === 'global' ? '' : ' AND v.id_sucursal = ' . intval($config['id_sucursal']);
+    $scopeWhere = ' AND v.id_empresa = ' . intval($config['id_empresa'] ?? 1) . ($scope === 'global' ? '' : ' AND v.id_sucursal = ' . intval($config['id_sucursal']));
     $title = "Reporte General: $start al $end";
     $startDt = new DateTime($start);
     $endDt = new DateTime($end);
     $reportDays = max(1, $startDt->diff($endDt)->days + 1);
 
-    $stmt = $pdo->prepare("SELECT v.*, s.nombre_cajero FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id WHERE DATE(v.fecha) BETWEEN ? AND ?{$scopeWhere} ORDER BY v.id DESC");
+    $stmt = $pdo->prepare("SELECT v.id, v.fecha, v.total, v.metodo_pago, v.tipo_servicio,
+                                  v.cliente_nombre, v.id_sesion_caja, v.id_caja,
+                                  v.id_empresa, v.id_sucursal, v.id_almacen,
+                                  s.nombre_cajero
+                           FROM ventas_cabecera v
+                           LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+                           WHERE v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY) {$scopeWhere}
+                           ORDER BY v.id DESC");
     $stmt->execute([$start, $end]);
     $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $whereClause = "DATE(v.fecha) BETWEEN ? AND ?{$scopeWhere}";
+    $whereClause = "v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY){$scopeWhere}";
     $params = [$start, $end];
 }
 
 // 1. FINANZAS (Ganancia)
-$sqlFin = "SELECT SUM(d.cantidad * d.precio) as venta, SUM(d.cantidad * p.costo) as costo 
+$sqlFin = "SELECT SUM(d.cantidad * d.precio) as venta, SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo)) as costo
            FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
            WHERE $whereClause";
 $stmtF = $pdo->prepare($sqlFin);
@@ -71,7 +95,7 @@ $ganancia = $finanzas['venta'] - $finanzas['costo'];
 $margen = ($finanzas['venta'] > 0) ? ($ganancia / $finanzas['venta']) * 100 : 0;
 
 // 2. CATEGORIAS (Agrupado) - MODIFICADO CON GANANCIA
-$sqlCat = "SELECT p.categoria, SUM(d.cantidad) as cant, SUM(d.cantidad * d.precio) as total, SUM(d.cantidad * (d.precio - p.costo)) as ganancia 
+$sqlCat = "SELECT p.categoria, SUM(d.cantidad) as cant, SUM(d.cantidad * d.precio) as total, SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as ganancia
            FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
            WHERE $whereClause GROUP BY p.categoria";
 $stmtC = $pdo->prepare($sqlCat);
@@ -102,7 +126,7 @@ foreach ($refundItems as $ri) {
 }
 
 // 5. LISTA DETALLADA DE PRODUCTOS (MODIFICADO CON GANANCIA)
-$sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.cantidad * d.precio) as total_val, SUM(d.cantidad * (d.precio - p.costo)) as total_profit 
+$sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.cantidad * d.precio) as total_val, SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as total_profit
              FROM ventas_detalle d 
              JOIN productos p ON d.id_producto = p.codigo 
              JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
@@ -112,6 +136,29 @@ $sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.c
 $stmtProds = $pdo->prepare($sqlProds);
 $stmtProds->execute($params);
 $soldProducts = $stmtProds->fetchAll(PDO::FETCH_ASSOC);
+
+// 6. PRODUCTOS DE TICKETS PASADOS COMO GASTO
+$sqlExpenseProds = "SELECT COALESCE(NULLIF(d.nombre_producto, ''), p.nombre, d.id_producto) AS nombre,
+                           SUM(d.cantidad) AS total_qty,
+                           SUM(d.cantidad * d.precio) AS total_val
+                    FROM ventas_detalle d
+                    LEFT JOIN productos p ON d.id_producto = p.codigo
+                    JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                    WHERE $whereClause
+                      AND (
+                          LOWER(COALESCE(v.metodo_pago, '')) LIKE '%gasto%'
+                          OR EXISTS (
+                              SELECT 1
+                              FROM ventas_pagos vp
+                              WHERE vp.id_venta_cabecera = v.id
+                                AND LOWER(vp.metodo_pago) LIKE '%gasto%'
+                          )
+                      )
+                    GROUP BY d.id_producto, d.nombre_producto, p.nombre
+                    ORDER BY nombre ASC";
+$stmtExpenseProds = $pdo->prepare($sqlExpenseProds);
+$stmtExpenseProds->execute($params);
+$expenseProducts = $stmtExpenseProds->fetchAll(PDO::FETCH_ASSOC);
 
 foreach ($soldProducts as $prod) {
     $name = trim((string)($prod['nombre'] ?? ''));
@@ -538,6 +585,41 @@ if (!empty($tickets)) {
                 <td class="text-end">$<?php echo number_format($totalValGeneral, 2); ?></td>
                 <td class="text-end text-success">$<?php echo number_format($totalProfitGeneral, 2); ?></td>
             </tr>
+            <?php endif; ?>
+        </tbody>
+    </table>
+
+    <h4 style="margin-top: 30px;">💸 Productos pasados como gasto</h4>
+    <table>
+        <thead>
+            <tr>
+                <th>Producto</th>
+                <th class="text-end">Cantidad</th>
+                <th class="text-end">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php if (empty($expenseProducts)): ?>
+                <tr><td colspan="3" class="text-center text-muted">No hay productos pasados como gasto en esta sesión.</td></tr>
+            <?php else: ?>
+                <?php $expenseQty = 0.0; $expenseTotal = 0.0; ?>
+                <?php foreach ($expenseProducts as $expense):
+                    $qty = floatval($expense['total_qty'] ?? 0);
+                    $total = floatval($expense['total_val'] ?? 0);
+                    $expenseQty += $qty;
+                    $expenseTotal += $total;
+                ?>
+                <tr>
+                    <td><?php echo htmlspecialchars($expense['nombre'] ?? 'Producto'); ?></td>
+                    <td class="text-end"><?php echo number_format($qty, 2); ?></td>
+                    <td class="text-end">$<?php echo number_format($total, 2); ?></td>
+                </tr>
+                <?php endforeach; ?>
+                <tr style="border-top: 2px solid #333; font-weight: bold;">
+                    <td>TOTAL GASTOS</td>
+                    <td class="text-end"><?php echo number_format($expenseQty, 2); ?></td>
+                    <td class="text-end">$<?php echo number_format($expenseTotal, 2); ?></td>
+                </tr>
             <?php endif; ?>
         </tbody>
     </table>

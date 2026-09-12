@@ -1,6 +1,35 @@
 <?php
 session_start();
+function purchase_wants_json_response(): bool
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        return true;
+    }
+
+    if (!empty($_GET['action'])) {
+        return true;
+    }
+
+    $accept = strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
+    if (strpos($accept, 'application/json') !== false) {
+        return true;
+    }
+
+    $xRequestedWith = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
+    return $xRequestedWith === 'xmlhttprequest';
+}
+
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
+    if (purchase_wants_json_response()) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode([
+            'status' => 'error',
+            'msg' => 'Sesion expirada. Vuelve a iniciar sesion e intenta de nuevo.',
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
     header('Location: login.php');
     exit;
 }
@@ -262,11 +291,11 @@ function purchase_load_context(PDO $pdo, array $config): array
     return $context;
 }
 
-function purchase_load_warehouses(PDO $pdo, int $sucursalId): array
+function purchase_load_warehouses(PDO $pdo, int $empresaId, int $sucursalId): array
 {
     try {
-        $stmt = $pdo->prepare('SELECT id, nombre FROM almacenes WHERE id_sucursal = ? ORDER BY nombre ASC');
-        $stmt->execute([$sucursalId]);
+        $stmt = $pdo->prepare('SELECT id, nombre FROM almacenes WHERE id_empresa = ? AND id_sucursal = ? ORDER BY nombre ASC');
+        $stmt->execute([$empresaId, $sucursalId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $ignored) {
         return [];
@@ -340,10 +369,10 @@ function purchase_fetch_product(PDO $pdo, string $sku, int $empresaId): ?array
     return $row ?: null;
 }
 
-function purchase_fetch_stock(PDO $pdo, string $sku, int $almacenId): float
+function purchase_fetch_stock(PDO $pdo, string $sku, int $almacenId, int $sucursalId): float
 {
-    $stmt = $pdo->prepare('SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? LIMIT 1');
-    $stmt->execute([$sku, $almacenId]);
+    $stmt = $pdo->prepare('SELECT cantidad FROM stock_almacen WHERE id_producto = ? AND id_almacen = ? AND id_sucursal = ? LIMIT 1');
+    $stmt->execute([$sku, $almacenId, $sucursalId]);
     return (float)($stmt->fetchColumn() ?: 0);
 }
 
@@ -530,7 +559,7 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
         $existing = purchase_fetch_product($pdo, $item['sku'], $empresaId);
         $costoAnterior = $existing ? (float)$existing['costo'] : null;
         $mayoristaAnterior = $existing ? (float)($existing['precio_mayorista'] ?? 0) : 0.0;
-        $stockAntes = purchase_fetch_stock($pdo, $item['sku'], $almacenId);
+        $stockAntes = purchase_fetch_stock($pdo, $item['sku'], $almacenId, $sucursalId);
         $stockDespues = $stockAntes;
         $costoResultante = $item['costo'];
         $estadoItem = 'ACTIVO';
@@ -541,11 +570,10 @@ function purchase_save_purchase(PDO $pdo, array $payload, array $context): array
                 $item['nombre'],
                 $item['costo'],
                 $item['precio_venta'],
-                0,
+                $item['precio_venta'],
                 $item['categoria'],
                 $empresaId,
             ]);
-            $warnings[] = 'El producto ' . $item['sku'] . ' fue dado de alta con precio mayorista en 0. Definelo manualmente.';
             product_image_pipeline_ensure_placeholder($item['sku'], (string)$item['nombre']);
         } elseif ($mayoristaAnterior <= 0) {
             $warnings[] = 'El producto ' . $item['sku'] . ' ya tenia precio mayorista en 0 y no se modifico automaticamente.';
@@ -700,7 +728,7 @@ function purchase_process_pending(PDO $pdo, int $purchaseId, array $context): ar
         $costoNuevo = (float)$item['costo_unitario'];
         $existing = purchase_fetch_product($pdo, $sku, $empresaId);
         $costoAnterior = $existing ? (float)$existing['costo'] : null;
-        $stockAntes = purchase_fetch_stock($pdo, $sku, $almacenId);
+        $stockAntes = purchase_fetch_stock($pdo, $sku, $almacenId, $sucursalId);
         $stockDespues = $stockAntes + $cantidad;
 
         $costoResultante = $costoNuevo;
@@ -769,7 +797,7 @@ function purchase_revert_item(PDO $pdo, int $purchaseId, int $detailId, array $c
     }
 
     $pdo->prepare("UPDATE compras_detalle SET estado_item = 'REVERTIDO', revertido_at = NOW(), revertido_by = ?, stock_despues = ?, costo_resultante = COALESCE(costo_resultante, costo_unitario) WHERE id = ?")
-        ->execute([$actor, purchase_fetch_stock($pdo, (string)$item['id_producto'], (int)$header['id_almacen']), $detailId]);
+        ->execute([$actor, purchase_fetch_stock($pdo, (string)$item['id_producto'], (int)$header['id_almacen'], (int)$header['id_sucursal']), $detailId]);
 
     $stmtActive = $pdo->prepare("SELECT COUNT(*) FROM compras_detalle WHERE id_compra = ? AND COALESCE(estado_item, 'ACTIVO') = 'ACTIVO'");
     $stmtActive->execute([$purchaseId]);
@@ -932,16 +960,16 @@ function purchase_load_history(PDO $pdo, array $filters, int $empresaId): array
     return $headers;
 }
 
-function purchase_load_products(PDO $pdo, int $empresaId, int $almacenId): array
+function purchase_load_products(PDO $pdo, int $empresaId, int $almacenId, int $sucursalId): array
 {
     $sql = "SELECT p.codigo, p.nombre, p.costo, p.categoria, p.precio,
                    COALESCE(sa.cantidad, 0) AS stock_actual
             FROM productos p
-            LEFT JOIN stock_almacen sa ON sa.id_producto = p.codigo AND sa.id_almacen = ?
+            LEFT JOIN stock_almacen sa ON sa.id_producto = p.codigo AND sa.id_almacen = ? AND sa.id_sucursal = ?
             WHERE p.activo = 1 AND p.id_empresa = ?
             ORDER BY p.nombre ASC";
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$almacenId, $empresaId]);
+    $stmt->execute([$almacenId, $sucursalId, $empresaId]);
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
@@ -968,7 +996,7 @@ $SUC_ID = (int)$context['id_sucursal'];
 $ALM_ID = (int)$context['id_almacen'];
 $actor = purchase_actor_label();
 $permissions = purchase_permissions();
-$almacenes = purchase_load_warehouses($pdo, $SUC_ID);
+$almacenes = purchase_load_warehouses($pdo, $EMP_ID, $SUC_ID);
 if ($almacenes) {
     $warehouseIds = array_map(static fn(array $row): int => (int)$row['id'], $almacenes);
     if (!in_array($ALM_ID, $warehouseIds, true)) {
@@ -1022,7 +1050,7 @@ $historyFilters = [
 ];
 
 try {
-    $products = purchase_load_products($pdo, $EMP_ID, $ALM_ID);
+    $products = purchase_load_products($pdo, $EMP_ID, $ALM_ID, $SUC_ID);
     $categories = purchase_load_categories($pdo);
     $recentPurchases = purchase_load_history($pdo, $historyFilters, $EMP_ID);
     $historyError = '';

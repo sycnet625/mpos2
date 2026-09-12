@@ -153,8 +153,8 @@ $export         = $_GET['export'] ?? '';
 // ---------------------------------------------------------------
 // Lista de sesiones (con filtros)
 // ---------------------------------------------------------------
-$where  = "cs.id_sucursal = ?";
-$params = [$sucursalID];
+$where  = "cs.id_empresa = ? AND cs.id_sucursal = ?";
+$params = [$empresaID, $sucursalID];
 if ($fDesde !== '')  { $where .= " AND fecha_contable >= ?"; $params[] = $fDesde; }
 if ($fHasta !== '')  { $where .= " AND fecha_contable <= ?"; $params[] = $fHasta; }
 if ($fCajero !== '') { $where .= " AND nombre_cajero = ?";   $params[] = $fCajero; }
@@ -166,6 +166,7 @@ if (!empty($fClientes)) {
         SELECT 1
         FROM ventas_cabecera v
         WHERE v.id_caja = cs.id
+          AND v.id_empresa = ?
           AND v.id_sucursal = ?
           AND (
               v.id_cliente IN ($phCliente)
@@ -173,6 +174,7 @@ if (!empty($fClientes)) {
           )
           AND " . ventas_reales_where_clause('v') . "
     )";
+    $params[] = $empresaID;
     $params[] = $sucursalID;
     foreach ($fClientes as $cid) { $params[] = $cid; }
     foreach ($clientesFiltroNombres as $cn) { $params[] = $cn; }
@@ -182,8 +184,8 @@ $stmtL = $pdo->prepare("SELECT cs.* FROM caja_sesiones cs WHERE $where ORDER BY 
 $stmtL->execute($params);
 $sesionesLista = $stmtL->fetchAll(PDO::FETCH_ASSOC);
 
-$stmtCaj = $pdo->prepare("SELECT DISTINCT nombre_cajero FROM caja_sesiones WHERE id_sucursal = ? AND nombre_cajero IS NOT NULL AND nombre_cajero <> '' ORDER BY nombre_cajero");
-$stmtCaj->execute([$sucursalID]);
+$stmtCaj = $pdo->prepare("SELECT DISTINCT nombre_cajero FROM caja_sesiones WHERE id_empresa = ? AND id_sucursal = ? AND nombre_cajero IS NOT NULL AND nombre_cajero <> '' ORDER BY nombre_cajero");
+$stmtCaj->execute([$empresaID, $sucursalID]);
 $cajeros = $stmtCaj->fetchAll(PDO::FETCH_COLUMN);
 
 // #23 — Detectar sesiones zombi (ABIERTA hace más de $horasZombi horas)
@@ -210,7 +212,7 @@ function getCanalBadgeRCM($canal, $map): string {
     return "<span style=\"display:inline-flex;align-items:center;gap:4px;background-color:{$bg}!important;color:white!important;padding:2px 9px;border-radius:20px;font-size:.65rem;font-weight:700;white-space:nowrap;print-color-adjust:exact;-webkit-print-color-adjust:exact;\">{$emoji} {$label}</span>";
 }
 
-function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [], array $clienteNombreFiltros = []): array {
+function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, array $fClientes = [], array $clienteNombreFiltros = []): array {
     $r = [
         'sesiones'=>[],'tickets'=>[],'detalles'=>[],'detallesPorTicket'=>[],
         'totalVentaNeta'=>0,'ventasReales'=>0,'metodosPago'=>[],
@@ -224,14 +226,15 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
     if (empty($ids)) return $r;
 
     $ph = implode(',', array_fill(0, count($ids), '?'));
-    $sqlSes = "SELECT * FROM caja_sesiones WHERE id IN ($ph) AND id_sucursal = ?";
-    $bindSes = array_merge($ids, [$sucursalID]);
+    $sqlSes = "SELECT * FROM caja_sesiones WHERE id IN ($ph) AND id_empresa = ? AND id_sucursal = ?";
+    $bindSes = array_merge($ids, [$empresaID, $sucursalID]);
     if (!empty($fClientes)) {
         $phCliente = implode(',', array_fill(0, count($fClientes), '?'));
         $sqlSes .= " AND EXISTS (
             SELECT 1
             FROM ventas_cabecera v
             WHERE v.id_caja = caja_sesiones.id
+              AND v.id_empresa = ?
               AND v.id_sucursal = ?
               AND (
                 v.id_cliente IN ($phCliente)
@@ -239,6 +242,7 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
               )
               AND " . ventas_reales_where_clause('v') . "
         )";
+        $bindSes[] = $empresaID;
         $bindSes[] = $sucursalID;
         foreach ($fClientes as $cid) { $bindSes[] = $cid; }
         foreach ($clienteNombreFiltros as $cn) { $bindSes[] = $cn; }
@@ -252,8 +256,8 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
     $idsValidos = array_map(fn($s) => intval($s['id']), $r['sesiones']);
     $ph2 = implode(',', array_fill(0, count($idsValidos), '?'));
 
-    $sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja IN ($ph2) AND id_sucursal = ? AND " . ventas_reales_where_clause();
-    $bindTickets = array_merge($idsValidos, [$sucursalID]);
+    $sqlTickets = "SELECT * FROM ventas_cabecera WHERE id_caja IN ($ph2) AND id_empresa = ? AND id_sucursal = ? AND " . ventas_reales_where_clause();
+    $bindTickets = array_merge($idsValidos, [$empresaID, $sucursalID]);
     if (!empty($fClientes)) {
         $sqlTickets .= " AND (" . "id_cliente IN (" . implode(',', array_fill(0, count($fClientes), '?')) . ")";
         if (!empty($clienteNombreFiltros)) {
@@ -268,14 +272,15 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
     $st->execute($bindTickets);
     $r['tickets'] = $st->fetchAll(PDO::FETCH_ASSOC);
 
-    $sqlDet = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria
+    $sqlDet = "SELECT d.*, p.nombre, p.codigo, COALESCE(d.costo_unitario, p.costo) AS costo, p.categoria
                FROM ventas_detalle d
                JOIN productos p ON d.id_producto = p.codigo
                JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                WHERE v.id_caja IN ($ph2)
+                 AND v.id_empresa = ?
                  AND v.id_sucursal = ?
                  AND " . ventas_reales_where_clause('v');
-    $bindDet = array_merge($idsValidos, [$sucursalID]);
+    $bindDet = array_merge($idsValidos, [$empresaID, $sucursalID]);
     if (!empty($fClientes)) {
         $sqlDet .= " AND (" . "v.id_cliente IN (" . implode(',', array_fill(0, count($fClientes), '?')) . ")";
         if (!empty($clienteNombreFiltros)) {
@@ -362,8 +367,8 @@ function calcularSet(PDO $pdo, array $ids, int $sucursalID, array $fClientes = [
     return $r;
 }
 
-$A = $haySeleccion   ? calcularSet($pdo, $idsA, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
-$B = $hayComparativa ? calcularSet($pdo, $idsB, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
+$A = $haySeleccion   ? calcularSet($pdo, $idsA, $empresaID, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
+$B = $hayComparativa ? calcularSet($pdo, $idsB, $empresaID, $sucursalID, $fClientes, $clientesFiltroNombres) : null;
 
 // ---------------------------------------------------------------
 // #24 — detectar tickets duplicados (mismo cajero, mismo total, ±120s)

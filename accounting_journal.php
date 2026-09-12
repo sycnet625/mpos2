@@ -4,7 +4,11 @@
 // REQUIERE: accounting_accounts.php (para la API de cuentas)
 
 require_once 'db.php';
+require_once 'config_loader.php';
 session_start();
+
+$EMP_ID = (int)($config['id_empresa'] ?? 1);
+try { $pdo->exec("ALTER TABLE contabilidad_diario ADD COLUMN IF NOT EXISTS id_empresa INT NOT NULL DEFAULT 1"); } catch (Throwable $e) { error_log('accounting_journal schema warning: ' . $e->getMessage()); }
 
 // 1. INSTALACIÓN AUTOMÁTICA DE TABLA DIARIO
 try {
@@ -48,12 +52,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['api'])) {
                 throw new Exception("El asiento no cuadra. Diferencia: " . ($tDebe - $tHaber));
             }
 
-            $stmt = $pdo->prepare("INSERT INTO contabilidad_diario (asiento_id, fecha, cuenta, detalle, debe, haber, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)");
+            $stmt = $pdo->prepare("INSERT INTO contabilidad_diario (asiento_id, fecha, cuenta, detalle, debe, haber, creado_por, id_empresa) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
             
             foreach ($items as $it) {
                 if ($it['debe'] > 0 || $it['haber'] > 0) {
                     $det = !empty($it['concepto']) ? $it['concepto'] : $glosa;
-                    $stmt->execute([$asientoID, $fecha, $it['cuenta'], $det, $it['debe'], $it['haber'], $user]);
+                    $stmt->execute([$asientoID, $fecha, $it['cuenta'], $det, $it['debe'], $it['haber'], $user, $EMP_ID]);
                 }
             }
 
@@ -71,7 +75,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['api'])) {
 $filterTipo = $_GET['tipo'] ?? '';
 $recentMovements = [];
 try {
-    $whereHist = $filterTipo !== '' ? "WHERE asiento_tipo = " . $pdo->quote($filterTipo) : '';
+    $whereHist = "WHERE id_empresa = " . $EMP_ID;
+    if ($filterTipo !== '') $whereHist .= " AND asiento_tipo = " . $pdo->quote($filterTipo);
     $stmt = $pdo->query("SELECT * FROM contabilidad_diario $whereHist ORDER BY id DESC LIMIT 100");
     $recentMovements = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 } catch (Exception $e) {

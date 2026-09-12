@@ -18,6 +18,9 @@ const PRIMARY_IMAGE_DIR = __DIR__ . '/assets/product_images/';
 const TEMP_IMAGE_DIR = '/tmp/palweb_product_images/';
 $FOCUS_CODE = safeProductId((string)($_GET['focus'] ?? ''));
 $AUTORUN_PROVIDER = preg_replace('/[^a-z_]/', '', strtolower((string)($_GET['autorun'] ?? '')));
+if ($AUTORUN_PROVIDER === '' && $FOCUS_CODE !== '') {
+    $AUTORUN_PROVIDER = 'elyerromenu';
+}
 
 function isWritableDir(string $path): bool {
     if (!is_dir($path)) {
@@ -244,6 +247,78 @@ function searchBingImageCandidates(string $query, string $siteDomain, string $re
     return array_values($cands);
 }
 
+function searchBingEmbeddedImageCandidates(string $query, string $siteDomain, string $source, int $score = 54): array {
+    $query = trim($query);
+    if ($query === '' || $siteDomain === '') {
+        return [];
+    }
+
+    $searchUrl = 'https://www.bing.com/images/search?' . http_build_query([
+        'q' => 'site:' . $siteDomain . ' ' . $query,
+    ]);
+    $html = httpGet($searchUrl, 14)['body'] ?? '';
+    if ($html === '') {
+        return [];
+    }
+
+    $cands = [];
+    $html = html_entity_decode($html, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    if (preg_match_all("~[\"']murl[\"']\\s*:\\s*[\"']((?:\\\\.|[^\"'])+)[\"']~i", $html, $matches)) {
+        foreach (array_slice(array_unique($matches[1]), 0, 12) as $rawUrl) {
+            $url = json_decode('"' . $rawUrl . '"', true);
+            $url = is_string($url) ? $url : stripslashes($rawUrl);
+            $url = normalizeCandidateImageUrl($url);
+            if (preg_match('#^https?://#i', $url)) {
+                addCandidates($cands, $url, $source, $query, $score);
+            }
+        }
+    }
+    return array_values($cands);
+}
+
+function searchBingProductPageImages(string $query, string $siteDomain, string $source, int $score = 58): array {
+    $query = trim($query);
+    if ($query === '' || $siteDomain === '') {
+        return [];
+    }
+
+    $searchUrl = 'https://www.bing.com/search?' . http_build_query([
+        'q' => 'site:' . $siteDomain . '/es/producto/ ' . $query,
+    ]);
+    $html = html_entity_decode(httpGet($searchUrl, 14)['body'] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    if ($html === '') {
+        return [];
+    }
+
+    $pages = [];
+    if (preg_match_all("~https?://(?:www\\.)?" . preg_quote($siteDomain, '~') . "/es/producto/[^\"'\\s<>?#]+~i", $html, $matches)) {
+        $pages = array_slice(array_unique($matches[0]), 0, 8);
+    }
+
+    $cands = [];
+    foreach ($pages as $pageUrl) {
+        $pageHtml = html_entity_decode(httpGet($pageUrl, 12)['body'] ?? '', ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if ($pageHtml === '') continue;
+
+        $imageUrls = [];
+        if (preg_match_all("~<meta[^>]+(?:property|name)=[\"'](?:og:image|twitter:image)[\"'][^>]+content=[\"']([^\"']+)[\"']~i", $pageHtml, $meta)) {
+            $imageUrls = array_merge($imageUrls, $meta[1]);
+        }
+        if (preg_match_all("~[\"']image[\"']\\s*:\\s*[\"']([^\"']+)[\"']~i", $pageHtml, $jsonLd)) {
+            $imageUrls = array_merge($imageUrls, $jsonLd[1]);
+        }
+
+        foreach (array_unique($imageUrls) as $imageUrl) {
+            $imageUrl = normalizeCandidateImageUrl((string)$imageUrl);
+            if (preg_match('#^https?://#i', $imageUrl)) {
+                addCandidates($cands, $imageUrl, $source, $query, $score);
+            }
+        }
+        if (count($cands) >= 8) break;
+    }
+    return array_values($cands);
+}
+
 function hasAnyVariant(string $base): bool {
     foreach (['.avif', '.webp', '.jpg', '.jpeg', '.png'] as $ext) {
         if (file_exists($base . $ext)) return true;
@@ -451,15 +526,15 @@ function searchWikipediaCandidates(string $query): array {
     return array_values($base);
 }
 
-function searchTargetCandidates(string $query): array {
+function searchSupermarket23Candidates(string $query): array {
     $query = toSafeQuery($query);
     $cands = [];
 
-    $searchUrl = 'https://www.target.com/s?' . http_build_query(['searchTerm' => $query]);
+    $searchUrl = 'https://www.supermarket23.com/es/?' . http_build_query(['s' => $query]);
     $html = httpGet($searchUrl, 12)['body'] ?? '';
-    if (preg_match_all('~https://target\\.scene7\\.com/is/image/Target/[^"\'\\s<>]+~i', $html, $m)) {
+    if (preg_match_all('~https?://(?:www\\.)?supermarket23\\.com/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"\'\\s<>]*)?~i', $html, $m)) {
         foreach (array_slice(array_unique($m[0]), 0, 8) as $img) {
-            addCandidates($cands, $img, 'Target', $query, 60);
+            addCandidates($cands, $img, 'Supermarket23', $query, 60);
         }
     }
     if (!empty($cands)) {
@@ -468,13 +543,25 @@ function searchTargetCandidates(string $query): array {
 
     $bing = searchBingImageCandidates(
         $query,
-        'target.com',
-        '~https://target\\.scene7\\.com/is/image/Target/[^"\'\\s<>]+~i',
-        'Target/Bing',
+        'supermarket23.com',
+        '~https?://(?:www\\.)?supermarket23\\.com/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"\'\\s<>]*)?~i',
+        'Supermarket23/Bing',
         56
     );
     foreach ($bing as $cand) {
         addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+    }
+    if (empty($cands)) {
+        $embedded = searchBingEmbeddedImageCandidates($query, 'supermarket23.com', 'Supermarket23/Bing', 56);
+        foreach ($embedded as $cand) {
+            addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+        }
+    }
+    if (empty($cands)) {
+        $productPages = searchBingProductPageImages($query, 'supermarket23.com', 'Supermarket23/Ficha', 60);
+        foreach ($productPages as $cand) {
+            addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+        }
     }
     return array_values($cands);
 }
@@ -544,34 +631,13 @@ function searchElYerroMenuCandidates(string $query): array {
     return array_values($cands);
 }
 
-function searchWalmartCandidates(string $query): array {
+function searchKatapulkCandidates(string $query): array {
     $query = toSafeQuery($query);
     $cands = [];
-    $apiKey = getConfigValue('WALMART_API_KEY', 'walmart_api_key');
-    if ($apiKey !== '') {
-        $apiUrl = 'https://developer.api.walmart.com/api-proxy/service/affil/product/v2/search';
-        $queryUrl = $apiUrl . '?' . http_build_query([
-            'query' => $query,
-            'format' => 'json',
-            'sort' => 'relevance',
-            'apiKey' => $apiKey,
-        ]);
-
-        $json = httpGetJson($queryUrl, 14);
-        if ($json && is_array($json['items'] ?? null)) {
-            foreach (array_slice($json['items'], 0, 8) as $item) {
-                $img = $item['largeImage'] ?? ($item['mediumImage'] ?? null);
-                $name = $item['name'] ?? $query;
-                if (is_string($img)) addCandidates($cands, $img, 'Walmart API', (string)$name, 88);
-            }
-        }
-        if (!empty($cands)) return array_values($cands);
-    }
-
-    $searchUrl = 'https://www.walmart.com/search?' . http_build_query(['q' => $query]);
+    $searchUrl = 'https://www.katapulk.com/cu/global-search?' . http_build_query(['exclude' => 'false', 'global_search' => $query, 'order' => 'RELEVANCE', 'page' => 1]);
     $html = httpGet($searchUrl, 12)['body'] ?? '';
-    if (preg_match_all('~https://[^"\'\\s<>]*i5\\.walmartimages\\.com/[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp)~i', $html, $m)) {
-        foreach (array_slice(array_unique($m[0]), 0, 8) as $img) addCandidates($cands, $img, 'Walmart', $query, 58);
+    if (preg_match_all('~https?://[^"\'\\s<>]*katapulk[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"\'\\s<>]*)?~i', $html, $m)) {
+        foreach (array_slice(array_unique($m[0]), 0, 8) as $img) addCandidates($cands, $img, 'Katapulk', $query, 58);
     }
     if (!empty($cands)) {
         return array_values($cands);
@@ -579,13 +645,19 @@ function searchWalmartCandidates(string $query): array {
 
     $bing = searchBingImageCandidates(
         $query,
-        'walmart.com',
-        '~https://i5\\.walmartimages\\.com/[^"\'\\s<>]+~i',
-        'Walmart/Bing',
+        'katapulk.com',
+        '~https?://[^"\'\\s<>]*katapulk[^"\'\\s<>]+\\.(?:jpg|jpeg|png|webp|avif)(?:\\?[^"\'\\s<>]*)?~i',
+        'Katapulk/Bing',
         55
     );
     foreach ($bing as $cand) {
         addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+    }
+    if (empty($cands)) {
+        $embedded = searchBingEmbeddedImageCandidates($query, 'katapulk.com', 'Katapulk/Bing', 56);
+        foreach ($embedded as $cand) {
+            addCandidates($cands, $cand['url'], $cand['source'], $cand['title'], $cand['score']);
+        }
     }
     return array_values($cands);
 }
@@ -640,16 +712,16 @@ function searchBySkuCandidates(string $sku): array {
     $cands = [];
     if ($sku === '') return [];
 
-    $fromWalmart = searchWalmartCandidates($sku);
-    foreach ($fromWalmart as $c) {
+    $fromKatapulk = searchKatapulkCandidates($sku);
+    foreach ($fromKatapulk as $c) {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
     if (!empty($cands)) {
         return array_values($cands);
     }
 
-    $fromTarget = searchTargetCandidates($sku);
-    foreach ($fromTarget as $c) {
+    $fromSupermarket23 = searchSupermarket23Candidates($sku);
+    foreach ($fromSupermarket23 as $c) {
         addCandidates($cands, $c['url'], $c['source'], $c['title'], $c['score']);
     }
 
@@ -678,10 +750,10 @@ function searchBySkuCandidates(string $sku): array {
 
 $providerByName = [
     'wikipedia' => 'searchWikipediaCandidates',
-    'target'    => 'searchTargetCandidates',
+    'supermarket23' => 'searchSupermarket23Candidates',
     'aliexpress' => 'searchAliExpressCandidates',
     'elyerromenu' => 'searchElYerroMenuCandidates',
-    'walmart'   => 'searchWalmartCandidates',
+    'katapulk'  => 'searchKatapulkCandidates',
     'amazon'    => 'searchAmazonCandidates',
     'sku'       => 'searchBySkuCandidates',
 ];
@@ -762,11 +834,11 @@ if ($FOCUS_CODE !== '') {
 }
 
 $providers = [
-    ['key' => 'wikipedia', 'label' => 'Wikipedia'],
-    ['key' => 'target', 'label' => 'Target'],
-    ['key' => 'aliexpress', 'label' => 'AliExpress (China)'],
     ['key' => 'elyerromenu', 'label' => 'El Yerro Menu'],
-    ['key' => 'walmart', 'label' => 'Walmart'],
+    ['key' => 'wikipedia', 'label' => 'Wikipedia'],
+    ['key' => 'supermarket23', 'label' => 'Supermarket23'],
+    ['key' => 'aliexpress', 'label' => 'AliExpress (China)'],
+    ['key' => 'katapulk', 'label' => 'Katapulk'],
     ['key' => 'amazon', 'label' => 'Amazon'],
     ['key' => 'sku', 'label' => 'SKU'],
 ];
@@ -852,11 +924,11 @@ $providers = [
             <button class="btn btn-outline-secondary btn-sm" onclick="window.location.reload()"><i class="fas fa-sync-alt me-1"></i>Recargar</button>
         </div>
         <div class="provider-row mb-3">
-            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('wikipedia')"><i class="fas fa-book me-1"></i>Wikipedia</button>
-            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('target')"><i class="fas fa-bullseye me-1"></i>Target</button>
-            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('aliexpress')"><i class="fas fa-globe-asia me-1"></i>AliExpress</button>
             <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('elyerromenu')"><i class="fas fa-store me-1"></i>El Yerro</button>
-            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('walmart')"><i class="fab fa-wikipedia-w me-1"></i>Walmart</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('wikipedia')"><i class="fas fa-book me-1"></i>Wikipedia</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('supermarket23')"><i class="fas fa-store me-1"></i>Supermarket23</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('aliexpress')"><i class="fas fa-globe-asia me-1"></i>AliExpress</button>
+            <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('katapulk')"><i class="fas fa-cart-shopping me-1"></i>Katapulk</button>
             <button class="btn btn-success btn-sm provider-all-btn" onclick="runProviderAll('amazon')"><i class="fab fa-amazon me-1"></i>Amazon</button>
             <button class="btn btn-primary btn-sm provider-all-btn" onclick="runProviderAll('sku')"><i class="fas fa-barcode me-1"></i>Por SKU</button>
         </div>

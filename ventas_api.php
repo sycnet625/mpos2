@@ -133,10 +133,11 @@ try {
 
     // Procesar ítems
     $stmtDet = $pdo->prepare("
-        INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, nombre_producto, codigo_producto)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO ventas_detalle (id_venta_cabecera, id_producto, cantidad, precio, costo_unitario, nombre_producto, codigo_producto)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     ");
     $stmtProd = $pdo->prepare("SELECT es_servicio, es_elaborado FROM productos WHERE codigo = ?");
+    $stmtCosto = $pdo->prepare("SELECT costo FROM productos WHERE codigo = ? AND id_empresa = ? LIMIT 1");
     $stmtStock = $pdo->prepare("SELECT COALESCE(SUM(cantidad),0) FROM stock_almacen WHERE id_producto = ? AND id_almacen = ?");
 
     $sinExistencia = 0;
@@ -151,7 +152,9 @@ try {
         $price = floatval($item['price']);
         $name  = vapi_str($item['name'] ?? $sku, 150);
 
-        $stmtDet->execute([$idVenta, $sku, $qty, $price, $name, $sku]);
+        $stmtCosto->execute([$sku, $idEmpresa]);
+        $costo = (float)($stmtCosto->fetchColumn() ?: 0);
+        $stmtDet->execute([$idVenta, $sku, $qty, $price, $costo, $name, $sku]);
     }
 
     foreach ($resolvedSale['inventory_items'] as $resolvedItem) {
