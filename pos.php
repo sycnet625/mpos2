@@ -991,7 +991,9 @@ try {
 
     // Categorias
     $stmtCat = $pdo->prepare("SELECT DISTINCT p.categoria as nombre_categoria, c.color, c.emoji FROM productos p LEFT JOIN categorias c ON p.categoria = c.nombre WHERE p.id_empresa = ? AND $where ORDER BY p.categoria");
-    $stmtCat->execute(array_merge([$empresaID, $empresaID], $params));
+    // La consulta solo recibe un parámetro de empresa; el segundo estaba
+    // provocando HY093 y abortaba la carga posterior de clientes.
+    $stmtCat->execute(array_merge([$empresaID], $params));
     $catsData = $stmtCat->fetchAll(PDO::FETCH_ASSOC);
 
     // Productos

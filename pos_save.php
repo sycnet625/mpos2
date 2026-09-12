@@ -244,8 +244,10 @@ try {
         throw new Exception('Producto fuera del contexto POS o inactivo: ' . implode(', ', $missing));
     }
 
-    $canCustomPrice = !empty($_SESSION['admin_logged_in'])
-        || in_array((string)($_SESSION['pos_rol'] ?? ''), ['admin', 'supervisor'], true);
+    $isAdmin = !empty($_SESSION['admin_logged_in'])
+        || (string)($_SESSION['pos_rol'] ?? '') === 'admin';
+    $canCustomPrice = $isAdmin
+        || (string)($_SESSION['pos_rol'] ?? '') === 'supervisor';
     $normalizedSaleItems = [];
     $computedSubtotal = 0.0;
     foreach ($saleItems as $item) {
@@ -288,10 +290,12 @@ try {
         ];
     }
     $computedTotal = round($computedSubtotal * (1 - ($globalDiscountPct / 100)), 2);
-    if (abs($computedTotal - $saleTotal) > 0.01) {
+    if (abs($computedTotal - $saleTotal) > 0.01 && !$isAdmin) {
         throw new Exception('El total de la venta no coincide con los precios autorizados. Actualice el carrito.');
     }
-    $saleTotal = $computedTotal;
+    // El administrador puede confirmar el total que aparece en el POS,
+    // incluso si incluye un ajuste manual o un importe adicional del cobro.
+    $saleTotal = $isAdmin ? round($saleTotal, 2) : $computedTotal;
     $saleItems = $normalizedSaleItems;
 
     // 4. TRANSACCIÓN GLOBAL

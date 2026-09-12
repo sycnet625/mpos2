@@ -502,8 +502,19 @@ window.confirmPayment = async function() {
 
     const payload = {
         uuid:                 crypto.randomUUID(),
-        items:                cart.map(i => ({ id: i.id, name: i.name, qty: i.qty, price: i.price, note: i.note })),
+        items:                cart.map(i => ({
+            id: i.id,
+            name: i.name,
+            qty: i.qty,
+            price: i.price,
+            discountPct: Number(i.discountPct || 0),
+            customPrice: !!i.customPrice,
+            note: i.note
+        })),
         total:                currentSaleTotal,
+        price_mode:          priceMode,
+        price_adjust_pct:    Number(priceAdjustPct || 0),
+        descuento_global:    Number(globalDiscountPct || 0),
         payments:             payments,
         metodo_pago:          mainMethod,
         tipo_servicio:        serv,
@@ -527,7 +538,14 @@ window.confirmPayment = async function() {
             Synth.cash();
             if (document.getElementById('printTicket').checked) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
             else showToast('Venta #' + res.id + ' Registrada');
+            const soldCodes = payload.items.map(item => item.id);
             finishSale();
+            // pos_save.php ya descontó el inventario. Reconciliar las tarjetas
+            // con la existencia real evita dejar visible el stock del catálogo
+            // cacheado hasta que el usuario haga un hard reload.
+            if (typeof refreshProductStock === 'function') {
+                await refreshProductStock(soldCodes);
+            }
         } else {
             alert('Error: ' + res.msg);
         }
