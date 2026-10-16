@@ -56,7 +56,9 @@ function getTicketData($pdo, $idVenta, $config) {
         $subtotal += $it['subtotal'];
     }
     $total = floatval($venta['total']);
-    $envio = round($total - $subtotal, 2);
+    $envio = max(0, round($total - $subtotal, 2));
+    $tipoServicio = strtolower(trim((string)($venta['tipo_servicio'] ?? '')));
+    $esMensajeria = in_array($tipoServicio, ['mensajeria', 'domicilio', 'delivery'], true);
 
     return [
         'venta' => $venta,
@@ -68,6 +70,7 @@ function getTicketData($pdo, $idVenta, $config) {
         'subtotal' => $subtotal,
         'total' => $total,
         'envio' => $envio,
+        'esMensajeria' => $esMensajeria,
         'id' => $idVenta
     ];
 }
@@ -222,6 +225,10 @@ function renderHalf($d, $logoUrl, $config) {
             <div style="font-size:10px;">Cajero: <?= htmlspecialchars($d['cajero']) ?></div>
             <div style="font-size:10px;">Pago: <?= htmlspecialchars($v['metodo_pago']) ?></div>
             <div style="font-size:10px;">Ticket Original: #<?= $d['id'] ?></div>
+            <?php if ($d['esMensajeria']): ?>
+                <div style="font-size:11px; font-weight:bold; margin-top:3px;">🛵 TICKET POR MENSAJERÍA</div>
+                <div style="font-size:10px;">Mensajero: <?= htmlspecialchars($v['mensajero_nombre'] ?? 'No asignado') ?></div>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -268,7 +275,7 @@ function renderHalf($d, $logoUrl, $config) {
                     <td>SUBTOTAL</td>
                     <td class="text-right money">$<?= number_format($d['subtotal'], 2) ?></td>
                 </tr>
-                <?php if($d['envio'] > 0): ?>
+                <?php if($d['esMensajeria']): ?>
                 <tr>
                     <td>ENVÍO / MENSAJERÍA</td>
                     <td class="text-right money">$<?= number_format($d['envio'], 2) ?></td>

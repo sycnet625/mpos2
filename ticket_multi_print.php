@@ -44,7 +44,8 @@ if ($ticketCount <= 1) {
 $tiposServicio = [
     'consumir_aqui' => 'COMER AQUÍ',
     'llevar'        => 'PARA LLEVAR',
-    'mensajeria'    => 'DOMICILIO',
+    'mensajeria'    => 'MENSAJERÍA / DOMICILIO',
+    'delivery'      => 'MENSAJERÍA / DOMICILIO',
     'reserva'       => 'RESERVA',
 ];
 $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
@@ -187,7 +188,9 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
     $subtotal   = array_sum(array_map(fn($i) => $i['cantidad'] * $i['precio'], $items));
     $costoEnvio = round($v['total'] - $subtotal, 2);
     $esDelivery = in_array(strtolower($v['tipo_servicio'] ?? ''), $tiposConEnvio);
-    $hayEnvio   = $costoEnvio > 0.01 && $esDelivery;
+    $costoEnvio = max(0, $costoEnvio);
+    $hayEnvio   = $esDelivery;
+    $esMensajeria = $esDelivery;
     $tipoDisplay = $tiposServicio[$v['tipo_servicio']] ?? strtoupper($v['tipo_servicio'] ?? '');
     $mostrarCliente = !empty($v['cliente_nombre'])
         && !in_array($v['cliente_nombre'], ['Mostrador', 'Consumidor Final', 'DEVOLUCIÓN']);
@@ -217,6 +220,12 @@ body { font-family: 'Courier New', monospace; font-size: 11px; background: #f0f0
 
     <?php if (!empty($tipoDisplay)): ?>
     <div class="tk-service">📦 <?= $tipoDisplay ?></div>
+    <?php endif; ?>
+    <?php if ($esMensajeria): ?>
+    <div class="tk-delivery">🛵 TICKET POR MENSAJERÍA</div>
+    <?php if (!empty($v['mensajero_nombre'])): ?>
+    <div class="tk-row"><span class="tk-label">Mensajero:</span><span class="tk-val"><?= htmlspecialchars($v['mensajero_nombre']) ?></span></div>
+    <?php endif; ?>
     <?php endif; ?>
     <?php if (!empty($v['fecha_reserva'])): ?>
     <div class="tk-delivery">📅 Entrega: <?= date('d/m/Y h:i A', strtotime($v['fecha_reserva'])) ?></div>

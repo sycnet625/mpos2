@@ -134,7 +134,10 @@ try {
     }
 
     $tipoServicio = pos_security_clean_text($input['tipo_servicio'] ?? 'mostrador', 50);
-    if (!in_array($tipoServicio, ['mostrador', 'delivery', 'reserva', 'mesa', 'recoger'], true)) {
+    // El POS utiliza "mensajeria" para las ventas con entrega a domicilio.
+    // Debe conservarse en la cabecera para que el ticket pueda mostrar todos
+    // los datos de la entrega.
+    if (!in_array($tipoServicio, ['mostrador', 'mensajeria', 'delivery', 'reserva', 'mesa', 'recoger'], true)) {
         $tipoServicio = 'mostrador';
     }
 

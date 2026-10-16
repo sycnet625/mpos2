@@ -62,11 +62,13 @@ try {
 
     $subtotalItems = 0;
     foreach ($items as $it) $subtotalItems += $it['cantidad'] * $it['precio'];
-    $costoEnvio = round($venta['total'] - $subtotalItems, 2);
+    $costoEnvio = max(0, round($venta['total'] - $subtotalItems, 2));
     $tiposConEnvio = ['mensajeria', 'domicilio', 'delivery'];
-    $esDelivery = in_array(strtolower($venta['tipo_servicio'] ?? ''), $tiposConEnvio)
+    $tipoServicioVenta = strtolower(trim((string)($venta['tipo_servicio'] ?? '')));
+    $esDelivery = in_array($tipoServicioVenta, $tiposConEnvio, true)
                || strpos($venta['cliente_direccion'] ?? '', '[MENSAJERÍA:') !== false;
-    $hayEnvio = $costoEnvio > 0.01 && $esDelivery;
+    // En mensajería se imprime siempre el renglón, incluso si el costo es 0.
+    $hayEnvio = $esDelivery;
 
     $cajero = "Cajero";
     if (isset($venta['id_caja']) && $venta['id_caja'] > 0) {
@@ -115,8 +117,9 @@ $pendienteDisplay = round($totalDisplay - $abonoDisplay, 2);
 
 $viaQr = ($_GET['source'] ?? '') === 'qr';
 
-$tiposServicio = [ 'consumir_aqui' => 'COMER AQUÍ', 'llevar' => 'PARA LLEVAR', 'mensajeria' => 'DOMICILIO', 'reserva' => 'RESERVA' ];
+$tiposServicio = [ 'consumir_aqui' => 'COMER AQUÍ', 'mostrador' => 'COMER AQUÍ', 'llevar' => 'PARA LLEVAR', 'mensajeria' => 'MENSAJERÍA / DOMICILIO', 'delivery' => 'MENSAJERÍA / DOMICILIO', 'reserva' => 'RESERVA' ];
 $tipoServicioDisplay = $tiposServicio[$venta['tipo_servicio']] ?? strtoupper($venta['tipo_servicio']);
+$esMensajeria = in_array($tipoServicioVenta, ['mensajeria', 'domicilio', 'delivery'], true);
 
 $canalOrigen = $venta['canal_origen'] ?? 'POS';
 $canalMap = [
@@ -745,10 +748,19 @@ if ($priceView === 'mayorista') {
             
             <?php if (!empty($venta['tipo_servicio'])): ?>
                 <tr><td colspan="2" class="text-center">
-                    <div style="background: #f0f0f0; padding: 5px; margin: 3px 0; border: 1px solid #ccc; font-weight: bold;">
+                    <div style="background: <?php echo $esMensajeria ? '#fff3cd' : '#f0f0f0'; ?>; padding: 5px; margin: 3px 0; border: 1px solid <?php echo $esMensajeria ? '#d39e00' : '#ccc'; ?>; font-weight: bold;">
                         📦 <?php echo $tipoServicioDisplay; ?>
                     </div>
                 </td></tr>
+            <?php endif; ?>
+
+            <?php if ($esMensajeria): ?>
+                <tr><td colspan="2" class="text-center">
+                    <div class="delivery-highlight fw-bold">🛵 TICKET POR MENSAJERÍA</div>
+                </td></tr>
+                <?php if (!empty($venta['mensajero_nombre'])): ?>
+                    <tr><td>Mensajero:</td><td class="text-right fw-bold"><?php echo htmlspecialchars($venta['mensajero_nombre']); ?></td></tr>
+                <?php endif; ?>
             <?php endif; ?>
             
             <?php if (!empty($venta['fecha_reserva'])): ?>

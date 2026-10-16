@@ -519,6 +519,8 @@ window.confirmPayment = async function() {
         metodo_pago:          mainMethod,
         tipo_servicio:        serv,
         cliente_nombre:       cliName,
+        cliente_telefono:     document.getElementById('cliPhone').value.trim(),
+        cliente_direccion:    document.getElementById('cliAddr').value.trim(),
         mensajero_nombre:     msj,
         costo_mensajeria:     costoMensajeria,
         fecha_reserva:        rDate,
