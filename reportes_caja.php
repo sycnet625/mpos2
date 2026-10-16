@@ -73,8 +73,8 @@ $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
 // CORRECCIÓN: JOIN por p.codigo (El ID numérico ya no existe)
 $sqlDetalles = "SELECT d.*, p.nombre, p.codigo, p.costo, p.categoria
                 FROM ventas_detalle d
-                JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = v.id_empresa
                 JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = v.id_empresa
                 WHERE v.id_caja = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND " . ventas_reales_where_clause('v');
 $stmtD = $pdo->prepare($sqlDetalles);
 $stmtD->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
@@ -91,8 +91,8 @@ foreach ($allDetalles as $d) {
 }
 
 // 4. KPIs
-$totalVentaNeta = 0;        // Suma de todos los pagos registrados (bruto)
-$ventasReales = 0;          // Suma de tickets positivos (neto después de devoluciones)
+$totalVentaNeta = 0;        // Pagos de ventas, excluyendo gastos de casa
+$ventasReales = 0;          // Suma de tickets positivos que sí son ventas
 $metodosPago = [];
 $conteoTickets = 0;
 $cantDevoluciones = 0;
@@ -102,15 +102,28 @@ $horaInicio = strtotime($sesion['fecha_apertura']);
 $horaFin = $sesion['fecha_cierre'] ? strtotime($sesion['fecha_cierre']) : time();
 $horasOperacion = max(1, round(($horaFin - $horaInicio) / 3600, 2));
 
-// Calcular venta neta desde ventas_pagos (todos los pagos registrados)
-$sqlTotalPagos = "SELECT SUM(monto) as total FROM ventas_pagos WHERE id_venta_cabecera IN (SELECT id FROM ventas_cabecera WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?)";
+// Calcular pagos de ventas desde ventas_pagos (sin tickets de gasto de casa).
+$sqlTotalPagos = "SELECT SUM(vp.monto) as total
+                  FROM ventas_pagos vp
+                  JOIN ventas_cabecera v ON v.id = vp.id_venta_cabecera
+                  WHERE v.id_caja = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?
+                    AND " . ventas_ingresos_where_clause('v');
 $stmtTP = $pdo->prepare($sqlTotalPagos);
 $stmtTP->execute([$idSesion, $empresaID, $sucursalID, $almacenID]);
 $totalVentaNeta = floatval($stmtTP->fetchColumn() ?? 0);
 
+$gastosCasaTicketIds = [];
+$ventasPositivasTicketIds = [];
 foreach ($tickets as $t) {
+    if (ticket_es_gasto_casa($t) && (float)$t['total'] > 0) {
+        $gastosCasaTicketIds[(int)$t['id']] = true;
+    }
+    if ((float)$t['total'] > 0 && !ticket_es_gasto_casa($t)) {
+        $ventasPositivasTicketIds[(int)$t['id']] = true;
+    }
+
     // Ventas reales = solo tickets positivos
-    if ($t['total'] > 0) {
+    if ($t['total'] > 0 && !ticket_es_gasto_casa($t)) {
         $ventasReales += $t['total'];
         $conteoTickets++;
     }
@@ -124,13 +137,29 @@ foreach ($tickets as $t) {
     $metodosPago[$t['metodo_pago']] += $t['total'];
 }
 
-// Ganancia = solo de tickets positivos (sin incluir devoluciones)
+// Total de tickets cobrados con la opción que el POS muestra como
+// "Tarjeta/Gasto". Se aceptan también nombres antiguos como "Gasto Casa".
+$totalTarjetaGastos = 0.0;
+foreach ($tickets as $t) {
+    $metodoPago = strtolower(trim((string)($t['metodo_pago'] ?? '')));
+    if (strpos($metodoPago, 'tarjet') !== false || strpos($metodoPago, 'gasto') !== false) {
+        $totalTarjetaGastos += (float)$t['total'];
+    }
+}
+
+// Ganancia limpia = solo tickets positivos de venta; sin devoluciones ni
+// gastos de casa (el costo de estos últimos no se resta aquí).
 $totalCostoPositivos = 0;
 $totalVentaBrutaPositivos = 0;
 foreach ($allDetalles as $d) {
-    if ($d['cantidad'] > 0) {  // Solo items positivos
-        $totalCostoPositivos += ($d['cantidad'] * $d['costo']);
-        $totalVentaBrutaPositivos += ($d['cantidad'] * $d['precio']);
+    if ($d['cantidad'] > 0 && isset($ventasPositivasTicketIds[(int)$d['id_venta_cabecera']])) {
+        if (!isset($gastosCasaTicketIds[(int)$d['id_venta_cabecera']])) {
+            $costoUnitario = ($d['costo_unitario'] ?? null) !== null
+                ? (float)$d['costo_unitario']
+                : (float)$d['costo'];
+            $totalCostoPositivos += ($d['cantidad'] * $costoUnitario);
+            $totalVentaBrutaPositivos += ($d['cantidad'] * $d['precio']);
+        }
     }
 }
 
@@ -161,6 +190,7 @@ $resumenTextoLineas = [
     "Fecha contable: " . date('d/m/Y', strtotime($sesion['fecha_contable'])),
     "Cajero: " . ($sesion['nombre_cajero'] ?? 'Cajero'),
     "Venta neta: $" . number_format($totalVentaNeta, 2),
+    "Gastos de casa: $" . number_format($totalTarjetaGastos, 2),
     "Ventas reales: $" . number_format($ventasRealesNeta, 2),
     "Ganancia: $" . number_format($ganancia, 2) . " | Margen: " . number_format($margen, 1) . "%",
     "Tickets: {$conteoTickets} | Devoluciones: {$cantDevoluciones} (-$" . number_format($valorDevoluciones, 2) . ")",
@@ -229,6 +259,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
             /* KPIs Grid */
             .row { display: flex !important; flex-wrap: wrap !important; --bs-gutter-x: 3px !important; --bs-gutter-y: 3px !important; margin-bottom: 3px !important; }
             .col-md-4 { width: 33.33% !important; flex: 0 0 auto !important; }
+            .col-md-3 { width: 25% !important; flex: 0 0 auto !important; }
 
             .kpi-card { padding: 3px 5px !important; border: 1px solid #bbb !important; box-shadow: none !important; height: auto !important; min-height: auto !important; }
             h3 { font-size: 12px !important; font-weight: 800 !important; margin: 0 !important; }
@@ -348,7 +379,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
     </div>
 
     <div class="row g-3 mb-2">
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="kpi-card border-start border-4 border-danger">
                 <div class="d-flex justify-content-between align-items-center">
                     <div><small class="text-danger fw-bold">CANTIDAD DEVOLUCIONES</small><h3 class="fw-bold mb-0 text-danger"><?php echo $cantDevoluciones; ?></h3></div>
@@ -356,7 +387,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="kpi-card border-start border-4 border-danger">
                 <div class="d-flex justify-content-between align-items-center">
                     <div><small class="text-danger fw-bold">VALOR REEMBOLSADO</small><h3 class="fw-bold mb-0 text-danger">$<?php echo number_format($valorDevoluciones, 2); ?></h3></div>
@@ -364,7 +395,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col-md-3">
             <div class="kpi-card border-start border-4 border-primary">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <small class="text-primary fw-bold">RESUMEN POR PAGO</small>
@@ -381,6 +412,14 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
                         </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="kpi-card border-start border-4 border-warning">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div><small class="text-warning fw-bold">TARJETA / GASTOS</small><h3 class="fw-bold mb-0">$<?php echo number_format($totalTarjetaGastos, 2); ?></h3></div>
+                    <div class="kpi-icon bg-warning bg-opacity-10 text-warning"><i class="fas fa-credit-card"></i></div>
                 </div>
             </div>
         </div>
@@ -413,6 +452,7 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
                         $badgePagoClass = 'bg-light text-dark border';
 
                         if ($isRefund) { $rowClass = 'row-refund'; $badgePagoClass = 'bg-refund-badge'; } 
+                        elseif (ticket_es_gasto_casa($t)) { $rowClass = 'row-gasto'; $badgePagoClass = 'bg-gasto'; }
                         elseif ($t['tipo_servicio'] === 'reserva') { $rowClass = 'row-reserva'; } 
                         elseif ($t['tipo_servicio'] === 'llevar') { $rowClass = 'row-llevar'; } 
                         else {

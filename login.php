@@ -73,6 +73,8 @@ $systemBrandLogo = trim((string)($config['marca_sistema_logo'] ?? ''));
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+    require_once __DIR__ . '/auth_rate_limit.php';
+    auth_rate_limit('admin_login');
     $rl = rl_get($rl_ip);
 
     $user = trim($_POST['user'] ?? '');
@@ -83,13 +85,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     } else {
         try {
             // CORRECCIÓN: Se cambió 'username' por 'nombre' que es lo que existe en tu BD
-            $stmt = $pdo->prepare("SELECT id, nombre, password FROM users WHERE nombre = :nombre");
+            $stmt = $pdo->prepare("SELECT id, nombre, password, rol, activo FROM users WHERE nombre = :nombre LIMIT 1");
             $stmt->execute(['nombre' => $user]);
             $user_data = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user_data && password_verify($pass, $user_data['password'])) {
+            if ($user_data && (int)$user_data['activo'] === 1
+                && in_array(strtolower(trim((string)$user_data['rol'])), ['admin', 'administrador', 'administrator'], true)
+                && password_verify($pass, $user_data['password'])) {
                 rl_clear($rl_ip);
                 session_regenerate_id(true);
+                $_SESSION = [];
                 $_SESSION['admin_logged_in'] = true;
                 $_SESSION['admin_user'] = $user_data['nombre']; // CORRECCIÓN: Usar 'nombre'
                 $_SESSION['user_id'] = $user_data['id'];

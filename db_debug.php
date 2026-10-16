@@ -1,4 +1,7 @@
 <?php
+http_response_code(404);
+header('Content-Type: text/plain; charset=utf-8');
+exit;
 // ARCHIVO: /var/www/palweb/api/db_debug.php
 // ⚠️ MODO DIOS V7.1: PAGINACIÓN + TEMA OSCURO + FILTROS
 // Descripción: Editor de BD con diseño Dark Mode recuperado y paginación real server-side.
@@ -519,4 +522,3 @@ if (isset($_GET['action'])) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

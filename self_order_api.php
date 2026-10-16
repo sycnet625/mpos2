@@ -5,7 +5,6 @@ header('Content-Type: application/json');
 require_once 'db.php';
 require_once 'push_notify.php';
 require_once 'config_loader.php';
-session_start();
 
 $EMP_ID = (int)($config['id_empresa'] ?? 1);
 

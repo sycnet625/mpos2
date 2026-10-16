@@ -45,6 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             SELECT metodo_pago, SUM(total) as total 
             FROM ventas_cabecera 
             WHERE id_caja = ? AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
+              AND " . ventas_reales_where_clause() . "
             GROUP BY metodo_pago
         ");
         $stmtTotales->execute([$sessionId, $EMP_ID, $SUC_ID, $ALM_ID]);
@@ -55,16 +56,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $pdo->beginTransaction();
 
         $totalVenta = 0;
+        $totalGastoCasa = 0;
         $insertSQL = "INSERT INTO contabilidad_diario (asiento_id, fecha, cuenta, detalle, debe, haber, creado_por) VALUES (?, ?, ?, ?, ?, ?, ?)";
         $stmtIns = $pdo->prepare($insertSQL);
 
         // A. DEBE (Entrada de Dinero)
         foreach ($pagos as $metodo => $monto) {
             if ($monto > 0) {
-                $totalVenta += $monto;
                 // Mapeo de cuentas según método
                 $cuentaDebe = (stripos($metodo, 'Transferencia') !== false) ? '104.01' : '101.01'; 
-                $descDebe = "Ingreso $metodo - $refCheck";
+                $esGastoCasa = stripos($metodo, 'tarjet') !== false || stripos($metodo, 'gasto') !== false;
+                if ($esGastoCasa) {
+                    $totalGastoCasa += $monto;
+                    $cuentaDebe = '601.01';
+                    $descDebe = "Gasto de casa $metodo - $refCheck";
+                } else {
+                    $totalVenta += $monto;
+                    $descDebe = "Ingreso $metodo - $refCheck";
+                }
                 $stmtIns->execute([$asientoID, $fechaContablePost, $cuentaDebe, $descDebe, $monto, 0, $_SESSION['admin_name']]);
             }
         }
@@ -74,6 +83,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $cuentaHaber = '401.01'; // Ventas
             $descHaber = "Ventas del Día - $cajero ($refCheck)";
             $stmtIns->execute([$asientoID, $fechaContablePost, $cuentaHaber, $descHaber, 0, $totalVenta, $_SESSION['admin_name']]);
+        }
+        if ($totalGastoCasa > 0) {
+            $stmtIns->execute([$asientoID, $fechaContablePost, '101.01', "Salida por gastos de casa - $refCheck", 0, $totalGastoCasa, $_SESSION['admin_name']]);
         }
 
         $pdo->commit();
@@ -112,7 +124,7 @@ try {
                     JOIN productos p ON d.id_producto = p.codigo
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
                     LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_reales_where_clause('v');
+                    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_ingresos_where_clause('v');
     
     $stmtF = $pdo->prepare($sqlFinanzas);
     $stmtF->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
@@ -133,6 +145,12 @@ try {
     $stmtP = $pdo->prepare($sqlPagos);
     $stmtP->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $pagos = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+    $gastosCasaTotal = 0.0;
+    foreach ($pagos as $p) {
+        if (stripos((string)$p['metodo_pago'], 'tarjet') !== false || stripos((string)$p['metodo_pago'], 'gasto') !== false) {
+            $gastosCasaTotal += (float)$p['total'];
+        }
+    }
 
     // 3. SESIONES DE CAJA
     $sqlSesiones = "SELECT s.*, 
@@ -149,6 +167,7 @@ try {
                    FROM ventas_cabecera v 
                    LEFT JOIN caja_sesiones s ON v.id_caja = s.id
                    WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ?
+                     AND " . ventas_reales_where_clause('v') . "
                    ORDER BY v.id DESC";
     $stmtT = $pdo->prepare($sqlTickets);
     $stmtT->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
@@ -156,6 +175,7 @@ try {
     
     // --- PROCESAMIENTO DE KPIS ---
     $cntReservas = 0; $cntDelivery = 0; $cntReembolsos = 0;
+    $conteoVentasKpi = 0;
     $sumaTransferencia = 0; $sumaVentaPositiva = 0; $maxVenta = 0;
     $deliveryStats = [];
     $grouped = [];
@@ -169,8 +189,11 @@ try {
         if ($t['total'] < 0) {
             $cntReembolsos++;
         } else {
-            $sumaVentaPositiva += $t['total'];
-            if($t['total'] > $maxVenta) $maxVenta = $t['total'];
+            if (!ticket_es_gasto_casa($t)) {
+                $sumaVentaPositiva += $t['total'];
+                $conteoVentasKpi++;
+                if ($t['total'] > $maxVenta) $maxVenta = $t['total'];
+            }
 
             if ($t['tipo_servicio'] === 'reserva') $cntReservas++;
             if ($t['tipo_servicio'] === 'mensajeria') {
@@ -183,7 +206,7 @@ try {
         }
     }
     $pctTransferencia = ($sumaVentaPositiva > 0) ? ($sumaTransferencia / $sumaVentaPositiva) * 100 : 0;
-    $ticketPromedio = (count($allTickets) > 0) ? $ventaTotal / count($allTickets) : 0;
+    $ticketPromedio = ($conteoVentasKpi > 0) ? $ventaTotal / $conteoVentasKpi : 0;
 
     // KPI WEB
     $kpiWeb = $pdo->query("SELECT COUNT(*) as cant, SUM(total) as total FROM pedidos_cabecera WHERE estado = 'completado' AND DATE(fecha) BETWEEN '$start' AND '$end'")->fetch(PDO::FETCH_ASSOC);
@@ -195,7 +218,7 @@ try {
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ?
+        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND v.tipo_servicio = 'reserva' AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_ingresos_where_clause('v') . "
     ");
     $stmtRes->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
     $kpiReserva = $stmtRes->fetch(PDO::FETCH_ASSOC);
@@ -233,7 +256,7 @@ try {
         JOIN productos p ON d.id_producto = p.codigo 
         JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
         LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ?
+        WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ? AND $sqlDateLogic BETWEEN ? AND ? AND " . ventas_ingresos_where_clause('v') . "
         GROUP BY dia
     ");
     $stmtChart->execute([$EMP_ID, $SUC_ID, $ALM_ID, $start, $end]);
@@ -352,6 +375,24 @@ try {
                     </li>
                     <?php endforeach; ?>
                 </ul>
+                <div class="mt-2 px-2 py-1 rounded bg-warning-subtle text-danger fw-bold d-flex justify-content-between">
+                    <span>GASTOS DE CASA</span><span>$<?php echo number_format($gastosCasaTotal, 2); ?></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <div class="card card-stat h-100 p-3 border-start border-4 border-warning">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <small class="text-warning fw-bold">GASTOS TARJETA / CASA</small>
+                        <h3 class="fw-bold text-danger mb-0">$<?php echo number_format($gastosCasaTotal, 2); ?></h3>
+                        <small class="text-muted">Total del período analizado</small>
+                    </div>
+                    <div class="icon-box bg-warning bg-opacity-10 text-warning"><i class="fas fa-receipt"></i></div>
+                </div>
             </div>
         </div>
     </div>

@@ -1,10 +1,14 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/report_print.php
 ini_set('display_errors', 0);
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 require_once 'db.php';
 
 // Config
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
 
 $mode = $_GET['mode'] ?? 'range'; 
 $title = "";
@@ -52,6 +56,7 @@ if ($mode === 'session') {
                             FROM ventas_cabecera
                             WHERE (id_sesion_caja = ? OR id_caja = ?)
                               AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ?
+                              AND " . ventas_reales_where_clause() . "
                             ORDER BY id ASC");
     $stmtT->execute([$id, $id, $sesionEmpresa, $sesionSucursal, $sesionAlmacen]);
     $tickets = $stmtT->fetchAll(PDO::FETCH_ASSOC);
@@ -63,7 +68,15 @@ if ($mode === 'session') {
 } else {
     $start = $_GET['start']; $end = $_GET['end'];
     $scope = ($_GET['scope'] ?? 'local') === 'global' ? 'global' : 'local';
-    $scopeWhere = ' AND v.id_empresa = ' . intval($config['id_empresa'] ?? 1) . ($scope === 'global' ? '' : ' AND v.id_sucursal = ' . intval($config['id_sucursal']));
+    $contextEmpresa = intval($config['id_empresa'] ?? 1);
+    $contextSucursal = intval($config['id_sucursal'] ?? 1);
+    $contextAlmacen = intval($config['id_almacen'] ?? 1);
+    $scopeWhere = ' AND v.id_empresa = ' . $contextEmpresa;
+    if ($scope !== 'global') {
+        $scopeWhere .= ' AND v.id_sucursal = ' . $contextSucursal
+                     . ' AND v.id_almacen = ' . $contextAlmacen;
+    }
+    $sqlReportDate = 'COALESCE(s.fecha_contable, DATE(v.fecha))';
     $title = "Reporte General: $start al $end";
     $startDt = new DateTime($start);
     $endDt = new DateTime($end);
@@ -75,19 +88,25 @@ if ($mode === 'session') {
                                   s.nombre_cajero
                            FROM ventas_cabecera v
                            LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-                           WHERE v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY) {$scopeWhere}
+                           WHERE {$sqlReportDate} BETWEEN ? AND ? {$scopeWhere}
+                             AND " . ventas_reales_where_clause('v') . "
                            ORDER BY v.id DESC");
     $stmt->execute([$start, $end]);
     $tickets = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $whereClause = "v.fecha >= ? AND v.fecha < DATE_ADD(?, INTERVAL 1 DAY){$scopeWhere}";
+    $whereClause = "{$sqlReportDate} BETWEEN ? AND ?{$scopeWhere}";
     $params = [$start, $end];
 }
 
-// 1. FINANZAS (Ganancia)
-$sqlFin = "SELECT SUM(d.cantidad * d.precio) as venta, SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo)) as costo
-           FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-           WHERE $whereClause";
+$whereIncomeClause = $whereClause . ' AND ' . ventas_reales_where_clause('v') . ' AND NOT ' . ventas_gastos_casa_where_clause('v');
+
+// 1. FINANZAS (Ganancia). Solo tickets positivos de venta; los gastos de casa
+// y las devoluciones quedan fuera de la ganancia limpia.
+$sqlFin = "SELECT SUM(d.cantidad * d.precio) as venta,
+                  SUM(d.cantidad * COALESCE(d.costo_unitario, p.costo)) as costo
+           FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+           LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+           WHERE $whereIncomeClause AND v.total > 0";
 $stmtF = $pdo->prepare($sqlFin);
 $stmtF->execute($params);
 $finanzas = $stmtF->fetch(PDO::FETCH_ASSOC);
@@ -96,8 +115,9 @@ $margen = ($finanzas['venta'] > 0) ? ($ganancia / $finanzas['venta']) * 100 : 0;
 
 // 2. CATEGORIAS (Agrupado) - MODIFICADO CON GANANCIA
 $sqlCat = "SELECT p.categoria, SUM(d.cantidad) as cant, SUM(d.cantidad * d.precio) as total, SUM(d.cantidad * (d.precio - COALESCE(d.costo_unitario, p.costo))) as ganancia
-           FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-           WHERE $whereClause GROUP BY p.categoria";
+           FROM ventas_detalle d JOIN productos p ON d.id_producto = p.codigo JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+           LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+           WHERE $whereIncomeClause AND v.total > 0 GROUP BY p.categoria";
 $stmtC = $pdo->prepare($sqlCat);
 $stmtC->execute($params);
 $summaryCats = $stmtC->fetchAll(PDO::FETCH_ASSOC);
@@ -108,12 +128,17 @@ foreach($tickets as $t) {
     if(!isset($pagos[$t['metodo_pago']])) $pagos[$t['metodo_pago']] = 0;
     $pagos[$t['metodo_pago']] += $t['total'];
 }
+$gastosCasaTotal = 0.0;
+foreach ($tickets as $t) {
+    if (ticket_es_gasto_casa($t)) $gastosCasaTotal += (float)$t['total'];
+}
 
 // 4. ANALISIS DE DEVOLUCIONES
 $sqlRef = "SELECT p.nombre, SUM(d.cantidad) as cant, SUM(d.cantidad * d.precio) as total 
            FROM ventas_detalle d 
            JOIN productos p ON d.id_producto = p.codigo 
            JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
+           LEFT JOIN caja_sesiones s ON v.id_caja = s.id
            WHERE $whereClause AND d.cantidad < 0 
            GROUP BY p.nombre";
 $stmtRef = $pdo->prepare($sqlRef);
@@ -130,7 +155,8 @@ $sqlProds = "SELECT p.nombre, p.categoria, SUM(d.cantidad) as total_qty, SUM(d.c
              FROM ventas_detalle d 
              JOIN productos p ON d.id_producto = p.codigo 
              JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id 
-             WHERE $whereClause 
+             LEFT JOIN caja_sesiones s ON v.id_caja = s.id
+             WHERE $whereIncomeClause AND v.total > 0
              GROUP BY p.codigo, p.nombre, p.categoria 
              ORDER BY p.categoria ASC, p.nombre ASC";
 $stmtProds = $pdo->prepare($sqlProds);
@@ -144,16 +170,16 @@ $sqlExpenseProds = "SELECT COALESCE(NULLIF(d.nombre_producto, ''), p.nombre, d.i
                     FROM ventas_detalle d
                     LEFT JOIN productos p ON d.id_producto = p.codigo
                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                    LEFT JOIN caja_sesiones s ON v.id_caja = s.id
                     WHERE $whereClause
-                      AND (
-                          LOWER(COALESCE(v.metodo_pago, '')) LIKE '%gasto%'
-                          OR EXISTS (
-                              SELECT 1
-                              FROM ventas_pagos vp
-                              WHERE vp.id_venta_cabecera = v.id
-                                AND LOWER(vp.metodo_pago) LIKE '%gasto%'
-                          )
-                      )
+                      AND (" . ventas_gastos_casa_where_clause('v') . "
+                           OR EXISTS (
+                               SELECT 1
+                               FROM ventas_pagos vp
+                               WHERE vp.id_venta_cabecera = v.id
+                                 AND (LOWER(vp.metodo_pago) LIKE '%tarjet%'
+                                      OR LOWER(vp.metodo_pago) LIKE '%gasto%')
+                           ))
                     GROUP BY d.id_producto, d.nombre_producto, p.nombre
                     ORDER BY nombre ASC";
 $stmtExpenseProds = $pdo->prepare($sqlExpenseProds);
@@ -227,7 +253,9 @@ if (!empty($tickets)) {
             ];
         }
         $cashSessions[$sessionId]['tickets'][] = $ticket;
-        $cashSessions[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+        if (!ticket_es_gasto_casa($ticket)) {
+            $cashSessions[$sessionId]['total'] += floatval($ticket['total'] ?? 0);
+        }
     }
 
     if (!empty($cashSessions)) {
@@ -327,14 +355,15 @@ if (!empty($tickets)) {
             <table>
                 <?php $sumPagos=0; foreach($pagos as $metodo => $monto): $sumPagos+=$monto; ?>
                 <tr>
-                    <td><?php echo $metodo; ?></td>
+                    <td<?php echo (ticket_es_gasto_casa(['metodo_pago' => $metodo]) ? ' class="text-danger fw-bold"' : ''); ?>><?php echo htmlspecialchars($metodo); ?><?php echo ticket_es_gasto_casa(['metodo_pago' => $metodo]) ? ' (GASTO)' : ''; ?></td>
                     <td class="text-end">$<?php echo number_format($monto, 2); ?></td>
                 </tr>
                 <?php endforeach; ?>
                 <tr>
-                    <td class="fw-bold">TOTAL NETO:</td>
+                    <td class="fw-bold">TOTAL MOVIMIENTOS:</td>
                     <td class="text-end fw-bold">$<?php echo number_format($sumPagos, 2); ?></td>
                 </tr>
+                <tr><td class="fw-bold text-danger">GASTOS DE CASA:</td><td class="text-end fw-bold text-danger">$<?php echo number_format($gastosCasaTotal, 2); ?></td></tr>
             </table>
         </div>
 

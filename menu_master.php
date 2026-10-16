@@ -3,6 +3,85 @@
 // Menú Flotante v3.0 - FEATURE: Categorías Colapsables & Expand All
 
 global $config, $currentConfig;
+require_once __DIR__ . '/pos_security.php';
+if (session_status() === PHP_SESSION_ACTIVE) {
+    $menuCsrfToken = pos_security_ensure_csrf_token();
+} elseif (!headers_sent()) {
+    pos_security_bootstrap_session();
+    $menuCsrfToken = pos_security_ensure_csrf_token();
+} else {
+    $menuCsrfToken = is_string($_SESSION['pos_csrf_token'] ?? null) ? $_SESSION['pos_csrf_token'] : '';
+}
+echo '<script>window.PW_CSRF_TOKEN=' . json_encode($menuCsrfToken) . ';</script>';
+?>
+<style>
+    #pwReportBusy { position: fixed; inset: 0; z-index: 20000; display: grid; place-items: center; padding: 1rem; background: rgba(15, 23, 42, .62); backdrop-filter: blur(3px); }
+    #pwReportBusy .pw-report-card { width: min(420px, 100%); padding: 1.5rem; border-radius: 16px; background: #fff; color: #172033; box-shadow: 0 20px 70px rgba(0,0,0,.3); text-align: center; }
+    #pwReportBusy .pw-report-track { height: 10px; margin: 1.1rem 0 .75rem; overflow: hidden; border-radius: 99px; background: #e8edf5; }
+    #pwReportBusy .pw-report-bar { width: 38%; height: 100%; border-radius: inherit; background: linear-gradient(90deg,#2563eb,#38bdf8); animation: pw-report-progress 1.15s ease-in-out infinite alternate; }
+    @keyframes pw-report-progress { from { transform: translateX(-15%); } to { transform: translateX(175%); } }
+    @media (prefers-reduced-motion: reduce) { #pwReportBusy .pw-report-bar { animation-duration: 3s; } }
+</style>
+<script>
+(function () {
+    'use strict';
+    const reportFiles = new Set(['/sales_history.php', '/profit.php']);
+    let visible = false;
+    let elapsedTimer = null;
+    function showReportBusy(path) {
+        if (visible) return;
+        visible = true;
+        const title = path === '/profit.php' ? 'Análisis de rentabilidad' : 'Historial de ventas';
+        const overlay = document.createElement('div');
+        overlay.id = 'pwReportBusy';
+        overlay.setAttribute('role', 'status');
+        overlay.setAttribute('aria-live', 'polite');
+        overlay.innerHTML = '<div class="pw-report-card"><div style="font-size:1.6rem;color:#2563eb"><i class="fas fa-chart-line" aria-hidden="true"></i></div>'
+            + '<h2 style="font-size:1.15rem;margin:.45rem 0">Calculando ' + title + '</h2>'
+            + '<p style="margin:0;color:#526078">' + (path === '/profit.php'
+                ? 'El servidor agrega ventas, costos y tendencias de los últimos 30 días.'
+                : 'El servidor consulta sesiones, ventas, costos e inventario del periodo.') + '</p>'
+            + '<div class="pw-report-track" aria-hidden="true"><div class="pw-report-bar"></div></div>'
+            + '<div style="font-size:.85rem;color:#526078">Tiempo transcurrido: <span id="pwReportElapsed">0 s</span></div>'
+            + '<div style="font-size:.75rem;color:#718096;margin-top:.45rem">La barra indica actividad; no es un porcentaje exacto.</div></div>';
+        document.body.appendChild(overlay);
+        const startedAt = Date.now();
+        elapsedTimer = window.setInterval(function () {
+            const counter = document.getElementById('pwReportElapsed');
+            if (counter) counter.textContent = Math.floor((Date.now() - startedAt) / 1000) + ' s';
+        }, 1000);
+    }
+    window.addEventListener('pageshow', function (event) {
+        if (!event.persisted) return;
+        if (elapsedTimer !== null) window.clearInterval(elapsedTimer);
+        document.getElementById('pwReportBusy')?.remove();
+        elapsedTimer = null;
+        visible = false;
+    });
+    document.addEventListener('click', function (event) {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const link = event.target.closest('a[href]');
+        if (!link || (link.target && link.target !== '_self')) return;
+        let target;
+        try { target = new URL(link.href, window.location.href); } catch (_) { return; }
+        if (target.origin !== window.location.origin || !reportFiles.has(target.pathname)) return;
+        event.preventDefault();
+        showReportBusy(target.pathname);
+        window.setTimeout(function () { window.location.assign(target.href); }, 60);
+    });
+    document.addEventListener('submit', function (event) {
+        const form = event.target;
+        if (!(form instanceof HTMLFormElement) || (form.method || 'get').toLowerCase() !== 'get') return;
+        const current = window.location.pathname;
+        if (!reportFiles.has(current) || form.dataset.reportProgressSubmitted === '1') return;
+        event.preventDefault();
+        form.dataset.reportProgressSubmitted = '1';
+        showReportBusy(current);
+        window.setTimeout(function () { form.submit(); }, 60);
+    });
+})();
+</script>
+<?php
 $_c = $config ?? $currentConfig ?? [];
 $menuSystemName = trim((string)($_c['marca_sistema_nombre'] ?? 'PalWeb POS Marinero')) ?: 'PalWeb POS Marinero';
 $menuSystemLogo = trim((string)($_c['marca_sistema_logo'] ?? ''));
@@ -62,6 +141,7 @@ $menuCategories = [
         ["icon" => "fa-balance-scale", "name" => "Reporte IPV (Kardex)", "url" => "reporte_ipv.php"],
         ["icon" => "fa-cash-register", "name" => "Cortes de Caja", "url" => "reportes_caja.php"],
         ["icon" => "fa-layer-group", "name" => "Reporte Multi-Sesión", "url" => "reportes_caja_multi.php"],
+        ["icon" => "fa-code-branch", "name" => "Dividir Sesión de Caja", "url" => "caja_dividir.php"],
         ["icon" => "fa-chart-pie", "name" => "Análisis Ganancia", "url" => "profit_analysis.php"],
         ["icon" => "fa-chart-bar", "name" => "Análisis Diario", "url" => "profit.php"],
     ],
@@ -422,15 +502,17 @@ async function loadChatList() {
             const badge = c.unread > 0 ? `<span class="cl-badge">${c.unread}</span>` : '';
             const time = new Date(c.last_msg_time).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
             
-            html += `
-            <div class="cl-item" onclick="selectChat('${c.client_uuid}')" style="background:${bg}">
-                ${badge}
-                <div style="font-weight:bold;">Cliente #${c.client_uuid.substr(0,6)}</div>
-                <div style="font-size:12px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${c.last_msg || '...'}</div>
-                <div style="font-size:10px; color:#999; margin-top:2px;">${time}</div>
-            </div>`;
+            const safeUuid = String(c.client_uuid || '');
+            html += `<div class="cl-item" data-chat-uuid="${safeUuid.replace(/[^a-zA-Z0-9_-]/g, '')}" style="background:${bg}">${badge}<div style="font-weight:bold;">Cliente #${safeUuid.slice(0,6)}</div><div class="chat-preview" style="font-size:12px;color:#666;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div><div style="font-size:10px;color:#999;margin-top:2px;">${time}</div></div>`;
         });
         container.innerHTML = html;
+        list.forEach(c => {
+            const uuid = String(c.client_uuid || '').replace(/[^a-zA-Z0-9_-]/g, '');
+            const item = container.querySelector(`[data-chat-uuid="${uuid}"]`);
+            if (!item) return;
+            item.onclick = () => selectChat(uuid);
+            item.querySelector('.chat-preview').textContent = String(c.last_msg || '...');
+        });
     } catch(e) {}
 }
 
@@ -445,7 +527,7 @@ window.selectChat = function(uuid) {
 async function loadConversation(uuid, scroll) {
     if(!uuid) return;
     try {
-        const res = await fetch(`${CHAT_API}?action=admin_get_chat&uuid=${uuid}`);
+        const res = await fetch(`${CHAT_API}?action=admin_get_chat`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uuid, csrf_token: window.PW_CSRF_TOKEN || '' }) });
         const msgs = await res.json();
         const body = document.getElementById('chatMessages');
         let html = '';
@@ -453,11 +535,10 @@ async function loadConversation(uuid, scroll) {
         msgs.forEach(m => {
             const type = m.sender === 'admin' ? 'cb-admin' : 'cb-client';
             const align = m.sender === 'admin' ? 'flex-end' : 'flex-start';
-            html += `<div style="display:flex; justify-content:${align}; margin-bottom:5px;">
-                        <div class="chat-bubble ${type}">${m.message}</div>
-                     </div>`;
+            html += `<div class="chat-message-row" data-chat-message="1" style="display:flex;justify-content:${align};margin-bottom:5px;"><div class="chat-bubble ${type}"></div></div>`;
         });
         body.innerHTML = html;
+        body.querySelectorAll('[data-chat-message="1"] .chat-bubble').forEach((bubble, index) => { bubble.textContent = String(msgs[index]?.message || ''); });
         if(scroll) body.scrollTop = body.scrollHeight;
     } catch(e) {}
 }
@@ -474,7 +555,7 @@ window.sendAdminMsg = async function() {
     
     await fetch(CHAT_API + '?action=send', {
         method: 'POST',
-        body: JSON.stringify({ uuid: currentChatUUID, message: text, sender: 'admin' })
+        body: JSON.stringify({ uuid: currentChatUUID, message: text, sender: 'admin', csrf_token: window.PW_CSRF_TOKEN || '' })
     });
 }; 
 

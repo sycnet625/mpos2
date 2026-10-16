@@ -102,10 +102,10 @@ try {
 
     // Recuperar sesión y su fecha contable
     if ($idSesion > 0) {
-        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_contable FROM caja_sesiones WHERE id = ? AND estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? LIMIT 1");
+        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_apertura, fecha_contable FROM caja_sesiones WHERE id = ? AND estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? LIMIT 1");
         $stmtSesion->execute([$idSesion, $idEmpresa, $idSucursal, $idAlmacen]);
     } else {
-        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
+        $stmtSesion = $pdo->prepare("SELECT id, id_empresa, id_sucursal, id_almacen, nombre_cajero, fecha_apertura, fecha_contable FROM caja_sesiones WHERE estado = 'ABIERTA' AND id_empresa = ? AND id_sucursal = ? AND id_almacen = ? ORDER BY id DESC LIMIT 1");
         $stmtSesion->execute([$idEmpresa, $idSucursal, $idAlmacen]);
     }
 
@@ -113,6 +113,26 @@ try {
     if (!$row) {
         throw new Exception("No hay una sesión de caja abierta para la empresa {$idEmpresa}, sucursal {$idSucursal} y almacén {$idAlmacen}.");
     }
+
+    // Una sesión que permanece abierta al cambiar el día puede seguir vendiendo.
+    // Se agrega un aviso informativo a la respuesta exitosa, sin bloquear la venta.
+    $fechaSesion = substr((string)($row['fecha_contable'] ?? ''), 0, 10);
+    $fechaHoy = date('Y-m-d');
+    $fechaAperturaDia = substr((string)($row['fecha_apertura'] ?? ''), 0, 10);
+    $fechaDiaSesion = $fechaAperturaDia !== '' ? $fechaAperturaDia : $fechaSesion;
+    $avisoSesionDiaSiguiente = $fechaDiaSesion !== '' && $fechaDiaSesion < $fechaHoy
+        ? [
+            'id' => (int)$row['id'],
+            'nombre_cajero' => (string)($row['nombre_cajero'] ?? ''),
+            'fecha_apertura' => (string)($row['fecha_apertura'] ?? ''),
+            'fecha_contable' => $fechaSesion,
+            'fecha_hoy' => $fechaHoy,
+            'id_empresa' => $idEmpresa,
+            'id_sucursal' => $idSucursal,
+            'id_almacen' => $idAlmacen,
+        ]
+        : null;
+
     $idSesion = (int)$row['id'];
     $usuarioNombre = $row['nombre_cajero'];
     $fechaContable = $row['fecha_contable'];
@@ -619,7 +639,21 @@ try {
         error_log("pos_save notifications error: " . $chatErr->getMessage());
     }
 
-    echo json_encode(['status' => 'success', 'id' => $idVenta, 'uuid' => $uuid]);
+    // Informar al POS todos los productos cuyo stock cambió, no solo las
+    // líneas visibles del carrito. En un combo, el inventario real son sus
+    // componentes y también deben actualizarse sus tarjetas.
+    $affectedCodes = array_values(array_unique(array_filter(array_merge(
+        array_map(static fn(array $item): string => (string)($item['id'] ?? ''), $saleItems),
+        array_map(static fn(array $item): string => (string)($item['id'] ?? ''), $resolvedSale['inventory_items'] ?? [])
+    ))));
+
+    echo json_encode([
+        'status' => 'success',
+        'id' => $idVenta,
+        'uuid' => $uuid,
+        'affected_codes' => $affectedCodes,
+        'aviso_sesion_dia_siguiente' => $avisoSesionDiaSiguiente,
+    ], JSON_UNESCAPED_UNICODE);
 
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();

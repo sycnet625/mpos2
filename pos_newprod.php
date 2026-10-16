@@ -3,13 +3,21 @@
 // DESCRIPCIÓN: Modal universal para creación rápida de productos (Backend + UI)
 // VERSIÓN: V2.2 (FIX USER CONTEXT)
 
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once __DIR__ . '/pos_security.php';
+pos_security_bootstrap_session();
+require_once __DIR__ . '/admin_security.php';
+// admin_security ya crea $pdo. Cargar también el contexto y las funciones
+// explícitamente: depender de `!isset($pdo)` dejaba este endpoint sin ellas.
+require_once __DIR__ . '/config_loader.php';
+require_once __DIR__ . '/product_image_pipeline.php';
+require_once __DIR__ . '/combo_helper.php';
 
 // Detectar si se está llamando directamente o incluido
 $is_direct_access = (basename($_SERVER['SCRIPT_FILENAME']) === 'pos_newprod.php');
 
 // 1. LÓGICA DE BACKEND (Solo se ejecuta si hay petición AJAX)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array($_GET['action'], ['get_next_sku', 'get_categories']))) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') require_once __DIR__ . '/admin_security.php';
     if (!function_exists('pos_newprod_ensure_barcode_columns')) {
         function pos_newprod_ensure_barcode_columns(PDO $pdo): void {
             static $ready = false;
@@ -29,53 +37,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || (isset($_GET['action']) && in_array
         }
     }
     
-    // Evitar conflictos si ya se incluyó db.php antes
-    if (!isset($pdo)) {
-        ini_set('display_errors', 0);
-require_once 'db.php';
-require_once 'config_loader.php';
-require_once 'product_image_pipeline.php';
-require_once 'combo_helper.php';
-        $EMP_ID = intval($config['id_empresa']);
-        $SUC_ID = intval($config['id_sucursal']); // Obtenemos sucursal para prefijo
-    } else {
-        // Si ya viene incluido, asegurar variables
-        if(!isset($SUC_ID)) $SUC_ID = 1;
-        if(!isset($EMP_ID)) $EMP_ID = 1;
-    }
+    ini_set('display_errors', 0);
     // El alta debe usar el mismo contexto que el POS que abrió el formulario.
     // Así el producto queda visible en la sucursal y almacén activos.
-    $EMP_ID = (int)($_SESSION['id_empresa'] ?? $EMP_ID ?? 1);
-    $SUC_ID = (int)($_SESSION['id_sucursal'] ?? $SUC_ID ?? 1);
-    $ALM_ID = (int)($_SESSION['id_almacen'] ?? ($ALM_ID ?? ($config['id_almacen'] ?? 1)));
+    $EMP_ID = (int)($config['id_empresa'] ?? $_SESSION['id_empresa'] ?? 1);
+    $SUC_ID = (int)($config['id_sucursal'] ?? $_SESSION['id_sucursal'] ?? 1);
+    $ALM_ID = (int)($config['id_almacen'] ?? $_SESSION['id_almacen'] ?? 1);
 
-    // A. OBTENER PRÓXIMO SKU (LOGICA SUCURSAL)
+    // A. OBTENER PRÓXIMO SKU (sucursal + almacén + secuencia de 4 dígitos)
     if (isset($_GET['action']) && $_GET['action'] === 'get_next_sku') {
-        header('Content-Type: application/json');
+        header('Content-Type: application/json; charset=utf-8');
         try {
-            // 1. Generar prefijo: SS (ID Sucursal repetido)
-            // Ej: Sucursal 4 -> "44"
-            $prefix = str_repeat((string)$SUC_ID, 2); 
+            if ($SUC_ID <= 0 || $ALM_ID <= 0) {
+                throw new RuntimeException('No se pudo determinar la sucursal y el almacén activos.');
+            }
+
+            // El formato identifica primero la sucursal y después el almacén.
+            // Ejemplo: sucursal 6, almacén 1 -> 610001.
+            $prefix = (string)$SUC_ID . (string)$ALM_ID;
             $lenPrefix = strlen($prefix);
 
-            // 2. Buscar el máximo consecutivo existente para este prefijo
-            $sql = "SELECT MAX(CAST(SUBSTRING(codigo, :len + 1) AS UNSIGNED)) as max_seq
-                    FROM productos 
-                    WHERE codigo LIKE CONCAT(:prefix, '%') 
-                    AND id_empresa = :emp";
-            
+            // Buscar en el rango del índice primario de codigo. Así evitamos
+            // aplicar CAST/SUBSTRING a todas las filas que coincidan con el prefijo.
+            $firstCode = $prefix . '0000';
+            $lastCode = $prefix . '9999';
+            $sql = "SELECT codigo
+                    FROM productos FORCE INDEX (PRIMARY)
+                    WHERE codigo >= :first_code AND codigo <= :last_code
+                      AND CHAR_LENGTH(codigo) = :code_length
+                      AND id_empresa = :emp
+                    ORDER BY codigo DESC
+                    LIMIT 1";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute([':len' => $lenPrefix, ':prefix' => $prefix, ':emp' => $EMP_ID]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->execute([
+                ':first_code' => $firstCode,
+                ':last_code' => $lastCode,
+                ':code_length' => $lenPrefix + 4,
+                ':emp' => $EMP_ID,
+            ]);
+            $lastExistingCode = (string)($stmt->fetchColumn() ?: '');
             
-            // 3. Calcular siguiente (si no hay, empieza en 1)
-            $nextSeq = ($row['max_seq']) ? intval($row['max_seq']) + 1 : 1; 
+            // Los cuatro dígitos ordenan igual al número de secuencia.
+            $nextSeq = $lastExistingCode !== ''
+                ? (int)substr($lastExistingCode, -4) + 1
+                : 1;
+            if ($nextSeq > 9999) {
+                throw new RuntimeException('Se agotaron los 9999 códigos disponibles para esta sucursal y almacén.');
+            }
             
-            // Devolver datos separados para que el JS formatee (44 + 0001)
             echo json_encode(['status' => 'success', 'prefix' => $prefix, 'next_seq' => $nextSeq]);
 
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -87,8 +101,8 @@ require_once 'combo_helper.php';
             $stmt = $pdo->query("SELECT nombre FROM categorias ORDER BY nombre ASC");
             $cats = $stmt->fetchAll(PDO::FETCH_COLUMN);
             echo json_encode(['status' => 'success', 'categories' => $cats]);
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -97,8 +111,8 @@ require_once 'combo_helper.php';
         header('Content-Type: application/json');
         try {
             echo json_encode(['status' => 'success', 'products' => combo_component_catalog($pdo, $EMP_ID)]);
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -245,8 +259,8 @@ require_once 'combo_helper.php';
                 'codigo' => $codigo, 'nombre' => $_POST['nombre'], 'es_combo' => isset($_POST['es_combo']) ? 1 : 0
             ]]);
 
-        } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
         }
         exit;
     }
@@ -288,6 +302,7 @@ if ($is_direct_access) {
             </div>
             <div class="modal-body bg-light">
                 <form id="formQuickProd" enctype="multipart/form-data">
+                    <?= function_exists('admin_security_form_token') ? admin_security_form_token() : '' ?>
                     <input type="hidden" name="save_new_product" value="1">
                     
                     <div class="row g-2 mb-3">
@@ -562,7 +577,7 @@ if ($is_direct_access) {
 
     async function loadCategoriesQP() {
         try {
-            const res = await fetch('pos_newprod.php?action=get_categories');
+            const res = await fetch('/pos_newprod.php?action=get_categories');
             const data = await res.json();
             if(data.status === 'success') {
                 const datalist = document.getElementById('cat_list_qp');
@@ -580,7 +595,7 @@ if ($is_direct_access) {
 
     async function loadNextSku() {
         try {
-            const res = await fetch('pos_newprod.php?action=get_next_sku'); 
+            const res = await fetch('/pos_newprod.php?action=get_next_sku'); 
             const data = await res.json();
             
             if(data.status === 'success') {
@@ -597,7 +612,7 @@ if ($is_direct_access) {
     async function loadComboCatalog() {
         if (comboCatalog.length > 0) return;
         try {
-            const res = await fetch('pos_newprod.php?action=get_combo_products');
+            const res = await fetch('/pos_newprod.php?action=get_combo_products');
             const data = await res.json();
             if (data.status !== 'success') return;
             comboCatalog = data.products || [];
@@ -703,7 +718,8 @@ if ($is_direct_access) {
 
         try {
             const formData = new FormData(form);
-            const res = await fetch('pos_newprod.php', {
+            formData.set('csrf_token', window.PW_CSRF_TOKEN || formData.get('csrf_token') || '');
+            const res = await fetch('/pos_newprod.php', {
                 method: 'POST',
                 body: formData
             });

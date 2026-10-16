@@ -42,7 +42,7 @@ async function ensurePosCsrfToken(forceRefresh = false) {
             cache: 'no-store',
             credentials: 'same-origin',
             signal: typeof window.posFetchTimeoutSignal === 'function'
-                ? window.posFetchTimeoutSignal(5000)
+                ? window.posFetchTimeoutSignal(10000)
                 : undefined
         });
         const data = await resp.json();
@@ -53,6 +53,31 @@ async function ensurePosCsrfToken(forceRefresh = false) {
     } catch (e) {}
 
     return false;
+}
+
+function notifyOvernightCashSession(response) {
+    const session = response?.aviso_sesion_dia_siguiente;
+    if (!session || !session.fecha_hoy) return false;
+
+    const empresaId = Number(session.id_empresa || 0);
+    const sucursalId = Number(session.id_sucursal || 0);
+    const key = `pos_overnight_cash_info_${empresaId}_${sucursalId}_${session.fecha_hoy}`;
+    try {
+        if (localStorage.getItem(key)) return false;
+        localStorage.setItem(key, '1');
+    } catch (e) {
+        window.__posOvernightCashWarnings = window.__posOvernightCashWarnings || new Set();
+        if (window.__posOvernightCashWarnings.has(key)) return false;
+        window.__posOvernightCashWarnings.add(key);
+    }
+
+    const sessionId = Number(session.id || 0);
+    const fechaApertura = String(session.fecha_apertura || '').slice(0, 10) || 'un día anterior';
+    showToast(
+        `La sesión #${sessionId || '—'} sigue abierta desde ${fechaApertura}. Venta #${Number(response.id || 0)} registrada.`,
+        'warning'
+    );
+    return true;
 }
 
 // ==========================================
@@ -271,6 +296,38 @@ let pinEntryMode = 'overlay';
 let pendingSessionRetry = null;
 let sessionLoginModalInstance = null;
 let terminalLockModalInstance = null;
+let pinLoginInProgress = false;
+
+function logAuthEvent(event, details = {}) {
+    // Nunca registrar PIN, tokens, respuestas completas ni datos sensibles.
+    console.info('[POS-AUTH]', Object.assign({ event, at: new Date().toISOString() }, details));
+}
+
+function setPinLoginBusy(busy, message = '') {
+    pinLoginInProgress = busy;
+    const buttons = document.querySelectorAll('#pinGrid button, #sessionLoginModal .mini-pin-grid button');
+    buttons.forEach(button => { button.disabled = busy; });
+    ['pinNetworkStatus', 'pinNetworkStatusModal'].forEach(id => {
+        const status = document.getElementById(id);
+        if (status) {
+            status.textContent = message;
+            status.classList.toggle('d-none', !message);
+        }
+    });
+}
+
+function updateAuthModeBadge(mode) {
+    const badge = document.getElementById('authModeBadge');
+    if (!badge) return;
+    const offline = mode === 'offline';
+    badge.className = 'badge px-2 ' + (offline ? 'bg-warning text-dark' : 'bg-info text-dark');
+    badge.innerHTML = offline
+        ? '<i class="fas fa-cloud-slash"></i> SESIÓN OFFLINE'
+        : '<i class="fas fa-shield-alt"></i> SESIÓN ONLINE';
+    badge.title = offline
+        ? 'PIN validado localmente; las operaciones pendientes se sincronizarán al recuperar la conexión.'
+        : 'PIN validado por el servidor.';
+}
 
 // ==========================================
 // INICIALIZACION
@@ -307,19 +364,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     setTimeout(() => {
         if (typeof window.initPOSOffline === 'function') {
-            window.initPOSOffline().then(() => {
-                // Si ya hay sesión activa (recarga de página), refrescar cajeros en IndexedDB
-                if (navigator.onLine) {
-                    fetch('pos.php?load_cashiers=1', { cache: 'no-store' })
-                        .then(r => r.json())
-                        .then(d => {
-                            if (d.status === 'success' && window.posCache && window.posCache.saveCajeros) {
-                                window.posCache.saveCajeros(d.cashiers);
-                            }
-                        })
-                        .catch(() => {});
-                }
-            }).catch(() => {});
+            window.initPOSOffline().catch(() => {});
         }
     }, 300);
     
@@ -444,6 +489,18 @@ function pendingSyncReadLegacyQueue() {
     } catch (e) { return []; }
 }
 
+function collectSaleStockCodes(target, sale, response) {
+    if (!(target instanceof Set)) return;
+    (Array.isArray(sale?.items) ? sale.items : []).forEach(item => {
+        const code = String(item?.id || item?.codigo || '').trim();
+        if (code) target.add(code);
+    });
+    (Array.isArray(response?.affected_codes) ? response.affected_codes : []).forEach(code => {
+        code = String(code || '').trim();
+        if (code) target.add(code);
+    });
+}
+
 async function refreshPendingSyncPanel() {
     const status = document.getElementById('pendingSyncStatus');
     const total = document.getElementById('pendingSyncTotal');
@@ -503,6 +560,7 @@ async function syncOfflineQueue() {
     
     const failedQueue = []; 
     let syncedCount = 0;
+    const syncedStockCodes = new Set();
     
     for (const sale of queue) {
         try {
@@ -513,7 +571,9 @@ async function syncOfflineQueue() {
             });
             const res = await resp.json();
             if (res.status === 'success') {
+                notifyOvernightCashSession(res);
                 syncedCount++;
+                collectSaleStockCodes(syncedStockCodes, sale, res);
                 try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
             } else {
                 if (await handleSessionAuthFailure(res, () => syncOfflineQueue(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
@@ -528,6 +588,9 @@ async function syncOfflineQueue() {
     }
     
     localStorage.setItem(QUEUE_KEY, JSON.stringify(failedQueue));
+    if (syncedStockCodes.size > 0) {
+        await refreshProductStock([...syncedStockCodes], { allowFullRefresh: true });
+    }
     updateOnlineStatus();
     
     if (syncedCount > 0) { 
@@ -555,6 +618,7 @@ async function syncAllPending() {
     let totalSynced = 0;
     let totalErrors = 0;
     const processedSaleUuids = new Set();
+    const syncedStockCodes = new Set();
     
     // localStorage
     const legacyQueue = readStorageArray(QUEUE_KEY);
@@ -568,9 +632,11 @@ async function syncAllPending() {
                     headers: getPosJsonHeaders(), 
                     body: JSON.stringify(sale) 
                 });
-                const res = await resp.json();
+            const res = await resp.json();
                 if (res.status === 'success') {
+                    notifyOvernightCashSession(res);
                     totalSynced++;
+                    collectSaleStockCodes(syncedStockCodes, sale, res);
                     try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
                 } else {
                     if (await handleSessionAuthFailure(res, () => syncAllPending(), 'Inicio de sesion requerido para sincronizar ventas offline.')) {
@@ -606,7 +672,9 @@ async function syncAllPending() {
                     });
                     const res = await resp.json();
                     if (res.status === 'success') {
+                        notifyOvernightCashSession(res);
                         await window.posCache.markSaleSynced(sale.id);
+                        collectSaleStockCodes(syncedStockCodes, sale, res);
                         try { if (window.PalWebNative && sale.uuid) window.PalWebNative.saleSynced(sale.uuid); } catch (e) {}
                         totalSynced++;
                     } else {
@@ -622,6 +690,10 @@ async function syncAllPending() {
         } catch(e) {
             console.error('Error sincronizando IndexedDB:', e);
         }
+    }
+
+    if (syncedStockCodes.size > 0) {
+        await refreshProductStock([...syncedStockCodes], { allowFullRefresh: true });
     }
     
     if (totalSynced > 0) {
@@ -772,19 +844,28 @@ async function refreshProducts(almId = null, forceFull = false) {
 // La venta actualiza stock_almacen, pero no necesariamente productos.updated_at.
 // Reconciliar solo las líneas cobradas mantiene visible la existencia real sin
 // descargar de nuevo todo el catálogo.
-async function refreshProductStock(codes) {
-    if (!navigator.onLine || !Array.isArray(codes) || codes.length === 0) return;
+let productStockRefreshSequence = 0;
+
+async function refreshProductStock(codes, options = {}) {
+    if (!navigator.onLine || !Array.isArray(codes) || codes.length === 0) return false;
     const uniqueCodes = [...new Set(codes.map(code => String(code || '').trim()).filter(Boolean))];
-    if (uniqueCodes.length === 0) return;
+    if (uniqueCodes.length === 0) return false;
+    const requestSequence = ++productStockRefreshSequence;
     try {
         const response = await fetch('pos.php?load_product_stock=1&codes=' + encodeURIComponent(uniqueCodes.join(',')) + '&t=' + Date.now(), {
             method: 'GET',
             cache: 'no-store',
+            credentials: 'same-origin',
             headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate' }
         });
-        if (!response.ok) return;
+        if (!response.ok) throw new Error('HTTP ' + response.status);
         const result = await response.json();
-        if (result.status !== 'success' || !Array.isArray(result.products)) return;
+        if (result.status !== 'success' || !Array.isArray(result.products)) {
+            throw new Error('Respuesta de stock inválida');
+        }
+        // Una consulta anterior no puede sobrescribir la existencia obtenida
+        // por una venta más reciente cuando varias operaciones son seguidas.
+        if (requestSequence !== productStockRefreshSequence) return false;
         const stockByCode = new Map(result.products.map(product => [String(product.codigo), Number(product.stock || 0)]));
         (window.productsDB || []).forEach(product => {
             const code = String(product.codigo || '');
@@ -797,8 +878,22 @@ async function refreshProductStock(codes) {
         }
         const activeCategory = document.querySelector('.category-btn.active')?.dataset?.category || 'all';
         renderProducts(activeCategory, document.getElementById('searchInput')?.value || '');
+        const missingCodes = uniqueCodes.filter(code => !stockByCode.has(code));
+        if (missingCodes.length > 0 && options.allowFullRefresh !== false && requestSequence === productStockRefreshSequence) {
+            await refreshProducts(null, true);
+        }
+        return missingCodes.length === 0;
     } catch (error) {
         console.warn('No se pudo actualizar el stock visible:', error);
+        if (options.allowFullRefresh !== false && requestSequence === productStockRefreshSequence) {
+            try {
+                await refreshProducts(null, true);
+                return true;
+            } catch (fallbackError) {
+                console.warn('Tampoco se pudo actualizar el catálogo global:', fallbackError);
+            }
+        }
+        return false;
     }
 }
 
@@ -1011,70 +1106,148 @@ async function handleSessionAuthFailure(result, retryFn, fallbackMessage) {
 // ==========================================
 async function verifyPin() {
     // Bloqueo activo: ignorar intentos
-    if (Date.now() < pinLockedUntil) return;
+    if (Date.now() < pinLockedUntil || pinLoginInProgress) return;
     if (enteredPin.length < 4) return;
 
     let loginSuccess = false;
+    let allowOfflineLogin = !navigator.onLine;
+    let loginMode = 'offline';
+    let loginFailureKind = allowOfflineLogin ? 'network' : '';
+    let realOnline = navigator.onLine;
     let cajeroRol    = 'cajero';
     let loginContext = null;
     // Contexto con el que se abrió esta página, antes de aplicar el PIN nuevo.
     // Debe conservarse para detectar cambios de sucursal/almacén.
     const pageContextBeforeLogin = Object.assign({}, window.POS_ACTIVE_CONTEXT || {});
 
-    if (navigator.onLine) {
-        try {
-            await ensurePosCsrfToken(true);
-            const resp = await fetch('pos_cash.php?action=login', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: getPosJsonHeaders(),
-                body: JSON.stringify({ pin: enteredPin }),
-                signal: typeof window.posFetchTimeoutSignal === 'function'
-                    ? window.posFetchTimeoutSignal(5000)
-                    : undefined
-            });
-            const data = await resp.json();
-            if (data.status === 'success') {
-                if (typeof data.csrf_token === 'string' && data.csrf_token.length >= 32) {
-                    window.POS_CSRF_TOKEN_VALUE = data.csrf_token;
-                }
-                loginSuccess = true;
-                currentCashier = data.cajero;
-                cajeroRol = data.rol ?? 'cajero';
-                loginContext = Object.assign({}, data, { serverAuthenticated: true });
-
-                // Refrescar IndexedDB con lista completa de cajeros (incluyendo PINs)
-                // Los PINs NO están en CAJEROS_CONFIG del HTML — se obtienen del servidor
-                // solo tras autenticación exitosa, para mantener el login offline seguro.
-                if (typeof window.posCache !== 'undefined' && window.posCache.db &&
-                    typeof window.posCache.saveCajeros === 'function') {
-                    fetch('pos.php?load_cashiers=1', { cache: 'no-store' })
-                        .then(r => r.json())
-                        .then(d => { if (d.status === 'success') window.posCache.saveCajeros(d.cashiers); })
-                        .catch(() => {});
-                }
+    setPinLoginBusy(true, 'Verificando conexión…');
+    const loginStartedAt = performance.now();
+    try {
+        if (navigator.onLine) {
+            // netcheck actualiza el indicador de red, pero no debe bloquear el login:
+            // un ping auxiliar lento no significa que el endpoint de autenticación
+            // esté offline.
+            if (window.connectionMonitor && typeof window.connectionMonitor.checkConnection === 'function') {
+                window.connectionMonitor.checkConnection().catch(() => {});
             }
-        } catch(e) {
-            console.log('Login online fallo, intentando offline:', e.message);
+
+            if (realOnline) {
+                let lastError = null;
+                for (let attempt = 1; attempt <= 2 && !loginSuccess; attempt++) {
+                    try {
+                        setPinLoginBusy(true, attempt === 1 ? 'Conectando con el servidor…' : 'Reintentando conexión…');
+                        const csrfReady = await ensurePosCsrfToken(true);
+                        if (!csrfReady) throw Object.assign(new Error('No se pudo obtener el token CSRF'), { authKind: 'network' });
+
+                        const resp = await fetch('pos_cash.php?action=login', {
+                            method: 'POST',
+                            credentials: 'same-origin',
+                            cache: 'no-store',
+                            headers: getPosJsonHeaders({ 'Cache-Control': 'no-store', 'Pragma': 'no-cache' }),
+                            body: JSON.stringify({ pin: enteredPin }),
+                            signal: typeof window.posFetchTimeoutSignal === 'function'
+                                ? window.posFetchTimeoutSignal(10000)
+                                : undefined
+                        });
+                        const data = await resp.json().catch(() => ({}));
+
+                        // Un rechazo del servidor (PIN incorrecto, CSRF, etc.) no debe
+                        // convertirse en un login offline autorizado.
+                        if (!resp.ok || data.status !== 'success') {
+                            const error = new Error(data.msg || data.message || 'No se pudo autenticar');
+                            error.authKind = resp.status >= 500 || resp.status === 408 ? 'network' : 'credentials';
+                            error.httpStatus = resp.status;
+                            throw error;
+                        }
+
+                        if (typeof data.csrf_token === 'string' && data.csrf_token.length >= 32) {
+                            window.POS_CSRF_TOKEN_VALUE = data.csrf_token;
+                        }
+                        loginSuccess = true;
+                        loginMode = 'online';
+                        currentCashier = data.cajero;
+                        cajeroRol = data.rol ?? 'cajero';
+                        loginContext = Object.assign({}, data, { serverAuthenticated: true });
+                        logAuthEvent('login_online_ok', { attempt, durationMs: Math.round(performance.now() - loginStartedAt) });
+
+                        // Guardar un verificador local del PIN recién validado, nunca el PIN.
+                        if (typeof window.posCache !== 'undefined' && window.posCache.db &&
+                            typeof window.posCache.rememberAuthenticatedCashier === 'function') {
+                            await window.posCache.rememberAuthenticatedCashier(data, enteredPin).catch(() => {});
+                        }
+                    } catch (e) {
+                        lastError = e;
+                        const retryable = e.authKind === 'network' || e instanceof TypeError ||
+                            e.name === 'AbortError' || e.name === 'TimeoutError';
+                        logAuthEvent('login_online_error', {
+                            attempt,
+                            kind: retryable ? 'network_or_timeout' : 'credentials_or_server',
+                            status: e.httpStatus || 0,
+                            durationMs: Math.round(performance.now() - loginStartedAt)
+                        });
+                        if (!retryable || attempt >= 2) break;
+                        await new Promise(resolve => setTimeout(resolve, 700));
+                    }
+                }
+
+                if (!loginSuccess && lastError) {
+                    const retryable = lastError.authKind === 'network' || lastError instanceof TypeError ||
+                        lastError.name === 'AbortError' || lastError.name === 'TimeoutError';
+                    // Con navigator.onLine activo, no autorizar desde IndexedDB por
+                    // un fallo puntual del endpoint online. El fallback offline se
+                    // reserva para una desconexión confirmada por el navegador.
+                    allowOfflineLogin = !navigator.onLine && retryable;
+                    loginFailureKind = retryable ? (navigator.onLine ? 'server' : 'network') : 'credentials';
+                }
+            } else {
+                allowOfflineLogin = true;
+                loginFailureKind = 'network';
+                logAuthEvent('login_offline_fallback', { reason: 'real_connectivity_check_failed' });
+            }
+        }
+    } finally {
+        if (!loginSuccess && allowOfflineLogin) {
+            setPinLoginBusy(true, 'Sin conexión. Verificando acceso offline…');
         }
     }
 
-    // Fallback offline: solo IndexedDB (PINs guardados en login previo online)
-    // CAJEROS_CONFIG ya NO contiene PINs por seguridad
-    if (!loginSuccess && typeof window.posCache !== 'undefined' &&
+    // Un rechazo del servidor nunca se convierte en autorización offline.
+    if (!loginSuccess && allowOfflineLogin && typeof window.posCache !== 'undefined' &&
         typeof window.posCache.verifyCajeroOffline === 'function') {
         try {
             const cajero = await window.posCache.verifyCajeroOffline(enteredPin);
             if (cajero) {
                 loginSuccess = true;
+                loginMode = 'offline';
                 currentCashier = cajero.nombre;
                 cajeroRol = cajero.rol ?? 'cajero';
                 loginContext = Object.assign({}, cajero, { serverAuthenticated: false });
+                logAuthEvent('login_offline_ok', { durationMs: Math.round(performance.now() - loginStartedAt) });
             }
         } catch(e) {}
     }
 
+    setPinLoginBusy(false);
+    if (loginSuccess && loginMode === 'offline') {
+        showToast('Acceso offline: las operaciones se sincronizarán al recuperar la conexión.', 'warning');
+    }
+
+    // El catálogo y la sesión de servidor no se pueden cambiar de sucursal sin red.
+    // No permitir que un PIN offline deje la interfaz apuntando a datos de otra sucursal.
+    if (loginSuccess && !navigator.onLine && loginContext) {
+        const offlineContextChanged = Number(pageContextBeforeLogin.id_empresa || 0) !== Number(loginContext.id_empresa || 0)
+            || Number(pageContextBeforeLogin.id_sucursal || 0) !== Number(loginContext.id_sucursal || 0)
+            || Number(pageContextBeforeLogin.id_almacen || 0) !== Number(loginContext.id_almacen || 0);
+        if (offlineContextChanged) {
+            enteredPin = '';
+            updatePinDisplay();
+            showToast('Conéctate a internet para cambiar de sucursal o almacén.', 'error');
+            return;
+        }
+    }
+
     if (loginSuccess) {
+        updateAuthModeBadge(loginMode);
         const isSessionReauth = pinEntryMode === 'modal';
         currentRole = cajeroRol;
         pinAttempts = 0;
@@ -1118,6 +1291,18 @@ async function verifyPin() {
                     || previousSucursal !== Number(window.POS_ACTIVE_CONTEXT.id_sucursal)
                     || previousAlmacen !== Number(window.POS_ACTIVE_CONTEXT.id_almacen);
                 if (contextChanged && navigator.onLine) {
+                    // Mantener abierta la sesión del cajero durante la recarga que
+                    // aplica el nuevo catálogo y no restaurar un carrito de otra sucursal.
+                    try {
+                        sessionStorage.removeItem('pos_cart_locked');
+                        sessionStorage.setItem('pos_session_reload', JSON.stringify({
+                            cajero: currentCashier,
+                            rol: cajeroRol,
+                            cashOpen: false,
+                            cashId: null,
+                            timestamp: Date.now()
+                        }));
+                    } catch (e) {}
                     showToast('Cambiando al catálogo del nuevo almacén...', 'info');
                     window.location.reload();
                     return;
@@ -1181,6 +1366,16 @@ async function verifyPin() {
             await finalizarLogin(loginContext?.id_almacen || null);
         }
     } else {
+        if (loginFailureKind === 'network' || loginFailureKind === 'server') {
+            const message = loginFailureKind === 'server'
+                ? 'La conexión está disponible, pero el servidor de login no respondió. Inténtalo de nuevo.'
+                : 'No se pudo contactar al servidor. Verifica la conexión e inténtalo de nuevo.';
+            showToast(message, 'warning');
+            logAuthEvent('login_failed', { kind: loginFailureKind, durationMs: Math.round(performance.now() - loginStartedAt) });
+            enteredPin = '';
+            updatePinDisplay();
+            return;
+        }
         pinAttempts++;
         if (pinAttempts >= PIN_MAX_ATTEMPTS) {
             activatePinLockout();
@@ -2570,12 +2765,16 @@ async function confirmPayment() {
             const res = await r.json();
             
             if (res.status === 'success') {
+                notifyOvernightCashSession(res);
                 if(tot < 0) Synth.refund(); else Synth.cash();
                 if(pr) window.open('/ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
                 else showToast('Venta #' + res.id + ' registrada');
                 paymentProcessing = false;
                 finishSale();
-                await refreshProductStock(itms.map(item => item.id));
+                await refreshProductStock([
+                    ...itms.map(item => item.id),
+                    ...(Array.isArray(res.affected_codes) ? res.affected_codes : [])
+                ], { allowFullRefresh: true });
                 return;
             } else {
                 const errMsg = String(res.msg || '');
@@ -3821,56 +4020,91 @@ window.toggleDetail = function(id) {
     }
 };
 
-function askSystemAuth(actionLabel) {
-    const user = prompt(`Usuario del sistema para ${actionLabel}:`, '');
-    if (!user) return null;
-    const pass = prompt(`Contraseña del sistema para ${actionLabel}:`, '');
-    if (!pass) return null;
-    return { auth_user: user.trim(), auth_pass: pass };
+async function getRefundAuthorization(actionLabel) {
+    if (typeof window.requestPosRefundPin !== 'function') {
+        showToast('No se pudo abrir la autorización de devoluciones.', 'error');
+        return null;
+    }
+    const pin = await window.requestPosRefundPin(actionLabel);
+    return pin ? { pin_maestro_devolucion: pin } : null;
+}
+
+async function submitRefundRequest(payload) {
+    const send = async () => {
+        const response = await fetch('pos_refund.php', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: getPosJsonHeaders(),
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        return response.json();
+    };
+
+    try {
+        return { data: await send(), retried: false };
+    } catch (firstError) {
+        // Si el servidor terminó pero se perdió la respuesta, el segundo
+        // intento recibe la respuesta idempotente y no duplica la devolución.
+        await new Promise(resolve => setTimeout(resolve, 500));
+        return { data: await send(), retried: true };
+    }
 }
 
 window.refundTicketComplete = async function(ticketId) {
     if(!confirm(`¿DEVOLVER TICKET #${ticketId} COMPLETO?`)) return;
-    const auth = askSystemAuth(`devolver ticket #${ticketId}`);
+    const auth = await getRefundAuthorization(`devolver ticket #${ticketId}`);
     if (!auth) return;
     try {
-        const r = await fetch('pos_refund.php', { 
-            method: 'POST', 
-            headers: getPosJsonHeaders(), 
-            body: JSON.stringify({ ticket_id: ticketId, ...auth }) 
-        });
-        const d = await r.json();
+        const refundResult = await submitRefundRequest({ ticket_id: ticketId, ...auth });
+        const d = refundResult.data;
         if(d.status === 'success') { 
-            alert('Éxito: Ticket devuelto.'); 
+            alert(d.already_processed && !refundResult.retried
+                ? 'La devolución ya estaba registrada.'
+                : 'Éxito: Ticket devuelto.');
             if(typeof Synth !== 'undefined') Synth.refund();
-            showHistorialModal(); // Recargar
+            // La devolución ya fue confirmada. Si falla la actualización visual,
+            // no se debe convertir una operación exitosa en “error de red”.
+            try {
+                if (typeof refreshProductStock === 'function' && Array.isArray(d.affected_codes)) {
+                    await refreshProductStock(d.affected_codes, { allowFullRefresh: true });
+                }
+                await showHistorialModal(); // Recargar
+            } catch (refreshError) {
+                console.warn('Devolución confirmada; no se pudo refrescar la vista:', refreshError);
+            }
         } else { 
             alert('Error: ' + d.msg); 
         }
     } catch(e) { 
-        alert('Error de red al intentar devolver'); 
+        alert('No se pudo confirmar la respuesta de la devolución. Actualice el historial para verificar si fue registrada.');
     }
 };
 
 window.refundItemFromHistorial = async function(detailId, prodName) {
     if(!confirm(`¿Devolver lote de: ${prodName}?`)) return;
-    const auth = askSystemAuth(`devolver producto ${prodName}`);
+    const auth = await getRefundAuthorization(`devolver el producto ${prodName}`);
     if (!auth) return;
     try {
-        const r = await fetch('pos_refund.php', { 
-            method: 'POST', 
-            headers: getPosJsonHeaders(), 
-            body: JSON.stringify({ id: detailId, ...auth }) 
-        });
-        const d = await r.json();
+        const refundResult = await submitRefundRequest({ id: detailId, ...auth });
+        const d = refundResult.data;
         if(d.status === 'success') { 
-            alert('Producto devuelto'); 
-            showHistorialModal(); 
+            alert(d.already_processed && !refundResult.retried
+                ? 'La devolución ya estaba registrada.'
+                : 'Producto devuelto');
+            try {
+                if (typeof refreshProductStock === 'function' && Array.isArray(d.affected_codes)) {
+                    await refreshProductStock(d.affected_codes, { allowFullRefresh: true });
+                }
+                await showHistorialModal();
+            } catch (refreshError) {
+                console.warn('Devolución confirmada; no se pudo refrescar la vista:', refreshError);
+            }
         } else { 
             alert(d.msg); 
         }
     } catch(e) { 
-        alert('Error red'); 
+        alert('No se pudo confirmar la respuesta de la devolución. Actualice el historial para verificar si fue registrada.');
     }
 };
 

@@ -827,30 +827,29 @@ $resumenTexto = implode("\n", $resumenTextoLineas);
             canvasClone.replaceWith(image);
         });
         clone.querySelectorAll('script,.web-pdf-exclude,.modal-backdrop').forEach(element => element.remove());
-        const form = document.createElement('form');
-        form.method = 'POST';
-        form.action = 'web_page_pdf.php';
-        form.target = '_blank';
-        const htmlInput = document.createElement('input');
-        htmlInput.type = 'hidden';
-        htmlInput.name = 'html';
-        htmlInput.value = '<!DOCTYPE html>' + clone.outerHTML;
-        const filenameInput = document.createElement('input');
-        filenameInput.type = 'hidden';
-        filenameInput.name = 'filename';
-        filenameInput.value = filename;
-        const widthInput = document.createElement('input');
-        widthInput.type = 'hidden';
-        widthInput.name = 'page_width';
-        widthInput.value = Math.max(document.documentElement.scrollWidth, window.innerWidth);
-        const heightInput = document.createElement('input');
-        heightInput.type = 'hidden';
-        heightInput.name = 'page_height';
-        heightInput.value = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
-        form.append(htmlInput, filenameInput, widthInput, heightInput);
-        document.body.appendChild(form);
-        form.submit();
-        form.remove();
+        const base = document.createElement('base');
+        base.href = new URL('.', window.location.href).href;
+        clone.querySelector('head')?.prepend(base);
+        const printStyle = document.createElement('style');
+        printStyle.textContent = '@page { margin: 10mm; } @media print { body { overflow: visible !important; } }';
+        clone.querySelector('head')?.append(printStyle);
+        const title = clone.querySelector('title');
+        if (title) title.textContent = filename;
+
+        const printWindow = window.open('', '_blank', 'width=1200,height=900,scrollbars=yes');
+        if (!printWindow) {
+            alert('Permite las ventanas emergentes para generar el PDF.');
+            return;
+        }
+        printWindow.document.open();
+        printWindow.document.write('<!DOCTYPE html>' + clone.outerHTML);
+        printWindow.document.close();
+        printWindow.addEventListener('load', () => {
+            setTimeout(() => {
+                printWindow.focus();
+                printWindow.print();
+            }, 500);
+        }, {once: true});
     }
 
     const whatsappReportModal = new bootstrap.Modal(document.getElementById('whatsappReportModal'));

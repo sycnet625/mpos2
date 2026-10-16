@@ -540,13 +540,19 @@ window.confirmPayment = async function() {
             Synth.cash();
             if (document.getElementById('printTicket').checked) window.open('ticket_view.php?id=' + res.id, 'Ticket', 'width=380,height=600');
             else showToast('Venta #' + res.id + ' Registrada');
-            const soldCodes = payload.items.map(item => item.id);
+            // El servidor devuelve también los componentes reales descontados
+            // (por ejemplo, los productos que forman un combo). Así todas las
+            // tarjetas afectadas quedan reconciliadas después de cada cobro.
+            const soldCodes = [
+                ...payload.items.map(item => item.id),
+                ...(Array.isArray(res.affected_codes) ? res.affected_codes : [])
+            ];
             finishSale();
             // pos_save.php ya descontó el inventario. Reconciliar las tarjetas
             // con la existencia real evita dejar visible el stock del catálogo
             // cacheado hasta que el usuario haga un hard reload.
             if (typeof refreshProductStock === 'function') {
-                await refreshProductStock(soldCodes);
+                await refreshProductStock(soldCodes, { allowFullRefresh: true });
             }
         } else {
             alert('Error: ' + res.msg);

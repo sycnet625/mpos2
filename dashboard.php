@@ -1995,7 +1995,7 @@ HTML;
             const resp = await fetch('update_order.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, estado, nota, origen })
+                body: JSON.stringify({ id, estado, nota, origen, csrf_token: window.PW_CSRF_TOKEN || '' })
             });
             const result = await resp.json();
             

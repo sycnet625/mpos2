@@ -231,7 +231,7 @@ if (!isset($config)) {
     // 2) Contexto dinámico por usuario ERP logueado
     $currentScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
     $isShop = in_array($currentScript, [
-        'shop.php', 'shop2.php', 'shop_premium.php', 
+        'shop.php', 'shop2.php', 'shop_premium.php', 'ventas_api.php',
         'pos_config_premium.php',
         'manifest-shop.php', 'manifest-pos.php'
     ], true);

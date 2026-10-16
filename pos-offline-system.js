@@ -8,7 +8,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
     class POSCache {
         constructor() {
             this.dbName = 'POS_Offline_DB_' + (window.POS_STORAGE_SCOPE || 'e1_s1_a1_c0');
-            this.dbVersion = 14;
+            this.dbVersion = 15;
             this.db = null;
         }
         
@@ -16,8 +16,11 @@ if (typeof window.posOfflineLoaded === 'undefined') {
             return new Promise((resolve, reject) => {
                 const request = indexedDB.open(this.dbName, this.dbVersion);
                 request.onerror = () => reject(request.error);
-                request.onsuccess = () => {
+                request.onsuccess = async () => {
                     this.db = request.result;
+                    this.db.onversionchange = () => this.db.close();
+                    await this.purgeLegacyPins();
+                    await this.restoreOfflineVerifier();
                     console.log('IndexedDB Listo v' + this.dbVersion);
                     resolve();
                 };
@@ -31,9 +34,9 @@ if (typeof window.posOfflineLoaded === 'undefined') {
                     if (!db.objectStoreNames.contains('cart_state')) {
                         db.createObjectStore('cart_state', { keyPath: 'id' });
                     }
-                    if (!db.objectStoreNames.contains('cajeros')) {
-                        db.createObjectStore('cajeros', { keyPath: 'pin' });
-                    }
+                    // Eliminar PIN antiguos al migrar, conservando ventas pendientes.
+                    if (db.objectStoreNames.contains('cajeros')) db.deleteObjectStore('cajeros');
+                    db.createObjectStore('cajeros', { keyPath: 'nombre' });
                     if (!db.objectStoreNames.contains('caja_session')) {
                         db.createObjectStore('caja_session', { keyPath: 'id' });
                     }
@@ -41,13 +44,48 @@ if (typeof window.posOfflineLoaded === 'undefined') {
                         db.createObjectStore('metadata', { keyPath: 'key' });
                     }
 
-                    if (db.objectStoreNames.contains('offline_sales')) {
-                        db.deleteObjectStore('offline_sales');
+                    if (!db.objectStoreNames.contains('offline_sales')) {
+                        const salesStore = db.createObjectStore('offline_sales', { keyPath: 'id', autoIncrement: true });
+                        salesStore.createIndex('synced', 'synced', { unique: false });
                     }
-                    const salesStore = db.createObjectStore('offline_sales', { keyPath: 'id', autoIncrement: true });
-                    salesStore.createIndex('synced', 'synced', { unique: false });
                 };
             });
+        }
+
+        async purgeLegacyPins() {
+            // Borrar solo credenciales legacy; nunca tocar ventas de otras cajas.
+            if (!indexedDB.databases) return;
+            try {
+                for (const info of await indexedDB.databases()) {
+                    if (!info.name?.startsWith('POS_Offline_DB') || info.name === this.dbName) continue;
+                    await new Promise(resolve => {
+                        const req = indexedDB.open(info.name);
+                        req.onerror = resolve;
+                        req.onblocked = resolve;
+                        req.onsuccess = () => {
+                            const db = req.result;
+                            if (!db.objectStoreNames.contains('cajeros')) { db.close(); resolve(); return; }
+                            const tx = db.transaction('cajeros', 'readwrite');
+                            const store = tx.objectStore('cajeros');
+                            if (store.keyPath === 'pin') store.clear();
+                            tx.oncomplete = tx.onerror = () => { db.close(); resolve(); };
+                        };
+                    });
+                }
+            } catch (e) { console.warn('No se pudieron limpiar credenciales antiguas.', e); }
+        }
+
+        async restoreOfflineVerifier() {
+            try {
+                const record = JSON.parse(localStorage.getItem('palweb_offline_operator_v1') || 'null');
+                const context = window.POS_ACTIVE_CONTEXT || {};
+                if (!record?.verifier || record.expiresAt < Date.now()
+                    || Number(record.id_empresa) !== Number(context.id_empresa)
+                    || Number(record.id_sucursal) !== Number(context.id_sucursal)) return;
+                const tx = this.db.transaction('cajeros', 'readwrite');
+                tx.objectStore('cajeros').put(record);
+                await new Promise(resolve => { tx.oncomplete = tx.onerror = resolve; });
+            } catch (e) { /* El almacenamiento privado puede estar deshabilitado. */ }
         }
 
         async hydrateProductsFromLocalStorage() {
@@ -86,19 +124,29 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         }
 
         // CAJEROS
-        async saveCajeros(cajeros) {
-            if (!this.db || !cajeros || !Array.isArray(cajeros)) return;
-            try {
-                const tx = this.db.transaction(['cajeros'], 'readwrite');
-                const store = tx.objectStore('cajeros');
-                store.clear();
-                cajeros.forEach(c => {
-                    if (c.pin) store.put(c);
-                });
-                return new Promise(resolve => tx.oncomplete = () => resolve());
-            } catch(e) {
-                console.error('Error guardando cajeros:', e);
-            }
+        async pinVerifier(pin, salt) {
+            const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
+            const bits = await crypto.subtle.deriveBits({name: 'PBKDF2', salt: new Uint8Array(salt), iterations: 310000, hash: 'SHA-256'}, key, 256);
+            return Array.from(new Uint8Array(bits), b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        async rememberAuthenticatedCashier(data, pin) {
+            if (!this.db || !crypto.subtle) return;
+            const salt = Array.from(crypto.getRandomValues(new Uint8Array(16)));
+            const verifier = await this.pinVerifier(pin, salt);
+            const tx = this.db.transaction(['cajeros'], 'readwrite');
+            // Solo recordar al operador que autenticó este terminal.
+            const store = tx.objectStore('cajeros');
+            store.clear();
+            const record = {nombre: data.cajero, rol: data.rol, id_empresa: data.id_empresa,
+                id_sucursal: data.id_sucursal, id_almacen: data.id_almacen,
+                salt, verifier, expiresAt: Date.now() + 24 * 60 * 60 * 1000};
+            store.put(record);
+            try { localStorage.setItem('palweb_offline_operator_v1', JSON.stringify(record)); } catch (e) {}
+            return new Promise((resolve, reject) => {
+                tx.oncomplete = resolve;
+                tx.onerror = () => reject(tx.error);
+            });
         }
         
         async getCajeros() {
@@ -118,12 +166,11 @@ if (typeof window.posOfflineLoaded === 'undefined') {
         async verifyCajeroOffline(pin) {
             if (!this.db) return null;
             try {
-                const tx = this.db.transaction(['cajeros'], 'readonly');
-                return new Promise(resolve => {
-                    const req = tx.objectStore('cajeros').get(pin);
-                    req.onsuccess = () => resolve(req.result || null);
-                    req.onerror = () => resolve(null);
-                });
+                for (const cashier of await this.getCajeros()) {
+                    if (!cashier.verifier || !cashier.salt || cashier.expiresAt < Date.now()) continue;
+                    if (await this.pinVerifier(pin, cashier.salt) === cashier.verifier) return cashier;
+                }
+                return null;
             } catch(e) {
                 return null;
             }
@@ -288,6 +335,7 @@ if (typeof window.posOfflineLoaded === 'undefined') {
                 }
             }
             this.updateUI();
+            return this.isOnline;
         }
         
         updateUI() {

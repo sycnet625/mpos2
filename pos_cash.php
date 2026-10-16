@@ -20,6 +20,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 header('Content-Type: application/json');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 ini_set('display_errors', 0);
 require_once 'db.php';
 require_once 'push_notify.php';
@@ -161,7 +164,10 @@ try {
     }
 
     if ($action === 'login') {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') poscash_error('Se requiere POST.', 405);
         poscash_require_csrf($input);
+        require_once __DIR__ . '/auth_rate_limit.php';
+        auth_rate_limit('cashier_login');
 
         $pin = preg_replace('/\D+/', '', (string)($input['pin'] ?? ''));
         if ($pin === null || $pin === '' || strlen($pin) < 4 || strlen($pin) > 10) {
@@ -169,39 +175,70 @@ try {
         }
 
         $foundCajero = null;
+        $pinAmbiguous = false;
+        $legacyCashiers = false;
+        $cashContext = poscash_context($config);
 
         try {
+            // El PIN identifica al cajero y su contexto. Buscar dentro de la empresa
+            // permite cambiar de sucursal en la misma terminal sin relajar el límite
+            // multiempresa; al autenticar, la sesión adopta sucursal/almacén del cajero.
             $stmtCashier = $pdo->prepare("
                 SELECT id, nombre, pin, rol, id_empresa, id_sucursal, id_almacen
                 FROM pos_cashiers
-                WHERE pin = ? AND COALESCE(activo, 1) = 1
-                LIMIT 1
+                WHERE id_empresa = ? AND COALESCE(activo, 1) = 1
+                ORDER BY id ASC
             ");
-            $stmtCashier->execute([(string)$pin]);
-            $row = $stmtCashier->fetch(PDO::FETCH_ASSOC);
-            if ($row) {
+            $stmtCashier->execute([$cashContext['id_empresa']]);
+            foreach ($stmtCashier->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $storedPin = (string)($row['pin'] ?? '');
+                $isHash = password_get_info($storedPin)['algo'] !== null;
+                $pinMatches = $isHash ? password_verify((string)$pin, $storedPin) : hash_equals($storedPin, (string)$pin);
+                if (!$pinMatches) continue;
+
+                // PINes duplicados en distintas sucursales no deben elegir un contexto arbitrario.
+                if ($foundCajero !== null) {
+                    $pinAmbiguous = true;
+                    $foundCajero = null;
+                    break;
+                }
                 $foundCajero = [
                     'id' => (int)$row['id'],
                     'nombre' => (string)$row['nombre'],
-                    'pin' => (string)$row['pin'],
                     'rol' => (string)($row['rol'] ?? 'cajero'),
                     'id_empresa' => (int)($row['id_empresa'] ?? 1),
                     'id_sucursal' => (int)($row['id_sucursal'] ?? 1),
                     'id_almacen' => (int)($row['id_almacen'] ?? 1),
                 ];
+                $foundPinRow = $row;
+                $foundPinIsHash = $isHash;
+            }
+
+            // Migrar PIN legacy solo después de confirmar que es único en la empresa.
+            if ($foundCajero !== null && !$pinAmbiguous && !$foundPinIsHash) {
+                $newPinHash = password_hash((string)$pin, PASSWORD_DEFAULT);
+                $pdo->prepare('UPDATE pos_cashiers SET pin = ? WHERE id = ? AND pin = ?')->execute([
+                    $newPinHash,
+                    (int)$foundPinRow['id'],
+                    (string)$foundPinRow['pin'],
+                ]);
             }
         } catch (Throwable $e) {
-            // Fallback a configuración legacy en pos.cfg.
+            // Solo instalaciones sin tabla usan PIN legacy; un usuario desactivado no recae en pos.cfg.
+            if ($e instanceof PDOException && ($e->errorInfo[0] ?? '') === '42S02') {
+                $legacyCashiers = true;
+            } else {
+                throw $e;
+            }
         }
 
-        if (!$foundCajero) {
+        if (!$foundCajero && $legacyCashiers) {
             $cajeros = $config['cajeros'] ?? [];
             foreach ($cajeros as $c) {
                 if ((string)($c['pin'] ?? '') === (string)$pin) {
                     $foundCajero = [
                         'id' => 0,
                         'nombre' => (string)($c['nombre'] ?? 'Cajero'),
-                        'pin' => (string)$pin,
                         'rol' => (string)($c['rol'] ?? 'cajero'),
                         'id_empresa' => (int)($config['id_empresa'] ?? 1),
                         'id_sucursal' => (int)($config['id_sucursal'] ?? 1),
@@ -213,8 +250,9 @@ try {
         }
 
         if ($foundCajero) {
-            // NO regenerar ID aquí para evitar race condition:
-            // requests paralelos (set_almacen, doOpen) llegarían con el SID antiguo destruido
+            // El cliente espera esta respuesta antes de enviar peticiones autenticadas.
+            session_regenerate_id(true);
+            unset($_SESSION['admin_logged_in'], $_SESSION['admin_user'], $_SESSION['user_id']);
             $_SESSION['cajero'] = $foundCajero['nombre'];
             $_SESSION['cajero_id'] = (int)$foundCajero['id'];
             $_SESSION['id_empresa'] = (int)$foundCajero['id_empresa'];
@@ -223,6 +261,7 @@ try {
             $_SESSION['pos_rol'] = (string)$foundCajero['rol'];
             $_SESSION['pos_session_fingerprint'] = poscash_session_fingerprint();
             $_SESSION['pos_session_regenerated_at'] = time();
+            $_SESSION['pos_csrf_token'] = bin2hex(random_bytes(32));
             $csrfToken = poscash_ensure_csrf_token();
             session_write_close();
 

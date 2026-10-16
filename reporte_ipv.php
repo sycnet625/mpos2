@@ -87,11 +87,27 @@ try {
                   AND v.id_almacen = ?
                   AND v.id_sucursal = ?
                   AND v.tipo_servicio != 'devolucion'
-                  AND " . ventas_reales_where_clause('v') . "
+                  AND " . ventas_ingresos_where_clause('v') . "
                   GROUP BY d.id_producto";
     $stmtV = $pdo->prepare($sqlVentas);
     $stmtV->execute([$id_empresa, $startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
     $ventasDineroMap = $stmtV->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    // Cantidad vendida para la ganancia: solo tickets positivos de venta.
+    // El kardex conserva todos los movimientos VENTA, incluidos consumos de
+    // casa, para que el stock final siga cuadrando correctamente.
+    $sqlVentasQty = "SELECT d.id_producto, SUM(d.cantidad) AS cantidad_venta
+                     FROM ventas_detalle d
+                     JOIN ventas_cabecera v ON d.id_venta_cabecera = v.id
+                     LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
+                     WHERE v.id_empresa = ? AND IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
+                       AND v.id_almacen = ? AND v.id_sucursal = ? AND v.total > 0
+                       AND v.tipo_servicio != 'devolucion'
+                       AND " . ventas_ingresos_where_clause('v') . "
+                     GROUP BY d.id_producto";
+    $stmtVQty = $pdo->prepare($sqlVentasQty);
+    $stmtVQty->execute([$id_empresa, $startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
+    $ventasQtyIngresoMap = $stmtVQty->fetchAll(PDO::FETCH_KEY_PAIR);
 
     // 6b. TOTAL GLOBAL DESDE CABECERA (venta neta: incluye devoluciones negativas)
     // Las devoluciones restan automáticamente porque su total es negativo.
@@ -100,7 +116,7 @@ try {
                        LEFT JOIN caja_sesiones sc ON (v.id_caja = sc.id OR v.id_sesion_caja = sc.id)
                        WHERE v.id_empresa = ? AND IFNULL(sc.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
                        AND v.id_almacen = ? AND v.id_sucursal = ?
-                       AND " . ventas_reales_where_clause('v');
+                       AND " . ventas_ingresos_where_clause('v');
     $stmtTg = $pdo->prepare($sqlTotalGlobal);
     $stmtTg->execute([$id_empresa, $startDateTime, $endDateTime, $id_almacen, $id_sucursal]);
     $totalGlobalRow = $stmtTg->fetch(PDO::FETCH_ASSOC);
@@ -124,7 +140,7 @@ try {
         // Procesar Movimientos del Kardex
         $entras = 0;
         $salidas = 0;
-        $ventas_qty = 0;
+        $ventas_qty_kardex = 0;
         
         if (isset($movs[$sku])) {
             foreach ($movs[$sku] as $m) {
@@ -132,7 +148,7 @@ try {
                 $tipo = $m['tipo_movimiento'];
 
                 if ($tipo === 'VENTA') {
-                    $ventas_qty += abs($qty);
+                    $ventas_qty_kardex += abs($qty);
                 } elseif ($qty > 0) {
                     $entras += $qty;
                 } else {
@@ -142,10 +158,11 @@ try {
         }
 
         // Stock Final Calculado
-        $stk_final = $stk_inic + $entras - $salidas - $ventas_qty;
+        $stk_final = $stk_inic + $entras - $salidas - $ventas_qty_kardex;
+        $ventas_qty = floatval($ventasQtyIngresoMap[$sku] ?? 0);
 
         // --- LÓGICA DE FILTRADO ---
-        $tiene_movimiento = ($entras > 0 || $salidas > 0 || $ventas_qty > 0);
+        $tiene_movimiento = ($entras > 0 || $salidas > 0 || $ventas_qty_kardex > 0);
 
         // Modo 1: Solo con Ventas
         if ($filter_mode == '1' && $ventas_qty <= 0) continue;

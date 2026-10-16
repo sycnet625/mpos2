@@ -27,35 +27,36 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 try {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        throw new InvalidArgumentException('Se requiere POST.');
+    }
     $input = json_decode(file_get_contents('php://input'), true);
     if (!$input) throw new Exception("JSON inválido o vacío.");
     if (empty($input['items'])) throw new Exception("Se requiere al menos un item.");
 
     // Validar CSRF
     $sentCsrf = $input['csrf_token'] ?? '';
-    if (empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $sentCsrf)) {
+    if (!is_string($sentCsrf) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $sentCsrf)) {
         http_response_code(403);
         echo json_encode(['status' => 'error', 'msg' => 'Token de seguridad inválido. Recarga la tienda.']);
         exit;
     }
 
-    // Configuración desde pos.cfg
-    $config = ['id_almacen' => 1, 'id_sucursal' => 1, 'id_empresa' => 1];
-    $cfgFile = __DIR__ . '/pos.cfg';
-    if (file_exists($cfgFile)) {
-        $loaded = json_decode(file_get_contents($cfgFile), true);
-        if ($loaded) $config = array_merge($config, $loaded);
-    }
+    require_once __DIR__ . '/config_loader.php';
+    require_once __DIR__ . '/shop_checkout.php';
+    $checkout = shop_validate_checkout($pdo, $config, $input);
+    $input = array_merge($input, $checkout);
 
-    $idAlmacen  = intval($input['id_almacen']  ?? $config['id_almacen']);
-    $idSucursal = intval($input['id_sucursal']  ?? $config['id_sucursal']);
+    $idAlmacen  = intval($config['id_almacen']);
+    $idSucursal = intval($config['id_sucursal']);
     $idEmpresa  = intval($config['id_empresa']);
 
     // Campos de la venta
     $uuid          = vapi_str($input['uuid'] ?? uniqid('WEB-', true), 100);
     $total         = floatval($input['total'] ?? 0);
     $tipoServicio  = vapi_str($input['tipo_servicio'] ?? 'mostrador', 50);
-    $canalOrigen   = vapi_str($input['canal_origen']  ?? 'Web', 30);
+    $canalOrigen   = 'Web';
     $metodoPago    = vapi_str($input['metodo_pago']   ?? 'Efectivo', 50);
     $clienteNombre = vapi_str($input['cliente_nombre']    ?? 'Mostrador', 100);
     $clienteTel    = vapi_str($input['cliente_telefono']  ?? '', 50);
@@ -64,7 +65,7 @@ try {
     $mensajero     = vapi_str($input['mensajero_nombre'] ?? '', 100);
     $codigoPago    = vapi_str($input['codigo_pago']   ?? '', 100);
     $estadoPago    = vapi_str($input['estado_pago']   ?? 'confirmado', 20);
-    $abono         = floatval($input['abono'] ?? 0);
+    $abono         = 0.0; // Los cobros requieren confirmación del operador.
     $esReserva     = ($tipoServicio === 'reserva');
     $fechaVenta    = date('Y-m-d H:i:s');
 
@@ -82,14 +83,7 @@ try {
     } catch (Throwable $_e) {}
 
     // Pagos desglosados
-    $payments = $input['payments'] ?? [];
-    if (empty($payments) && !empty($input['metodo_pago'])) {
-        $payments[] = ['method' => $metodoPago, 'amount' => $total];
-    } elseif (count($payments) > 1) {
-        $metodoPago = 'Mixto';
-    } elseif (count($payments) === 1) {
-        $metodoPago = vapi_str($payments[0]['method'], 50);
-    }
+    $payments = []; // Un pedido público no acredita ingresos por sí mismo.
 
     $kardex = (class_exists('KardexEngine')) ? new KardexEngine($pdo) : null;
 
@@ -248,5 +242,6 @@ try {
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     error_log("ventas_api error: " . $e->getMessage());
-    echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+    if (http_response_code() < 400) http_response_code($e instanceof InvalidArgumentException ? 422 : 500);
+    echo json_encode(['status' => 'error', 'msg' => $e instanceof PDOException ? 'No se pudo registrar el pedido.' : $e->getMessage()]);
 }

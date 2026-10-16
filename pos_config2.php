@@ -178,6 +178,35 @@ function poscfg_validate_location(PDO $pdo, int $empresaId, int $sucursalId, int
     }
 }
 
+function poscfg_hash_user_refund_pin(PDO $pdo, string $pin, int $empresaId, int $sucursalId, int $excludeUserId = 0): string
+{
+    if (!preg_match('/^\d{4,10}$/', $pin)) {
+        throw new RuntimeException('El PIN maestro de devoluciones debe tener entre 4 y 10 dígitos.');
+    }
+
+    $sql = "SELECT u.id, u.pin_devolucion_hash
+            FROM users u
+            JOIN pos_user_contexts puc ON puc.user_id = u.id
+            WHERE puc.id_empresa = ? AND puc.id_sucursal = ?
+              AND LOWER(u.rol) IN ('admin', 'administrador', 'administrator')
+              AND u.pin_devolucion_hash IS NOT NULL AND u.pin_devolucion_hash <> ''";
+    $params = [$empresaId, $sucursalId];
+    if ($excludeUserId > 0) {
+        $sql .= ' AND u.id <> ?';
+        $params[] = $excludeUserId;
+    }
+
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if (password_verify($pin, (string)$row['pin_devolucion_hash'])) {
+            throw new RuntimeException('Ese PIN ya está asignado a otro administrador de la sucursal.');
+        }
+    }
+
+    return password_hash($pin, PASSWORD_DEFAULT);
+}
+
 function poscfg_rebuild_shop_product_images(PDO $pdo, int $empresaId): array
 {
     $stmt = $pdo->prepare("SELECT codigo, nombre FROM productos WHERE id_empresa = ? AND es_web = 1 ORDER BY codigo ASC");
@@ -761,6 +790,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pin = trim((string)($_POST['user_pin'] ?? ''));
             $rol = trim((string)($_POST['user_rol'] ?? 'cajero')) ?: 'cajero';
             $password = (string)($_POST['user_password'] ?? '');
+            $refundPin = trim((string)($_POST['user_refund_pin'] ?? ''));
             $empresaId = (int)($_POST['user_id_empresa'] ?? 0);
             $sucursalId = (int)($_POST['user_id_sucursal'] ?? 0);
             $almacenId = (int)($_POST['user_id_almacen'] ?? 0);
@@ -777,28 +807,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             poscfg_validate_location($pdo, $empresaId, $sucursalId, $almacenId);
 
+            $refundPinHash = null;
+            if (in_array(strtolower($rol), ['admin', 'administrador', 'administrator'], true)) {
+                if ($refundPin === '' && $userId > 0) {
+                    $stmtCurrentRefundPin = $pdo->prepare("
+                        SELECT u.pin_devolucion_hash, puc.id_empresa, puc.id_sucursal
+                        FROM users u
+                        LEFT JOIN pos_user_contexts puc ON puc.user_id = u.id
+                        WHERE u.id = ? LIMIT 1
+                    ");
+                    $stmtCurrentRefundPin->execute([$userId]);
+                    $currentRefundPin = $stmtCurrentRefundPin->fetch(PDO::FETCH_ASSOC) ?: [];
+                    $refundPinHash = $currentRefundPin['pin_devolucion_hash'] ?? null;
+                    if (!$refundPinHash) {
+                        throw new RuntimeException('Configure un PIN maestro de devoluciones para este administrador.');
+                    }
+                    if ((int)($currentRefundPin['id_empresa'] ?? 0) !== $empresaId
+                        || (int)($currentRefundPin['id_sucursal'] ?? 0) !== $sucursalId) {
+                        throw new RuntimeException('Ingrese un nuevo PIN maestro al cambiar el administrador de sucursal.');
+                    }
+                } else {
+                    $refundPinHash = poscfg_hash_user_refund_pin($pdo, $refundPin, $empresaId, $sucursalId, $userId);
+                }
+            } elseif ($refundPin !== '') {
+                throw new RuntimeException('El PIN maestro de devoluciones solo se puede configurar para usuarios administradores.');
+            }
+
             if ($userId > 0) {
                 if (trim($password) !== '') {
                     $stmt = $pdo->prepare("
                         UPDATE users
-                        SET nombre = ?, email = ?, pin = ?, rol = ?, password = ?, id_sucursal = ?, activo = ?, updated_at = NOW()
+                        SET nombre = ?, email = ?, pin = ?, pin_devolucion_hash = ?, rol = ?, password = ?, id_sucursal = ?, activo = ?, updated_at = NOW()
                         WHERE id = ?
                     ");
-                    $stmt->execute([$nombre, $email !== '' ? $email : null, $pin, $rol, password_hash($password, PASSWORD_DEFAULT), $sucursalId, $activo, $userId]);
+                    $stmt->execute([$nombre, $email !== '' ? $email : null, $pin, $refundPinHash, $rol, password_hash($password, PASSWORD_DEFAULT), $sucursalId, $activo, $userId]);
                 } else {
                     $stmt = $pdo->prepare("
                         UPDATE users
-                        SET nombre = ?, email = ?, pin = ?, rol = ?, id_sucursal = ?, activo = ?, updated_at = NOW()
+                        SET nombre = ?, email = ?, pin = ?, pin_devolucion_hash = ?, rol = ?, id_sucursal = ?, activo = ?, updated_at = NOW()
                         WHERE id = ?
                     ");
-                    $stmt->execute([$nombre, $email !== '' ? $email : null, $pin, $rol, $sucursalId, $activo, $userId]);
+                    $stmt->execute([$nombre, $email !== '' ? $email : null, $pin, $refundPinHash, $rol, $sucursalId, $activo, $userId]);
                 }
             } else {
                 $stmt = $pdo->prepare("
-                    INSERT INTO users (nombre, email, password, pin, rol, id_sucursal, activo, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                    INSERT INTO users (nombre, email, password, pin, pin_devolucion_hash, rol, id_sucursal, activo, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
                 ");
-                $stmt->execute([$nombre, $email !== '' ? $email : null, password_hash($password, PASSWORD_DEFAULT), $pin, $rol, $sucursalId, $activo]);
+                $stmt->execute([$nombre, $email !== '' ? $email : null, password_hash($password, PASSWORD_DEFAULT), $pin, $refundPinHash, $rol, $sucursalId, $activo]);
                 $userId = (int)$pdo->lastInsertId();
                 $editUserId = $userId;
             }
@@ -1006,6 +1062,7 @@ $userContexts = $pdo->query("
         u.nombre AS user_nombre,
         u.email AS user_email,
         u.pin AS user_pin,
+        u.pin_devolucion_hash AS user_pin_devolucion_hash,
         u.rol AS user_rol,
         u.id_sucursal AS user_sucursal_login,
         u.activo AS user_login_activo,
@@ -1050,6 +1107,7 @@ $editUserData = [
     'nombre' => '',
     'email' => '',
     'pin' => '',
+    'pin_devolucion_configurado' => false,
     'rol' => 'cajero',
     'activo' => 1,
     'id_empresa' => '',
@@ -1064,6 +1122,7 @@ if ($editUserId > 0) {
                 'nombre' => (string)$row['user_nombre'],
                 'email' => (string)($row['user_email'] ?? ''),
                 'pin' => (string)($row['user_pin'] ?? ''),
+                'pin_devolucion_configurado' => !empty($row['user_pin_devolucion_hash']),
                 'rol' => (string)$row['user_rol'],
                 'activo' => (int)$row['user_login_activo'],
                 'id_empresa' => (string)($row['id_empresa'] ?? ''),
@@ -2297,7 +2356,7 @@ unset($treeCompany);
                 <div class="card">
                     <div class="card-header fw-bold text-success">👤 Usuario ERP y contexto operativo</div>
                     <div class="card-body">
-                        <p class="small text-muted mb-3">Cada usuario del sistema puede quedar ligado a una empresa, sucursal y almacén. Ese contexto se aplica por login en los módulos dinámicos.</p>
+                        <p class="small text-muted mb-3">Cada usuario del sistema puede quedar ligado a una empresa, sucursal y almacén. Configure además un PIN maestro por administrador para autorizar devoluciones en su sucursal; el PIN se guarda como hash.</p>
                         <form method="post" class="row g-3">
                     <input type="hidden" name="form_action" value="save_user">
                     <input type="hidden" name="user_id" value="<?php echo (int)$editUserData['id']; ?>">
@@ -2318,9 +2377,24 @@ unset($treeCompany);
                         <input type="password" class="form-control" name="user_password" minlength="8" autocomplete="<?php echo $editUserData['id'] > 0 ? 'new-password' : 'current-password'; ?>" <?php echo $editUserData['id'] > 0 ? '' : 'required'; ?> placeholder="<?php echo $editUserData['id'] > 0 ? 'Dejar vacía para mantener o usar 8+, 1 mayúscula y 1 número' : 'Mín. 8, 1 mayúscula y 1 número'; ?>">
                         <div class="form-text">Mínimo 8 caracteres, una mayúscula y un número.</div>
                     </div>
+                    <div class="col-md-3 d-none" id="userRefundPinField">
+                        <label class="form-label">PIN maestro de devoluciones</label>
+                        <input type="password" class="form-control mono" name="user_refund_pin" inputmode="numeric" pattern="[0-9]{4,10}" minlength="4" maxlength="10" autocomplete="new-password">
+                        <div class="form-text">
+                            Solo para administradores. Entre 4 y 10 dígitos.
+                            <?php if ($editUserData['id'] > 0): ?>
+                                <span class="badge <?php echo !empty($editUserData['pin_devolucion_configurado']) ? 'bg-success' : 'bg-warning text-dark'; ?>">
+                                    <?php echo !empty($editUserData['pin_devolucion_configurado']) ? 'Configurado' : 'Pendiente'; ?>
+                                </span>
+                                Vacío conserva el PIN actual.
+                            <?php else: ?>
+                                Obligatorio si el rol seleccionado es admin.
+                            <?php endif; ?>
+                        </div>
+                    </div>
                     <div class="col-md-2">
                         <label class="form-label">Rol</label>
-                        <select class="form-select" name="user_rol">
+                        <select class="form-select" name="user_rol" id="userRoleSelect">
                             <?php foreach (['admin','cajero','supervisor','operador'] as $role): ?>
                                 <option value="<?php echo $role; ?>" <?php echo $editUserData['rol'] === $role ? 'selected' : ''; ?>><?php echo $role; ?></option>
                             <?php endforeach; ?>
@@ -2435,6 +2509,7 @@ unset($treeCompany);
                                 <th>Usuario</th>
                                 <th>Contacto</th>
                                 <th>Rol</th>
+                                <th>PIN devoluciones</th>
                                 <th>Contexto</th>
                                 <th>Estado</th>
                                 <th class="text-end">Acciones</th>
@@ -2455,6 +2530,15 @@ unset($treeCompany);
                                     </td>
                                     <td><?php echo htmlspecialchars($row['user_email'] ?: '—'); ?></td>
                                     <td><span class="badge bg-secondary"><?php echo htmlspecialchars($row['user_rol']); ?></span></td>
+                                    <td>
+                                        <?php if (in_array(strtolower((string)$row['user_rol']), ['admin', 'administrador', 'administrator'], true)): ?>
+                                            <span class="badge <?php echo !empty($row['user_pin_devolucion_hash']) ? 'bg-success' : 'bg-warning text-dark'; ?>">
+                                                <?php echo !empty($row['user_pin_devolucion_hash']) ? 'Configurado' : 'Pendiente'; ?>
+                                            </span>
+                                        <?php else: ?>
+                                            <span class="text-muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td>
                                         <?php if (!empty($row['id_empresa'])): ?>
                                             <div><?php echo htmlspecialchars(($row['empresa_nombre'] ?? 'Emp ' . $row['id_empresa']) . ' / ' . ($row['sucursal_nombre'] ?? 'Suc ' . $row['id_sucursal']) . ' / ' . ($row['almacen_nombre'] ?? 'Alm ' . $row['id_almacen'])); ?></div>
@@ -3245,6 +3329,17 @@ unset($treeCompany);
 </main>
 <script>
 const POSCFG_ACTIVE_TAB = <?= json_encode($activeTab, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const userRoleSelect = document.getElementById('userRoleSelect');
+const userRefundPinField = document.getElementById('userRefundPinField');
+userRoleSelect?.addEventListener('change', () => {
+    const isAdmin = ['admin', 'administrador', 'administrator'].includes(String(userRoleSelect.value || '').toLowerCase());
+    userRefundPinField?.classList.toggle('d-none', !isAdmin);
+    if (!isAdmin) {
+        const pinInput = userRefundPinField?.querySelector('input[name="user_refund_pin"]');
+        if (pinInput) pinInput.value = '';
+    }
+});
+if (userRoleSelect) userRoleSelect.dispatchEvent(new Event('change'));
 
 function ensureActiveTabInputs(name) {
     document.querySelectorAll('form').forEach(form => {

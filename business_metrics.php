@@ -50,6 +50,28 @@ if (!function_exists('bm_calcular')) {
             [$tickets, $detalles, $detallesPorTicket] = _bm_load_tickets_detalles($pdo, $p);
         }
 
+        // Los tickets Tarjeta/Gasto se mantienen disponibles para auditoría e
+        // inventario, pero no deben contaminar ingresos, ganancia ni los
+        // desgloses de ventas.
+        $ticketsIngreso = [];
+        $idsVentasPositivas = [];
+        foreach ($tickets as $ticket) {
+            if (ticket_es_gasto_casa($ticket)) {
+                continue;
+            } else {
+                $ticketsIngreso[] = $ticket;
+                if (floatval($ticket['total'] ?? 0) > 0) {
+                    $idsVentasPositivas[(int)$ticket['id']] = true;
+                }
+            }
+        }
+        $detallesIngreso = [];
+        foreach ($detalles as $detalle) {
+            if (isset($idsVentasPositivas[(int)$detalle['id_venta_cabecera']])) {
+                $detallesIngreso[] = $detalle;
+            }
+        }
+
         $result = ['params' => $p];
 
         if ($reqAll || in_array(BM_VENTAS,     $secciones, true)) {
@@ -59,13 +81,13 @@ if (!function_exists('bm_calcular')) {
             $result[BM_GASTOS]     = _bm_calc_gastos($pdo, $p);
         }
         if ($reqAll || in_array(BM_PRODUCTOS,  $secciones, true)) {
-            $result[BM_PRODUCTOS]  = _bm_calc_productos($detalles, $p['limite_top']);
+            $result[BM_PRODUCTOS]  = _bm_calc_productos($detallesIngreso, $p['limite_top']);
         }
         if ($reqAll || in_array(BM_CLIENTES,   $secciones, true)) {
-            $result[BM_CLIENTES]   = _bm_calc_clientes($tickets, $p['limite_top']);
+            $result[BM_CLIENTES]   = _bm_calc_clientes($ticketsIngreso, $p['limite_top']);
         }
         if ($reqAll || in_array(BM_CAJERO,     $secciones, true)) {
-            $result[BM_CAJERO]     = _bm_calc_cajero($pdo, $p, $tickets);
+            $result[BM_CAJERO]     = _bm_calc_cajero($pdo, $p, $ticketsIngreso);
         }
         if ($reqAll || in_array(BM_SERIES,     $secciones, true)) {
             $result[BM_SERIES]     = _bm_calc_series($pdo, $p);
@@ -222,6 +244,8 @@ if (!function_exists('_bm_calc_ventas')) {
         $countDevol      = 0;
         $valorDevol      = 0.0;
         $costoDevol      = 0.0;
+        $gastosCasa      = 0.0;
+        $countGastosCasa = 0;
         $metodosPago     = [];
         $porCanal        = [];
         $porTipoServicio = [];
@@ -265,6 +289,15 @@ if (!function_exists('_bm_calc_ventas')) {
             }
             if ($tval == 0) continue;
 
+            // Consumo del dueño: no es ingreso ni venta y queda fuera de la
+            // ganancia limpia. Su movimiento de inventario se conserva en el
+            // kardex y se expone por separado como gasto de casa.
+            if (ticket_es_gasto_casa($t)) {
+                $gastosCasa += $tval;
+                $countGastosCasa++;
+                continue;
+            }
+
             $total += $tval;
             $countTickets++;
             if ($fecha !== '') $fechas[$fecha] = true;
@@ -295,10 +328,15 @@ if (!function_exists('_bm_calc_ventas')) {
             $porTipoServicio[$ts] = ($porTipoServicio[$ts] ?? 0.0) + $tval;
         }
 
-        // Venta neta: suma de ventas_pagos donde existan, sino = total
-        $neta = !empty($pagosMap)
-            ? array_sum(array_map(fn($mp) => array_sum($mp), $pagosMap))
-            : $total;
+        // Venta neta: solo ingresos; nunca incluir pagos de consumos de casa.
+        $neta = 0.0;
+        foreach ($tickets as $t) {
+            if (ticket_es_gasto_casa($t) || floatval($t['total'] ?? 0) <= 0) continue;
+            $tid = (int)$t['id'];
+            $neta += isset($pagosMap[$tid])
+                ? array_sum($pagosMap[$tid])
+                : floatval($t['total'] ?? 0);
+        }
 
         $diasActivos   = count($fechas);
         $gananciaBruta = $total - $costo;
@@ -315,6 +353,7 @@ if (!function_exists('_bm_calc_ventas')) {
             'dias_activos'      => $diasActivos,
             'promedio_diario'   => $diasActivos > 0 ? $total / $diasActivos : 0.0,
             'devoluciones'      => ['count' => $countDevol, 'valor' => $valorDevol, 'valor_costo' => $costoDevol],
+            'gastos_casa'       => ['count' => $countGastosCasa, 'valor' => $gastosCasa],
             'por_metodo_pago'   => $metodosPago,
             'por_canal'         => $porCanal,
             'por_tipo_servicio' => $porTipoServicio,
@@ -607,8 +646,9 @@ if (!function_exists('_bm_calc_series')) {
                               COUNT(CASE WHEN v.total > 0 THEN 1 END) AS transacciones
                        FROM ventas_cabecera v $join
                        WHERE v.id_empresa = ? AND $dia BETWEEN ? AND ?
-                         AND " . ventas_reales_where_clause('v') . $sucV . $sesV . "
-                       GROUP BY dia ORDER BY dia";
+                         AND v.total > 0
+                         AND " . ventas_ingresos_where_clause('v') . $sucV . $sesV . "
+                         GROUP BY dia ORDER BY dia";
         $st = $pdo->prepare($sqlVentas);
         $st->execute(array_merge([$p['id_empresa'], $p['fecha_inicio'], $p['fecha_fin']], $bindV, $bindSes));
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -622,7 +662,8 @@ if (!function_exists('_bm_calc_series')) {
                      JOIN ventas_cabecera v ON v.id = vd.id_venta_cabecera
                      JOIN productos p ON p.codigo = vd.id_producto $join
                      WHERE v.id_empresa = ? AND $dia BETWEEN ? AND ?
-                       AND " . ventas_reales_where_clause('v') . $sucV . $sesV . "
+                       AND v.total > 0
+                       AND " . ventas_ingresos_where_clause('v') . $sucV . $sesV . "
                      GROUP BY dia ORDER BY dia";
         $st = $pdo->prepare($sqlCosto);
         $st->execute(array_merge([$p['id_empresa'], $p['fecha_inicio'], $p['fecha_fin']], $bindV, $bindSes));
@@ -728,6 +769,7 @@ if (!function_exists('_bm_calc_pedidos')) {
             [$where, $binds] = _bm_build_where($p);
             // ventas_reales_where_clause ya incluye (tipo_servicio != 'reserva' OR estado_pago = 'confirmado')
             // Añadimos AND tipo_servicio = 'reserva' para quedarnos solo con reservas confirmadas
+            $where .= ' AND NOT ' . ventas_gastos_casa_where_clause('v');
             $st = $pdo->prepare(
                 "SELECT COUNT(DISTINCT v.id) AS n,
                         COALESCE(SUM(v.total),0) AS venta,

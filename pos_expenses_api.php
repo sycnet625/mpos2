@@ -2,7 +2,7 @@
 // ARCHIVO: /var/www/palweb/api/pos_expenses_api.php
 // API para funcionalidades avanzadas de gastos
 
-session_start();
+require_once __DIR__ . '/admin_security.php';
 require_once 'db.php';
 require_once 'config_loader.php';
 header('Content-Type: application/json');
@@ -10,6 +10,10 @@ header('Content-Type: application/json');
 date_default_timezone_set('America/Havana');
 
 $action = $_GET['action'] ?? '';
+if (in_array($action, ['copy_previous_month', 'save_daily_expenses', 'save_template', 'delete_template'], true)
+    && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    pos_security_error('Se requiere POST.', 405);
+}
 $input = json_decode(file_get_contents('php://input'), true) ?? [];
 $EMP_ID = (int)($config['id_empresa'] ?? 1);
 $SUC_ID = (int)($config['id_sucursal'] ?? 1);

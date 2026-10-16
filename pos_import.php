@@ -1,6 +1,7 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_import.php
 // VERSIÓN MULTISUCURSAL - KARDEX V2 (CORREGIDO 9 PARAMS)
+require_once __DIR__ . '/admin_security.php';
 
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -10,8 +11,10 @@ use PhpOffice\PhpSpreadsheet\Style\Border;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 error_reporting(E_ALL);
+ini_set('memory_limit', '256M');
+set_time_limit(60);
 
 require_once 'db.php';
 require_once __DIR__ . '/vendor/autoload.php';
@@ -257,6 +260,10 @@ function pos_import_load_rows_from_csv(string $path): array
     while (($row = fgetcsv($handle, 0, $delimiter)) !== false) {
         if (count(array_filter($row, static fn($v) => trim((string)$v) !== '')) > 0) {
             $rows[] = $row;
+            if (count($rows) > 5001) {
+                fclose($handle);
+                throw new RuntimeException('El archivo excede el máximo de 5000 filas.');
+            }
         }
     }
     fclose($handle);
@@ -266,6 +273,9 @@ function pos_import_load_rows_from_csv(string $path): array
 function pos_import_load_rows_from_excel(string $path): array
 {
     $reader = IOFactory::createReaderForFile($path);
+    if (!in_array(get_class($reader), [PhpOffice\PhpSpreadsheet\Reader\Xlsx::class, PhpOffice\PhpSpreadsheet\Reader\Xls::class], true)) {
+        throw new RuntimeException('Solo se permiten libros XLS o XLSX.');
+    }
     if (method_exists($reader, 'setReadDataOnly')) {
         $reader->setReadDataOnly(true);
     }
@@ -276,6 +286,10 @@ function pos_import_load_rows_from_excel(string $path): array
     $sheet = $spreadsheet->getSheetByName('Importacion');
     if (!$sheet) {
         $sheet = $spreadsheet->getActiveSheet();
+    }
+    if ((int)$sheet->getHighestDataRow() > 5001 || Coordinate::columnIndexFromString($sheet->getHighestDataColumn()) > 18) {
+        $spreadsheet->disconnectWorksheets();
+        throw new RuntimeException('El archivo excede el máximo permitido de filas o columnas.');
     }
     $rows = [];
     foreach ($sheet->toArray(null, true, true, false) as $row) {
@@ -294,6 +308,9 @@ function pos_import_load_batch_from_file(array $file): array
     }
     if (!is_uploaded_file((string)$file['tmp_name'])) {
         throw new RuntimeException('El archivo no se recibió correctamente.');
+    }
+    if ((int)($file['size'] ?? 0) < 1 || (int)$file['size'] > 10 * 1024 * 1024) {
+        throw new RuntimeException('El archivo debe tener entre 1 byte y 10 MB.');
     }
 
     $ext = strtolower(pathinfo((string)$file['name'], PATHINFO_EXTENSION));
@@ -523,9 +540,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'process_file') {
     try {
         $input = [
             'dry_run' => !empty($_POST['dry_run']),
-            'id_empresa' => $_POST['id_empresa'] ?? 1,
-            'id_almacen' => $_POST['id_almacen'] ?? 1,
-            'id_sucursal' => $_POST['id_sucursal'] ?? 1,
+            'id_empresa' => $_SESSION['id_empresa'] ?? $config['id_empresa'],
+            'id_almacen' => $_SESSION['id_almacen'] ?? $config['id_almacen'],
+            'id_sucursal' => $_SESSION['id_sucursal'] ?? $config['id_sucursal'],
         ];
         $rows = pos_import_load_batch_from_file($_FILES['import_file'] ?? []);
         $results = pos_import_process_rows(
@@ -555,13 +572,14 @@ if (isset($_GET['action']) && $_GET['action'] == 'process_batch') {
     
     $input = json_decode(file_get_contents('php://input'), true);
     $batch = is_array($input['batch'] ?? null) ? $input['batch'] : [];
+    if (count($batch) > 5000) pos_security_error('El lote excede 5000 filas.', 413);
     $results = pos_import_process_rows(
         $pdo,
         $batch,
         (bool)($input['dry_run'] ?? false),
-        intval($input['id_empresa'] ?? 1),
-        intval($input['id_almacen'] ?? 1),
-        intval($input['id_sucursal'] ?? 1)
+        (int)($_SESSION['id_empresa'] ?? $config['id_empresa']),
+        (int)($_SESSION['id_almacen'] ?? $config['id_almacen']),
+        (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'])
     );
     echo json_encode($results);
     exit;
@@ -685,6 +703,7 @@ document.getElementById('btnStart').addEventListener('click', async () => {
     const form = new FormData();
     form.append('import_file', file);
     form.append('dry_run', document.getElementById('dryRun').checked ? '1' : '0');
+    form.append('csrf_token', window.PW_CSRF_TOKEN || '');
     form.append('id_empresa', document.getElementById('empId').value);
     form.append('id_almacen', document.getElementById('almId').value);
     form.append('id_sucursal', document.getElementById('sucId').value);

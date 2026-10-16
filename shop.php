@@ -78,49 +78,7 @@ $systemBrandName = trim((string)($config['marca_sistema_nombre'] ?? 'PalWeb POS 
 $companyBrandName = trim((string)($config['marca_empresa_nombre'] ?? ($config['tienda_nombre'] ?? 'MI TIENDA'))) ?: 'MI TIENDA';
 $companyBrandLogo = trim((string)($config['marca_empresa_logo'] ?? ''));
 
-function shop_round_price_up_to_5(float $value): float {
-    if ($value <= 0) {
-        return 0.0;
-    }
-    return (float)(ceil($value / 5) * 5);
-}
-
-function shop_apply_price_rule(float $price, array $config, ?float $wholesalePrice = null): float {
-    $mode = trim((string)($config['shop_price_mode'] ?? 'normal'));
-    $customPct = (float)($config['shop_price_custom_pct'] ?? 0);
-    $roundTo5 = !empty($config['shop_price_round_to_5']);
-    $result = $price;
-
-    if ($mode === 'mayorista') {
-        $candidate = (float)($wholesalePrice ?? 0);
-        if ($candidate > 0) {
-            $result = $candidate;
-        }
-    } elseif ($mode === 'custom') {
-        $result = $price * (1 + ($customPct / 100));
-    }
-
-    if ($roundTo5) {
-        $result = shop_round_price_up_to_5($result);
-    }
-
-    return round(max(0, $result), 2);
-}
-
-function shop_apply_price_config_to_row(array &$row, array $config): void {
-    $basePrice = (float)($row['precio_base'] ?? $row['precio'] ?? 0);
-    $wholesalePrice = (float)($row['precio_mayorista_base'] ?? 0);
-    $offerBase = (float)($row['precio_oferta_base'] ?? $row['precio_oferta'] ?? 0);
-
-    $row['precio'] = shop_apply_price_rule($basePrice, $config, $wholesalePrice);
-    $row['precio_oferta'] = $offerBase > 0
-        ? shop_apply_price_rule($offerBase, $config, $wholesalePrice)
-        : 0.0;
-
-    if ($row['precio_oferta'] > 0 && $row['precio_oferta'] >= $row['precio']) {
-        $row['precio_oferta'] = 0.0;
-    }
-}
+require_once __DIR__ . '/shop_pricing.php';
 
 // Cache estático para evitar N+1 de file_exists (se llena una sola vez por request)
 function shop_image_meta(string $code): array {
@@ -316,23 +274,7 @@ if (isset($_GET['action_geo'])) {
     header('Content-Type: application/json; charset=utf-8');
     
     $act = $_GET['action_geo'];
-    $locations = [
-        "Cerro" => ["El Canal" => 0.5, "Pilar-Atares" => 2.0, "Cerro" => 1.5, "Las Cañas" => 2.5, "Palatino" => 3.0, "Armada" => 2.0, "Latinoamericano" => 1.0],
-        "Plaza" => ["Rampa" => 4.0, "Vedado" => 4.5, "Carmelo" => 5.5, "Príncipe" => 2.5, "Plaza" => 3.0, "Nuevo Vedado" => 4.0],
-        "Centro Habana" => ["Cayo Hueso" => 3.0, "Pueblo Nuevo" => 3.5, "Los Sitios" => 3.0, "Dragones" => 3.5, "Colón" => 4.0],
-        "Habana Vieja" => ["Prado" => 4.5, "Catedral" => 5.0, "Plaza Vieja" => 5.0, "Belén" => 5.0, "San Isidro" => 5.5],
-        "Diez de Octubre" => ["Luyanó" => 4.0, "Jesús del Monte" => 3.5, "Lawton" => 5.0, "Víbora" => 4.5, "Santos Suárez" => 3.5, "Sevillano" => 4.5],
-        "Playa" => ["Miramar" => 7.0, "Buena Vista" => 6.0, "Ceiba" => 5.0, "Siboney" => 9.0, "Santa Fe" => 12.0],
-        "Marianao" => ["Los Ángeles" => 6.0, "Pocito" => 7.0, "Zamora" => 6.5, "Libertad" => 6.0],
-        "La Lisa" => ["La Lisa" => 9.0, "El Cano" => 11.0, "Punta Brava" => 12.0, "San Agustín" => 10.0],
-        "Boyeros" => ["Santiago de las Vegas" => 15.0, "Boyeros" => 12.0, "Wajay" => 11.0, "Calabazar" => 9.0, "Altahabana" => 7.0],
-        "Arroyo Naranjo" => ["Los Pinos" => 7.0, "Poey" => 8.0, "Vibora Park" => 7.0, "Mantilla" => 9.0, "Managua" => 15.0],
-        "San Miguel" => ["Rocafort" => 6.0, "Luyanó Moderno" => 7.0, "Diezmero" => 8.0, "San Francisco" => 10.0],
-        "Cotorro" => ["San Pedro" => 16.0, "Cuatro Caminos" => 18.0, "Santa Maria" => 14.0],
-        "Regla" => ["Guaicanamar" => 8.0, "Casablanca" => 9.0],
-        "Guanabacoa" => ["Villa I" => 10.0, "Chibas" => 9.5, "Minas" => 12.0],
-        "Habana del Este" => ["Camilo Cienfuegos" => 9.0, "Cojímar" => 11.0, "Guiteras" => 10.0, "Alamar" => 12.0, "Guanabo" => 25.0]
-    ];
+    $locations = shop_delivery_locations();
 
     if ($act === 'list_mun') echo json_encode(array_keys($locations));
     elseif ($act === 'list_bar') {
@@ -2275,7 +2217,7 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             $initials = mb_strtoupper(mb_substr($p['nombre'], 0, 2));
             $isPriorityCard = $idx < 4;
         ?>
-        <div class="product-card" data-cat="<?= htmlspecialchars($p['categoria'] ?? '', ENT_QUOTES) ?>" onclick='openProductDetail(<?= json_encode([
+        <div class="product-card" data-cat="<?= htmlspecialchars($p['categoria'] ?? '', ENT_QUOTES, 'UTF-8') ?>" onclick='openProductDetail(<?= htmlspecialchars(json_encode([
             "id"          => $p['codigo'],
             "name"        => $p['nombre'],
             "price"       => floatval($p['precio']),
@@ -2297,14 +2239,14 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
             "precioOferta"  => floatval($p['precio_oferta'] ?? 0),
             "esCombo"       => intval($p['es_combo'] ?? 0) === 1,
             "comboResumen"  => $p['combo_resumen'] ?? '',
-        ], JSON_UNESCAPED_UNICODE) ?>)'>
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>)'>
             <div class="product-image-wrapper">
                 <?php if(isset($_SESSION['client_id'])): 
                     $isFavorite = in_array($p['codigo'], $userWishlist);
                 ?>
                     <button class="btn-wishlist <?php echo $isFavorite ? 'active' : ''; ?>"
                             aria-label="<?php echo $isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos'; ?>"
-                            onclick="event.stopPropagation(); toggleWishlist('<?php echo $p['codigo']; ?>', this)">
+                            onclick="event.stopPropagation(); toggleWishlist(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, this)">
                         <i class="<?php echo $isFavorite ? 'fas' : 'far'; ?> fa-heart" aria-hidden="true"></i>
                     </button>
                 <?php endif; ?>
@@ -2388,12 +2330,12 @@ if (!ini_get('zlib.output_compression') && str_contains($_SERVER['HTTP_ACCEPT_EN
                     </div>
                     <?php if ($hasStock): ?>
                         <button class="btn-add-cart"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $precioVentaShop ?>)">
+                                onclick="event.stopPropagation(); addToCart(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode((string)$p['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= $precioVentaShop ?>)">
                             <span data-i18n="prod.add">+ Agregar</span>
                         </button>
                     <?php elseif ($esReservable): ?>
                         <button class="btn-add-cart" style="background:#f59e0b;border-color:#f59e0b;font-size:.78rem;"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $precioVentaShop ?>, true)">
+                                onclick="event.stopPropagation(); addToCart(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode((string)$p['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= $precioVentaShop ?>, true)">
                             <span data-i18n="prod.reserve">📅 Reservar</span>
                         </button>
                     <?php else: ?>
@@ -4938,7 +4880,10 @@ document.addEventListener('DOMContentLoaded', () => {
             tipo_cambio:             shopTC,
             monto_moneda_original:   parseFloat((grandTotalCUP / shopTC).toFixed(2)),
             csrf_token:              CSRF_TOKEN,
-            items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, note: '', isReserva: i.isReserva || false }))
+            delivery,
+            municipio: delivery ? document.getElementById('cMun').value : '',
+            barrio: delivery ? document.getElementById('cBar').value : '',
+            items: cart.map(i => ({ id: i.id, qty: i.qty, price: i.price, name: i.name, variant: i.variant || null, note: '', isReserva: i.isReserva || false }))
         };
 
         try {
@@ -5054,7 +4999,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             await fetch(CHAT_API_URL + '?action=send', {
                 method: 'POST',
-                body: JSON.stringify({ uuid: clientUUID, message: text, sender: 'client' })
+                body: JSON.stringify({ uuid: clientUUID, message: text, sender: 'client', csrf_token: CSRF_TOKEN })
             });
         } catch (e) { console.error(e); }
     }

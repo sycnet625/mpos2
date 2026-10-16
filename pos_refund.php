@@ -26,26 +26,14 @@ try {
     pos_security_require_csrf($input);
     if (!$input) throw new Exception("Datos de entrada inválidos");
 
-    // ── Autenticación con credenciales del sistema ────────────────────────────
-    $authUser = pos_security_clean_text($input['auth_user'] ?? '', 100);
-    $authPass = (string)($input['auth_pass'] ?? '');
-    if ($authUser === '' || $authPass === '') {
-        throw new Exception("Debe ingresar usuario y contraseña del sistema");
+    $operadorPos = pos_security_clean_text(
+        $_SESSION['cajero'] ?? $_SESSION['admin_user'] ?? $_SESSION['admin_name'] ?? 'POS',
+        100
+    );
+    $pinMaestro = trim((string)($input['pin_maestro_devolucion'] ?? ''));
+    if (!preg_match('/^\d{4,10}$/', $pinMaestro)) {
+        throw new Exception('Ingrese el PIN maestro de devoluciones de un administrador de esta sucursal.');
     }
-    $stmtAuth = $pdo->prepare("SELECT id, nombre, password, rol, activo FROM users WHERE nombre = ? LIMIT 1");
-    $stmtAuth->execute([$authUser]);
-    $authRow = $stmtAuth->fetch(PDO::FETCH_ASSOC);
-    if (!$authRow || !password_verify($authPass, (string)$authRow['password'])) {
-        throw new Exception("Credenciales del sistema inválidas");
-    }
-    if (isset($authRow['activo']) && (int)$authRow['activo'] !== 1) {
-        throw new Exception("Usuario del sistema inactivo");
-    }
-    $authRole = strtolower(trim((string)($authRow['rol'] ?? '')));
-    if ($authRole === 'cajero') {
-        throw new Exception("Usuario del sistema sin permisos para devoluciones");
-    }
-    $usuarioNombre = (string)($authRow['nombre'] ?? $authUser);
 
     $idDetalle = isset($input['id']) && is_numeric($input['id']) ? (int)$input['id'] : 0;
     $idTicket  = isset($input['ticket_id']) && is_numeric($input['ticket_id']) ? (int)$input['ticket_id'] : 0;
@@ -66,6 +54,49 @@ try {
     if ($idEmpresaCtx <= 0 || $idSucursalCtx <= 0 || $idAlmacenCtx <= 0) {
         throw new Exception('Contexto de devolución inválido.');
     }
+
+    $refundPinRate = $_SESSION['pos_refund_pin_rate'] ?? ['attempts' => 0, 'started_at' => time(), 'locked_until' => 0];
+    if ((int)($refundPinRate['locked_until'] ?? 0) > time()) {
+        throw new Exception('Demasiados intentos de autorización. Espere un minuto e inténtelo de nuevo.');
+    }
+
+    // El PIN debe pertenecer a un usuario ERP administrador activo y asignado
+    // a la empresa y sucursal de la sesión actual. No se acepta rol del navegador.
+    $stmtAdmins = $pdo->prepare("
+        SELECT u.id, u.nombre, u.pin_devolucion_hash
+        FROM users u
+        JOIN pos_user_contexts puc ON puc.user_id = u.id
+        WHERE puc.id_empresa = ? AND puc.id_sucursal = ?
+          AND COALESCE(puc.activo, 1) = 1 AND COALESCE(u.activo, 1) = 1
+          AND LOWER(u.rol) IN ('admin', 'administrador', 'administrator')
+          AND u.pin_devolucion_hash IS NOT NULL AND u.pin_devolucion_hash <> ''
+        ORDER BY u.id ASC
+    ");
+    $stmtAdmins->execute([$idEmpresaCtx, $idSucursalCtx]);
+    $adminAutorizador = null;
+    foreach ($stmtAdmins->fetchAll(PDO::FETCH_ASSOC) as $admin) {
+        if (password_verify($pinMaestro, (string)$admin['pin_devolucion_hash'])) {
+            $adminAutorizador = $admin;
+            break;
+        }
+    }
+    if (!$adminAutorizador) {
+        $startedAt = (int)($refundPinRate['started_at'] ?? 0);
+        $attempts = ($startedAt > 0 && time() - $startedAt <= 600)
+            ? (int)($refundPinRate['attempts'] ?? 0) + 1
+            : 1;
+        $_SESSION['pos_refund_pin_rate'] = [
+            'attempts' => $attempts,
+            'started_at' => ($attempts === 1) ? time() : $startedAt,
+            'locked_until' => ($attempts >= 5) ? time() + 60 : 0,
+        ];
+        throw new Exception('PIN maestro incorrecto o no pertenece a un administrador activo de esta sucursal.');
+    }
+
+    unset($_SESSION['pos_refund_pin_rate']);
+    $adminAutorizadorId = (int)$adminAutorizador['id'];
+    $adminAutorizadorNombre = pos_security_clean_text($adminAutorizador['nombre'] ?? 'Administrador', 100);
+    $usuarioNombre = $adminAutorizadorNombre;
 
     // ── Migración silenciosa: id_venta_original (fuera de transacción) ────────
     try {
@@ -92,6 +123,35 @@ try {
             throw new Exception("Este ítem ya está registrado en negativo (devuelto por sistema anterior).");
         }
         if (!empty($item['reembolsado'])) {
+            // Si el navegador perdió la respuesta después del commit, repetir
+            // la solicitud debe devolver éxito idempotente, no un falso error.
+            $stmtExisting = $pdo->prepare(
+                "SELECT v.id
+                 FROM ventas_cabecera v
+                 JOIN ventas_detalle d ON d.id_venta_cabecera = v.id
+                 WHERE v.id_venta_original = ?
+                   AND v.tipo_servicio = 'devolucion'
+                   AND d.id_producto = ?
+                   AND d.cantidad = ?
+                 ORDER BY v.id DESC LIMIT 1"
+            );
+            $stmtExisting->execute([
+                $item['id_ticket'],
+                $item['id_producto'],
+                -1 * abs(floatval($item['cantidad']))
+            ]);
+            $existingRefundId = (int)($stmtExisting->fetchColumn() ?: 0);
+            if ($existingRefundId > 0) {
+                $pdo->commit();
+                echo json_encode([
+                    'status' => 'success',
+                    'msg' => 'La devolución ya estaba registrada.',
+                    'id_devolucion' => $existingRefundId,
+                    'already_processed' => true,
+                    'affected_codes' => [(string)$item['id_producto']]
+                ]);
+                exit;
+            }
             throw new Exception("Este ítem ya fue devuelto anteriormente.");
         }
 
@@ -154,6 +214,9 @@ try {
         $pdo->commit();
 
         log_audit($pdo, AUDIT_DEVOLUCIÓN_ITEM, $usuarioNombre, [
+            'autorizado_por'      => $adminAutorizadorNombre,
+            'autorizador_id'      => $adminAutorizadorId,
+            'operador_pos'        => $operadorPos,
             'id_detalle_original' => $idDetalle,
             'id_venta_original'   => $item['id_ticket'],
             'id_devolucion'       => $newHeadId,
@@ -164,7 +227,12 @@ try {
             'monto'               => $montoDevolver,
         ]);
 
-        echo json_encode(['status' => 'success', 'msg' => 'Devolución procesada correctamente', 'id_devolucion' => $newHeadId]);
+        echo json_encode([
+            'status' => 'success',
+            'msg' => 'Devolución procesada correctamente',
+            'id_devolucion' => $newHeadId,
+            'affected_codes' => [(string)$item['id_producto']]
+        ]);
     }
 
     // =========================================================================
@@ -179,11 +247,39 @@ try {
             throw new Exception("Esta venta ya fue anulada o devuelta (total negativo).");
         }
 
-        // Verificar que no exista ya una devolución completa para esta venta
-        $stmtDup = $pdo->prepare("SELECT id FROM ventas_cabecera WHERE id_venta_original = ? LIMIT 1");
+        // Verificar cualquier devolución previa. Una devolución parcial impide
+        // devolver el ticket completo; una completa se responde idempotentemente
+        // si el navegador perdió la respuesta original.
+        $stmtDup = $pdo->prepare(
+            "SELECT id, motivo_anulacion FROM ventas_cabecera
+             WHERE id_venta_original = ? AND tipo_servicio = 'devolucion'
+             ORDER BY id DESC LIMIT 1"
+        );
         $stmtDup->execute([$idTicket]);
-        if ($stmtDup->fetchColumn()) {
-            throw new Exception("Esta venta ya tiene un ticket de devolución completo registrado.");
+        $existingRefund = $stmtDup->fetch(PDO::FETCH_ASSOC) ?: null;
+        $existingRefundId = (int)($existingRefund['id'] ?? 0);
+        if ($existingRefundId > 0) {
+            if (trim((string)($existingRefund['motivo_anulacion'] ?? '')) !== 'Devolución ticket completo') {
+                throw new Exception("Esta venta ya tiene una devolución parcial registrada.");
+            }
+            $stmtExistingCodes = $pdo->prepare(
+                "SELECT id_producto FROM ventas_detalle
+                 WHERE id_venta_cabecera = ? AND cantidad < 0"
+            );
+            $stmtExistingCodes->execute([$existingRefundId]);
+            $affectedCodes = array_values(array_unique(array_map(
+                'strval',
+                $stmtExistingCodes->fetchAll(PDO::FETCH_COLUMN)
+            )));
+            $pdo->commit();
+            echo json_encode([
+                'status' => 'success',
+                'msg' => 'La devolución ya estaba registrada.',
+                'id_devolucion' => $existingRefundId,
+                'already_processed' => true,
+                'affected_codes' => $affectedCodes
+            ]);
+            exit;
         }
 
         $stmtDet = $pdo->prepare("SELECT d.*, p.es_servicio FROM ventas_detalle d LEFT JOIN productos p ON d.id_producto = p.codigo AND p.id_empresa = ? WHERE d.id_venta_cabecera = ?");
@@ -249,6 +345,9 @@ try {
         $pdo->commit();
 
         log_audit($pdo, AUDIT_DEVOLUCIÓN_TICKET, $usuarioNombre, [
+            'autorizado_por'    => $adminAutorizadorNombre,
+            'autorizador_id'    => $adminAutorizadorId,
+            'operador_pos'      => $operadorPos,
             'id_venta_original' => $idTicket,
             'id_devolucion'     => $newHeadId,
             'total_original'    => floatval($venta['total']),
@@ -257,7 +356,19 @@ try {
             'items_count'       => count($detalles),
         ]);
 
-        echo json_encode(['status' => 'success', 'msg' => 'Ticket devuelto correctamente', 'id_devolucion' => $newHeadId]);
+        $affectedCodes = array_values(array_unique(array_map(
+            'strval',
+            array_column(
+                array_filter($detalles, static fn(array $detail): bool => floatval($detail['cantidad']) > 0),
+                'id_producto'
+            )
+        )));
+        echo json_encode([
+            'status' => 'success',
+            'msg' => 'Ticket devuelto correctamente',
+            'id_devolucion' => $newHeadId,
+            'affected_codes' => $affectedCodes
+        ]);
     }
 
 } catch (Exception $e) {

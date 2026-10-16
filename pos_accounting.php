@@ -125,7 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $f = $v['fecha_contable_final'];
                 $t = floatval($v['total']);
                 $c = $costosVenta[(int)$v['id']] ?? 0.0;
-                if($v['metodo_pago']==='Gasto Casa'){
+                if(ticket_es_gasto_casa($v)){
                     insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'709 - Retiro Dueño',$c,0,"Consumo Casa #{$v['id']}");
                     insertAsiento($pdo,$f,'VENTA_CASA',$v['id'],'120 - Inventario Mercancías',0,$c,"Salida Inv.");
                 } else {
@@ -340,7 +340,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $fh = date('Y-m-d'); $ff = $_GET['fecha'] ?? $fh; $scope = $_GET['scope'] ?? 'local'; $errView = "";
 try {
     $qInv = "SELECT SUM(s.cantidad*p.costo) FROM stock_almacen s JOIN productos p ON s.id_producto=p.codigo WHERE p.activo=1 AND p.id_empresa=$EMP_ID";
-    $qVta = "SELECT COALESCE(SUM(total),0) FROM ventas_cabecera WHERE id_empresa=$EMP_ID AND " . ventas_reales_where_clause();
+    $qVta = "SELECT COALESCE(SUM(total),0) FROM ventas_cabecera WHERE id_empresa=$EMP_ID AND " . ventas_ingresos_where_clause();
     $qGas = "SELECT COALESCE(SUM(monto),0) as total FROM gastos_historial WHERE id_empresa=$EMP_ID";
 
     if ($scope === 'local') {

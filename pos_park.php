@@ -1,10 +1,18 @@
 <?php
 // ARCHIVO: pos_park.php
 header('Content-Type: application/json');
+require_once __DIR__ . '/pos_security.php';
+pos_security_bootstrap_session();
+pos_security_require_auth();
+pos_security_enforce_session(false);
 require_once 'db.php';
 
 $action = $_GET['action'] ?? '';
 $input = json_decode(file_get_contents('php://input'), true);
+if (in_array($action, ['park', 'retrieve'], true)) {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') pos_security_error('Se requiere POST.', 405);
+    pos_security_require_csrf(is_array($input) ? $input : $_POST);
+}
 
 try {
     if ($action === 'park') {
@@ -20,7 +28,7 @@ try {
 
     } elseif ($action === 'retrieve') {
         // Recuperar y borrar de espera
-        $id = intval($_GET['id']);
+        $id = (int)($input['id'] ?? 0);
         $stmt = $pdo->prepare("SELECT datos_json FROM pedidos_espera WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -36,4 +44,3 @@ try {
     echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
 }
 ?>
-

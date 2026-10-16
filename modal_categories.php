@@ -127,7 +127,7 @@ async function saveCategory() {
         const res = await fetch('categories_api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
+            body: JSON.stringify({ ...payload, csrf_token: window.PW_CSRF_TOKEN || '' })
         });
         const data = await res.json();
         
@@ -151,7 +151,7 @@ async function deleteCategory(id) {
         const res = await fetch('categories_api.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'delete', id })
+            body: JSON.stringify({ action: 'delete', id, csrf_token: window.PW_CSRF_TOKEN || '' })
         });
         const data = await res.json();
         

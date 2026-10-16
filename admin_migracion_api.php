@@ -9,6 +9,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     echo json_encode(['ok' => false, 'msg' => 'No autorizado']);
     exit;
 }
+session_write_close();
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
@@ -351,6 +352,8 @@ if ($action === '') {
                         <div class="col-md-6"><label class="control-label" for="dest">Usuario y destino SSH</label><input id="dest" class="form-control mig-input" placeholder="root@203.0.113.10" autocomplete="username"></div>
                         <div class="col-md-3"><label class="control-label" for="sshPort">Puerto SSH</label><input id="sshPort" class="form-control mig-input" value="22" inputmode="numeric"></div>
                         <div class="col-md-3"><label class="control-label" for="sshPassword">Contraseña SSH <span class="text-secondary">(opcional)</span></label><input id="sshPassword" type="password" class="form-control mig-input" placeholder="••••••••" autocomplete="current-password"><div class="small muted mt-1">No se guarda ni se muestra en el registro.</div></div>
+                        <div class="col-md-7"><label class="control-label" for="savedHost">Hosts guardados</label><div class="d-flex gap-2"><select id="savedHost" class="form-select mig-select"><option value="">Selecciona un host guardado…</option></select><button id="btnForgetHost" type="button" class="btn btn-outline-secondary" disabled title="Eliminar host guardado" aria-label="Eliminar host guardado"><i class="fa-solid fa-trash-can"></i></button></div><div class="small muted mt-1">Elige uno para completar usuario, destino y puerto.</div></div>
+                        <div class="col-md-5"><label class="control-label" for="hostLabel">Nombre del host <span class="text-secondary">(opcional)</span></label><input id="hostLabel" class="form-control mig-input" maxlength="100" placeholder="Ej.: Servidor de la tienda" autocomplete="off"><div class="small muted mt-1">Se guarda junto al host para reconocerlo fácilmente.</div></div>
                         <div class="col-12"><div class="control-label">Tipo de operación</div><div class="row g-2">
                             <div class="col-md-6"><label class="mode-choice active d-block" data-choice="new"><input type="radio" name="targetMode" value="new" checked> <strong class="ms-1">Servidor nuevo</strong><div class="small muted mt-2 ms-4">Primera copia completa mediante tar+zstd, más rápida.</div></label></div>
                             <div class="col-md-6"><label class="mode-choice d-block" data-choice="update"><input type="radio" name="targetMode" value="update"> <strong class="ms-1">Actualizar existente</strong><div class="small muted mt-2 ms-4">Actualización incremental mediante rsync, sin borrar archivos.</div></label></div>
@@ -433,9 +436,77 @@ if ($action === '') {
         ];
         const transferLabels = Object.fromEntries(transferPhases.map(([phase, title]) => [phase, title]));
         const $ = id => document.getElementById(id);
+        const savedHostsStorageKey = 'palweb_migration_saved_hosts_v1';
+        const maxSavedHosts = 30;
+        let savedHosts = [];
         let running = false;
         let activeJobId = null;
         let lastProgressDebug = {};
+
+        function isValidDestClient(dest) {
+            return /^[a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+$/.test(dest);
+        }
+        function loadSavedHosts() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(savedHostsStorageKey) || '[]');
+                if (!Array.isArray(raw)) return [];
+                return raw.filter(host => host && typeof host.dest === 'string' && isValidDestClient(host.dest.trim()))
+                    .map(host => ({
+                        dest: host.dest.trim(),
+                        port: /^\d{1,5}$/.test(String(host.port || '')) ? String(host.port) : '22',
+                        label: String(host.label || '').trim().slice(0, 100)
+                    })).slice(0, maxSavedHosts);
+            } catch (error) {
+                return [];
+            }
+        }
+        function persistSavedHosts() {
+            try { localStorage.setItem(savedHostsStorageKey, JSON.stringify(savedHosts)); } catch (error) { /* almacenamiento no disponible */ }
+        }
+        function renderSavedHosts(selectedDest = '') {
+            const select = $('savedHost');
+            if (!select) return;
+            select.replaceChildren(new Option('Selecciona un host guardado…', ''));
+            savedHosts.forEach(host => {
+                const option = new Option(host.label ? `${host.label} — ${host.dest}` : host.dest, host.dest);
+                select.add(option);
+            });
+            select.value = savedHosts.some(host => host.dest === selectedDest) ? selectedDest : '';
+            $('btnForgetHost').disabled = !select.value;
+        }
+        function syncSavedHostSelection() {
+            const dest = $('dest').value.trim();
+            $('savedHost').value = savedHosts.some(host => host.dest === dest) ? dest : '';
+            $('btnForgetHost').disabled = !$('savedHost').value;
+        }
+        function rememberCurrentHost() {
+            const dest = $('dest').value.trim();
+            if (!isValidDestClient(dest)) return;
+            const host = {
+                dest,
+                port: /^\d{1,5}$/.test($('sshPort').value.trim()) ? $('sshPort').value.trim() : '22',
+                label: $('hostLabel').value.trim().slice(0, 100)
+            };
+            savedHosts = [host, ...savedHosts.filter(item => item.dest !== dest)].slice(0, maxSavedHosts);
+            persistSavedHosts();
+            renderSavedHosts(dest);
+        }
+        function forgetSelectedHost() {
+            const dest = $('savedHost').value;
+            if (!dest) return;
+            savedHosts = savedHosts.filter(host => host.dest !== dest);
+            persistSavedHosts();
+            renderSavedHosts();
+            log('Host guardado eliminado.');
+        }
+        function selectSavedHost(dest) {
+            const host = savedHosts.find(item => item.dest === dest);
+            if (!host) return;
+            $('dest').value = host.dest;
+            $('sshPort').value = host.port;
+            $('hostLabel').value = host.label;
+            $('btnForgetHost').disabled = false;
+        }
 
         function renderSteps() {
             $('stepsGrid').innerHTML = steps.map((s, i) => `<div class="col-md-6 col-xl-3"><div class="step-card pending" id="step-card-${i+1}"><div class="d-flex gap-2 align-items-start"><div class="step-number">${i+1}</div><div><div class="fw-bold">${s[0]}</div><div class="small muted mt-1">${s[1]}</div></div></div><div class="small mt-3 text-secondary" id="step-status-${i+1}">Pendiente</div></div></div>`).join('');
@@ -536,6 +607,7 @@ if ($action === '') {
             ['btnPreflight','btnSimulate','btnRun'].forEach(id => $(id).disabled = disabled);
             $('btnCancel').classList.toggle('d-none', !disabled || !activeJobId);
             $('btnCancel').disabled = !disabled || !activeJobId;
+            $('btnForgetHost').disabled = disabled || !$('savedHost').value;
         }
         async function resumeActiveJob() {
             try {
@@ -547,7 +619,7 @@ if ($action === '') {
                 $('operationBadge').textContent = data.mode === 'run' ? 'Migración activa' : 'Simulación activa';
                 setStatus('Migración activa recuperada','warn');
                 setActiveNotice(`Hay una ${data.mode === 'run' ? 'migración' : 'simulación'} activa${data.dest ? ' hacia '+data.dest : ''}. El progreso fue recuperado y continuará aquí. Puedes detenerla desde el botón rojo.`);
-                if (data.dest) $('dest').value = data.dest;
+                if (data.dest) { $('dest').value = data.dest; syncSavedHostSelection(); }
                 if (data.target_mode) { const radio = document.querySelector(`input[name="targetMode"][value="${data.target_mode}"]`); if (radio) radio.checked = true; }
                 applyJobState(data.state);
                 const tail = String(data.state?.tail || '');
@@ -574,7 +646,7 @@ if ($action === '') {
             } catch (error) { $('btnCancel').disabled=false; log(error.message,'error'); }
         }
         async function execute(mode, step) {
-            if(running || !validate()) return; running=true; resetSteps(); setActiveNotice('',false); $('operationBadge').textContent = mode === 'run' ? 'Aplicando cambios' : 'Simulación en curso'; setStatus(mode === 'run' ? 'Migración ejecutándose' : 'Simulación ejecutándose','warn'); log(`${mode === 'run' ? 'APLICACIÓN' : 'SIMULACIÓN'} iniciada hacia ${$('dest').value.trim()}`); document.querySelectorAll('button').forEach(b=>b.disabled=true);
+            if(running || !validate()) return; rememberCurrentHost(); running=true; resetSteps(); setActiveNotice('',false); $('operationBadge').textContent = mode === 'run' ? 'Aplicando cambios' : 'Simulación en curso'; setStatus(mode === 'run' ? 'Migración ejecutándose' : 'Simulación ejecutándose','warn'); log(`${mode === 'run' ? 'APLICACIÓN' : 'SIMULACIÓN'} iniciada hacia ${$('dest').value.trim()}`); document.querySelectorAll('button').forEach(b=>b.disabled=true);
             try { const response=await fetch(endpoint,{method:'POST',body:formData(mode,step)}); if(!response.ok) throw new Error('HTTP '+response.status); const start=await response.json(); if(!start.ok || !start.job_id) throw new Error(start.msg || 'No se pudo iniciar el trabajo'); activeJobId=start.job_id; setRunButtons(true); log('Trabajo en segundo plano iniciado: '+start.job_id); const data=await pollJob(start.job_id); activeJobId=null; if(data.ok){ $('operationBadge').textContent='Finalizado'; setStatus('Operación completada','ok'); log('Operación finalizada correctamente.','ok'); } else { $('errorCount').textContent='1'; $('operationBadge').textContent=data.cancelled ? 'Detenido' : 'Error'; setStatus(data.cancelled ? 'Migración detenida' : 'Operación con errores', data.cancelled ? 'warn' : 'error'); log(data.msg || `Proceso terminó con código ${data.exit_code}`,'error'); } } catch(e){ setStatus('Error de comunicación','error'); log(e.message,'error'); } finally { running=false; activeJobId=null; setRunButtons(false); }
         }
         document.querySelectorAll('.mode-choice').forEach(label=>label.addEventListener('click',()=>{document.querySelectorAll('.mode-choice').forEach(x=>x.classList.remove('active'));label.classList.add('active'); if(label.dataset.choice==='new'){$('allowDelete').checked=false;$('allowDelete').disabled=true;}else{$('allowDelete').disabled=false;}}));
@@ -583,8 +655,12 @@ if ($action === '') {
         $('btnRun').addEventListener('click',()=>{ if(confirm('¿Confirmas la migración real hacia '+$('dest').value.trim()+'? Se modificarán servicios, archivos y base de datos del destino.')) execute('run',$('stepSelect').value); });
         $('btnCancel').addEventListener('click',cancelActiveJob);
         $('btnClearLog').addEventListener('click',()=>{$('logBox').textContent='Registro limpiado.';});
+        $('savedHost').addEventListener('change', e => selectSavedHost(e.target.value));
+        $('dest').addEventListener('input', syncSavedHostSelection);
+        ['dest','sshPort','hostLabel'].forEach(id => $(id).addEventListener('blur', rememberCurrentHost));
+        $('btnForgetHost').addEventListener('click', forgetSelectedHost);
         $('runMode').addEventListener('change',e=>{if(e.target.value==='run') $('btnRun').focus();});
-        resetSteps(); renderSoftware(); $('allowDelete').disabled=true; setStatus('Panel listo','ok'); resumeActiveJob();
+        savedHosts = loadSavedHosts(); renderSavedHosts(); resetSteps(); renderSoftware(); $('allowDelete').disabled=true; setStatus('Panel listo','ok'); resumeActiveJob();
     })();
     </script>
     </body>

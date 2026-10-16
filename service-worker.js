@@ -3,8 +3,8 @@
 // Versión 9.9 - Online first + POS offline completo
 // ==========================================
 
-const SW_VERSION = 'v9.9';
-const CACHE_NAME = 'palweb-pos-v101';
+const SW_VERSION = 'v9.12-security';
+const CACHE_NAME = 'palweb-pos-v104';
 const APP_BASE_URL = new URL('./', self.location.href);
 const appUrl = (rel) => new URL(rel, APP_BASE_URL).toString();
 
@@ -99,19 +99,6 @@ self.addEventListener('activate', (event) => {
                 console.log('[SW-POS] Activación completada - ONLINE FIRST activo');
                 return self.clients.claim();
             })
-            .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-            .then((clients) => {
-                return Promise.all(clients.map((client) => {
-                    try {
-                        const clientUrl = new URL(client.url);
-                        const isPosClient = clientUrl.pathname.endsWith('/pos.php') || clientUrl.pathname.endsWith('/pos/');
-                        if (isPosClient && typeof client.navigate === 'function') {
-                            return client.navigate(client.url);
-                        }
-                    } catch (e) {}
-                    return null;
-                }));
-            })
     );
 });
 
@@ -145,6 +132,12 @@ self.addEventListener('fetch', (event) => {
     ]);
 
     if (authPagePaths.has(swUrl.pathname)) {
+        event.respondWith(fetch(event.request, { credentials: 'same-origin', cache: 'no-store' }));
+        return;
+    }
+
+    // Autenticación POS y CSRF: nunca almacenar ni devolver respuestas cacheadas.
+    if (swUrl.pathname.endsWith('/pos_cash.php')) {
         event.respondWith(fetch(event.request, { credentials: 'same-origin', cache: 'no-store' }));
         return;
     }

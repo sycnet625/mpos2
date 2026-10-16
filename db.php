@@ -90,6 +90,20 @@ try {
 
 } catch (\PDOException $e) {
     error_log('DB connection error: ' . $e->getMessage());
-    palweb_db_emit_error("Error DB: " . $e->getMessage());
+    palweb_db_emit_error('No se pudo conectar con la base de datos. Contacte al administrador.');
+}
+
+// Revocar privilegios antiguos si el usuario fue desactivado o no es administrador.
+if (session_status() === PHP_SESSION_ACTIVE && ($_SESSION['admin_logged_in'] ?? false) === true) {
+    $checkAdmin = $pdo->prepare('SELECT rol, activo FROM users WHERE id = ? LIMIT 1');
+    $checkAdmin->execute([(int)($_SESSION['user_id'] ?? 0)]);
+    $account = $checkAdmin->fetch(PDO::FETCH_ASSOC);
+    if (!$account || (int)$account['activo'] !== 1
+        || !in_array(strtolower(trim((string)$account['rol'])), ['admin', 'administrador', 'administrator'], true)) {
+        unset($_SESSION['admin_logged_in'], $_SESSION['admin_user']);
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        exit(json_encode(['status' => 'error', 'msg' => 'Permisos de administración revocados. Inicie sesión nuevamente.']));
+    }
 }
 ?>

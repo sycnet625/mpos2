@@ -1,15 +1,24 @@
 <?php
 // ARCHIVO: pos_kitchen_api.php
 header('Content-Type: application/json');
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
+require_once __DIR__ . '/pos_security.php';
+pos_security_bootstrap_session();
+pos_security_require_auth();
+pos_security_enforce_session(false);
 require_once 'db.php';
 require_once 'config_loader.php';
 
 $idEmpresa = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
 $idSucursal = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
 $idAlmacen = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+session_write_close();
 
 $action = $_GET['action'] ?? 'list';
+if ($action === 'update') {
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') pos_security_error('Se requiere POST.', 405);
+    $input = pos_security_json_input();
+    pos_security_require_csrf($input);
+}
 
 try {
     // LISTAR COMANDAS PENDIENTES O EN PROCESO
@@ -52,8 +61,11 @@ try {
     
     // CAMBIAR ESTADO
     elseif ($action === 'update') {
-        $id = intval($_GET['id']);
-        $estado = $_GET['status']; // pendiente -> elaboracion -> terminado -> entregado
+        $id = (int)($input['id'] ?? 0);
+        $estado = (string)($input['status'] ?? '');
+        if ($id < 1 || !in_array($estado, ['pendiente', 'elaboracion', 'terminado', 'entregado', 'cancelado'], true)) {
+            pos_security_error('Datos inválidos.', 422);
+        }
         
         $sql = "UPDATE comandas SET estado = ?, 
                 fecha_inicio = (CASE WHEN ? = 'elaboracion' THEN NOW() ELSE fecha_inicio END),

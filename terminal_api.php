@@ -2,13 +2,14 @@
 // ARCHIVO: terminal_api.php
 // Backend API para el terminal web SSH/tmux
 
-session_start();
+require_once __DIR__ . '/admin_security.php';
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     http_response_code(403);
     header('Content-Type: application/json');
     echo json_encode(['error' => 'No autorizado']);
     exit;
 }
+session_write_close();
 
 ini_set('display_errors', 0);
 set_time_limit(0);
@@ -31,6 +32,12 @@ if (empty($action)) {
 
 if ($action !== 'stream') {
     header('Content-Type: application/json; charset=utf-8');
+}
+
+if (!in_array($action, ['list', 'stream'], true) && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    http_response_code(405);
+    echo json_encode(['error' => 'Se requiere POST.']);
+    exit;
 }
 
 function term_exec($cmd) {

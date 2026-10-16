@@ -2,7 +2,7 @@
 // ARCHIVO: terminal.php
 // Terminal web SSH/tmux — frontend
 
-session_start();
+require_once __DIR__ . '/admin_security.php';
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php');
     exit;
@@ -11,6 +11,8 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta name="pos-csrf-token" content="<?= htmlspecialchars(pos_security_ensure_csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+    <script src="assets/js/admin-csrf.js"></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Terminal — PalWeb</title>

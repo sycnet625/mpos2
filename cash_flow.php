@@ -11,6 +11,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 }
 
 require_once 'config_loader.php';
+require_once 'accounting_helpers.php';
 $ALM_ID = intval($config['id_almacen']);
 $SUC_ID = intval($config['id_sucursal']);
 $EMP_ID = intval($config['id_empresa']);
@@ -97,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             // 1. Ventas solo de la sucursal actual
             $empresa_contexto = intval($config['id_empresa'] ?? 1);
-            $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND s.id_empresa = ? AND s.id_sucursal = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA')");
+            $stmtV = $pdo->prepare("SELECT SUM(v.total) FROM ventas_cabecera v INNER JOIN caja_sesiones s ON v.id_sesion_caja = s.id WHERE s.fecha_contable = ? AND s.id_empresa = ? AND s.id_sucursal = ? AND v.id_empresa = ? AND v.id_sucursal = ? AND (v.estado_reserva IS NULL OR v.estado_reserva != 'ANULADA') AND " . ventas_ingresos_where_clause('v'));
             $stmtV->execute([$fecha, $empresa_contexto, $sucursal_contexto, $empresa_contexto, $sucursal_contexto]);
             $data['ventas_suc_'.$sucursal_contexto] = floatval($stmtV->fetchColumn() ?: 0);
 

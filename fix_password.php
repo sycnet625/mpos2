@@ -1,4 +1,7 @@
 <?php
+http_response_code(404);
+header('Content-Type: text/plain; charset=utf-8');
+exit;
 // ARCHIVO: fix_password.php
 // UTILIDAD: Resetear contraseña de administrador con hash compatible
 require_once 'db.php';
@@ -73,4 +76,3 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-

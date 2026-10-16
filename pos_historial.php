@@ -15,9 +15,13 @@ try {
     $empresaID = intval($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
     $sucursalID = intval($_SESSION['id_sucursal'] ?? $config['id_sucursal']);
     $almacenID = intval($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
-    
+
     // 2. Obtener la sesión de caja real del POS si existe en la sesión PHP
     $idSesionActiva = isset($_SESSION['id_caja']) && is_numeric($_SESSION['id_caja']) ? (int)$_SESSION['id_caja'] : 0;
+    // El contexto ya fue leído; no mantener bloqueado el archivo de sesión
+    // mientras se ejecutan las consultas del historial.
+    session_write_close();
+
     $sesion = null;
 
     if ($idSesionActiva > 0) {

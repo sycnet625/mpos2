@@ -2,7 +2,6 @@
 // ARCHIVO: /var/www/palweb/api/ticket_view.php
 header('Content-Type: text/html; charset=utf-8');
 ini_set('display_errors', 0);
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
 
 require_once 'db.php';
 

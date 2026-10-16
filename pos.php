@@ -63,7 +63,7 @@ if ($posBasePath === '') {
 $posPrefix = $posBasePath === '/' ? '' : $posBasePath;
 $posDocumentBase = $posPrefix . '/';
 $posScopePath = $posPrefix . '/';
-$posUiVersion = 'v9.82';
+$posUiVersion = 'V2.86';
 
 function pos_is_authenticated(): bool
 {
@@ -227,17 +227,19 @@ function pos_image_meta(string $code): array {
 function pos_get_dynamic_cashiers(PDO $pdo, array $config): array
 {
     try {
-        $rows = $pdo->query("
-            SELECT nombre, pin, rol, id_empresa, id_sucursal, id_almacen
+        $stmt = $pdo->prepare("
+            SELECT nombre, rol, id_empresa, id_sucursal, id_almacen
             FROM pos_cashiers
             WHERE COALESCE(activo, 1) = 1
+              AND id_empresa = ? AND id_sucursal = ?
             ORDER BY nombre ASC
-        ")->fetchAll(PDO::FETCH_ASSOC);
+        ");
+        $stmt->execute([(int)($config['id_empresa'] ?? 1), (int)($config['id_sucursal'] ?? 1)]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (!empty($rows)) {
             return array_map(static function (array $row): array {
                 return [
                     'nombre' => (string)$row['nombre'],
-                    'pin' => (string)$row['pin'],
                     'rol' => (string)($row['rol'] ?? 'cajero'),
                     'id_empresa' => (int)($row['id_empresa'] ?? 1),
                     'id_sucursal' => (int)($row['id_sucursal'] ?? 1),
@@ -253,7 +255,6 @@ function pos_get_dynamic_cashiers(PDO $pdo, array $config): array
     foreach (($config['cajeros'] ?? []) as $c) {
         $fallback[] = [
             'nombre' => (string)($c['nombre'] ?? 'Cajero'),
-            'pin' => (string)($c['pin'] ?? ''),
             'rol' => (string)($c['rol'] ?? 'cajero'),
             'id_empresa' => (int)($config['id_empresa'] ?? 1),
             'id_sucursal' => (int)($config['id_sucursal'] ?? 1),
@@ -498,8 +499,7 @@ if (isset($_GET['set_almacen']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-// ENDPOINT: Cajeros completos (con PIN) para poblar IndexedDB offline
-// Solo accesible con sesión activa (cajero ya autenticado o admin)
+// ENDPOINT: directorio de cajeros de la sucursal, sin credenciales.
 if (isset($_GET['load_cashiers'])) {
     header('Content-Type: application/json');
     if (empty($_SESSION['cajero']) && empty($_SESSION['admin_logged_in'])) {
@@ -1714,6 +1714,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
         <div class="pin-version-badge" title="Versión de la interfaz POS">POS <?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?></div>
         <div class="fs-1 mb-2" id="pinDisplay">••••</div>
         <div id="pinAttemptsDots" class="mb-2 text-muted small"></div>
+        <div id="pinNetworkStatus" class="small text-primary fw-bold mb-2 d-none" role="status" aria-live="polite"></div>
         <div id="pinLockMsg" class="alert alert-danger py-1 mb-2 small" style="visibility:hidden; height:0; overflow:hidden; padding:0; margin:0; border:none;"></div>
         <div class="pin-grid" id="pinGrid">
             <button class="pin-btn" onclick="typePin(1)">1</button><button class="pin-btn" onclick="typePin(2)">2</button><button class="pin-btn" onclick="typePin(3)">3</button>
@@ -1746,6 +1747,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
             <div class="modal-body">
                 <div class="mini-login-copy">Vuelve a autenticarte para continuar esta accion sin cerrar el POS.</div>
                 <div id="sessionLoginReason"></div>
+                <div id="pinNetworkStatusModal" class="small text-primary fw-bold mb-2 d-none" role="status" aria-live="polite"></div>
                 <div class="mini-pin-display" id="sessionPinDisplay">....</div>
                 <div class="mini-pin-grid">
                     <button type="button" class="pin-btn" onclick="typePin(1)">1</button><button type="button" class="pin-btn" onclick="typePin(2)">2</button><button type="button" class="pin-btn" onclick="typePin(3)">3</button>
@@ -1824,6 +1826,9 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <span id="netStatus" class="badge bg-success px-2" style="font-size:0.7rem;">
                         <i class="fas fa-wifi"></i>
                     </span>
+                    <span id="authModeBadge" class="badge bg-secondary px-2" style="font-size:0.7rem;" title="Estado de autenticación">
+                        <i class="fas fa-lock"></i> SIN SESIÓN
+                    </span>
                 </div>
             </div>
             <!-- Fila 2: Sucursal/Almacén + Botones de acción -->
@@ -1856,6 +1861,11 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
                     <a href="reportes_caja.php" target="_blank" rel="noopener" class="btn btn-sm btn-light text-primary px-2 inv-btn" title="Reportes">
                         <i class="fas fa-chart-line"></i>
                     </a>
+                    <?php if (!empty($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true): ?>
+                    <a href="caja_dividir.php" target="_blank" rel="noopener" class="btn btn-sm btn-light text-danger px-2 inv-btn" title="Dividir sesión de caja">
+                        <i class="fas fa-code-branch"></i>
+                    </a>
+                    <?php endif; ?>
 
                 </div>
             </div>
@@ -2175,7 +2185,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     const PRODUCTS_DATA = <?php echo json_encode($prods); ?>;
     window.POS_STORAGE_SCOPE = 'e<?php echo (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1); ?>_s<?php echo (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1); ?>_a<?php echo (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1); ?>_c<?php echo (int)($_SESSION['id_caja'] ?? $config['id_caja'] ?? 0); ?>';
     window.POS_CATALOG_SYNC_AT = <?php echo time(); ?>;
-    // CAJEROS_CONFIG no incluye el pin — los PINs viven solo en IndexedDB (cargados via load_cashiers tras autenticarse)
+    // El directorio no contiene PIN ni verificadores de credenciales.
     const CAJEROS_CONFIG = <?php
         echo json_encode(array_map(static function(array $c): array {
             unset($c['pin']);
@@ -2290,6 +2300,7 @@ window.verifyPin = function() { /* se activa tras cargar pos1.js */ };
     }
 </script>
 
+<script src="assets/js/pos-refund-auth.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="pos1.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
 <script src="pos-offline-system.js?v=<?php echo htmlspecialchars($posUiVersion, ENT_QUOTES, 'UTF-8'); ?>"></script>
 

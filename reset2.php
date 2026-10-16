@@ -1,4 +1,7 @@
 <?php
+http_response_code(404);
+header('Content-Type: text/plain; charset=utf-8');
+exit;
 // ARCHIVO: reset.php
 require_once 'db.php';
 
@@ -148,4 +151,3 @@ try {
 
 </body>
 </html>
-

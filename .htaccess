@@ -1,5 +1,9 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
+    RewriteRule ^(?:backups|migrations|_deprecated|vendor|venv|wa_web_bridge)(?:/|$) - [F,L,NC]
+    # Endpoint JSON usado por el creador de productos; valida sesión admin y CSRF.
+    RewriteRule ^pos_newprod\.php$ - [L,NC]
+    RewriteRule (?:\.php(?:[0-9]+|[.~_-].*)|\.(?:sql|cfg|env|log|bak|save|old|orig|swp|tgz|tar\.gz|sql\.gz))$ - [F,L,NC]
 
     RewriteRule ^pos/?$ pos.php [QSA,L,NC]
     RewriteRule ^shop/?$ shop.php [QSA,L,NC]

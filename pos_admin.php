@@ -1,5 +1,6 @@
 <?php
 // ARCHIVO: /var/www/palweb/api/pos_admin.php
+require_once __DIR__ . '/admin_security.php';
 ini_set('display_errors', 0);
 ini_set('max_execution_time', 600);
 ini_set('memory_limit', '512M');
@@ -265,8 +266,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         if ($action === 'delete_local') {
-            $file = $_POST['filename'];
-            if (file_exists("$backupDir/$file")) unlink("$backupDir/$file");
+            $file = basename((string)($_POST['filename'] ?? ''));
+            $target = realpath($backupDir . '/' . $file);
+            if (!$target || dirname($target) !== realpath($backupDir) || !preg_match('/\.tar\.gz$/', $file)) {
+                throw new Exception('Respaldo inválido.');
+            }
+            unlink($target);
             $msg = "Archivo eliminado."; $msgType = "info";
         }
 
@@ -320,6 +325,8 @@ rsort($backups);
 ?><!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta name="pos-csrf-token" content="<?= htmlspecialchars(pos_security_ensure_csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+    <script src="assets/js/admin-csrf.js"></script>
     <meta charset="UTF-8">
     <title>Admin Panel | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -473,6 +480,7 @@ rsort($backups);
                 <p class="text-muted mb-0 small">Utilice esta herramienta si detecta discrepancias entre el historial y el stock actual.</p>
             </div>
             <form method="POST" onsubmit="return confirm('Esta accion recalculara todas las existencias. Continuar?');">
+                <?= admin_security_form_token() ?>
                 <input type="hidden" name="action" value="recalc_kardex">
                 <button class="btn btn-warning text-dark fw-bold"><i class="fas fa-sync me-1"></i> Sincronizar Stock Maestro</button>
             </form>
@@ -491,10 +499,12 @@ rsort($backups);
 
                 <div class="d-flex flex-wrap gap-2 mb-4">
                     <form method="POST" class="flex-fill">
+                        <?= admin_security_form_token() ?>
                         <input type="hidden" name="action" value="create_local">
                         <button class="btn btn-primary w-100 fw-bold"><i class="fas fa-file-archive me-1"></i> Crear Backup Local</button>
                     </form>
                     <form method="POST" class="flex-fill">
+                        <?= admin_security_form_token() ?>
                         <input type="hidden" name="action" value="download_sql">
                         <button class="btn btn-outline-dark w-100"><i class="fas fa-download me-1"></i> Descargar SQL</button>
                     </form>
@@ -517,16 +527,19 @@ rsort($backups);
                                     <td class="text-end text-nowrap">
                                         <a href="pos_admin.php?action=download_backup&file=<?php echo urlencode($name); ?>" class="btn btn-sm btn-success" title="Descargar .tar.gz"><i class="fas fa-download"></i></a>
                                         <form method="POST" class="d-inline ajax-local-restore-form">
+                                            <?= admin_security_form_token() ?>
                                             <input type="hidden" name="action" value="restore_local_dry_run">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
                                             <button class="btn btn-sm btn-outline-primary" title="Dry run"><i class="fas fa-vial"></i></button>
                                         </form>
                                         <form method="POST" class="d-inline ajax-local-restore-form" onsubmit="return confirm('Restaurar?');">
+                                            <?= admin_security_form_token() ?>
                                             <input type="hidden" name="action" value="restore_local">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
                                             <button class="btn btn-sm btn-warning" title="Restaurar"><i class="fas fa-undo"></i></button>
                                         </form>
                                         <form method="POST" class="d-inline" onsubmit="return confirm('Eliminar?');">
+                                            <?= admin_security_form_token() ?>
                                             <input type="hidden" name="action" value="delete_local">
                                             <input type="hidden" name="filename" value="<?php echo $name; ?>">
                                             <button class="btn btn-sm btn-outline-danger" title="Eliminar"><i class="fas fa-trash"></i></button>
@@ -542,6 +555,7 @@ rsort($backups);
                 <div class="mb-3">
                     <div class="section-title mb-2">Subir copia al servidor</div>
                     <form method="POST" enctype="multipart/form-data" class="d-flex flex-wrap gap-2">
+                        <?= admin_security_form_token() ?>
                         <input type="hidden" name="action" value="upload_backup">
                         <input type="file" name="backup_file" class="form-control" accept=".tar.gz,.tgz" required style="flex:1;">
                         <button class="btn btn-outline-success fw-bold"><i class="fas fa-cloud-upload-alt me-1"></i> Subir</button>
@@ -552,6 +566,7 @@ rsort($backups);
                 <div>
                     <div class="section-title mb-2">Restaurar externo</div>
                     <form method="POST" enctype="multipart/form-data" class="d-flex flex-wrap gap-2" id="externalRestoreForm">
+                        <?= admin_security_form_token() ?>
                         <input type="file" name="sql_file" class="form-control" accept=".sql,.tar.gz,.tgz" required style="flex:1;">
                         <button class="btn btn-outline-primary" name="action" value="upload_dry_run"><i class="fas fa-vial"></i> Dry-run</button>
                         <button class="btn btn-danger" name="action" value="upload_restore" onclick="return confirm('PELIGRO! Sobreescribira la BD.');"><i class="fas fa-upload"></i> Restaurar</button>

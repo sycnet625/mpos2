@@ -1,3 +1,8 @@
+<?php
+require_once __DIR__ . '/pos_security.php';
+pos_security_bootstrap_session();
+$kdsCsrfToken = pos_security_ensure_csrf_token();
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -446,7 +451,7 @@
             card.style.opacity = '0.7';
         }
         try {
-            await fetch(`pos_kitchen_api.php?action=update&id=${id}&status=${status}`);
+            await fetch('pos_kitchen_api.php?action=update', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': <?= json_encode($kdsCsrfToken) ?> }, body: JSON.stringify({ id, status }) });
             loadComandas(); 
         } catch (e) {
             console.error(e);

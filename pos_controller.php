@@ -19,6 +19,7 @@ try {
     $empresaID = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
     $sucursalID = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
     $almacenID = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
+    session_write_close();
     $cond[] = "p.id_empresa = {$empresaID}";
     $cond[] = "EXISTS (SELECT 1 FROM stock_almacen scope_stock
                         WHERE scope_stock.id_producto = p.codigo

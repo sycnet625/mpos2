@@ -1,8 +1,8 @@
 <?php
 header('Content-Type: application/json');
-require_once 'db.php';
-
 $method = $_SERVER['REQUEST_METHOD'];
+if ($method === 'POST') require_once __DIR__ . '/admin_security.php';
+require_once 'db.php';
 
 // GET: Listar categorías
 if ($method === 'GET') {

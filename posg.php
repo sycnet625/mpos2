@@ -11,6 +11,7 @@ require_once 'combo_helper.php';
 $almacenID = (int)($_SESSION['id_almacen'] ?? $config['id_almacen'] ?? 1);
 $sucursalID = (int)($_SESSION['id_sucursal'] ?? $config['id_sucursal'] ?? 1);
 $empresaID = (int)($_SESSION['id_empresa'] ?? $config['id_empresa'] ?? 1);
+session_write_close();
 
 // --- CARGA DE PRODUCTOS ---
 $prods = [];

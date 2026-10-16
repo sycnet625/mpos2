@@ -95,6 +95,10 @@ function pw_runtime_ensure_pos_context_tables(PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
         );
     }
+
+    if (pw_runtime_table_exists($pdo, 'users') && !pw_runtime_column_exists($pdo, 'users', 'pin_devolucion_hash')) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN pin_devolucion_hash VARCHAR(255) NULL AFTER pin");
+    }
 }
 
 function pw_runtime_ensure_default_location_ids(PDO $pdo, array &$config): void

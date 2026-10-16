@@ -2,8 +2,7 @@
 // ARCHIVO: /var/www/palweb/api/pos_expenses.php
 // VERSIÓN: GESTOR DE GASTOS GOLD (CON MODALES Y NÓMINA)
 
-session_start();
-// if (!isset($_SESSION['admin_logged_in'])) header('Location: login.php'); 
+require_once __DIR__ . '/admin_security.php';
 require_once 'db.php';
 
 // --- CONFIGURACIÓN Y SUCURSAL ---
@@ -88,6 +87,8 @@ $plantillasRapidas = [
 <!DOCTYPE html>
 <html lang="es">
 <head>
+    <meta name="pos-csrf-token" content="<?= htmlspecialchars(pos_security_ensure_csrf_token(), ENT_QUOTES, 'UTF-8') ?>">
+    <script src="assets/js/admin-csrf.js"></script>
     <meta charset="UTF-8">
     <title>Control de Gastos | <?= htmlspecialchars(config_loader_system_name()) ?></title>
     <link href="assets/css/bootstrap.min.css" rel="stylesheet">

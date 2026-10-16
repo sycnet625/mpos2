@@ -6,6 +6,7 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 require_once 'db.php';
 require_once 'config_loader.php';
 require_once 'accounting_helpers.php';
+session_write_close();
 
 // CONFIGURACIÓN MÍNIMA
 $id_sucursal = 1; 
@@ -38,17 +39,19 @@ try {
     // 1. Desglose
     $wReal   = ventas_reales_where_clause('v');
     $wRealVc = ventas_reales_where_clause('vc');
+    $wIngreso = ventas_ingresos_where_clause('v');
+    $wIngresoVc = ventas_ingresos_where_clause('vc');
     $sqlDaily = "SELECT
                     dates.dia,
                     COALESCE((SELECT SUM(v.total) 
                               FROM ventas_cabecera v LEFT JOIN caja_sesiones s ON v.id_caja = s.id 
-                              WHERE v.id_empresa = ? AND v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) = dates.dia AND $wReal), 0) as total_venta,
+                              WHERE v.id_empresa = ? AND v.id_sucursal = ? AND IFNULL(s.fecha_contable, DATE(v.fecha)) = dates.dia AND v.total > 0 AND $wIngreso), 0) as total_venta,
                     COALESCE((SELECT SUM(vd.cantidad * COALESCE(vd.costo_unitario, p.costo))
                               FROM ventas_detalle vd 
                               JOIN ventas_cabecera vc ON vd.id_venta_cabecera = vc.id 
                               LEFT JOIN caja_sesiones sc ON vc.id_caja = sc.id
                               JOIN productos p ON vd.id_producto = p.codigo
-                              WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) = dates.dia AND $wRealVc), 0) as total_costo,
+                              WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) = dates.dia AND vc.total > 0 AND $wIngresoVc), 0) as total_costo,
                     COALESCE((SELECT SUM(monto) FROM gastos_historial WHERE id_empresa = ? AND id_sucursal = ? AND DATE(fecha) = dates.dia), 0) as total_gasto
                  FROM (
                     SELECT DISTINCT IFNULL(s.fecha_contable, DATE(v.fecha)) as dia 
@@ -78,7 +81,7 @@ try {
                            JOIN ventas_cabecera vc ON vp.id_venta_cabecera = vc.id 
                            LEFT JOIN caja_sesiones sc ON vc.id_caja = sc.id
                            WHERE vc.id_empresa = ? AND vc.id_sucursal = ? AND IFNULL(sc.fecha_contable, DATE(vc.fecha)) BETWEEN ? AND ?
-                           AND " . ventas_reales_where_clause('vc') . " 
+                           AND " . ventas_ingresos_where_clause('vc') . "
                            GROUP BY vp.metodo_pago");
     $stmt->execute([$id_empresa, $id_sucursal, $fecha_inicio, $fecha_fin]);
     $payments = $stmt->fetchAll();
@@ -134,7 +137,7 @@ try {
             }
             $sessionSummary[$sessionId]['tickets'][] = $ticket;
             $tVal = floatval($ticket['total'] ?? 0);
-            if ($tVal > 0) {
+            if ($tVal > 0 && !ticket_es_gasto_casa($ticket)) {
                 $sessionSummary[$sessionId]['total'] += $tVal;
             }
         }
@@ -227,7 +230,8 @@ try {
              JOIN productos p ON vd.id_producto = p.codigo
              WHERE v.id_empresa = ? AND v.id_sucursal = ?
                AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
-               AND " . ventas_reales_where_clause('v') . "
+               AND v.total > 0
+               AND " . ventas_ingresos_where_clause('v') . "
              GROUP BY p.codigo, p.nombre, p.categoria
              ORDER BY p.categoria ASC, p.nombre ASC"
         );

@@ -185,7 +185,7 @@ try {
     }
 
     // Desglose de transferencias por día (columna específica de la tabla)
-    $wRealVc = ventas_reales_where_clause('vc');
+    $wRealVc = ventas_ingresos_where_clause('vc');
     $stmtTrf = $pdo->prepare(
         "SELECT IFNULL(cs.fecha_contable, DATE(vc.fecha)) AS dia,
                 COALESCE(SUM(vp.monto), 0) AS total
@@ -280,7 +280,7 @@ try {
             }
             $sessionSummary[$sessionId]['tickets'][] = $ticket;
             $ticketVal = floatval($ticket['total'] ?? 0);
-            if ($ticketVal > 0) {
+            if ($ticketVal > 0 && !ticket_es_gasto_casa($ticket)) {
                 $sessionSummary[$sessionId]['total'] += $ticketVal;
             }
         }
@@ -362,7 +362,7 @@ try {
                     if ($ticketTotal > 0) {
                         $fullCanceledCount++;
                     }
-                } else {
+                } elseif (!ticket_es_gasto_casa($ticket)) {
                     $totalReal += $ticketTotal;
                 }
 
@@ -383,10 +383,11 @@ try {
              FROM ventas_detalle vd
              JOIN ventas_cabecera v ON vd.id_venta_cabecera = v.id
              LEFT JOIN caja_sesiones s ON v.id_caja = s.id
-             JOIN productos p ON vd.id_producto = p.codigo
+               JOIN productos p ON vd.id_producto = p.codigo
              WHERE v.id_empresa = ? AND v.id_sucursal = ? AND v.id_almacen = ?
                AND IFNULL(s.fecha_contable, DATE(v.fecha)) BETWEEN ? AND ?
-               AND " . ventas_reales_where_clause('v') . "
+               AND v.total > 0
+               AND " . ventas_ingresos_where_clause('v') . "
              GROUP BY p.codigo, p.nombre, p.categoria
              ORDER BY p.categoria ASC, p.nombre ASC"
         );

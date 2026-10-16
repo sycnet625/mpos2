@@ -9,6 +9,7 @@ require_once 'config_loader.php';
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
     header('Location: login.php'); exit;
 }
+session_write_close();
 
 // Asegurar tabla de control de migraciones
 $pdo->exec("CREATE TABLE IF NOT EXISTS `migrations` (
@@ -74,7 +75,7 @@ $allMigrations = [
 ['id'=>'m006_caja_cajeros','module'=>'Core POS','icon'=>'fa-cash-register','description'=>'caja_sesiones y pos_cashiers',
 'sqls'=>[
 "CREATE TABLE IF NOT EXISTS `caja_sesiones` (`id` INT AUTO_INCREMENT PRIMARY KEY,`id_usuario` INT DEFAULT NULL,`id_empresa` INT DEFAULT 1,`nombre_cajero` VARCHAR(100) DEFAULT NULL,`fecha_apertura` DATETIME DEFAULT current_timestamp(),`fecha_cierre` DATETIME DEFAULT NULL,`monto_inicial` DECIMAL(12,2) DEFAULT 0,`monto_final_sistema` DECIMAL(12,2) DEFAULT 0,`monto_final_real` DECIMAL(12,2) DEFAULT NULL,`diferencia` DECIMAL(12,2) DEFAULT 0,`estado` VARCHAR(20) DEFAULT 'abierta',`fecha_contable` DATE DEFAULT NULL,`id_sucursal` INT DEFAULT 1,`id_almacen` INT DEFAULT 1,`nota` TEXT DEFAULT NULL,KEY `idx_caja_estado` (`estado`),KEY `idx_caja_empresa` (`id_empresa`,`id_sucursal`,`id_almacen`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-"CREATE TABLE IF NOT EXISTS `pos_cashiers` (`id` INT AUTO_INCREMENT PRIMARY KEY,`nombre` VARCHAR(100) NOT NULL,`pin` VARCHAR(10) NOT NULL,`rol` VARCHAR(20) NOT NULL DEFAULT 'cajero',`id_empresa` INT NOT NULL,`id_sucursal` INT NOT NULL,`id_almacen` INT NOT NULL,`activo` TINYINT(1) NOT NULL DEFAULT 1,`created_at` TIMESTAMP DEFAULT current_timestamp(),`updated_at` TIMESTAMP DEFAULT current_timestamp() ON UPDATE current_timestamp(),UNIQUE KEY `uniq_pin` (`pin`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+"CREATE TABLE IF NOT EXISTS `pos_cashiers` (`id` INT AUTO_INCREMENT PRIMARY KEY,`nombre` VARCHAR(100) NOT NULL,`pin` VARCHAR(255) NOT NULL,`rol` VARCHAR(20) NOT NULL DEFAULT 'cajero',`id_empresa` INT NOT NULL,`id_sucursal` INT NOT NULL,`id_almacen` INT NOT NULL,`activo` TINYINT(1) NOT NULL DEFAULT 1,`created_at` TIMESTAMP DEFAULT current_timestamp(),`updated_at` TIMESTAMP DEFAULT current_timestamp() ON UPDATE current_timestamp(),UNIQUE KEY `uniq_pin` (`pin`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 ]],
 
 // ── MÓDULO: Operaciones POS ───────────────────────────────────────────────────

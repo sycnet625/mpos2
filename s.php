@@ -1451,7 +1451,7 @@ ob_end_flush();
                 <div class="product-footer">
                     <div class="product-price">$<?= number_format($p['precio'], 2) ?></div>
                     <button class="btn-add-cart" 
-                            onclick="addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)"
+                            onclick="addToCart(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode((string)$p['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= (float)$p['precio'] ?>)"
                             <?= !$hasStock ? 'disabled' : '' ?>>
                         <i class="fas <?= $hasStock ? 'fa-cart-plus' : 'fa-ban' ?>"></i>
                         <?= $hasStock ? 'Agregar' : 'Agotado' ?>

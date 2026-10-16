@@ -54,7 +54,7 @@ update_application_config() {
     $cfg = json_decode((string)$raw, true);
     if (!is_array($cfg)) { fwrite(STDERR, "pos.cfg no contiene JSON válido\n"); exit(1); }
     $primary = trim((string)getenv("PALWEB_PRIMARY_DOMAIN"));
-    $domains = array_values(array_filter(array_map("trim", explode(",", (string)getenv("PALWEB_DOMAIN_LIST"))));
+    $domains = array_values(array_filter(array_map("trim", explode(",", (string)getenv("PALWEB_DOMAIN_LIST")))));
     $origin = "https://" . $primary;
     $cfg["website"] = $origin;
     if (array_key_exists("sitio_web", $cfg)) $cfg["sitio_web"] = $origin;

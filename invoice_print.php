@@ -4,7 +4,6 @@
 // Mantiene el diseño exacto "Hoja Carta" del generador.
 require_once 'db.php';
 require_once 'config_loader.php';
-session_start();
 
 // Validar ID
 if (!isset($_GET['id'])) { die("ID de factura no especificado."); }

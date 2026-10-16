@@ -43,6 +43,8 @@ marinero/
 .claude/
 .claude.json
 .codex/
+.codex
+.ssh/
 .term_pipes/
 .palweb_ai_runtime/
 .pos_schema_v2

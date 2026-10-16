@@ -55,14 +55,22 @@ try {
 
     // KPIs principales
     $kpiSales  = $m[BM_VENTAS]['total'] - $m[BM_VENTAS]['devoluciones']['valor'];
-    $kpiProfit = $m[BM_VENTAS]['ganancia_bruta'] - ($m[BM_VENTAS]['devoluciones']['valor'] - $m[BM_VENTAS]['devoluciones']['valor_costo']);
+    // BM_VENTAS ya calcula la ganancia limpia usando únicamente tickets
+    // positivos que no son devoluciones ni gastos de casa.
+    $kpiProfit = $m[BM_VENTAS]['ganancia_bruta'];
     $kpiMargin = $kpiSales > 0 ? ($kpiProfit / $kpiSales) * 100 : 0.0;
 
     // Construir serie de 30 días (incluye días sin actividad como ceros)
     $dates = [];
     for ($i = 29; $i >= 0; $i--) {
         $date = date('Y-m-d', strtotime("-$i days"));
-        $dates[$date] = ['venta' => 0.0, 'ganancia' => 0.0, 'label' => date('d/m', strtotime($date))];
+        $dates[$date] = [
+            'venta' => 0.0,
+            'ganancia' => 0.0,
+            'gastos' => 0.0,
+            'tarjeta_gasto' => 0.0,
+            'label' => date('d/m', strtotime($date)),
+        ];
     }
     foreach ($m[BM_SERIES] as $row) {
         if (isset($dates[$row['fecha']])) {
@@ -70,9 +78,103 @@ try {
             $dates[$row['fecha']]['ganancia'] = $row['ganancia'];
         }
     }
+
+    // Gastos operativos diarios del mismo contexto de empresa/sucursal.
+    // Se consulta aquí explícitamente porque BM_SERIES conserva compatibilidad
+    // con instalaciones antiguas donde gastos_historial no tenía id_empresa.
+    try {
+        $filtroSucursalGasto = $isGlobal ? '' : ' AND id_sucursal = ?';
+        $paramsGasto = [$EMP_ID, $fechaInicio, $fechaFin];
+        if (!$isGlobal) $paramsGasto[] = $SUC_ID;
+        $stmtGasto = $pdo->prepare(
+            "SELECT DATE(fecha) AS dia, COALESCE(SUM(monto), 0) AS total
+             FROM gastos_historial
+             WHERE id_empresa = ? AND DATE(fecha) BETWEEN ? AND ?{$filtroSucursalGasto}
+             GROUP BY DATE(fecha)"
+        );
+        $stmtGasto->execute($paramsGasto);
+        foreach ($stmtGasto->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $date = (string)$row['dia'];
+            if (isset($dates[$date])) $dates[$date]['gastos'] = (float)$row['total'];
+        }
+    } catch (Throwable $e) {
+        // Mantener los valores del motor central si la instalación todavía no
+        // posee el esquema multitenant de gastos_historial.
+        foreach ($m[BM_SERIES] as $row) {
+            if (isset($dates[$row['fecha']])) {
+                $dates[$row['fecha']]['gastos'] = $row['gastos'] ?? 0.0;
+            }
+        }
+    }
+
+    // Importe diario cobrado como Tarjeta/Gasto. Se usa ventas_pagos cuando
+    // existe para soportar pagos mixtos y se conserva el método de cabecera
+    // como respaldo para tickets antiguos.
+    $tarjetaGastoPorDia = [];
+    $diaVentaSql = "IFNULL(cs.fecha_contable, DATE(v.fecha))";
+    $filtroSucursalPago = $isGlobal ? '' : ' AND v.id_sucursal = ?';
+    $paramsPago = [$EMP_ID, $fechaInicio, $fechaFin];
+    if (!$isGlobal) $paramsPago[] = $SUC_ID;
+    try {
+        $sqlTarjeta = "SELECT {$diaVentaSql} AS dia,
+                              COALESCE(SUM(CASE
+                                  WHEN vp.id IS NULL
+                                      THEN CASE WHEN LOWER(COALESCE(v.metodo_pago, '')) LIKE '%tarjet%'
+                                                   OR LOWER(COALESCE(v.metodo_pago, '')) LIKE '%gasto%'
+                                                THEN v.total ELSE 0 END
+                                  WHEN LOWER(COALESCE(vp.metodo_pago, '')) LIKE '%tarjet%'
+                                      OR LOWER(COALESCE(vp.metodo_pago, '')) LIKE '%gasto%'
+                                      THEN vp.monto ELSE 0
+                              END), 0) AS total
+                       FROM ventas_cabecera v
+                       LEFT JOIN caja_sesiones cs
+                              ON cs.id = COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0))
+                       LEFT JOIN ventas_pagos vp ON vp.id_venta_cabecera = v.id
+                       WHERE v.id_empresa = ?
+                         AND {$diaVentaSql} BETWEEN ? AND ?
+                         AND v.total > 0
+                         AND " . ventas_reales_where_clause('v') . $filtroSucursalPago . "
+                       GROUP BY dia";
+        $stmtTarjeta = $pdo->prepare($sqlTarjeta);
+        $stmtTarjeta->execute($paramsPago);
+        foreach ($stmtTarjeta->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $tarjetaGastoPorDia[(string)$row['dia']] = (float)$row['total'];
+        }
+    } catch (Throwable $e) {
+        // Instalaciones antiguas sin ventas_pagos: usar el método de cabecera.
+        try {
+            $sqlTarjetaLegacy = "SELECT {$diaVentaSql} AS dia, COALESCE(SUM(v.total), 0) AS total
+                                 FROM ventas_cabecera v
+                                 LEFT JOIN caja_sesiones cs
+                                        ON cs.id = COALESCE(NULLIF(v.id_sesion_caja, 0), NULLIF(v.id_caja, 0))
+                                 WHERE v.id_empresa = ?
+                                   AND {$diaVentaSql} BETWEEN ? AND ?
+                                   AND v.total > 0
+                                   AND (LOWER(COALESCE(v.metodo_pago, '')) LIKE '%tarjet%'
+                                        OR LOWER(COALESCE(v.metodo_pago, '')) LIKE '%gasto%')
+                                   AND " . ventas_reales_where_clause('v') . $filtroSucursalPago . "
+                                 GROUP BY dia";
+            $stmtTarjetaLegacy = $pdo->prepare($sqlTarjetaLegacy);
+            $stmtTarjetaLegacy->execute($paramsPago);
+            foreach ($stmtTarjetaLegacy->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $tarjetaGastoPorDia[(string)$row['dia']] = (float)$row['total'];
+            }
+        } catch (Throwable $legacyError) {
+            // La gráfica continúa mostrando ventas y ganancia aunque falte
+            // la tabla histórica de desglose de pagos.
+        }
+    }
+    foreach ($tarjetaGastoPorDia as $date => $amount) {
+        if (isset($dates[$date])) $dates[$date]['tarjeta_gasto'] = max(0.0, $amount);
+    }
+    $kpiTarjetaGasto      = array_sum(array_column($dates, 'tarjeta_gasto'));
+    $kpiGastosOperativos  = array_sum(array_column($dates, 'gastos'));
     $chartLabels = array_column($dates, 'label');
+    // BM_SERIES ya excluye los tickets Tarjeta/Gasto de la venta.
     $chartSales  = array_column($dates, 'venta');
+    $chartTarjetaGasto = array_column($dates, 'tarjeta_gasto');
     $chartProfit = array_column($dates, 'ganancia');
+    $chartExpenses = array_column($dates, 'gastos');
 
     // Productos top/bottom — con filtro es_elaborado si aplica
     $topGanancia = $m[BM_PRODUCTOS]['top_por_ganancia'];
@@ -133,8 +235,8 @@ try {
         </div>
     </section>
 
-    <div class="row g-4 mb-4">
-        <div class="col-md-4">
+    <div class="row row-cols-1 row-cols-sm-2 row-cols-xl-5 g-4 mb-4">
+        <div class="col">
             <div class="glass-card p-4 h-100">
                 <div class="stat-box">
                     <div class="tiny text-muted">Ventas Totales</div>
@@ -142,7 +244,7 @@ try {
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col">
             <div class="glass-card p-4 h-100">
                 <div class="stat-box">
                     <div class="tiny text-muted">Ganancia Neta</div>
@@ -150,11 +252,27 @@ try {
                 </div>
             </div>
         </div>
-        <div class="col-md-4">
+        <div class="col">
             <div class="glass-card p-4 h-100">
                 <div class="stat-box">
                     <div class="tiny text-muted">Rentabilidad</div>
                     <div class="summary-total text-warning"><?php echo number_format($kpiMargin, 1); ?>%</div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="glass-card p-4 h-100">
+                <div class="stat-box">
+                    <div class="tiny text-muted">Tarjeta/Gasto</div>
+                    <div class="summary-total text-warning">$<?php echo number_format($kpiTarjetaGasto, 2); ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="glass-card p-4 h-100">
+                <div class="stat-box">
+                    <div class="tiny text-muted">Gastos Operativos</div>
+                    <div class="summary-total text-danger">$<?php echo number_format($kpiGastosOperativos, 2); ?></div>
                 </div>
             </div>
         </div>
@@ -164,9 +282,12 @@ try {
         <div class="d-flex justify-content-between align-items-center mb-3">
             <div>
                 <div class="section-title">Grafico</div>
-                <h2 class="h5 fw-bold mb-0">Evolucion Diaria Administrativa</h2>
+                <h2 class="h5 fw-bold mb-0">Evolucion Diaria: Ventas, Tarjeta/Gasto y Gastos</h2>
             </div>
             <span class="soft-pill"><?php echo $tituloVista; ?></span>
+        </div>
+        <div class="small text-muted mb-2">
+            La barra azul representa las ventas reales, sin consumos de casa. La barra amarilla muestra Tarjeta/Gasto fuera de las ventas. La línea roja muestra gastos operativos diarios.
         </div>
         <div style="height: 350px;"><canvas id="profitChart"></canvas></div>
     </div>
@@ -253,11 +374,65 @@ try {
         data: {
             labels: <?php echo json_encode($chartLabels); ?>,
             datasets: [
-                { label: 'Ventas ($)', data: <?php echo json_encode($chartSales); ?>, backgroundColor: 'rgba(78, 115, 223, 0.8)', borderRadius: 4 },
-                { label: 'Ganancia ($)', data: <?php echo json_encode($chartProfit); ?>, backgroundColor: 'rgba(28, 200, 138, 0.9)', borderRadius: 4 }
+                {
+                    label: 'Ventas reales ($)',
+                    data: <?php echo json_encode($chartSales); ?>,
+                    backgroundColor: 'rgba(78, 115, 223, 0.82)',
+                    borderRadius: 4,
+                    stack: 'ventas'
+                },
+                {
+                    label: 'Tarjeta/Gasto ($)',
+                    data: <?php echo json_encode($chartTarjetaGasto); ?>,
+                    backgroundColor: 'rgba(246, 194, 62, 0.92)',
+                    borderColor: '#d39e00',
+                    borderWidth: 1,
+                    borderRadius: 4,
+                    stack: 'gastos_casa'
+                },
+                {
+                    label: 'Ganancia ($)',
+                    data: <?php echo json_encode($chartProfit); ?>,
+                    backgroundColor: 'rgba(28, 200, 138, 0.9)',
+                    borderRadius: 4,
+                    stack: 'ganancia'
+                },
+                {
+                    type: 'line',
+                    label: 'Gastos operativos ($)',
+                    data: <?php echo json_encode($chartExpenses); ?>,
+                    borderColor: '#dc3545',
+                    backgroundColor: 'rgba(220, 53, 69, 0.14)',
+                    pointBackgroundColor: '#dc3545',
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    borderWidth: 2,
+                    tension: 0.25,
+                    fill: false,
+                    yAxisID: 'y'
+                }
             ]
         },
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { stacked: true },
+                y: { beginAtZero: true, stacked: true, ticks: { callback: value => '$' + Number(value).toLocaleString('es-ES') } }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        footer: items => {
+                            const index = items[0]?.dataIndex ?? -1;
+                            const total = index >= 0 ? Number(<?php echo json_encode(array_column($dates, 'venta')); ?>[index] || 0) : 0;
+                            return 'Ventas totales: $' + total.toLocaleString('es-ES', { minimumFractionDigits: 2 });
+                        }
+                    }
+                }
+            }
+        }
     });
 </script>
 

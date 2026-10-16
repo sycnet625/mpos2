@@ -1614,12 +1614,12 @@ ob_end_flush();
                     </div>
                     <?php if ($hasStock): ?>
                         <button class="btn-add-cart"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>)">
+                                onclick="event.stopPropagation(); addToCart(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode((string)$p['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= (float)$p['precio'] ?>)">
                             <span data-i18n="prod.add">+ Agregar</span>
                         </button>
                     <?php elseif ($esReservable): ?>
                         <button class="btn-add-cart" style="background:#f59e0b;border-color:#f59e0b;font-size:.78rem;"
-                                onclick="event.stopPropagation(); addToCart('<?= $p['codigo'] ?>', '<?= htmlspecialchars($p['nombre'], ENT_QUOTES) ?>', <?= $p['precio'] ?>, true)">
+                                onclick="event.stopPropagation(); addToCart(<?= htmlspecialchars(json_encode((string)$p['codigo'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= htmlspecialchars(json_encode((string)$p['nombre'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8') ?>, <?= (float)$p['precio'] ?>, true)">
                             <span data-i18n="prod.reserve">📅 Reservar</span>
                         </button>
                     <?php else: ?>

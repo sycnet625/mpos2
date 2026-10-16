@@ -272,6 +272,17 @@ function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, arra
     $st->execute($bindTickets);
     $r['tickets'] = $st->fetchAll(PDO::FETCH_ASSOC);
 
+    $gastosCasaTicketIds = [];
+    $ventasPositivasTicketIds = [];
+    foreach ($r['tickets'] as $ticket) {
+        if (ticket_es_gasto_casa($ticket)) {
+            $gastosCasaTicketIds[(int)$ticket['id']] = true;
+        }
+        if ((float)$ticket['total'] > 0 && !ticket_es_gasto_casa($ticket)) {
+            $ventasPositivasTicketIds[(int)$ticket['id']] = true;
+        }
+    }
+
     $sqlDet = "SELECT d.*, p.nombre, p.codigo, COALESCE(d.costo_unitario, p.costo) AS costo, p.categoria
                FROM ventas_detalle d
                JOIN productos p ON d.id_producto = p.codigo
@@ -294,15 +305,18 @@ function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, arra
     $sd->execute($bindDet);
     $r['detalles'] = $sd->fetchAll(PDO::FETCH_ASSOC);
 
-    $r['totalVentaNeta'] = array_sum(array_column($r['tickets'], 'total'));
+    $r['totalVentaNeta'] = 0.0;
 
     $prodAgg = [];
     foreach ($r['detalles'] as $d) {
         $r['detallesPorTicket'][$d['id_venta_cabecera']][] = $d;
-        if ($d['cantidad'] > 0) {
-            $r['totalCostoPositivos']        += ($d['cantidad'] * $d['costo']);
-            $r['totalVentaBrutaPositivos']   += ($d['cantidad'] * $d['precio']);
+        if ($d['cantidad'] > 0 && isset($ventasPositivasTicketIds[(int)$d['id_venta_cabecera']])) {
+            if (!isset($gastosCasaTicketIds[(int)$d['id_venta_cabecera']])) {
+                $r['totalCostoPositivos']      += ($d['cantidad'] * $d['costo']);
+                $r['totalVentaBrutaPositivos'] += ($d['cantidad'] * $d['precio']);
+            }
         }
+        if ($d['cantidad'] <= 0 || isset($gastosCasaTicketIds[(int)$d['id_venta_cabecera']])) continue;
         $k = $d['codigo'];
         if (!isset($prodAgg[$k])) $prodAgg[$k] = ['codigo'=>$k,'nombre'=>$d['nombre'],'cantidad'=>0,'monto'=>0,'ganancia'=>0];
         $prodAgg[$k]['cantidad'] += floatval($d['cantidad']);
@@ -315,15 +329,19 @@ function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, arra
     $cliAgg = [];
     $cajAgg = [];
     foreach ($r['tickets'] as $t) {
-        $r['ventasReales'] += $t['total'];  // neto: incluye devoluciones negativas
-        if ($t['total'] > 0) $r['conteoTickets']++;
+        $esGastoCasa = ticket_es_gasto_casa($t);
+        if (!$esGastoCasa) {
+            $r['totalVentaNeta'] += (float)$t['total'];
+            $r['ventasReales'] += (float)$t['total'];
+        }
+        if ($t['total'] > 0 && !$esGastoCasa) $r['conteoTickets']++;
         if ($t['total'] < 0 || $t['cliente_nombre'] === 'DEVOLUCIÓN') {
             $r['cantDevoluciones']++; $r['valorDevoluciones'] += abs($t['total']);
         }
         $mp = $t['metodo_pago'] ?: 'Otro';
         if (!isset($r['metodosPago'][$mp])) $r['metodosPago'][$mp] = 0;
         $r['metodosPago'][$mp] += $t['total'];
-        if ($t['total'] > 0) {
+        if ($t['total'] > 0 && !$esGastoCasa) {
             $cn = $t['cliente_nombre'] ?: '—';
             if (!isset($cliAgg[$cn])) $cliAgg[$cn] = ['cliente'=>$cn,'tickets'=>0,'monto'=>0];
             $cliAgg[$cn]['tickets']++; $cliAgg[$cn]['monto'] += $t['total'];
@@ -333,7 +351,7 @@ function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, arra
     $r['topClientes'] = array_slice(array_values($cliAgg), 0, 10);
     $r['ganancia'] = $r['totalVentaBrutaPositivos'] - $r['totalCostoPositivos'];
     $r['margen']   = $r['totalVentaBrutaPositivos'] != 0 ? ($r['ganancia'] / $r['totalVentaBrutaPositivos']) * 100 : 0;
-    $r['ventasRealesNeta'] = $r['totalVentaNeta'] - $r['valorDevoluciones'];
+    $r['ventasRealesNeta'] = $r['totalVentaNeta'];
 
     $sesByCaja = [];
     foreach ($r['sesiones'] as $s) {
@@ -358,8 +376,9 @@ function calcularSet(PDO $pdo, array $ids, int $empresaID, int $sucursalID, arra
     foreach ($r['tickets'] as $t) {
         $cn = $sesByCaja[$t['id_caja']] ?? '—';
         if (!isset($cajAgg[$cn])) $cajAgg[$cn] = ['cajero'=>$cn,'sesiones'=>0,'tickets'=>0,'ventas'=>0,'devoluciones'=>0,'diferencia'=>0];
-        if ($t['total'] > 0) $cajAgg[$cn]['tickets']++;
-        $cajAgg[$cn]['ventas'] += $t['total'];
+        $esGastoCasa = ticket_es_gasto_casa($t);
+        if ($t['total'] > 0 && !$esGastoCasa) $cajAgg[$cn]['tickets']++;
+        if (!$esGastoCasa) $cajAgg[$cn]['ventas'] += $t['total'];
         if ($t['total'] < 0) $cajAgg[$cn]['devoluciones'] += abs($t['total']);
     }
     usort($cajAgg, fn($a,$b)=>$b['ventas']<=>$a['ventas']);

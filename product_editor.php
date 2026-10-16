@@ -1,5 +1,6 @@
 <?php
 // ARCHIVO: product_editor.php v3.3 — Editor completo de producto
+require_once __DIR__ . '/admin_security.php';
 
 ini_set('display_errors', 0);
 require_once 'db.php';
@@ -178,6 +179,7 @@ $etiqColores = ['#ef4444'=>'Rojo','#f97316'=>'Naranja','#eab308'=>'Amarillo','#2
 ?>
 
 <form id="formEditProduct" class="p-2">
+    <?= admin_security_form_token() ?>
     <input type="hidden" name="codigo" value="<?php echo htmlspecialchars($p['codigo']); ?>">
 
     <!-- ═══════════════════════════════════════════════════

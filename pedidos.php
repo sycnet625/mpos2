@@ -300,7 +300,7 @@ function getStatusBadge($estado) {
             const resp = await fetch('update_order.php', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, estado, nota })
+                body: JSON.stringify({ id, estado, nota, csrf_token: window.PW_CSRF_TOKEN || '' })
             });
             
             const result = await resp.json();
@@ -331,4 +331,3 @@ function getStatusBadge($estado) {
 <?php include_once 'menu_master.php'; ?>
 </body>
 </html>
-
