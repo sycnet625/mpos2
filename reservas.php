@@ -4,6 +4,9 @@ ini_set('display_errors', 0);
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/config_loader.php';
+require_once __DIR__ . '/pos_security.php';
+require_once __DIR__ . '/cakes_admin.php';
+$cakeAdminCsrf = pos_security_ensure_csrf_token();
 $pushNotifyFile = __DIR__ . '/push_notify.php';
 if (!file_exists($pushNotifyFile)) {
     $pushNotifyFile = dirname(__DIR__) . '/push_notify.php';
@@ -13,6 +16,10 @@ require_once $pushNotifyFile;
 $sucursalID = intval($config['id_sucursal']);
 $idAlmacen  = intval($config['id_almacen']);
 $empID      = intval($config['id_empresa']);
+if (isset($_GET['cakes']) && $_GET['cakes'] === '1' && ($_SESSION['admin_logged_in'] ?? false) !== true) {
+    http_response_code(403);
+    exit('Se requieren permisos de administrador.');
+}
 
 // Migración automática: columna de canal de origen
 $pdo->exec("ALTER TABLE ventas_cabecera ADD COLUMN IF NOT EXISTS canal_origen VARCHAR(30) DEFAULT 'POS'");
@@ -30,8 +37,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $input['action'] ?? '';
 
     try {
+        if ($action !== 'cake_transition' && !empty($input['id'])) {
+            $cakeGuard = $pdo->prepare("SELECT 1 FROM ventas_cabecera WHERE id=? AND id_empresa=? AND canal_origen='Web Cakes'");
+            $cakeGuard->execute([(int)$input['id'], $empID]);
+            if ($cakeGuard->fetchColumn()) {
+                if (($_SESSION['admin_logged_in'] ?? false) !== true) pos_security_error('Se requieren permisos de administrador.', 403);
+                if ($action !== 'get_detail') pos_security_require_csrf($input);
+            }
+        }
         // ── CREAR ─────────────────────────────────────────────────────────────
-        if ($action === 'create') {
+        if ($action === 'cake_transition') {
+            pos_security_require_auth();
+            pos_security_require_csrf($input);
+            if (($_SESSION['admin_logged_in'] ?? false) !== true) pos_security_error('Se requieren permisos de administrador.', 403);
+            cakes_change_status($pdo, (int)($input['id'] ?? 0), $empID, $sucursalID, (string)($input['estado'] ?? ''));
+            echo json_encode(['status'=>'success']);
+        }
+        elseif ($action === 'cake_abono') {
+            if (($_SESSION['admin_logged_in'] ?? false) !== true) pos_security_error('Se requieren permisos de administrador.', 403);
+            pos_security_require_csrf($input);
+            cakes_add_deposit($pdo, (int)($input['id'] ?? 0), $empID, $sucursalID, (string)($input['monto'] ?? ''));
+            echo json_encode(['status'=>'success']);
+        }
+        elseif ($action === 'create') {
             $clienteNombre = safeStr($input['cliente_nombre'] ?? 'Sin nombre', 100);
             $clienteTel    = safeStr($input['cliente_telefono'] ?? '', 50);
             $clienteDir    = safeStr($input['cliente_direccion'] ?? '', 255);
@@ -373,6 +401,7 @@ if (isset($_GET['action'])) {
     } elseif ($_GET['action'] === 'month_data') {
         $year  = intval($_GET['year']  ?? date('Y'));
         $month = intval($_GET['month'] ?? date('n'));
+        $cakesOnly = isset($_GET['cakes']) && $_GET['cakes'] === '1';
         $stmt  = $pdo->prepare("SELECT id, cliente_nombre, cliente_telefono,
             fecha_reserva, total, abono,
             (total - COALESCE(abono,0)) AS deuda,
@@ -381,7 +410,7 @@ if (isset($_GET['action'])) {
             metodo_pago, notas
             FROM ventas_cabecera
             WHERE tipo_servicio='reserva' AND id_sucursal=? AND id_empresa=?
-              AND YEAR(fecha_reserva)=? AND MONTH(fecha_reserva)=?
+              AND YEAR(fecha_reserva)=? AND MONTH(fecha_reserva)=? " . ($cakesOnly ? "AND canal_origen='Web Cakes'" : (($_SESSION['admin_logged_in'] ?? false) === true ? '' : "AND COALESCE(canal_origen,'') <> 'Web Cakes'")) . "
             ORDER BY fecha_reserva ASC");
         $stmt->execute([$sucursalID, $empID, $year, $month]);
         echo json_encode($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -413,7 +442,7 @@ if (isset($_GET['action'])) {
             LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ? AND sa.id_sucursal = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
             WHERE vc.tipo_servicio IN ('reserva','Reserva')
-              AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
+              AND (vc.estado_reserva IN ('PENDIENTE','CONFIRMADO','EN_PREPARACION','LISTO','EN_CAMINO') OR vc.estado_reserva IS NULL)
               AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
               AND COALESCE(p.es_servicio, 0) = 0
             GROUP BY vd.id_producto, vd.nombre_producto
@@ -439,7 +468,7 @@ if (isset($_GET['action'])) {
             LEFT JOIN stock_almacen sa ON sa.id_producto = vd.id_producto AND sa.id_almacen = ? AND sa.id_sucursal = ?
             LEFT JOIN productos p ON p.codigo = vd.id_producto
             WHERE vc.tipo_servicio IN ('reserva','Reserva')
-              AND (vc.estado_reserva IN ('PENDIENTE','EN_PREPARACION','EN_CAMINO') OR vc.estado_reserva IS NULL)
+              AND (vc.estado_reserva IN ('PENDIENTE','CONFIRMADO','EN_PREPARACION','LISTO','EN_CAMINO') OR vc.estado_reserva IS NULL)
               AND YEAR(vc.fecha_reserva) = ? AND MONTH(vc.fecha_reserva) = ?
               AND vc.id_empresa = ? AND vc.id_sucursal = ? AND vc.id_almacen = ?
               AND COALESCE(p.es_servicio, 0) = 0
@@ -469,6 +498,7 @@ if (isset($_GET['action'])) {
 $filterEstado = $_GET['estado'] ?? 'PENDIENTE';
 $filterQ      = trim($_GET['q'] ?? '');
 $filterFecha  = trim($_GET['fecha'] ?? '');
+$cakesOnly    = isset($_GET['cakes']) && $_GET['cakes'] === '1';
 $page         = max(1, intval($_GET['page'] ?? 1));
 $perPage      = 25;
 $offset       = ($page - 1) * $perPage;
@@ -481,11 +511,13 @@ if ($filterEstado === 'VERIFICANDO') {
     $where = ["c.id_sucursal=$sucursalID", "c.estado_pago='verificando'"];
 } else {
     $where = ["c.tipo_servicio='reserva'", "c.id_sucursal=$sucursalID"];
-    if ($filterEstado === 'PENDIENTE')     $where[] = "(c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL)";
+    if ($filterEstado === 'PENDIENTE')     $where[] = "(c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL OR (c.canal_origen='Web Cakes' AND c.estado_reserva IN ('CONFIRMADO','EN_PREPARACION','LISTO')))";
     elseif ($filterEstado === 'ENTREGADO') $where[] = "c.estado_reserva='ENTREGADO'";
     elseif ($filterEstado === 'CANCELADO') $where[] = "c.estado_reserva='CANCELADO'";
 }
 if ($filterQ)     { $where[] = "c.cliente_nombre LIKE ?"; $params[] = "%$filterQ%"; }
+if ($cakesOnly)   $where[] = "c.canal_origen='Web Cakes'";
+elseif (($_SESSION['admin_logged_in'] ?? false) !== true) $where[] = "COALESCE(c.canal_origen,'') <> 'Web Cakes'";
 if ($filterFecha === 'hoy')     $where[] = "DATE(c.fecha_reserva)=CURDATE()";
 elseif ($filterFecha === 'semana')  $where[] = "c.fecha_reserva BETWEEN NOW() AND DATE_ADD(NOW(),INTERVAL 7 DAY)";
 elseif ($filterFecha === 'vencidas') $where[] = "c.fecha_reserva < NOW() AND (c.estado_reserva='PENDIENTE' OR c.estado_reserva IS NULL)";
@@ -494,12 +526,12 @@ $whereSQL = implode(' AND ', $where);
 
 // KPIs
 $stmtKpi = $pdo->prepare("SELECT
-    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL) THEN 1 ELSE 0 END) as pendiente,
-    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL) AND DATE(fecha_reserva)=CURDATE() THEN 1 ELSE 0 END) as hoy,
-    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL) AND fecha_reserva < NOW() THEN 1 ELSE 0 END) as vencidas,
+    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL OR (canal_origen='Web Cakes' AND estado_reserva IN ('CONFIRMADO','EN_PREPARACION','LISTO'))) THEN 1 ELSE 0 END) as pendiente,
+    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL OR (canal_origen='Web Cakes' AND estado_reserva IN ('CONFIRMADO','EN_PREPARACION','LISTO'))) AND DATE(fecha_reserva)=CURDATE() THEN 1 ELSE 0 END) as hoy,
+    SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL OR (canal_origen='Web Cakes' AND estado_reserva IN ('CONFIRMADO','EN_PREPARACION','LISTO'))) AND fecha_reserva < NOW() THEN 1 ELSE 0 END) as vencidas,
     SUM(CASE WHEN estado_pago='verificando' AND (estado_reserva='PENDIENTE' OR estado_reserva IS NULL) THEN 1 ELSE 0 END) as verificando,
     SUM(CASE WHEN (estado_reserva='PENDIENTE' OR estado_reserva IS NULL) AND sin_existencia=1 THEN 1 ELSE 0 END) as sin_stock
-    FROM ventas_cabecera WHERE tipo_servicio='reserva' AND id_sucursal=?");
+    FROM ventas_cabecera WHERE tipo_servicio='reserva' AND id_sucursal=?" . ($cakesOnly ? " AND canal_origen='Web Cakes'" : (($_SESSION['admin_logged_in'] ?? false) === true ? '' : " AND COALESCE(canal_origen,'') <> 'Web Cakes'")));
 $stmtKpi->execute([$sucursalID]);
 $kpis = $stmtKpi->fetch(PDO::FETCH_ASSOC) ?: ['pendiente'=>0,'hoy'=>0,'vencidas'=>0,'verificando'=>0,'sin_stock'=>0];
 
@@ -551,17 +583,20 @@ $renderRows = function() use ($reservas) {
         elseif ($er === 'CANCELADO')     { $erCls = 'bg-secondary';         $erTxt = '✗ Cancelado'; }
         elseif ($er === 'EN_CAMINO')     { $erCls = 'bg-primary';           $erTxt = '🛵 En Camino'; }
         elseif ($er === 'EN_PREPARACION'){ $erCls = 'bg-info text-dark';    $erTxt = '🔥 En Preparación'; }
+        elseif ($er === 'CONFIRMADO')    { $erCls = 'bg-primary';           $erTxt = '✓ Confirmada'; }
+        elseif ($er === 'LISTO')         { $erCls = 'bg-success';           $erTxt = '🎂 Lista'; }
         else                             { $erCls = 'bg-warning text-dark'; $erTxt = '⏳ Pendiente'; }
 
         // Badge pago
         $ep = $r['estado_pago'];
-        if ($ep === 'confirmado')     { $epCls = 'bg-success';        $epTxt = '✓ Pagado'; }
+        if (($r['canal_origen'] ?? '') === 'Web Cakes' && (float)$r['deuda'] <= 0 && (float)$r['total'] > 0) { $epCls = 'bg-success'; $epTxt = '✓ Saldo cubierto'; }
+        elseif ($ep === 'confirmado') { $epCls = 'bg-success';        $epTxt = '✓ Pagado'; }
         elseif ($ep === 'verificando'){ $epCls = 'bg-warning text-dark'; $epTxt = '💳 Verificando'; }
         else                          { $epCls = 'bg-light text-dark border'; $epTxt = 'Al recibir'; }
 
         $rowCls = $vencida ? 'table-danger' : ($esHoy ? 'table-warning' : '');
         $deuda  = floatval($r['deuda']);
-        $isPending = ($er === 'PENDIENTE' || !$er);
+        $isPending = ($er === 'PENDIENTE' || !$er || (($r['canal_origen'] ?? '') === 'Web Cakes' && in_array($er, ['CONFIRMADO','EN_PREPARACION','LISTO'], true)));
 
         // Badge canal de origen
         $canal = $r['canal_origen'] ?? 'POS';
@@ -572,6 +607,7 @@ $renderRows = function() use ($reservas) {
             'Teléfono'   => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-phone-alt',     'Tel.'],
             'Kiosko'     => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-tablet-alt',    'Kiosko'],
             'Presencial' => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-user',          'Presencial'],
+            'Web Cakes'   => ['background-color:#f9a8d4!important;color:#000!important', 'fas fa-birthday-cake',   'Web Cakes'],
             'ICS'        => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-file-import',   'ICS'],
             'Otro'       => ['background-color:#fbcfe8!important;color:#000!important', 'fas fa-question',      'Otro'],
         ];
@@ -628,21 +664,32 @@ $renderRows = function() use ($reservas) {
     </td>
     <td class="text-end pe-3 no-print">
         <div class="btn-group btn-group-sm">
-            <button class="btn btn-outline-primary" title="Gestionar estado"
+            <?php if ($canal === 'Web Cakes' && in_array($er, ['PENDIENTE','CONFIRMADO','EN_PREPARACION','LISTO'], true)): ?>
+            <?php $cakeNext = ['PENDIENTE'=>'CONFIRMADO','CONFIRMADO'=>'EN_PREPARACION','EN_PREPARACION'=>'LISTO','LISTO'=>'ENTREGADO'][$er]; ?>
+            <button class="btn btn-outline-success" onclick="cakeTransition(<?= (int)$r['id'] ?>,'<?= $cakeNext ?>')" title="<?= htmlspecialchars(['CONFIRMADO'=>'Confirmar reserva','EN_PREPARACION'=>'Iniciar preparación','LISTO'=>'Marcar lista','ENTREGADO'=>'Marcar entregada'][$cakeNext], ENT_QUOTES, 'UTF-8') ?>"><i class="fas fa-check"></i></button>
+            <?php endif; ?>
+            <?php if ($canal !== 'Web Cakes'): ?><button class="btn btn-outline-primary" title="Gestionar estado"
                 onclick="openGestionarEstado(<?= $r['id'] ?>,'<?= $er ?>',`<?= addslashes($r['notas'] ?? '') ?>`)">
-                <i class="fas fa-tasks"></i></button>
+                <i class="fas fa-tasks"></i></button><?php endif; ?>
             <button class="btn btn-outline-secondary" onclick="verTicket(<?= $r['id'] ?>,<?= $deuda ?>)" title="Ver ticket"><i class="fas fa-eye"></i></button>
+            <?php if ($canal === 'Web Cakes' && $er !== 'CANCELADO' && $deuda > 0): ?>
+            <button class="btn btn-outline-warning" onclick="cakeAbono(<?= (int)$r['id'] ?>,<?= json_encode($deuda) ?>)" title="Registrar abono"><i class="fas fa-coins"></i></button>
+            <?php endif; ?>
             <?php if ($isPending): ?>
-            <button class="btn btn-outline-primary" onclick="openForm(<?= $r['id'] ?>)" title="Editar"><i class="fas fa-edit"></i></button>
+            <?php if ($canal !== 'Web Cakes'): ?><button class="btn btn-outline-primary" onclick="openForm(<?= $r['id'] ?>)" title="Editar"><i class="fas fa-edit"></i></button><?php endif; ?>
             <?php if ($ep === 'verificando'): ?>
             <button class="btn btn-outline-success fw-bold" onclick="confirmarPago(<?= $r['id'] ?>)" title="Confirmar transferencia"><i class="fas fa-check-double"></i></button>
             <button class="btn btn-outline-danger fw-bold" onclick="rechazarPago(<?= $r['id'] ?>)" title="Rechazar transferencia"><i class="fas fa-ban"></i></button>
             <?php endif; ?>
-            <?php if ($esHoy && !$r['en_cocina']): ?>
+            <?php if ($canal !== 'Web Cakes' && $esHoy && !$r['en_cocina']): ?>
             <button class="btn btn-outline-info" onclick="enviarACocina(<?= $r['id'] ?>)" title="Enviar a cocina"><i class="fas fa-fire-alt"></i></button>
             <?php endif; ?>
+            <?php if ($canal === 'Web Cakes'): ?>
+            <button class="btn btn-outline-danger" onclick="cakeTransition(<?= (int)$r['id'] ?>,'CANCELADO')" title="Rechazar o cancelar"><i class="fas fa-times-circle"></i></button>
+            <?php else: ?>
             <button class="btn btn-outline-success fw-bold" onclick="procesarAccion(<?= $r['id'] ?>,'complete')" title="Entregar"><i class="fas fa-check-circle"></i></button>
             <button class="btn btn-outline-danger" onclick="procesarAccion(<?= $r['id'] ?>,'cancel')" title="Cancelar"><i class="fas fa-times-circle"></i></button>
+            <?php endif; ?>
             <?php else: ?>
             <button class="btn btn-outline-secondary" title="Imprimir" onclick="window.open('/ticket_view.php?id=<?= $r['id'] ?>','_blank','width=380,height=600')"><i class="fas fa-print"></i></button>
             <?php endif; ?>
@@ -739,7 +786,7 @@ if (isset($_GET['ajax'])) {
         <div class="d-flex flex-column flex-lg-row justify-content-between gap-4 align-items-start">
             <div>
                 <div class="section-title text-white-50 mb-2">Ventas / Reservas</div>
-                <h1 class="h2 fw-bold mb-2"><i class="far fa-calendar-check me-2"></i>Gestión de Reservas</h1>
+                <h1 class="h2 fw-bold mb-2"><i class="far fa-calendar-check me-2"></i><?= $cakesOnly ? 'Pedidos de Cakes' : 'Gestión de Reservas' ?></h1>
                 <p class="mb-3 text-white-50">Administra reservas, entregas, pagos y envíos a cocina. Vista de lista y almanaque.</p>
                 <div class="d-flex flex-wrap gap-2">
                     <span class="kpi-chip"><i class="fas fa-clipboard-list me-1"></i><?= intval($kpis['pendiente']) ?> Pendientes</span>
@@ -755,6 +802,7 @@ if (isset($_GET['ajax'])) {
                 <button class="btn btn-outline-light" id="btnMultiPrint" onclick="toggleMultiPrint()"><i class="fas fa-th-large me-1"></i>Imprimir múltiple</button>
                 <button class="btn btn-outline-light" onclick="importICS()"><i class="fas fa-file-import me-1"></i>Importar .ICS</button>
                 <a href="crm_clients.php" class="btn btn-outline-light"><i class="fas fa-users me-1"></i>CRM</a>
+                <a href="<?= $cakesOnly ? 'reservas.php' : 'reservas.php?cakes=1' ?>" class="btn btn-outline-light"><i class="fas fa-birthday-cake me-1"></i><?= $cakesOnly ? 'Todas las reservas' : 'Pedidos de Cakes' ?></a>
                 <a href="dashboard.php" class="btn btn-outline-light"><i class="fas fa-home me-1"></i>Volver</a>
             </div>
         </div>
@@ -1203,12 +1251,37 @@ if (isset($_GET['ajax'])) {
 
 <script src="assets/js/bootstrap.bundle.min.js"></script>
 <script>
+const cakeAdminCsrf = <?= json_encode($cakeAdminCsrf, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+async function cakeTransition(id, estado) {
+    const labels = {CONFIRMADO:'confirmar esta reserva', EN_PREPARACION:'iniciar la preparación', LISTO:'marcar el cake listo', ENTREGADO:'marcar el cake entregado', CANCELADO:'cancelar esta reserva'};
+    if (!confirm('¿Deseas ' + (labels[estado] || 'cambiar el estado') + '?')) return;
+    try {
+        const res = await fetch('reservas.php', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action:'cake_transition',id,estado,csrf_token:cakeAdminCsrf})});
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.msg || 'No se pudo actualizar la reserva.');
+        showToast('Estado actualizado.'); reloadTable();
+    } catch (e) { showToast(e.message, 'danger'); }
+}
+async function cakeAbono(id, saldo) {
+    const raw = prompt(`Saldo pendiente: ${saldo.toFixed(2)} CUP. Introduce el abono recibido (solo se anotará en la reserva):`);
+    if (raw === null) return;
+    const monto = raw.trim().replace(',', '.');
+    if (!/^\d{1,9}(?:\.\d{1,2})?$/.test(monto) || Number(monto) <= 0 || Number(monto) > saldo) { showToast('Introduce un importe válido que no supere el saldo.', 'danger'); return; }
+    if (!confirm(`¿Anotar un abono de ${Number(monto).toFixed(2)} CUP en esta reserva?`)) return;
+    try {
+        const res = await fetch('reservas.php', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'cake_abono',id,monto,csrf_token:cakeAdminCsrf})});
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.msg || 'No se pudo registrar el abono.');
+        showToast('Abono anotado en la reserva.'); reloadTable();
+    } catch (e) { showToast(e.message, 'danger'); }
+}
 // ── Estado global ──────────────────────────────────────────────────────────
 let lineItems    = [];
 let currentEstado = '<?= $filterEstado ?>';
 let currentFecha  = '<?= $filterFecha ?>';
 let currentQ      = '<?= addslashes($filterQ) ?>';
 let currentPage   = <?= $page ?>;
+const cakesOnly = <?= $cakesOnly ? 'true' : 'false' ?>;
 let tCurrentId    = 0;
 
 const formModal           = new bootstrap.Modal('#formModal');
@@ -1235,7 +1308,7 @@ function setFiltro(key, val) {
 function goPage(p) { currentPage = p; reloadTable(); }
 
 async function reloadTable() {
-    const url = `reservas.php?ajax=1&estado=${currentEstado}&fecha=${currentFecha}&q=${encodeURIComponent(currentQ)}&page=${currentPage}`;
+    const url = `reservas.php?ajax=1&estado=${currentEstado}&fecha=${currentFecha}&q=${encodeURIComponent(currentQ)}&page=${currentPage}${cakesOnly?'&cakes=1':''}`;
     document.getElementById('tableBody').style.opacity = '.4';
     const res  = await fetch(url);
     const data = await res.json();
@@ -1719,7 +1792,7 @@ async function loadCalendar(year, month) {
     calYear = year; calMonth = month;
     document.getElementById('calTitle').textContent = 'Cargando...';
     try {
-        const res = await fetch(`reservas.php?action=month_data&year=${year}&month=${month}`);
+        const res = await fetch(`reservas.php?action=month_data&year=${year}&month=${month}${cakesOnly?'&cakes=1':''}`);
         calData = await res.json();
         renderCalendar();
     } catch(e) {

@@ -2,6 +2,10 @@
 // ARCHIVO: /var/www/palweb/api/ticket_view.php
 header('Content-Type: text/html; charset=utf-8');
 ini_set('display_errors', 0);
+header('Referrer-Policy: no-referrer');
+require_once __DIR__ . '/pos_security.php';
+pos_security_bootstrap_session();
+require_once __DIR__ . '/cakes_storage.php';
 
 require_once 'db.php';
 
@@ -31,6 +35,27 @@ try {
     $venta = $stmtHead->fetch(PDO::FETCH_ASSOC);
     if (!$venta) die("No existe.");
 
+    $cakeTrackingToken = '';
+    $cakeOptions = null;
+    if (($venta['canal_origen'] ?? '') === 'Web Cakes') {
+        try {
+            $cakeStmt = $pdo->prepare('SELECT token_hash, opciones FROM cakes_web_orders WHERE id_venta=? AND id_empresa=?');
+            $cakeStmt->execute([$idVenta, (int)$venta['id_empresa']]);
+            $cakeOrder = $cakeStmt->fetch(PDO::FETCH_ASSOC);
+            if ($cakeOrder !== false) {
+                $cakeTokenHash = $cakeOrder['token_hash'];
+                $cakeOptions = json_decode($cakeOrder['opciones'], true) ?: [];
+                $candidate = (string)($_GET['token'] ?? '');
+                $validToken = preg_match('/\A[a-f0-9]{32}\z/', $candidate) && hash_equals($cakeTokenHash, cakes_token_hash($candidate));
+                if (!$validToken && !pos_security_is_authenticated()) { http_response_code(404); exit('Ticket no disponible.'); }
+                if ($validToken) $cakeTrackingToken = $candidate;
+                header('Cache-Control: no-store');
+            }
+        } catch (PDOException $e) {
+            if ((int)($e->errorInfo[1] ?? 0) !== 1146) throw $e;
+        }
+    }
+
     // Obtener banner dinámico de la sucursal de la venta
     $branchBanner = '';
     if (!empty($venta['id_sucursal'])) {
@@ -49,7 +74,7 @@ try {
     }
 
     $sqlDet = "SELECT d.cantidad, d.precio, d.id_producto" . ($hasNotaCocina ? ", d.nota_cocina" : "") . ",
-                      COALESCE(p.nombre, CONCAT('Art: ', d.id_producto)) AS nombre_producto,
+                      COALESCE(NULLIF(d.nombre_producto, ''), p.nombre, CONCAT('Art: ', d.id_producto)) AS nombre_producto,
                       COALESCE(p.precio_mayorista, ps.precio_mayorista, d.precio) AS precio_mayorista_visual
                FROM ventas_detalle d
                LEFT JOIN productos p ON d.id_producto = p.codigo
@@ -762,7 +787,9 @@ if ($priceView === 'mayorista') {
                 <?php endif; ?>
             <?php endif; ?>
             
-            <?php if (!empty($venta['fecha_reserva'])): ?>
+            <?php if ($cakeOptions !== null): ?>
+                <tr><td colspan="2" class="text-center"><div class="delivery-highlight fw-bold">📅 FECHA SOLICITADA: <?php echo !empty($cakeOptions['fecha_solicitada']) ? date('d/m/Y', strtotime($cakeOptions['fecha_solicitada'])) : 'POR CONFIRMAR'; ?></div></td></tr>
+            <?php elseif (!empty($venta['fecha_reserva'])): ?>
                 <tr><td colspan="2" class="text-center">
                     <div class="delivery-highlight fw-bold">
                         📅 ENTREGA: <?php echo date('d/m/Y h:i A', strtotime($venta['fecha_reserva'])); ?>
@@ -776,6 +803,11 @@ if ($priceView === 'mayorista') {
             <?php if (!empty($venta['cliente_telefono'])): ?>
                 <tr><td>Teléfono:</td><td class="text-right"><?php echo htmlspecialchars($venta['cliente_telefono']); ?></td></tr>
             <?php endif; ?>
+            <?php if ($cakeOptions !== null): $cakeItems = isset($cakeOptions['items']) && is_array($cakeOptions['items']) ? $cakeOptions['items'] : [$cakeOptions]; foreach ($cakeItems as $cakeIndex=>$cakeItem): ?>
+                <tr><td colspan="2"><strong>Cake <?php echo (int)$cakeIndex+1; ?></strong></td></tr>
+                <?php foreach (['nombre'=>'Modelo','flavor'=>'Panetela o sabor','filling'=>'Relleno','coverage'=>'Cobertura','meringue_color'=>'Color','extra'=>'Extra'] as $key=>$label): if (!empty($cakeItem[$key])): ?>
+                <tr><td><?php echo htmlspecialchars($label, ENT_QUOTES, 'UTF-8'); ?>:</td><td class="text-right"><?php echo htmlspecialchars((string)$cakeItem[$key], ENT_QUOTES, 'UTF-8'); ?></td></tr>
+            <?php endif; endforeach; endforeach; endif; ?>
             <?php if (!empty($venta['cliente_direccion'])): ?>
                 <tr><td colspan="2" style="font-size:11px; padding-top: 3px;">
                     <strong>Dirección:</strong><br>
@@ -963,7 +995,7 @@ if ($priceView === 'mayorista') {
                     $qrBase   = $scheme . '://' . $_SERVER['HTTP_HOST'];
                 }
                 $scriptPath = strtok($_SERVER['REQUEST_URI'] ?? '/ticket_view.php', '?');
-                echo $qrBase . $scriptPath . '?id=' . $idVenta . '&source=qr';
+                echo $cakeTrackingToken !== '' ? $qrBase . '/cakes_estado.php?token=' . $cakeTrackingToken : $qrBase . $scriptPath . '?id=' . $idVenta . '&source=qr';
             ?>';
             new QRCode(document.getElementById('qrcode'), {
                 text: ticketUrl,
